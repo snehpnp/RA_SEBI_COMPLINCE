@@ -127,17 +127,15 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
               <div className="absolute inset-0 bg-primary-500/20 blur-3xl rounded-full animate-[pulse_3s_ease-in-out_infinite]"></div>
               
               {/* Animated Company Name */}
-              <div className="relative z-10 flex items-center justify-center space-x-3 animate-[float_4s_ease-in-out_infinite]">
+              <div className="relative z-10 flex items-center justify-center animate-[float_4s_ease-in-out_infinite]">
                 {tenantLogo ? (
-                  <img src={`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${tenantLogo}`} alt="Company Logo" className="h-16 w-16 object-contain animate-[spin_6s_linear_infinite]" />
+                  <img src={`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${tenantLogo}`} alt="Company Logo" className="h-16 object-contain" />
                 ) : (
-                  <ShieldCheck className="h-12 w-12 text-primary-500 animate-[spin_6s_linear_infinite]" />
+                  <>
+                    <img src="/logo-light.png" alt="RAGCP Logo" className="dark:hidden object-contain max-h-16" />
+                    <img src="/logo-dark.png" alt="RAGCP Logo" className="hidden dark:block object-contain max-h-16" />
+                  </>
                 )}
-                <h1 className="text-4xl sm:text-5xl font-black tracking-widest uppercase">
-                  <span className="bg-gradient-to-r from-primary-400 via-emerald-400 to-primary-600 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">
-                    RAGCP
-                  </span>
-                </h1>
               </div>
               <div className="mt-2 text-center relative z-10">
                 <p className="text-xs tracking-[0.3em] text-slate-400 uppercase font-semibold bg-gradient-to-r from-transparent via-slate-400 to-transparent bg-clip-text text-transparent animate-pulse">
@@ -192,11 +190,9 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
       
       <div className="w-full max-w-md relative z-10">
         {/* Brand */}
-        <div className="flex items-center justify-center space-x-2 mb-8">
-          <ShieldCheck className="h-10 w-10 text-primary-600 dark:text-primary-500" />
-          <span className="text-2xl font-black tracking-wider bg-gradient-to-r from-slate-900 dark:from-white to-primary-600 dark:to-primary-400 bg-clip-text text-transparent">
-            RAGCP
-          </span>
+        <div className="flex items-center justify-center mb-8">
+          <img src="/logo-light.png" alt="RAGCP Logo" className="dark:hidden object-contain max-h-14" />
+          <img src="/logo-dark.png" alt="RAGCP Logo" className="hidden dark:block object-contain max-h-14" />
         </div>
 
         {/* Card */}
@@ -277,11 +273,9 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
               >
                 Forgot Password?
               </button>
-              {searchParams.get('role') === 'client' && (
-                <Link href="/register" className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
-                  Don't have an account? <span className="text-primary-600 dark:text-primary-400 font-semibold hover:underline">Sign up</span>
-                </Link>
-              )}
+              <Link href="/register" className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
+                Don't have an account? <span className="text-primary-600 dark:text-primary-400 font-semibold hover:underline">Sign up here</span>
+              </Link>
             </div>
           </form>
           ) : (

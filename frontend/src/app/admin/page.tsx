@@ -305,7 +305,7 @@ function getDisplayStatus(sub: any): string {
 
 const downloadCSV = (data: any[], filename: string) => {
   if (!data || !data.length) {
-    alert("No data available to export.");
+    toast("No data available to export.");
     return;
   }
   const headers = Object.keys(data[0]);
@@ -419,11 +419,11 @@ function AdminDashboardContent() {
         try {
           const res = await api.updateRolePermissions(selectedRole.id, selectedRole.permissions);
           if (res.success) {
-            alert('Access permissions updated successfully.');
+            toast.success('Access permissions updated successfully.');
             await loadData();
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to save permissions.');
+          toast.error(err.message || 'Failed to save permissions.');
         } finally {
           setSavingPermissions(false);
         }
@@ -434,7 +434,7 @@ function AdminDashboardContent() {
   const handleCreateRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoleName) {
-      alert('Role name is required.');
+      toast('Role name is required.');
       return;
     }
     setRoleModalLoading(true);
@@ -444,11 +444,11 @@ function AdminDashboardContent() {
         setIsRoleModalOpen(false);
         setNewRoleName('');
         setNewRoleDesc('');
-        alert('Role created successfully.');
+        toast.success('Role created successfully.');
         await loadData();
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to create role.');
+      toast.error(err.message || 'Failed to create role.');
     } finally {
       setRoleModalLoading(false);
     }
@@ -457,7 +457,7 @@ function AdminDashboardContent() {
   const handleEditRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editRoleName) {
-      alert('Role name is required.');
+      toast('Role name is required.');
       return;
     }
     setEditRoleModalLoading(true);
@@ -468,11 +468,11 @@ function AdminDashboardContent() {
         setEditRoleName('');
         setEditRoleDesc('');
         setEditRoleId('');
-        alert('Role updated successfully.');
+        toast.success('Role updated successfully.');
         await loadData();
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to update role.');
+      toast.error(err.message || 'Failed to update role.');
     } finally {
       setEditRoleModalLoading(false);
     }
@@ -488,12 +488,12 @@ function AdminDashboardContent() {
         try {
           const res = await api.deleteRole(roleId);
           if (res.success) {
-            alert('Role deleted successfully.');
+            toast.success('Role deleted successfully.');
             setSelectedRole(null);
             await loadData();
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to delete role.');
+          toast.error(err.message || 'Failed to delete role.');
         }
       }
     });
@@ -716,9 +716,9 @@ function AdminDashboardContent() {
 
   const handleAssignPlan = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!assignPlanId) { alert('Please select a plan.'); return; }
-    if (!assignPaymentRefId.trim()) { alert('Please enter Payment Ref ID.'); return; }
-    if (!assignPaymentDate) { alert('Please select Payment Date.'); return; }
+    if (!assignPlanId) { toast('Please select a plan.'); return; }
+    if (!assignPaymentRefId.trim()) { toast('Please enter Payment Ref ID.'); return; }
+    if (!assignPaymentDate) { toast('Please select Payment Date.'); return; }
     
     const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
     if (!selectedPlan) return;
@@ -792,10 +792,10 @@ function AdminDashboardContent() {
             setAssignCustomDays('');
             setAssignCouponCode('');
             await loadData();
-            alert('✅ ' + res.message);
+            toast('✅ ' + res.message);
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to assign plan.');
+          toast.error(err.message || 'Failed to assign plan.');
         } finally {
           setAssignPlanLoading(false);
         }
@@ -1050,12 +1050,12 @@ const [orgAddress, setOrgAddress] = useState('');
         'ATR Proof': getFullUrl(c.atrProofUrl)
       }));
     } else if (type === 'overview') {
-      alert("No tabular data on overview to export.");
+      toast("No tabular data on overview to export.");
       return;
     }
 
     if (dataToExport.length === 0) {
-      alert("No data available to export.");
+      toast("No data available to export.");
       return;
     }
     downloadCSV(dataToExport, filename);
@@ -1410,7 +1410,7 @@ const [orgAddress, setOrgAddress] = useState('');
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!catName || catSegments.length === 0) {
-      alert('Name and at least one segment are required.');
+      toast('Name and at least one segment are required.');
       return;
     }
     try {
@@ -1421,7 +1421,7 @@ const [orgAddress, setOrgAddress] = useState('');
         setCatSegments([]);
         loadData();
       }
-    } catch (err: any) { alert(err.message); }
+    } catch (err: any) { toast(err.message); }
   };
 
   const handleToggleCategoryStatus = (id: string) => {
@@ -1436,7 +1436,7 @@ const [orgAddress, setOrgAddress] = useState('');
         try {
           const res = await api.toggleCategoryStatus(id);
           if (res.success) loadData();
-        } catch (err: any) { alert(err.message); }
+        } catch (err: any) { toast(err.message); }
       }
     });
   };
@@ -1453,7 +1453,7 @@ const [orgAddress, setOrgAddress] = useState('');
         try {
           const res = await api.togglePlanStatus(id);
           if (res.success) loadData();
-        } catch (err: any) { alert(err.message); }
+        } catch (err: any) { toast(err.message); }
       }
     });
   };
@@ -1470,10 +1470,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.deletePlan(id);
           if (res.success) {
             loadData();
-            alert('Plan soft-deleted successfully.');
+            toast.success('Plan soft-deleted successfully.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to delete plan.');
+          toast.error(err.message || 'Failed to delete plan.');
         }
       }
     });
@@ -1491,10 +1491,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.restorePlan(id);
           if (res.success) {
             loadData();
-            alert('Plan restored successfully.');
+            toast.success('Plan restored successfully.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to restore plan.');
+          toast.error(err.message || 'Failed to restore plan.');
         }
       }
     });
@@ -1538,7 +1538,7 @@ const [orgAddress, setOrgAddress] = useState('');
         body: formData
       });
       if (data.success) {
-        alert('Signature uploaded successfully');
+        toast.success('Signature uploaded successfully');
         
         // Update user state and local storage with the new tenant signature URL
         if (data.data && data.data.coSignatureUrl) {
@@ -1557,10 +1557,10 @@ const [orgAddress, setOrgAddress] = useState('');
         
         loadData();
       } else {
-        alert(data.message || 'Failed to upload signature');
+        toast.error(data.message || 'Failed to upload signature');
       }
     } catch (err: any) {
-      alert(err.message);
+      toast(err.message);
     } finally {
       setUploadingCoSignature(false);
       e.target.value = '';
@@ -1613,7 +1613,7 @@ const [orgAddress, setOrgAddress] = useState('');
 
        const data = await api.updateTenantSettings(formData);
        if (data.success) { 
-           alert('Settings saved!'); 
+           toast('Settings saved!'); 
            if (data.data) {
              setUser((prevUser: any) => {
                const updatedUser = { ...prevUser, tenant: data.data };
@@ -1623,8 +1623,8 @@ const [orgAddress, setOrgAddress] = useState('');
            }
            loadData(); 
        }
-       else { alert(data.message); }
-    } catch (err: any) { alert(err.message); }
+       else { toast(data.message); }
+    } catch (err: any) { toast(err.message); }
   };
 
   const handleTestSmtp = async () => {
@@ -1637,34 +1637,34 @@ const [orgAddress, setOrgAddress] = useState('');
         body: JSON.stringify({ toEmail: email })
       });
       if (data.success) {
-        alert(data.message);
+        toast(data.message);
       } else {
-        alert('Test Failed: ' + data.message);
+        toast.error('Test Failed: ' + data.message);
       }
     } catch (err: any) {
-      alert('Error testing SMTP: ' + err.message);
+      toast.error('Error testing SMTP: ' + err.message);
     }
   };
 
   const handleAdminChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (profileNewPassword !== profileConfirmPassword) {
-      alert('New passwords do not match!');
+      toast('New passwords do not match!');
       return;
     }
     setIsChangingPassword(true);
     try {
       const res = await api.changePassword({ currentPassword: profileCurrentPassword, newPassword: profileNewPassword });
       if (res.success) {
-        alert('Password changed successfully! Redirecting to login...');
+        toast.success('Password changed successfully! Redirecting to login...');
         setTimeout(() => {
           handleLogout();
         }, 1500);
       } else {
-        alert(res.message || 'Failed to change password');
+        toast.error(res.message || 'Failed to change password');
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to change password');
+      toast.error(err.message || 'Failed to change password');
     } finally {
       setIsChangingPassword(false);
     }
@@ -1672,7 +1672,7 @@ const [orgAddress, setOrgAddress] = useState('');
 
   const handleLogout = async (allDevices: boolean = false) => {
     await api.logout(allDevices);
-    router.push('/admin/login');
+    router.push('/login');
   };
 
   const handleRevertImpersonate = () => {
@@ -1780,7 +1780,7 @@ const [orgAddress, setOrgAddress] = useState('');
         }
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to save step.');
+      toast.error(err.message || 'Failed to save step.');
     }
   };
 
@@ -1812,7 +1812,7 @@ const [orgAddress, setOrgAddress] = useState('');
     const allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg'];
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
     if (!allowedExtensions.includes(fileExtension || '')) {
-      alert('Only image formats (PNG, JPG, JPEG) and PDF files are allowed.');
+      toast('Only image formats (PNG, JPG, JPEG) and PDF files are allowed.');
       inputElement.value = '';
       return;
     }
@@ -1895,7 +1895,7 @@ const [orgAddress, setOrgAddress] = useState('');
     try {
       // Frontend Validations
       if (!staffName || staffName.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(staffName)) {
-        alert('Staff name must contain only letters and spaces (min 2 chars).');
+        toast('Staff name must contain only letters and spaces (min 2 chars).');
         return;
       }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1910,19 +1910,19 @@ const [orgAddress, setOrgAddress] = useState('');
       }
       if (staffNism && staffNism.trim().length > 0) {
         if (staffNism.trim().length < 5) {
-          alert('NISM Registration Number must be at least 5 characters.');
+          toast('NISM Registration Number must be at least 5 characters.');
           return;
         }
         if (isNismDuplicate) {
-          alert('Duplicate NISM Certificate Number. Please enter a unique number.');
+          toast('Duplicate NISM Certificate Number. Please enter a unique number.');
           return;
         }
         if (!staffNismValidity || new Date(staffNismValidity) <= new Date()) {
-          alert('NISM validity expiry date must be in the future.');
+          toast('NISM validity expiry date must be in the future.');
           return;
         }
         if (!editingStaff && !staffNismFile) {
-          alert('Please upload the NISM Certificate document.');
+          toast('Please upload the NISM Certificate document.');
           return;
         }
       }
@@ -1931,7 +1931,7 @@ const [orgAddress, setOrgAddress] = useState('');
         const allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg'];
         const fileExtension = staffNismFile.name.split('.').pop()?.toLowerCase();
         if (!allowedExtensions.includes(fileExtension || '')) {
-          alert('Only image formats (PNG, JPG, JPEG) and PDF files are allowed.');
+          toast('Only image formats (PNG, JPG, JPEG) and PDF files are allowed.');
           return;
         }
       }
@@ -1968,16 +1968,16 @@ const [orgAddress, setOrgAddress] = useState('');
           resetStaffForm();
           setShowStaffCredsPopup(true);
         } else {
-          alert('Staff member updated successfully!');
+          toast.success('Staff member updated successfully!');
           setIsStaffModalOpen(false);
           resetStaffForm();
         }
         loadData();
       } else {
-        alert(res.message || (res.errors && res.errors.join(', ')) || 'Staff operation failed.');
+        toast.error(res.message || (res.errors && res.errors.join(', ')) || 'Staff operation failed.');
       }
     } catch (err: any) {
-      alert(err.message || 'Staff operation failed.');
+      toast.error(err.message || 'Staff operation failed.');
     } finally {
       setIsSubmittingStaff(false);
     }
@@ -1996,10 +1996,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.toggleStaffStatus(id);
           if (res.success) {
             loadData();
-            alert(res.message);
+            toast(res.message);
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to update status.');
+          toast.error(err.message || 'Failed to update status.');
         }
       }
     });
@@ -2031,7 +2031,7 @@ const [orgAddress, setOrgAddress] = useState('');
         loadData();
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to create complaint');
+      toast.error(err.message || 'Failed to create complaint');
     } finally {
       setIsSubmittingComplaint(false);
     }
@@ -2049,10 +2049,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.deleteStaff(id);
           if (res.success) {
             loadData();
-            alert('Staff member soft-deleted successfully.');
+            toast.success('Staff member soft-deleted successfully.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to delete staff.');
+          toast.error(err.message || 'Failed to delete staff.');
         }
       }
     });
@@ -2070,10 +2070,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.restoreStaff(id);
           if (res.success) {
             loadData();
-            alert('Staff member restored successfully.');
+            toast.success('Staff member restored successfully.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to restore staff.');
+          toast.error(err.message || 'Failed to restore staff.');
         }
       }
     });
@@ -2091,10 +2091,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.runComplianceCheck();
           if (res.success) {
             loadData();
-            alert(`Sweep done. ${res.alertsGenerated} alert(s) generated.`);
+            toast(`Sweep done. ${res.alertsGenerated} alert(s) generated.`);
           }
         } catch (err: any) {
-          alert(err.message || 'Sweep failed.');
+          toast.error(err.message || 'Sweep failed.');
         } finally {
           setSweepLoading(false);
         }
@@ -2126,10 +2126,10 @@ const [orgAddress, setOrgAddress] = useState('');
         generatePeriodicReport(res.data, periodName, endDateStr);
         setShowReportModal(false);
       } else {
-        alert(res.message || 'Failed to fetch report data.');
+        toast.error(res.message || 'Failed to fetch report data.');
       }
     } catch (err: any) {
-      alert(err.message || 'Error generating report.');
+      toast.error(err.message || 'Error generating report.');
     } finally {
       setDownloadingReport(false);
     }
@@ -2155,11 +2155,11 @@ const [orgAddress, setOrgAddress] = useState('');
           if (res.success) {
             setAuditModalReq(null); setAuditStatus(''); setAuditRemarks(''); setAuditPenaltyAmt(''); setAuditProof(null);
             loadData();
-            alert('Audit status updated successfully.');
+            toast.success('Audit status updated successfully.');
           } else {
-            alert(res.message || 'Failed to update.');
+            toast.error(res.message || 'Failed to update.');
           }
-        } catch(err: any) { alert(err.message); }
+        } catch(err: any) { toast(err.message); }
         finally { setResolveLoading(false); }
       }
     });
@@ -2168,19 +2168,19 @@ const [orgAddress, setOrgAddress] = useState('');
   const handlePenaltyResolve = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!penaltyResolutionType) {
-      alert('Resolution Type is mandatory.');
+      toast('Resolution Type is mandatory.');
       return;
     }
     if (!penaltyProof) {
-      alert('Proof document is mandatory.');
+      toast('Proof document is mandatory.');
       return;
     }
     if (penaltyResolutionType === 'Paid' && (!penaltyResolveId || !penaltyPayRef.trim())) {
-      alert('Transaction Reference is mandatory when resolving as Paid.');
+      toast('Transaction Reference is mandatory when resolving as Paid.');
       return;
     }
     if (!penaltyRemarks.trim()) {
-      alert('Remarks are mandatory.');
+      toast('Remarks are mandatory.');
       return;
     }
     triggerConfirm({
@@ -2201,11 +2201,11 @@ const [orgAddress, setOrgAddress] = useState('');
           if (res.success) {
             setPenaltyResolveId(null); setPenaltyResolutionType(''); setPenaltyPayRef(''); setPenaltyProof(null); setPenaltyRemarks('');
             loadData();
-            alert('Penalty resolved successfully.');
+            toast.success('Penalty resolved successfully.');
           } else {
-            alert(res.message || 'Failed to resolve.');
+            toast.error(res.message || 'Failed to resolve.');
           }
-        } catch(err: any) { alert(err.message); }
+        } catch(err: any) { toast(err.message); }
         finally { setResolveLoading(false); }
       }
     });
@@ -2214,7 +2214,7 @@ const [orgAddress, setOrgAddress] = useState('');
   const handleComplaintResolve = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!complaintResolveId || !complaintAtrRemarks.trim() || !complaintAtrProof) {
-      alert('ATR Proof document and Remarks are mandatory to resolve a complaint.');
+      toast('ATR Proof document and Remarks are mandatory to resolve a complaint.');
       return;
     }
     setComplaintResolveLoading(true);
@@ -2228,11 +2228,11 @@ const [orgAddress, setOrgAddress] = useState('');
         setComplaintAtrProof(null);
         setComplaintAtrRemarks('');
         loadData();
-        alert('Complaint resolved and ATR uploaded successfully.');
+        toast.success('Complaint resolved and ATR uploaded successfully.');
       } else {
-        alert(res.message || res.error || 'Failed to resolve complaint.');
+        toast.error(res.message || res.error || 'Failed to resolve complaint.');
       }
-    } catch(err: any) { alert(err.message || 'Failed to resolve complaint.'); }
+    } catch(err: any) { toast.error(err.message || 'Failed to resolve complaint.'); }
     finally { setComplaintResolveLoading(false); }
   };
 
@@ -2260,10 +2260,10 @@ const [orgAddress, setOrgAddress] = useState('');
             setClosingAlertId(null);
             setCloseRemarks('');
             setAlertProof(null);
-            alert('Alert closed successfully.');
+            toast.success('Alert closed successfully.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to close alert.');
+          toast.error(err.message || 'Failed to close alert.');
         }
       }
     });
@@ -2302,12 +2302,12 @@ const [orgAddress, setOrgAddress] = useState('');
             loadData();
             setCloseRemarks('');
             setDepositTopup('50000');
-            alert('Alert resolved successfully.');
+            toast.success('Alert resolved successfully.');
           } else {
-            alert(res.message || 'Failed to resolve alert.');
+            toast.error(res.message || 'Failed to resolve alert.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to resolve alert.');
+          toast.error(err.message || 'Failed to resolve alert.');
         }
       }
     });
@@ -2330,10 +2330,10 @@ const [orgAddress, setOrgAddress] = useState('');
           });
           if (res.success) {
             loadData();
-            alert('Payment verified as ' + status);
+            toast('Payment verified as ' + status);
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to verify payment.');
+          toast.error(err.message || 'Failed to verify payment.');
         }
       }
     });
@@ -2349,14 +2349,14 @@ const [orgAddress, setOrgAddress] = useState('');
         try {
           const res = await api.closeAdminTicket(ticketId);
           if (res.success) {
-            alert('Ticket closed successfully.');
+            toast.success('Ticket closed successfully.');
             const res2 = await api.getAdminTicket(ticketId);
             if (res2.success) setSelectedAdminTicket(res2.data);
             const listRes = await api.listAdminTickets();
             if (listRes.success) setAdminTickets(listRes.data);
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to close ticket');
+          toast.error(err.message || 'Failed to close ticket');
         }
       }
     });
@@ -2381,10 +2381,10 @@ const [orgAddress, setOrgAddress] = useState('');
         setResSummary('');
         setResDetails('');
         setResTarget('');
-        alert('Research recommendation created as Draft!');
+        toast.success('Research recommendation created as Draft!');
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to create research.');
+      toast.error(err.message || 'Failed to create research.');
     }
   };
 
@@ -2405,7 +2405,7 @@ const [orgAddress, setOrgAddress] = useState('');
         setChkTnc(false);
         setChkPolicy(false);
         setChkConsent(false);
-        alert('Research call published to all subscribed clients!');
+        toast('Research call published to all subscribed clients!');
       }
     } catch (err: any) {
       setPublishError(err.message || 'Failed to publish research.');
@@ -2440,7 +2440,7 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.deleteAdminClient(clientId);
           if (res.success) {
             loadData();
-            alert('Client soft-deleted successfully.');
+            toast.success('Client soft-deleted successfully.');
             // If the deleted client was selected, close their detail modal
             if (selectedClient && selectedClient.id === clientId) {
               setSelectedClient(null);
@@ -2448,7 +2448,7 @@ const [orgAddress, setOrgAddress] = useState('');
             }
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to delete client.');
+          toast.error(err.message || 'Failed to delete client.');
         }
       }
     });
@@ -2464,10 +2464,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.approveClient(clientId);
           if (res.success) {
             loadData();
-            alert('Client approved successfully. Welcome email sent.');
+            toast.success('Client approved successfully. Welcome email sent.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to approve client.');
+          toast.error(err.message || 'Failed to approve client.');
         }
       }
     });
@@ -2485,10 +2485,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const res = await api.restoreAdminClient(clientId);
           if (res.success) {
             loadData();
-            alert('Client restored successfully.');
+            toast.success('Client restored successfully.');
           }
         } catch (err: any) {
-          alert(err.message || 'Failed to restore client.');
+          toast.error(err.message || 'Failed to restore client.');
         }
       }
     });
@@ -2506,10 +2506,10 @@ const [orgAddress, setOrgAddress] = useState('');
           const r = await api.toggleAdminClientStatus(clientId);
           if (r.success) {
             loadData();
-            alert(r.message);
+            toast(r.message);
           }
         } catch (e: any) {
-          alert(e.message || 'Failed to update client status.');
+          toast.error(e.message || 'Failed to update client status.');
         }
       }
     });
@@ -2518,21 +2518,21 @@ const [orgAddress, setOrgAddress] = useState('');
   const handleUpdateClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editClientName.trim() || editClientName.trim().length < 2) {
-      alert('Full name must be at least 2 characters.'); return;
+      toast('Full name must be at least 2 characters.'); return;
     }
     const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRx.test(editClientEmail)) {
       setWizardErrors({ coEmail: 'Please enter a valid email address.' }); return;
     }
     if (!/^\d{10}$/.test(editClientMobile)) {
-      alert('Mobile number must be exactly 10 digits.'); return;
+      toast('Mobile number must be exactly 10 digits.'); return;
     }
     const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
     if (!panRx.test(editClientPan)) {
-      alert('PAN must be in format: ABCDE1234F (10 characters).'); return;
+      toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
     }
     if (!/^\d{12}$/.test(editClientAadhaar)) {
-      alert('Aadhaar number must be exactly 12 digits.'); return;
+      toast('Aadhaar number must be exactly 12 digits.'); return;
     }
 
     setEditClientModalLoading(true);
@@ -2554,10 +2554,10 @@ const [orgAddress, setOrgAddress] = useState('');
       if (r.success) {
         setIsEditClientModalOpen(false);
         loadData();
-        alert('Client details updated successfully!');
+        toast.success('Client details updated successfully!');
       }
     } catch (e: any) {
-      alert(e.message || 'Failed to update client.');
+      toast.error(e.message || 'Failed to update client.');
     } finally {
       setEditClientModalLoading(false);
     }
@@ -2670,7 +2670,7 @@ const [orgAddress, setOrgAddress] = useState('');
       link.parentNode?.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
     } catch (error: any) {
-      alert(`Export failed: ${error.message}`);
+      toast.error(`Export failed: ${error.message}`);
     } finally {
       setExportLoading(null);
     }
@@ -2696,13 +2696,11 @@ const [orgAddress, setOrgAddress] = useState('');
         <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
             {user?.tenantLogo ? (
-              <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
+              <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
             ) : (
               <>
-                <div className="w-10 h-10 shrink-0 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
-                  <ShieldCheck className="w-6 h-6 text-premium-primary" />
-                </div>
-                {!isSidebarCollapsed && <span className="text-xl font-bold tracking-wider whitespace-nowrap">{user?.tenantName || 'Advisor Portal'}</span>}
+                <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
               </>
             )}
           </div>
@@ -2875,35 +2873,16 @@ const [orgAddress, setOrgAddress] = useState('');
 
       {/* Main content */}
       <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-        <header className="shrink-0 px-4 md:px-8 py-4 md:py-6 border-b border-slate-300 dark:border-white/5 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md z-10">
-          <div className="flex justify-between items-start md:items-center flex-col md:flex-row gap-4 max-w-7xl mx-auto w-full">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="lg:hidden p-2 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 text-slate-700 dark:text-slate-300"
-              >
-                <Menu className="h-5 w-5" />
-              </button>
-              <div>
-                <h1 className="text-xl md:text-2xl font-bold tracking-tight">Advisor Operations Desk</h1>
-                <p className="text-[10px] md:text-xs text-slate-600 dark:text-slate-400">Manage research calls, internal policies, and SEBI compliance alerts</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 md:space-x-3 text-xs text-slate-700 dark:text-slate-300 w-full md:w-auto justify-end">
-              {user?.isImpersonated && (
-                <button
-                  onClick={handleRevertImpersonate}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 hover:text-indigo-700 dark:text-indigo-300 transition flex items-center space-x-1.5 font-semibold"
-                  title="Back to Super Admin"
-                >
-                  <LogOut className="h-3.5 w-3.5 rotate-180" />
-                  <span>Back to Super Admin</span>
-                </button>
-              )}
-              {/* Reverted ThemeToggle and Profile from Top Header as requested */}
-            </div>
-          </div>
-        </header>
+          {user?.isImpersonated && (
+            <button
+              onClick={handleRevertImpersonate}
+              className="fixed top-4 right-16 z-50 px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition flex items-center space-x-1.5 font-semibold shadow-lg"
+              title="Back to Super Admin"
+            >
+              <LogOut className="h-3.5 w-3.5 rotate-180" />
+              <span className="hidden sm:inline">Back to Super Admin</span>
+            </button>
+          )}
 
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
           <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
@@ -4283,7 +4262,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                   <div>
                                     <button
                                       onClick={() => {
-                                        import('@/services/api').then(m => m.default.downloadInvoicePdf(p.id, `Invoice_${p.transactionRef}.pdf`)).catch(() => alert('Failed to download invoice'));
+                                        import('@/services/api').then(m => m.default.downloadInvoicePdf(p.id, `Invoice_${p.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
                                       }}
                                       className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
                                     >
@@ -5643,7 +5622,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           window.URL.revokeObjectURL(url);
                         } catch (err) {
                           console.error('Failed to download CSV:', err);
-                          alert('Failed to download deleted clients CSV.');
+                          toast.error('Failed to download deleted clients CSV.');
                         }
                       }}
                       className="ml-auto flex items-center gap-2 bg-slate-800 dark:bg-white/10 hover:bg-slate-700 dark:hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold transition shadow-sm border border-slate-700 dark:border-white/10"
@@ -6455,24 +6434,24 @@ const [orgAddress, setOrgAddress] = useState('');
                           onClick={async () => {
                             // Validate required fields
                             if (!clientName.trim() || clientName.trim().length < 2) {
-                              alert('Full name must be at least 2 characters.'); return;
+                              toast('Full name must be at least 2 characters.'); return;
                             }
                             const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
                             if (!emailRx.test(clientEmail)) {
                               setWizardErrors({ coEmail: 'Please enter a valid email address.' }); return;
                             }
                             if (!/^\d{10}$/.test(clientMobile)) {
-                              alert('Mobile number must be exactly 10 digits.'); return;
+                              toast('Mobile number must be exactly 10 digits.'); return;
                             }
                             if (!clientPassword || clientPassword.length < 8) {
-                              alert('Password must be at least 8 characters.'); return;
+                              toast('Password must be at least 8 characters.'); return;
                             }
                             const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
                             if (!panRx.test(clientPan)) {
-                              alert('PAN must be in format: ABCDE1234F (10 characters).'); return;
+                              toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
                             }
                             if (!/^\d{12}$/.test(clientAadhaar)) {
-                              alert('Aadhaar number must be exactly 12 digits.'); return;
+                              toast('Aadhaar number must be exactly 12 digits.'); return;
                             }
 
                             setClientModalLoading(true);
@@ -6499,14 +6478,14 @@ const [orgAddress, setOrgAddress] = useState('');
                               if (r.success) {
                                 setIsClientModalOpen(false);
                                 loadData();
-                                alert(`Client "${clientName}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete KYC.`);
+                                toast.success(`Client "${clientName}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete KYC.`);
                               }
                             } catch(e: any) {
                               if (e.duplicateField) {
                                 setClientDuplicateField(e.duplicateField);
                                 setClientDuplicateError(e.message || 'Duplicate value detected.');
                               } else {
-                                alert(e.message || 'Failed to register client.');
+                                toast.error(e.message || 'Failed to register client.');
                               }
                             } finally {
                               setClientModalLoading(false);
@@ -7790,7 +7769,7 @@ const [orgAddress, setOrgAddress] = useState('');
 
         {activeTab === 'resources' && (
           <div className="animate-fade-in">
-            <AdminResourcesTab triggerAlert={(msg) => alert(msg)} />
+            <AdminResourcesTab triggerAlert={(msg) => toast(msg)} />
           </div>
         )}
 
@@ -8064,8 +8043,8 @@ const [orgAddress, setOrgAddress] = useState('');
                    const payload = { categoryId: planCategoryId, name: planName, description: planDesc, price: planPrice, durationMonths: planDuration };
                    const res = editingPlan ? await api.updatePlan(editingPlan.id, payload) : await api.createPlan(payload);
                    if (res.success) { setIsPlanModalOpen(false); loadData(); }
-                   else { alert(res.message); }
-                 } catch (err: any) { alert(err.message); }
+                   else { toast(res.message); }
+                 } catch (err: any) { toast(err.message); }
               }} className="space-y-5">
                 
                 <div>

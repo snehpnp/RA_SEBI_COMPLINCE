@@ -1,9 +1,11 @@
+
 'use client';
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 
-export default function Home() {
+export default function NotFound() {
   const router = useRouter();
 
   useEffect(() => {
@@ -12,23 +14,27 @@ export default function Home() {
       try {
         const user = JSON.parse(userStr);
         if (user.role === 'SUPER_ADMIN') {
-          router.push('/super-admin');
+          router.replace('/super-admin');
         } else if (user.role === 'CLIENT') {
-          router.push('/client');
+          router.replace('/client');
         } else {
-          router.push('/admin');
+          router.replace('/admin');
         }
       } catch (e) {
-        router.push('/login');
+        router.replace('/login');
       }
     } else {
-      router.push('/login');
+      router.replace('/login');
     }
   }, [router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      <div className="flex flex-col items-center space-y-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+        <p className="text-slate-600 dark:text-slate-400 font-medium">Redirecting to your secure portal...</p>
+      </div>
     </div>
   );
 }
+

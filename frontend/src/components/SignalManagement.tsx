@@ -240,16 +240,16 @@ export default function SignalManagement({
         body: JSON.stringify({ message: alertMessage })
       });
       if (res.success) {
-        alert('Alert sent successfully!');
+        toast.success('Alert sent successfully!');
         setShowAlertModal(false);
         setAlertMessage('');
         setAlertTrade(null);
         fetchSignals();
       } else {
-        alert(res.message);
+        toast(res.message);
       }
     } catch (err: any) {
-      alert('Failed to send alert: ' + err.message);
+      toast.error('Failed to send alert: ' + err.message);
     } finally {
       setSendingAlert(false);
     }
@@ -300,7 +300,7 @@ export default function SignalManagement({
 
   const handleConfirmSubmit = async () => {
     if (!tncChecked || !consentChecked) {
-      alert("Please accept both conditions to proceed.");
+      toast("Please accept both conditions to proceed.");
       return;
     }
     
@@ -334,10 +334,10 @@ export default function SignalManagement({
         setEntryPrice(''); setEntryType(''); setTarget1(''); setTarget2(''); setTarget3('');
         setStoploss(''); setDescription(''); setReportFile(null); setStockSearchQuery('');
       } else {
-        alert(res.message);
+        toast(res.message);
       }
     } catch (err: any) {
-      alert("Failed to add signal: " + err.message);
+      toast.error("Failed to add signal: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -383,10 +383,10 @@ export default function SignalManagement({
         setCloseRemark('');
         setCloseTargets({ t1: false, t2: false, t3: false, close: false });
       } else {
-        alert(res.message);
+        toast(res.message);
       }
     } catch (err: any) {
-      alert("Failed to close signal: " + err.message);
+      toast.error("Failed to close signal: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -937,7 +937,7 @@ export default function SignalManagement({
                           if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
                             setReportFile(file);
                           } else {
-                            alert('Only PDF files are allowed for the report.');
+                            toast('Only PDF files are allowed for the report.');
                             e.target.value = '';
                             setReportFile(null);
                           }
@@ -1353,15 +1353,15 @@ export default function SignalManagement({
                       body: JSON.stringify({ message })
                     });
                     if (res.success) {
-                      alert('Alert sent successfully!');
+                      toast.success('Alert sent successfully!');
                       fetchSignals();
                       return true;
                     } else {
-                      alert(res.message);
+                      toast(res.message);
                       return false;
                     }
                   } catch (err: any) {
-                    alert('Failed to send alert: ' + err.message);
+                    toast.error('Failed to send alert: ' + err.message);
                     return false;
                   }
                 }}

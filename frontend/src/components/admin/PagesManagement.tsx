@@ -4,6 +4,7 @@ import { Save, Trash2, Link, FileText, CheckCircle2, XCircle, ExternalLink } fro
 import api from '../../services/api';
 import { useGlobalConfirm } from '../GlobalConfirmProvider';
 import dynamic from 'next/dynamic';
+import { toast } from 'react-hot-toast';
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
 if (typeof window !== 'undefined') {
@@ -82,13 +83,13 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
         body: JSON.stringify(formData)
       });
       if (res.success) {
-        alert('Page saved successfully!');
+        toast.success('Page saved successfully!');
         fetchPages();
       } else {
-        alert(res.message);
+        toast(res.message);
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to save page');
+      toast.error(err.message || 'Failed to save page');
     } finally {
       setSaving(false);
     }
@@ -99,13 +100,13 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
     try {
       const res = await api.request(`/admin/pages/${id}`, { method: 'DELETE' });
       if (res.success) {
-        alert('Page deleted successfully');
+        toast.success('Page deleted successfully');
         fetchPages();
       } else {
-        alert(res.message);
+        toast(res.message);
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to delete page');
+      toast.error(err.message || 'Failed to delete page');
     }
   };
 

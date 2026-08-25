@@ -768,3 +768,12 @@ model ComplaintMonthlyReport {
 
   @@unique([tenantId, month, year])
 }
+
+model EmailVerification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  otp       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+

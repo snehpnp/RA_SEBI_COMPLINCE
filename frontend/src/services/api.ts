@@ -815,6 +815,20 @@ class ApiClient {
       body: JSON.stringify({ code })
     });
   }
+
+  async requestOtp(email: string) {
+    return this.request('/public/request-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+  }
+
+  async verifyOtp(email: string, otp: string) {
+    return this.request('/public/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp })
+    });
+  }
 }
 
 export const api = new ApiClient();

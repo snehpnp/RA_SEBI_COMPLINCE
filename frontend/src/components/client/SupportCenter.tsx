@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { MessageSquare, PhoneCall, HelpCircle, Plus, Search, ChevronDown, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 export default function SupportCenter() {
   const [activeTab, setActiveTab] = useState<'tickets' | 'faqs'>('tickets');
@@ -68,7 +69,7 @@ export default function SupportCenter() {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (hasOpenTicket) return alert('You already have an open ticket.');
+    if (hasOpenTicket) return toast('You already have an open ticket.');
     setSubmitting(true);
     try {
       await api.createTicket({ subject: newSubject, message: newDesc, priority: 'MEDIUM', categoryId: null });
@@ -77,7 +78,7 @@ export default function SupportCenter() {
       setNewDesc('');
       fetchTickets();
     } catch (err: any) {
-      alert(err.message || 'Failed to create ticket');
+      toast.error(err.message || 'Failed to create ticket');
     } finally {
       setSubmitting(false);
     }
@@ -85,8 +86,8 @@ export default function SupportCenter() {
 
   const handleReply = async () => {
     if (!replyText.trim() || !selectedTicket) return;
-    if (selectedTicket.status === 'CLOSED') return alert('Ticket is closed.');
-    if (selectedTicket.status === 'PENDING') return alert('Please wait for admin response.');
+    if (selectedTicket.status === 'CLOSED') return toast('Ticket is closed.');
+    if (selectedTicket.status === 'PENDING') return toast('Please wait for admin response.');
     
     setSubmitting(true);
     try {
@@ -98,7 +99,7 @@ export default function SupportCenter() {
         await fetchTickets();
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to reply');
+      toast.error(err.message || 'Failed to reply');
     } finally {
       setSubmitting(false);
     }

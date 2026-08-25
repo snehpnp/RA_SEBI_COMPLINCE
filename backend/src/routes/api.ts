@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout } from '../controllers/authController';
+import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp } from '../controllers/authController';
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory } from '../controllers/superAdminController';
 
 import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
@@ -92,6 +92,8 @@ router.get('/auth/me', authenticateJWT, getMe);
 router.post('/auth/change-password', authenticateJWT, changePassword);
 router.post('/auth/logout', authenticateJWT, logout);
 router.get('/public/tenants', getPublicTenants);
+router.post('/public/request-otp', requestOtp);
+router.post('/public/verify-otp', verifyOtp);
 // ----------------------------------------------------
 // SUPER ADMIN PORTAL
 // ----------------------------------------------------

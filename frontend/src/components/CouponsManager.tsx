@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Tag, CheckCircle, XCircle, Eye, EyeOff } from 'lucide-react';
 import api from '../services/api';
+import { toast } from 'react-hot-toast';
 
 
 const MultiSelectPills = ({ options, selectedString, onChange, disabled }: any) => {
@@ -82,7 +83,7 @@ export default function CouponsManager() {
       if (resPlans.success) setPlans(resPlans.data);
       if (resCategories.success) setCategories(resCategories.data);
     } catch (err: any) {
-      alert(err.message || 'Failed to fetch data');
+      toast.error(err.message || 'Failed to fetch data');
     } finally {
       setIsLoading(false);
     }
@@ -136,15 +137,15 @@ export default function CouponsManager() {
 
       if (editingCoupon) {
         await api.updateCoupon(editingCoupon.id, payload);
-        alert('Coupon updated');
+        toast.success('Coupon updated');
       } else {
         await api.createCoupon(payload);
-        alert('Coupon created');
+        toast.success('Coupon created');
       }
       setIsModalOpen(false);
       fetchData();
     } catch (err: any) {
-      alert(err.message || 'Error saving coupon');
+      toast.error(err.message || 'Error saving coupon');
     }
   };
 
@@ -160,7 +161,7 @@ export default function CouponsManager() {
           await api.toggleCouponVisibility(id);
           fetchData();
         } catch (err: any) {
-          alert(err.message || 'Error toggling visibility');
+          toast.error(err.message || 'Error toggling visibility');
         }
       }
     });
@@ -177,7 +178,7 @@ export default function CouponsManager() {
           await api.toggleCouponStatus(id);
           fetchData();
         } catch (err: any) {
-          alert(err.message || 'Error toggling status');
+          toast.error(err.message || 'Error toggling status');
         }
       }
     });

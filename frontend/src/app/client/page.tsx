@@ -101,7 +101,7 @@ function ClientPortalContent() {
 
   const handleLogout = async (allDevices: boolean = false) => {
     await api.logout(allDevices);
-    window.location.href = '/client-login';
+    window.location.href = '/login';
   };
 
   const renderContent = () => {
@@ -185,10 +185,8 @@ function ClientPortalContent() {
               <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
             ) : (
               <>
-                <div className="w-10 h-10 shrink-0 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
-                  <ShieldCheck className="w-6 h-6 text-premium-primary" />
-                </div>
-                {!isSidebarCollapsed && <span className="text-xl font-bold tracking-wider whitespace-nowrap">{currentUser?.tenantName || 'RAGCP'}</span>}
+                <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
               </>
             )}
           </div>

@@ -1,6 +1,7 @@
+import { toast } from 'react-hot-toast';
 export function downloadCSV(data: any[], filename: string) {
   if (!data || !data.length) {
-    alert('No data available to export.');
+    toast('No data available to export.');
     return;
   }
   

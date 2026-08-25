@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { toast } from 'react-hot-toast';
 
 export const generatePeriodicReport = async (data: any, periodName: string = 'Current', endDateStr?: string) => {
   try {
@@ -267,6 +268,6 @@ export const generatePeriodicReport = async (data: any, periodName: string = 'Cu
 
   } catch (error) {
     console.error('Error generating report:', error);
-    alert('Failed to generate template-based report.');
+    toast.error('Failed to generate template-based report.');
   }
 };

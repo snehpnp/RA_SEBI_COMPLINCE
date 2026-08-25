@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Save, Loader2, History, X, Eye, Calendar, CheckCircle, Download } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 interface ReportData {
   investorPendingLastMonth: number;
@@ -52,7 +53,7 @@ export default function ComplaintReportAdmin() {
       const reports = res && res.success ? (res.data || []) : historyList;
 
       if (reports.length === 0) {
-        alert('No complaint report history available to download.');
+        toast('No complaint report history available to download.');
         return;
       }
 
@@ -139,7 +140,7 @@ export default function ComplaintReportAdmin() {
       link.click();
       document.body.removeChild(link);
     } catch (err: any) {
-      alert(err.message || 'Failed to download history CSV');
+      toast.error(err.message || 'Failed to download history CSV');
     } finally {
       setDownloadingCsv(false);
     }
@@ -194,13 +195,13 @@ export default function ComplaintReportAdmin() {
         body: JSON.stringify({ month, year, data })
       });
       if (response && response.success) {
-        alert('Report saved successfully!');
+        toast.success('Report saved successfully!');
         if (isHistoryOpen) fetchHistory();
       } else {
-        alert(response.message);
+        toast(response.message);
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to save report');
+      toast.error(err.message || 'Failed to save report');
     } finally {
       setSaving(false);
     }

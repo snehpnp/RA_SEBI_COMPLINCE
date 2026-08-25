@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Receipt, Download, CreditCard, Clock, Search, ExternalLink, Loader2 } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 export default function PaymentCenter({ profile }: { profile?: any }) {
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -15,7 +16,7 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
       await api.downloadInvoicePdf(paymentId, `Invoice_${transactionRef}.pdf`);
     } catch (error) {
       console.error('Download failed', error);
-      alert('Failed to download invoice. Please try again.');
+      toast.error('Failed to download invoice. Please try again.');
     } finally {
       setDownloadingId(null);
     }

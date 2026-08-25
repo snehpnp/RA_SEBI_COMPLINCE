@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { CreditCard, CheckCircle2, Star, Zap, Shield, ChevronRight, Loader2 } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { profile?: any, onTriggerOnboarding?: () => void }) {
   const [activeTab, setActiveTab] = useState<'active' | 'browse'>('active');
@@ -25,10 +26,10 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
       const res = await api.applyCoupon(couponCode);
       if (res.success) {
         setAppliedCoupon(res.data);
-        alert('Coupon applied!');
+        toast('Coupon applied!');
       }
     } catch (err: any) {
-      alert(err.message || 'Invalid coupon');
+      toast.error(err.message || 'Invalid coupon');
       setAppliedCoupon(null);
     } finally {
       setLoading(false);
@@ -44,7 +45,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
     const isAgreementDone = !!profile?.agreementSigned || profile?.status === 'ACTIVE' || profile?.status === 'PAYMENT_PENDING';
     
     if (kycFirst && (!isKycDone || !isAgreementDone)) {
-      alert('Please complete your Identity KYC and Legal Agreement before making a payment.');
+      toast('Please complete your Identity KYC and Legal Agreement before making a payment.');
       setCheckoutPlan(null);
       if (onTriggerOnboarding) {
         onTriggerOnboarding();
@@ -92,7 +93,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
         throw new Error(res.message || 'Failed to initiate payment');
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to select plan');
+      toast.error(err.message || 'Failed to select plan');
     } finally {
       setLoading(false);
     }

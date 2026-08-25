@@ -286,12 +286,12 @@ function SuperAdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login');
+        router.push('/login');
         return;
       }
       const parsedUser = JSON.parse(userStr);
       if (parsedUser.role !== 'SUPER_ADMIN') {
-        router.push('/admin/login');
+        router.push('/login');
         return;
       }
       setUser(parsedUser);
@@ -301,7 +301,7 @@ function SuperAdminDashboardContent() {
 
   const handleLogout = async (allDevices: boolean = false) => {
     await api.logout(allDevices);
-    router.push('/admin/login');
+    router.push('/login');
   };
 
   const handleSebiCertificateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -728,10 +728,8 @@ function SuperAdminDashboardContent() {
               <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
             ) : (
               <>
-                <div className="w-10 h-10 shrink-0 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
-                  <ShieldCheck className="w-6 h-6 text-premium-primary" />
-                </div>
-                {!isSidebarCollapsed && <span className="text-xl font-bold tracking-wider whitespace-nowrap">Super Admin</span>}
+                <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
               </>
             )}
           </div>
@@ -831,30 +829,7 @@ function SuperAdminDashboardContent() {
 
       {/* Main Content Area */}
       <main className="flex-grow p-10 overflow-y-auto max-w-[1600px] mx-auto">
-        <header className="flex justify-between items-center mb-10 pb-6 border-b border-slate-300 dark:border-white/5 relative">
-          <div>
-            <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500 dark:from-white dark:to-slate-400">RAGCP Super Telemetry</h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Global multi-tenant metrics, governance audits and compliance controls</p>
-          </div>
-          <div className="relative flex items-center space-x-4">
-            <div className="relative flex flex-col items-end">
-              <button
-                onClick={() => loadData(true)}
-                disabled={isReloading}
-                className={`px-4 py-2 border border-slate-400 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 rounded-xl hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 hover:border-slate-400 dark:border-white/20 transition-all flex items-center space-x-2 text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-sm ${isReloading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${isReloading ? 'animate-spin' : ''}`} />
-                <span>{isReloading ? 'Reloading...' : 'Reload Systems'}</span>
-              </button>
-              {reloadToastMessage && (
-                <div className="absolute top-[120%] right-0 bg-indigo-500/20 border border-indigo-500/50 text-indigo-700 dark:text-indigo-300 text-xs px-3 py-2 rounded-lg whitespace-nowrap animate-in fade-in slide-in-from-top-2 shadow-lg backdrop-blur-md z-50 flex items-center space-x-2">
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  <span>{reloadToastMessage}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
+
 
         {/* 1. DASHBOARD TAB */}
         {activeTab === 'dashboard' && (

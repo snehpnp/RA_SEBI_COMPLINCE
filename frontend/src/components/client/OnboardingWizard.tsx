@@ -4,6 +4,7 @@ import {
   ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag
 } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 interface OnboardingWizardProps {
   profile: any;
@@ -116,7 +117,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
       await api.updateProfile(formData);
       handleNext();
     } catch (err: any) {
-      alert(err.message || 'Failed to update profile');
+      toast.error(err.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -166,7 +167,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     try {
       handleNext();
     } catch (err: any) {
-      alert(err.message || 'Failed to update KYC');
+      toast.error(err.message || 'Failed to update KYC');
     } finally {
       setLoading(false);
     }
@@ -182,7 +183,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           environment: 'production',
           callback: async function (response: any) {
             if (response.hasOwnProperty('error_code')) {
-              alert("Digio eSign Failed or Cancelled");
+              toast.error("Digio eSign Failed or Cancelled");
               setLoading(false);
             } else {
               await api.updateDigioStatus({ type: 'AGREEMENT', status: 'COMPLETED' });
@@ -200,11 +201,11 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
         digio.init();
         digio.submit(res.data.id, formData.email);
       } else {
-        alert(res.message || 'Failed to initiate Digio request');
+        toast.error(res.message || 'Failed to initiate Digio request');
         setLoading(false);
       }
     } catch (err: any) {
-      alert('Failed to connect to Digio. Please ensure credentials are correct.');
+      toast.error('Failed to connect to Digio. Please ensure credentials are correct.');
       setLoading(false);
     }
   };
@@ -216,10 +217,10 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
       const res = await api.applyCoupon(couponCode);
       if (res.success) {
         setAppliedCoupon(res.data);
-        alert('Coupon applied!');
+        toast('Coupon applied!');
       }
     } catch (err: any) {
-      alert(err.message || 'Invalid coupon');
+      toast.error(err.message || 'Invalid coupon');
       setAppliedCoupon(null);
     } finally {
       setLoading(false);
@@ -258,7 +259,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
         throw new Error(res.message || 'Failed to initiate payment');
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to select plan');
+      toast.error(err.message || 'Failed to select plan');
       setLoading(false);
     }
   };
