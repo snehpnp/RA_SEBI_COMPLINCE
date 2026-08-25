@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-100 text-slate-900 transition-colors duration-200;
+  }
+  .dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Custom premium styles */
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.dark .glassmorphism {
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Micro-interactions & animations */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -10px rgba(112, 140, 247, 0.3);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+:root {
+  /* Light mode premium equivalents */
+  --premium-bg: #f8fafc; /* slate-50 */
+  --premium-cards: #ffffff; /* white */
+  --premium-primary: #2563EB;
+  --premium-success: #22C55E;
+  --premium-warning: #F59E0B;
+  --premium-danger: #EF4444;
+  --premium-text: #0f172a; /* slate-900 */
+  --premium-border: #e2e8f0; /* slate-200 */
+}
+
+.dark {
+  /* Original dark mode equivalents */
+  --premium-bg: #0B1220;
+  --premium-cards: #111827;
+  --premium-primary: #2563EB;
+  --premium-success: #22C55E;
+  --premium-warning: #F59E0B;
+  --premium-danger: #EF4444;
+  --premium-text: #F8FAFC;
+  --premium-border: #1E293B;
+}

@@ -1,0 +1,2482 @@
+openapi: 3.0.0
+info:
+  title: RAGCP API Collection
+  description: API collection for Research Analyst Governance & Compliance Platform
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000
+    description: Local Server
+  - url: https://compliance.pnpuniverse.in/backend
+    description: Production Server
+tags:
+  - name: Auth
+  - name: Public & Misc
+  - name: Super Admin
+  - name: Admin
+  - name: Client
+  - name: Payments
+  - name: Research & Signals
+  - name: Compliance
+paths:
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: POST /auth/login
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                email: test@example.com
+                password: securePass123
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: POST /auth/refresh
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                token: Sample token
+                email: test@example.com
+                newPassword: Sample newPassword
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/auth/forgot-password:
+    post:
+      tags:
+        - Auth
+      summary: POST /auth/forgot-password
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                email: test@example.com
+                token: Sample token
+                newPassword: Sample newPassword
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/auth/reset-password:
+    post:
+      tags:
+        - Auth
+      summary: POST /auth/reset-password
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                token: Sample token
+                newPassword: Sample newPassword
+                currentPassword: Sample currentPassword
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/auth/me:
+    get:
+      tags:
+        - Auth
+      summary: GET /auth/me
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/auth/change-password:
+    post:
+      tags:
+        - Auth
+      summary: POST /auth/change-password
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                currentPassword: Sample currentPassword
+                newPassword: Sample newPassword
+                allDevices: Sample allDevices
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: POST /auth/logout
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                allDevices: Sample allDevices
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/public/tenants:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /public/tenants
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/pages:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /pages
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/pages/:slug:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /pages/:slug
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/complaint-report:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /complaint-report
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/complaint-report/history:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /complaint-report/history
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/webhook/razorpay:
+    post:
+      tags:
+        - Public & Misc
+      summary: POST /webhook/razorpay
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                clientId: Sample clientId
+                planId: Sample planId
+                amount: Sample amount
+                paymentMode: Sample paymentMode
+                transactionRef: Sample transactionRef
+                statusInput: Sample statusInput
+                couponCode: Sample couponCode
+                remarks: Sample remarks
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/resources:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /resources
+      description: >-
+        Roles/Permissions required: SUPER_ADMIN, ADMIN, COMPLIANCE_OFFICER,
+        PRINCIPAL_OFFICER, RESEARCHER, PERSON_ASSOCIATED, SALES, MARKETING
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/locations/states:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /locations/states
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/download:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /download
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /health:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /health
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /:
+    get:
+      tags:
+        - Public & Misc
+      summary: GET /
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/parse-sebi-certificate:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/parse-sebi-certificate
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/parse-nism-certificate:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/parse-nism-certificate
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/tenants
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    get:
+      tags:
+        - Super Admin
+      summary: GET /super-admin/tenants
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants/:id/status:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/tenants/:id/status
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                status: ACTIVE
+                password: securePass123
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants/:id:
+    delete:
+      tags:
+        - Super Admin
+      summary: DELETE /super-admin/tenants/:id
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    get:
+      tags:
+        - Super Admin
+      summary: GET /super-admin/tenants/:id
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    put:
+      tags:
+        - Super Admin
+      summary: PUT /super-admin/tenants/:id
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants/:id/restore:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/tenants/:id/restore
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                password: securePass123
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants/:id/permanent:
+    delete:
+      tags:
+        - Super Admin
+      summary: DELETE /super-admin/tenants/:id/permanent
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants/:id/impersonate:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/tenants/:id/impersonate
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/tenants/:id/documents:
+    get:
+      tags:
+        - Super Admin
+      summary: GET /super-admin/tenants/:id/documents
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/password:
+    put:
+      tags:
+        - Super Admin
+      summary: PUT /super-admin/password
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                currentPassword: Sample currentPassword
+                newPassword: Sample newPassword
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/logs:
+    get:
+      tags:
+        - Super Admin
+      summary: GET /super-admin/logs
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/compliance-rules:
+    get:
+      tags:
+        - Super Admin
+      summary: GET /super-admin/compliance-rules
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/compliance-rules/:id:
+    put:
+      tags:
+        - Super Admin
+      summary: PUT /super-admin/compliance-rules/:id
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                requirement: Sample requirement
+                frequency: Sample frequency
+                frequencyType: Sample frequencyType
+                severityLevel: Sample severityLevel
+                penaltyAmount: Sample penaltyAmount
+                isActive: Sample isActive
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/telemetry:
+    get:
+      tags:
+        - Super Admin
+      summary: GET /super-admin/telemetry
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/resources:
+    post:
+      tags:
+        - Super Admin
+      summary: POST /super-admin/resources
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/super-admin/resources/:id:
+    delete:
+      tags:
+        - Super Admin
+      summary: DELETE /super-admin/resources/:id
+      description: 'Roles/Permissions required: SUPER_ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/signature:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/signature
+      description: 'Roles/Permissions required: ADMIN, SUPER_ADMIN, RESEARCHER'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/settings:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/settings
+      description: 'Roles/Permissions required: ACCESS_SETTINGS'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/email-templates:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/email-templates
+      description: 'Roles/Permissions required: ADMIN, PRINCIPAL_OFFICER'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/email-templates/:type:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/email-templates/:type
+      description: 'Roles/Permissions required: ADMIN, PRINCIPAL_OFFICER'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                subject: Sample subject
+                body: Sample body
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/test-smtp:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/test-smtp
+      description: 'Roles/Permissions required: ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                toEmail: Sample toEmail
+                planId: Sample planId
+                remarks: Sample remarks
+                paymentRefId: Sample paymentRefId
+                paymentDate: Sample paymentDate
+                couponCode: Sample couponCode
+                customAmount: Sample customAmount
+                customDays: Sample customDays
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/invoices:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/invoices
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/agreements:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/agreements
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/kra:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/kra
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/clients:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/clients
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/deleted-clients:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/deleted-clients
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/payments:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/payments
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/exports/research-reports:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/exports/research-reports
+      description: 'Roles/Permissions required: EXPORT_DATA'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/pages:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/pages
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/pages
+      description: 'Roles/Permissions required: ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                id: Sample id
+                title: Sample title
+                slug: Sample slug
+                type: Sample type
+                content: Sample content
+                externalUrl: Sample externalUrl
+                status: ACTIVE
+                month: Sample month
+                year: Sample year
+                data: Sample data
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/pages/:id:
+    delete:
+      tags:
+        - Admin
+      summary: DELETE /admin/pages/:id
+      description: 'Roles/Permissions required: ADMIN'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/complaint-report:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/complaint-report
+      description: 'Roles/Permissions required: ADMIN'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                month: Sample month
+                year: Sample year
+                data: Sample data
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/profile-completeness:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/profile-completeness
+      description: 'Roles/Permissions required: ACCESS_DASHBOARD'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/active-clients/summary:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/active-clients/summary
+      description: 'Roles/Permissions required: ACCESS_DASHBOARD'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/active-clients/month-export:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/active-clients/month-export
+      description: 'Roles/Permissions required: ACCESS_DASHBOARD'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/active-clients/date:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/active-clients/date
+      description: 'Roles/Permissions required: ACCESS_DASHBOARD'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/audit-logs:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/audit-logs
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/profile-wizard:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/profile-wizard
+      description: 'Roles/Permissions required: ACCESS_DASHBOARD'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/staff:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/staff
+      description: 'Roles/Permissions required: ACCESS_STAFF'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/staff
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_STAFF, ANY_OF:
+        ACCESS_COMPLIANCE
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/dashboard-stats:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/dashboard-stats
+      description: 'Roles/Permissions required: ACCESS_DASHBOARD'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/staff/:id:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/staff/:id
+      description: 'Roles/Permissions required: ACCESS_STAFF'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    delete:
+      tags:
+        - Admin
+      summary: DELETE /admin/staff/:id
+      description: 'Roles/Permissions required: ACCESS_STAFF'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/staff/:id/status:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/staff/:id/status
+      description: 'Roles/Permissions required: ACCESS_STAFF'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/staff/:id/restore:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/staff/:id/restore
+      description: 'Roles/Permissions required: ACCESS_STAFF'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/parse-nism-certificate:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/parse-nism-certificate
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_STAFF, ANY_OF:
+        ACCESS_DASHBOARD
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/clients
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_CLIENTS, ANY_OF:
+        ACCESS_COMPLIANCE
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/deleted:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/clients/deleted
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/:id/status:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/clients/:id/status
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                email: test@example.com
+                mobile: Sample mobile
+                pan: Sample pan
+                aadhaar: Sample aadhaar
+                category: Sample category
+                occupation: Sample occupation
+                addressLine1: Sample addressLine1
+                city: Sample city
+                state: Sample state
+                zipCode: Sample zipCode
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/:id/communications:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/clients/:id/communications
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/:id/approve:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/clients/:id/approve
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/:id:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/clients/:id
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                email: test@example.com
+                mobile: Sample mobile
+                pan: Sample pan
+                aadhaar: Sample aadhaar
+                category: Sample category
+                occupation: Sample occupation
+                addressLine1: Sample addressLine1
+                city: Sample city
+                state: Sample state
+                zipCode: Sample zipCode
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    delete:
+      tags:
+        - Admin
+      summary: DELETE /admin/clients/:id
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/:id/restore:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/clients/:id/restore
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                segments: Sample segments
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/clients/:id/assign-plan:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/clients/:id/assign-plan
+      description: 'Roles/Permissions required: ACCESS_CLIENTS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                planId: Sample planId
+                remarks: Sample remarks
+                paymentRefId: Sample paymentRefId
+                paymentDate: Sample paymentDate
+                couponCode: Sample couponCode
+                customAmount: Sample customAmount
+                customDays: Sample customDays
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/categories:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/categories
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/categories
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                segments: Sample segments
+                categoryId: Sample categoryId
+                description: Sample description
+                price: Sample price
+                durationMonths: Sample durationMonths
+                researchSegments: Sample researchSegments
+                notificationsAllowed: Sample notificationsAllowed
+                clientLimit: Sample clientLimit
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/categories/:id:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/categories/:id
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                categoryId: Sample categoryId
+                description: Sample description
+                price: Sample price
+                durationMonths: Sample durationMonths
+                researchSegments: Sample researchSegments
+                notificationsAllowed: Sample notificationsAllowed
+                clientLimit: Sample clientLimit
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/categories/:id/status:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/categories/:id/status
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                categoryId: Sample categoryId
+                name: Sample name
+                description: Sample description
+                price: Sample price
+                durationMonths: Sample durationMonths
+                researchSegments: Sample researchSegments
+                notificationsAllowed: Sample notificationsAllowed
+                clientLimit: Sample clientLimit
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/plans:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/plans
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_PLANS, ANY_OF:
+        ACCESS_RESEARCH
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/plans
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                categoryId: Sample categoryId
+                name: Sample name
+                description: Sample description
+                price: Sample price
+                durationMonths: Sample durationMonths
+                researchSegments: Sample researchSegments
+                notificationsAllowed: Sample notificationsAllowed
+                clientLimit: Sample clientLimit
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/plans/:id:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/plans/:id
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                categoryId: Sample categoryId
+                name: Sample name
+                description: Sample description
+                price: Sample price
+                durationMonths: Sample durationMonths
+                notificationsAllowed: Sample notificationsAllowed
+                clientLimit: Sample clientLimit
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    delete:
+      tags:
+        - Admin
+      summary: DELETE /admin/plans/:id
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/plans/:id/restore:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/plans/:id/restore
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                themeColor: Sample themeColor
+                companyName: Sample companyName
+                companyEmail: Sample companyEmail
+                gstCalculationType: Sample gstCalculationType
+                state: Sample state
+                gst: Sample gst
+                smtpHost: Sample smtpHost
+                smtpPort: Sample smtpPort
+                smtpUser: Sample smtpUser
+                smtpPassword: Sample smtpPassword
+                smtpFrom: Sample smtpFrom
+                bankAccountName: Sample bankAccountName
+                bankAccountNo: Sample bankAccountNo
+                bankAccountType: Sample bankAccountType
+                bankIfsc: Sample bankIfsc
+                bankName: Sample bankName
+                bankBranch: Sample bankBranch
+                socialMediaLinks: Sample socialMediaLinks
+                digioClientId: Sample digioClientId
+                digioClientSecret: Sample digioClientSecret
+                digioKycTemplateName: Sample digioKycTemplateName
+                agreementContent: Sample agreementContent
+                kycFirst: Sample kycFirst
+                welcomeEmailText: Sample welcomeEmailText
+                reportDisclaimer: Sample reportDisclaimer
+                kraProvider: Sample kraProvider
+                kraApiKey: Sample kraApiKey
+                kraApiSecret: Sample kraApiSecret
+                activePaymentGateway: Sample activePaymentGateway
+                razorpayKeyId: Sample razorpayKeyId
+                razorpayKeySecret: Sample razorpayKeySecret
+                cashfreeAppId: Sample cashfreeAppId
+                cashfreeSecretKey: Sample cashfreeSecretKey
+                ccavenueMerchantId: Sample ccavenueMerchantId
+                ccavenueAccessCode: Sample ccavenueAccessCode
+                ccavenueWorkingKey: Sample ccavenueWorkingKey
+                stripePublishableKey: Sample stripePublishableKey
+                stripeSecretKey: Sample stripeSecretKey
+                address: Sample address
+                website: Sample website
+                mobile: Sample mobile
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/plans/:id/status:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/plans/:id/status
+      description: 'Roles/Permissions required: ACCESS_PLANS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                themeColor: Sample themeColor
+                companyName: Sample companyName
+                companyEmail: Sample companyEmail
+                gstCalculationType: Sample gstCalculationType
+                state: Sample state
+                gst: Sample gst
+                smtpHost: Sample smtpHost
+                smtpPort: Sample smtpPort
+                smtpUser: Sample smtpUser
+                smtpPassword: Sample smtpPassword
+                smtpFrom: Sample smtpFrom
+                bankAccountName: Sample bankAccountName
+                bankAccountNo: Sample bankAccountNo
+                bankAccountType: Sample bankAccountType
+                bankIfsc: Sample bankIfsc
+                bankName: Sample bankName
+                bankBranch: Sample bankBranch
+                socialMediaLinks: Sample socialMediaLinks
+                digioClientId: Sample digioClientId
+                digioClientSecret: Sample digioClientSecret
+                digioKycTemplateName: Sample digioKycTemplateName
+                agreementContent: Sample agreementContent
+                kycFirst: Sample kycFirst
+                welcomeEmailText: Sample welcomeEmailText
+                reportDisclaimer: Sample reportDisclaimer
+                kraProvider: Sample kraProvider
+                kraApiKey: Sample kraApiKey
+                kraApiSecret: Sample kraApiSecret
+                activePaymentGateway: Sample activePaymentGateway
+                razorpayKeyId: Sample razorpayKeyId
+                razorpayKeySecret: Sample razorpayKeySecret
+                cashfreeAppId: Sample cashfreeAppId
+                cashfreeSecretKey: Sample cashfreeSecretKey
+                ccavenueMerchantId: Sample ccavenueMerchantId
+                ccavenueAccessCode: Sample ccavenueAccessCode
+                ccavenueWorkingKey: Sample ccavenueWorkingKey
+                stripePublishableKey: Sample stripePublishableKey
+                stripeSecretKey: Sample stripeSecretKey
+                address: Sample address
+                website: Sample website
+                mobile: Sample mobile
+                toEmail: Sample toEmail
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/roles:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/roles
+      description: 'Roles/Permissions required: ACCESS_ROLES'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/roles
+      description: 'Roles/Permissions required: ACCESS_ROLES'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                description: Sample description
+                permissions: Sample permissions
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/roles/:id/permissions:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/roles/:id/permissions
+      description: 'Roles/Permissions required: ACCESS_ROLES'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                permissions: Sample permissions
+                name: Sample name
+                description: Sample description
+                allowMultiDeviceLogin: Sample allowMultiDeviceLogin
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/roles/:id:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/roles/:id
+      description: 'Roles/Permissions required: ACCESS_ROLES'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                name: Sample name
+                description: Sample description
+                allowMultiDeviceLogin: Sample allowMultiDeviceLogin
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    delete:
+      tags:
+        - Admin
+      summary: DELETE /admin/roles/:id
+      description: 'Roles/Permissions required: ACCESS_ROLES'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/coupons:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/coupons
+      description: 'Roles/Permissions required: ACCESS_SETTINGS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/coupons
+      description: 'Roles/Permissions required: ACCESS_SETTINGS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                code: Sample code
+                discountType: Sample discountType
+                discountValue: Sample discountValue
+                percentageType: Sample percentageType
+                minPurchaseValue: Sample minPurchaseValue
+                maxDiscountValue: Sample maxDiscountValue
+                expiryDate: Sample expiryDate
+                usageLimit: Sample usageLimit
+                clientId: Sample clientId
+                planId: Sample planId
+                categoryId: Sample categoryId
+                isPublic = false: Sample isPublic = false
+                amount: Sample amount
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/coupons/:id:
+    put:
+      tags:
+        - Admin
+      summary: PUT /admin/coupons/:id
+      description: 'Roles/Permissions required: ACCESS_SETTINGS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                discountType: Sample discountType
+                discountValue: Sample discountValue
+                percentageType: Sample percentageType
+                minPurchaseValue: Sample minPurchaseValue
+                maxDiscountValue: Sample maxDiscountValue
+                expiryDate: Sample expiryDate
+                usageLimit: Sample usageLimit
+                clientId: Sample clientId
+                planId: Sample planId
+                categoryId: Sample categoryId
+                code: Sample code
+                amount: Sample amount
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/coupons/:id/visibility:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/coupons/:id/visibility
+      description: 'Roles/Permissions required: ACCESS_SETTINGS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                code: Sample code
+                clientId: Sample clientId
+                planId: Sample planId
+                categoryId: Sample categoryId
+                amount: Sample amount
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/coupons/:id/status:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/coupons/:id/status
+      description: 'Roles/Permissions required: ACCESS_SETTINGS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                code: Sample code
+                clientId: Sample clientId
+                planId: Sample planId
+                categoryId: Sample categoryId
+                amount: Sample amount
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/payments/verify:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/payments/verify
+      description: 'Roles/Permissions required: ACCESS_PAYMENTS'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                paymentId: Sample paymentId
+                status: ACTIVE
+                remarks: Sample remarks
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/payments:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/payments
+      description: 'Roles/Permissions required: ACCESS_PAYMENTS'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/tickets:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/tickets
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/tickets/:id:
+    get:
+      tags:
+        - Admin
+      summary: GET /admin/tickets/:id
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/tickets/:id/reply:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/tickets/:id/reply
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/admin/tickets/:id/close:
+    post:
+      tags:
+        - Admin
+      summary: POST /admin/tickets/:id/close
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/register:
+    post:
+      tags:
+        - Client
+      summary: POST /client/register
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                tenantId: Sample tenantId
+                name: Sample name
+                email: test@example.com
+                mobile: Sample mobile
+                password: securePass123
+                pan: Sample pan
+                aadhaar: Sample aadhaar
+                category: Sample category
+                occupation: Sample occupation
+                addressLine1: Sample addressLine1
+                city: Sample city
+                state: Sample state
+                zipCode: Sample zipCode
+                createdById: Sample createdById
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/kyc/initiate:
+    post:
+      tags:
+        - Client
+      summary: POST /client/kyc/initiate
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                status: ACTIVE
+                type: Sample type
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/agreement/initiate:
+    post:
+      tags:
+        - Client
+      summary: POST /client/agreement/initiate
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                status: ACTIVE
+                type: Sample type
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/kyc/status:
+    post:
+      tags:
+        - Client
+      summary: POST /client/kyc/status
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                status: ACTIVE
+                type: Sample type
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/profile:
+    get:
+      tags:
+        - Client
+      summary: GET /client/profile
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    put:
+      tags:
+        - Client
+      summary: PUT /client/profile
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                addressLine1: Sample addressLine1
+                city: Sample city
+                state: Sample state
+                zipCode: Sample zipCode
+                occupation: Sample occupation
+                name: Sample name
+                mobile: Sample mobile
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/account:
+    delete:
+      tags:
+        - Client
+      summary: DELETE /client/account
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/documents:
+    post:
+      tags:
+        - Client
+      summary: POST /client/documents
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/kyc/verify:
+    post:
+      tags:
+        - Client
+      summary: POST /client/kyc/verify
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                pan: Sample pan
+                aadhaar: Sample aadhaar
+                statusInput: Sample statusInput
+                tncAccept: Sample tncAccept
+                policyAccept: Sample policyAccept
+                researchAccept: Sample researchAccept
+                signatureText: Sample signatureText
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/consent:
+    post:
+      tags:
+        - Client
+      summary: POST /client/consent
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                tncAccept: Sample tncAccept
+                policyAccept: Sample policyAccept
+                researchAccept: Sample researchAccept
+                signatureText: Sample signatureText
+                clientId: Sample clientId
+                planId: Sample planId
+                amount: Sample amount
+                paymentMode: Sample paymentMode
+                transactionRef: Sample transactionRef
+                statusInput: Sample statusInput
+                couponCode: Sample couponCode
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/esign:
+    post:
+      tags:
+        - Client
+      summary: POST /client/esign
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                signatureText: Sample signatureText
+                clientId: Sample clientId
+                planId: Sample planId
+                amount: Sample amount
+                paymentMode: Sample paymentMode
+                transactionRef: Sample transactionRef
+                statusInput: Sample statusInput
+                couponCode: Sample couponCode
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/plans:
+    get:
+      tags:
+        - Client
+      summary: GET /client/plans
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/payments/manual:
+    post:
+      tags:
+        - Client
+      summary: POST /client/payments/manual
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/coupons/apply:
+    post:
+      tags:
+        - Client
+      summary: POST /client/coupons/apply
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                code: Sample code
+                clientId: Sample clientId
+                planId: Sample planId
+                categoryId: Sample categoryId
+                amount: Sample amount
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/payments/:id/invoice:
+    get:
+      tags:
+        - Client
+      summary: GET /client/payments/:id/invoice
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/market-overview:
+    get:
+      tags:
+        - Client
+      summary: GET /client/market-overview
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/subscriptions:
+    get:
+      tags:
+        - Client
+      summary: GET /client/subscriptions
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/payments:
+    get:
+      tags:
+        - Client
+      summary: GET /client/payments
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/notifications:
+    get:
+      tags:
+        - Client
+      summary: GET /client/notifications
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/tickets:
+    post:
+      tags:
+        - Client
+      summary: POST /client/tickets
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    get:
+      tags:
+        - Client
+      summary: GET /client/tickets
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/tickets/:id:
+    get:
+      tags:
+        - Client
+      summary: GET /client/tickets/:id
+      description: 'Roles/Permissions required: CLIENT'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/tickets/:id/reply:
+    post:
+      tags:
+        - Client
+      summary: POST /client/tickets/:id/reply
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/coupons:
+    get:
+      tags:
+        - Client
+      summary: GET /client/coupons
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/client/complaints:
+    get:
+      tags:
+        - Client
+      summary: GET /client/complaints
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Client
+      summary: POST /client/complaints
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                clientId: Sample clientId
+                remarks: Sample remarks
+                resolutionNote: Sample resolutionNote
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/payment/ccavenue/initiate:
+    post:
+      tags:
+        - Payments
+      summary: POST /payment/ccavenue/initiate
+      description: 'Roles/Permissions required: CLIENT'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                planId: Sample planId
+                couponCode: Sample couponCode
+                encResp: Sample encResp
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/payment/ccavenue/response:
+    post:
+      tags:
+        - Payments
+      summary: POST /payment/ccavenue/response
+      description: 'Roles/Permissions required: None'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                encResp: Sample encResp
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/research:
+    post:
+      tags:
+        - Research & Signals
+      summary: POST /research
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                segment: Sample segment
+                type: Sample type
+                title: Sample title
+                summary: Sample summary
+                details: Sample details
+                recommendation: Sample recommendation
+                targetPrice: Sample targetPrice
+                acceptTnc: Sample acceptTnc
+                acceptPolicy: Sample acceptPolicy
+                acceptConsent: Sample acceptConsent
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/research/:id:
+    put:
+      tags:
+        - Research & Signals
+      summary: PUT /research/:id
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                segment: Sample segment
+                type: Sample type
+                title: Sample title
+                summary: Sample summary
+                details: Sample details
+                recommendation: Sample recommendation
+                targetPrice: Sample targetPrice
+                acceptTnc: Sample acceptTnc
+                acceptPolicy: Sample acceptPolicy
+                acceptConsent: Sample acceptConsent
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/research/:id/publish:
+    post:
+      tags:
+        - Research & Signals
+      summary: POST /research/:id/publish
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                acceptTnc: Sample acceptTnc
+                acceptPolicy: Sample acceptPolicy
+                acceptConsent: Sample acceptConsent
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/research/list:
+    get:
+      tags:
+        - Research & Signals
+      summary: GET /research/list
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_RESEARCH, ANY_OF:
+        ACCESS_COMPLIANCE, ANY_OF: ACCESS_DASHBOARD
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/research/:id/detail:
+    get:
+      tags:
+        - Research & Signals
+      summary: GET /research/:id/detail
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_RESEARCH, ANY_OF:
+        ACCESS_COMPLIANCE, ANY_OF: ACCESS_DASHBOARD
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/stocks:
+    get:
+      tags:
+        - Research & Signals
+      summary: GET /stocks
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/signals:
+    get:
+      tags:
+        - Research & Signals
+      summary: GET /signals
+      description: 'Roles/Permissions required: None'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Research & Signals
+      summary: POST /signals
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/signals/:id/close:
+    patch:
+      tags:
+        - Research & Signals
+      summary: PATCH /signals/:id/close
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                closeStatus: Sample closeStatus
+                exitPrice: Sample exitPrice
+                closeRemark: Sample closeRemark
+                closeTargets: Sample closeTargets
+                isFinalClose: Sample isFinalClose
+                message: Sample message
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/signals/:id/report:
+    post:
+      tags:
+        - Research & Signals
+      summary: POST /signals/:id/report
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/signals/:id/messages:
+    post:
+      tags:
+        - Research & Signals
+      summary: POST /signals/:id/messages
+      description: 'Roles/Permissions required: ACCESS_RESEARCH'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                message: Sample message
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/check:
+    post:
+      tags:
+        - Compliance
+      summary: POST /compliance/check
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_COMPLIANCE, ANY_OF:
+        ACCESS_DASHBOARD
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                remarks: Sample remarks
+                actualDepositAmount: Sample actualDepositAmount
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/alerts:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/alerts
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_COMPLIANCE, ANY_OF:
+        ACCESS_DASHBOARD
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/dashboard-metrics:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/dashboard-metrics
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_COMPLIANCE, ANY_OF:
+        ACCESS_DASHBOARD
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/periodic-report-data:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/periodic-report-data
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_COMPLIANCE, ANY_OF:
+        ACCESS_DASHBOARD
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/periodic-report-meta:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/periodic-report-meta
+      description: >-
+        Roles/Permissions required: ANY_OF: ACCESS_COMPLIANCE, ANY_OF:
+        ACCESS_DASHBOARD
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/alerts/:id/close:
+    post:
+      tags:
+        - Compliance
+      summary: POST /compliance/alerts/:id/close
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/checklist:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/checklist
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/checklist/history:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/checklist/history
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/checklist/:requirementId:
+    post:
+      tags:
+        - Compliance
+      summary: POST /compliance/checklist/:requirementId
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/penalties:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/penalties
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/penalties/:id/resolve:
+    post:
+      tags:
+        - Compliance
+      summary: POST /compliance/penalties/:id/resolve
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/complaints:
+    get:
+      tags:
+        - Compliance
+      summary: GET /compliance/complaints
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+    post:
+      tags:
+        - Compliance
+      summary: POST /compliance/complaints
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                clientId: Sample clientId
+                remarks: Sample remarks
+                resolutionNote: Sample resolutionNote
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}
+  /api/v1/compliance/complaints/:id/resolve:
+    put:
+      tags:
+        - Compliance
+      summary: PUT /compliance/complaints/:id/resolve
+      description: 'Roles/Permissions required: ACCESS_COMPLIANCE'
+      requestBody:
+        content: {}
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json: {}

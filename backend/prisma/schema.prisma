@@ -1,0 +1,770 @@
+datasource db {
+  provider = "mongodb"
+  url = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Tenant {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  companyName         String
+  companyType         String    @default("INDIVIDUAL")
+  raType              String    @default("FULL_TIME") // FULL_TIME, PART_TIME
+  sebiRegistration    String
+  bseEnrollment       String?
+  email               String    @unique
+  mobile              String
+  address             String
+  pan                 String
+  gst                 String?
+  website             String?
+  ownerName           String    @default("Admin User")
+  certificateUrl      String?
+  certificateValidity DateTime?
+  nismCertificateUrl  String?
+  nismValidity        DateTime?
+  status              String    @default("PENDING_PROFILE") // PENDING_PROFILE, ACTIVE, SUSPENDED, DELETED
+  previousStatus      String?   // Stores status before soft-delete for restoration
+  depositAmount       Float     @default(0.0)
+  aiUsage             Boolean   @default(false)
+  internalPolicyUrl   String?
+  logoUrl             String?
+  faviconUrl          String?
+  gstCalculationType  String    @default("EXCLUSIVE") // EXCLUSIVE, INCLUSIVE
+  state               String?
+  smtpHost            String?
+  smtpPort            Int?
+  smtpUser            String?
+  smtpPassword        String?
+  smtpFrom            String?
+  bankAccountName     String?
+  bankAccountNo       String?
+  bankAccountType     String?
+  bankIfsc            String?
+  bankName            String?
+  bankBranch          String?
+  socialMediaLinks    String?
+
+  // Digio KYC & eSign Integration
+  digioClientId       String?
+  digioClientSecret   String?
+  digioKycTemplateName String?
+  agreementContent    String?
+
+  // KRA Integration
+  kraProvider         String?
+  kraApiKey           String?
+  kraApiSecret        String?
+
+  coSignatureUrl      String? // Added for PDF Research Reports
+
+  // Payment Integration
+  activePaymentGateway String?  @default("RAZORPAY") // RAZORPAY, CASHFREE, CCAVENUE, STRIPE
+  razorpayKeyId       String?
+  razorpayKeySecret   String?
+  cashfreeAppId       String?
+  cashfreeSecretKey   String?
+  ccavenueMerchantId  String?
+  ccavenueAccessCode  String?
+  ccavenueWorkingKey  String?
+  stripePublishableKey String?
+  stripeSecretKey     String?
+
+  // Settings for Client Flow
+  kycFirst            Boolean   @default(true) // Should KYC happen before payment?
+  welcomeEmailText    String?
+  termsPdfUrl         String?
+  privacyPdfUrl       String?
+  reportDisclaimer    String?
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  // Relations
+  users                  User[]
+  categories             PlanCategory[]
+  plans                  Plan[]
+  researchReports        ResearchReport[]
+  signals                Signal[]
+  complianceAlerts       ComplianceAlert[]
+  complianceAudits       ComplianceAudit[]
+  complianceAuditHistory ComplianceAuditHistory[]
+  penalties              Penalty[]
+  payments               Payment[]
+  auditLogs              AuditLog[]
+  notificationLogs       NotificationLog[]
+  supportTickets         SupportTicket[]
+  complaints             Complaint[]
+  emailTemplates         EmailTemplate[]
+  documentHistory        TenantDocumentHistory[]
+  coupons                Coupon[]
+  customPages            CustomPage[]
+  complaintReports       ComplaintMonthlyReport[]
+}
+
+model Coupon {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId      String @db.ObjectId
+  code          String   
+  discountType  String   // PERCENTAGE, FIXED
+  discountValue Float
+  percentageType String? // FLAT, CAPPED
+  minPurchaseValue Float?
+  maxDiscountValue Float?
+  expiryDate    DateTime?
+  usageLimit    Int?
+  usedCount     Int      @default(0)
+  clientId      String? @db.ObjectId
+  planId        String? @db.ObjectId
+  categoryId    String? @db.ObjectId
+  status        String   @default("ACTIVE") // ACTIVE, INACTIVE
+  isPublic      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments      Payment[]
+  client        Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // plan          Plan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
+  // category      PlanCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+}
+
+model EmailTemplate {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId  String @db.ObjectId
+  type      String   // WELCOME, CHANGE_PASSWORD, KYC_AGREEMENT, INVOICE
+  subject   String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  @@unique([tenantId, type])
+}
+
+model Role {
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  name                  String   @unique // SUPER_ADMIN, ADMIN, PRINCIPAL_OFFICER, COMPLIANCE_OFFICER, RESEARCHER, PERSON_ASSOCIATED, CLIENT
+  description           String?
+  allowMultiDeviceLogin Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  users       User[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  code      String   @unique // CREATE, READ, UPDATE, DELETE, APPROVE, REJECT, PUBLISH, EXPORT, DOWNLOAD
+  name      String
+  createdAt DateTime @default(now())
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  roleId       String @db.ObjectId
+  permissionId String @db.ObjectId
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model User {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId     String? @db.ObjectId // Nullable for Super Admin
+  roleId       String @db.ObjectId
+  employeeCode String?
+  firstName    String
+  lastName     String
+  email        String    @unique
+  mobile       String
+  passwordHash String
+  status       String    @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
+  lastLogin        DateTime?
+  tokenVersion     Int       @default(0)
+  currentSessionId String?
+  sessionExpiresAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+  deletedBy    String?   // 'ADMIN', 'SELF'
+  tempPassword String?   // Used for storing password until client sets a new one
+
+  // Relations
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role   Role    @relation(fields: [roleId], references: [id])
+
+  staff          Staff?
+  client         Client?
+  auditLogs      AuditLog[]      @relation("UserAudits")
+  ticketMessages TicketMessage[]
+}
+
+model Staff {
+  id           String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String @db.ObjectId    @unique
+  employeeId   String    @unique
+  name         String
+  email        String
+  mobile       String
+  dob          DateTime?
+  joiningDate  DateTime?
+  nismNumber   String?
+  nismUpload   String?
+  nismValidity DateTime?
+  status       String    @default("ACTIVE") // ACTIVE, INACTIVE, WARNING_EXPIRED_NISM
+
+  // Relations
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personAssociated PersonAssociated?
+}
+
+model PersonAssociated {
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  staffId    String @db.ObjectId  @unique
+  roleType   String // SALES, MARKETING, OTHER
+  customRole String? // If roleType is OTHER
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+}
+
+model Client {
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String @db.ObjectId  @unique
+  name        String
+  email       String
+  mobile      String
+  pan         String  @unique
+  aadhaar     String  @unique
+  category    String  @default("INDIVIDUAL") // INDIVIDUAL, NON_INDIVIDUAL
+  occupation  String?
+  status      String  @default("PENDING_ONBOARDING") // PENDING_ONBOARDING, KYC_PENDING, KYC_FAILED, AGREEMENT_PENDING, PAYMENT_PENDING, ACTIVE, INACTIVE
+  createdById String? @db.ObjectId
+
+  // Relations
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile        ClientProfile?
+  documents      ClientDocument[]
+  agreements     Agreement[]
+  consents       Consent[]
+  subscriptions  Subscription[]
+  supportTickets SupportTicket[]
+  complaints     Complaint[]
+  identityHistory ClientIdentityHistory[]
+  complianceAlerts ComplianceAlert[]
+  coupons        Coupon[]
+}
+
+model ClientIdentityHistory {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId    String @db.ObjectId
+  fieldName   String   // "PAN" or "AADHAAR"
+  oldValue    String
+  newValue    String
+  changedAt   DateTime @default(now())
+  changedBy   String   // "CLIENT", "ADMIN", or "SYSTEM"
+  remarks     String?
+
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model ClientProfile {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId         String @db.ObjectId   @unique
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  state            String?
+  country          String?
+  zipCode          String?
+  riskProfile      String   @default("MODERATE") // CONSERVATIVE, MODERATE, AGGRESSIVE
+  netWorth         Float?
+  investmentLimit  Float?
+  investmentPeriod Int? // in months
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model ClientDocument {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId   String @db.ObjectId
+  docType    String // PAN_PROOF, AADHAAR_PROOF, MANUAL_KYC_PROOF, DEPOSIT_PROOF
+  fileUrl    String
+  fileName   String
+  status     String   @default("PENDING") // PENDING, VERIFIED, REJECTED
+  uploadedAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model PlanCategory {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId  String @db.ObjectId
+  name      String
+  segments  String // Comma separated e.g. "EQUITY,DERIVATIVE"
+  status    String   @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plans  Plan[]
+  // coupons Coupon[]
+}
+
+model Plan {
+  id                   String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId             String @db.ObjectId
+  categoryId           String? @db.ObjectId
+  name                 String // BASIC, PREMIUM, VIP
+  description          String?
+  price                Float
+  durationMonths       Int       @default(1)
+  researchSegments     String // Comma separated e.g. "EQUITY,DERIVATIVE"
+  notificationsAllowed String // Comma separated e.g. "EMAIL,INAPP,PUSH"
+  clientLimit          Int       @default(100)
+  status               String    @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
+  createdById          String? @db.ObjectId
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category      PlanCategory?  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+  // coupons       Coupon[]
+}
+
+model Subscription {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId  String @db.ObjectId
+  planId    String @db.ObjectId
+  startDate DateTime @default(now())
+  endDate   DateTime
+  status    String   @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  
+  // Snapshot of pricing at the time of purchase
+  amountBase      Float?
+  amountGst       Float?
+  amountTotal     Float?
+  isGstInclusive  Boolean? @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+}
+
+model Agreement {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId     String @db.ObjectId
+  agreementUrl String
+  version      String   @default("1.0")
+  esignMode    String   @default("MOCK_AADHAAR") // MOCK_AADHAAR
+  signedAt     DateTime @default(now())
+  ipAddress    String?
+  status       String   @default("SIGNED") // SIGNED, ARCHIVED
+
+  client  Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  history AgreementHistory[]
+}
+
+model AgreementHistory {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  agreementId String @db.ObjectId
+  action      String // GENERATED, SIGNED, DOWNLOADED
+  performedBy String
+  ipAddress   String?
+  timestamp   DateTime @default(now())
+
+  agreement Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+}
+
+model Consent {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId       String @db.ObjectId
+  tncAccept      Boolean  @default(false)
+  policyAccept   Boolean  @default(false)
+  researchAccept Boolean  @default(false)
+  acceptedAt     DateTime @default(now())
+  ipAddress      String?
+
+  client  Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  history ConsentHistory[]
+}
+
+model ConsentHistory {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  consentId String @db.ObjectId
+  action    String // ACCEPTED, UPDATED
+  timestamp DateTime @default(now())
+
+  consent Consent @relation(fields: [consentId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId          String @db.ObjectId
+  clientId          String @db.ObjectId
+  planId            String? @db.ObjectId
+  amount            Float
+  paymentMode       String // ONLINE_RAZORPAY, MANUAL_UPI, MANUAL_BANK
+  transactionRef    String   @unique
+  receiptUrl        String? // Mandatory for MANUAL payments
+  status            String   @default("PENDING") // PENDING, SUCCESS, FAILED, MISMATCH
+  remarks           String?
+  verifiedByStaffId   String? @db.ObjectId
+  assignedByAdminName String?
+  assignedByStaffName String?
+  clientCity          String?
+  clientState         String?
+  tenantState         String? // Snapshot of tenant state at purchase
+  planValidityDays    Int?
+  paymentGatewayId    String? @db.ObjectId
+  paymentDate         DateTime? // Date specified by admin
+  couponId            String? @db.ObjectId
+  discountApplied     Float?   @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  coupon Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+}
+
+model ResearchReport {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId           String @db.ObjectId
+  segment            String // EQUITY, DERIVATIVE, COMMODITY, CURRENCY, IPO, ETF
+  type               String // BUY, SELL, HOLD, REPORT, TARGET, TRADING_CALL, MODEL_PORTFOLIO
+  title              String
+  summary            String
+  details            String
+  recommendation     String? // BUY, SELL, HOLD
+  targetPrice        Float?
+  disclaimer         String
+  conflictDisclosure String
+  sebiRegNo          String
+  version            Int       @default(1)
+  status             String    @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  createdById        String @db.ObjectId
+  publishedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  views  ResearchAnalytics[]
+}
+
+model ResearchAnalytics {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  reportId  String @db.ObjectId
+  userId    String @db.ObjectId
+  action    String // VIEW, OPEN, DOWNLOAD
+  duration  Int      @default(0) // seconds spent viewing
+  ipAddress String?
+  timestamp DateTime @default(now())
+
+  report ResearchReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model ComplianceAlert {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId    String @db.ObjectId
+  clientId    String? @db.ObjectId
+  alertType   String // DEPOSIT_LOW, KYC_FAILED, CERTIFICATE_EXPIRY, AGREEMENT_MISSING, COMPLIANCE_PENDING, PAYMENT_FAILED
+  severity    String // HIGH, MEDIUM, LOW
+  status      String    @default("OPEN") // OPEN, CLOSED
+  description String
+  proofUrl    String? // Submission proof to close the alert
+  remarks     String?
+  closedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId  String? @db.ObjectId // Null for Super Admin operations
+  userId    String @db.ObjectId
+  action    String // CREATE, UPDATE, DELETE, LOGIN, EXPORT
+  module    String // TENANTS, USERS, STAFF, CLIENTS, RESEARCH, PAYMENTS, COMPLIANCE
+  oldValue  String? // JSON string
+  newValue  String? // JSON string
+  ipAddress String?
+  timestamp DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User    @relation("UserAudits", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationLog {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId   String? @db.ObjectId
+  recipient  String // Email address or User ID
+  channel    String // EMAIL, PUSH, INAPP
+  title      String
+  message    String
+  status     String   @default("PENDING") // PENDING, SENT, FAILED
+  retryCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model SupportTicket {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId  String @db.ObjectId
+  clientId  String @db.ObjectId
+  subject   String
+  status    String   @default("PENDING") // PENDING, OPEN, CLOSED
+  priority  String   @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client   Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  messages TicketMessage[]
+}
+
+model TicketMessage {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  ticketId      String @db.ObjectId
+  senderId      String @db.ObjectId // The User ID who sent the message (Client or Staff)
+  message       String
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+model Stock {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  symbol    String   @unique
+  name      String
+  segment   String   @default("EQUITY") // e.g. EQUITY, COMMODITY
+  isFno     Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  signals Signal[]
+}
+
+model Signal {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId          String @db.ObjectId
+  segment           String // CASH, FUTURE, OPTION, COMMODITY
+  planId            String @db.ObjectId // Link to category or plan
+  callType          String // BUY, SELL
+  tradeDuration     String // INTRADAY, SHORT_TERM, LONG_TERM
+  stockId           String @db.ObjectId
+  expiryDate        DateTime?
+  strikePrice       Float?
+  optionType        String? // CE, PE
+  entryPrice        Float
+  entryType         String // EXACT, RANGE, ABOVE, BELOW
+  suggestedQuantity String?
+  target1           Float
+  target2           Float?
+  target3           Float?
+  stoploss          Float
+  description       String?
+  reportUrl         String?
+  closeStatus       String? // FULLY_CLOSED, PARTIALLY_CLOSED, SL_HIT, CLOSED_SIGNAL, AVOID_SIGNAL
+  exitPrice         Float?
+  closeRemark       String?
+  closedAt          DateTime?
+  closeTargets      String? // comma separated list of hit targets e.g. "TARGET1,TARGET2"
+  status            String    @default("OPEN") // OPEN, CLOSED, TARGET_HIT, SL_HIT
+  createdById       String @db.ObjectId
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stock  Stock  @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  messages SignalMessage[]
+}
+
+model SignalMessage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  signalId  String @db.ObjectId
+  message   String
+  createdAt DateTime @default(now())
+
+  signal    Signal   @relation(fields: [signalId], references: [id], onDelete: Cascade)
+}
+
+// Stores the SEBI Master Requirements
+model ComplianceRequirement {
+  id            String                   @id @default(auto()) @map("_id") @db.ObjectId
+  serialNo      Int
+  requirement   String
+  frequency     String
+  frequencyType String                   @default("CONTINUOUS") // CONTINUOUS, BEFORE_EXPIRY, MONTHLY_DATE, ANNUAL_DATE, MONTHLY, HALF_YEARLY, ANNUAL, AS_APPLICABLE, EVERY_REPORT
+  severityLevel String                   @default("MODERATE") // HIGH, MODERATE, LOW
+  penaltyAmount String?
+  isActive      Boolean                  @default(true)
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @default(now()) @updatedAt
+  audits        ComplianceAudit[]
+  history       ComplianceAuditHistory[]
+}
+
+// Tracks the status of each requirement for your firm
+model ComplianceAudit {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId         String @db.ObjectId
+  requirementId    String @db.ObjectId
+  status           String    @default("PENDING") // PENDING, COMPLIANT, PENALIZED, PENALTY_RESOLVED, OVERDUE, NON_COMPLIANT, WARNING_ISSUED, WARNING_RESOLVED
+  dueDate          DateTime?
+  officerRemarks   String?
+  proofDocumentUrl String?
+  resolvedAt       DateTime?
+  updatedByUserId  String? @db.ObjectId
+  updatedAt        DateTime  @updatedAt
+
+  tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requirement ComplianceRequirement        @relation(fields: [requirementId], references: [id])
+  penalty     Penalty?
+  history     ComplianceAuditHistory[]
+}
+
+// Tracks full history of every status change on a checklist audit record
+model ComplianceAuditHistory {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId         String @db.ObjectId
+  requirementId    String @db.ObjectId
+  auditId          String @db.ObjectId
+  previousStatus   String?
+  newStatus        String
+  officerRemarks   String?
+  proofDocumentUrl String?
+  updatedByUserId  String? @db.ObjectId
+  updatedByName    String?
+  periodLabel      String?  // e.g. "Jun 2025", "Apr-Sep 2025" — human-readable period
+  createdAt        DateTime @default(now())
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requirement ComplianceRequirement @relation(fields: [requirementId], references: [id])
+  audit       ComplianceAudit       @relation(fields: [auditId], references: [id], onDelete: Cascade)
+}
+
+// Tracks penalties if a requirement is marked NON_COMPLIANT
+model Penalty {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  auditId    String @db.ObjectId    @unique
+  tenantId   String @db.ObjectId
+  amount     Float
+  reason     String
+  status     String    @default("PENDING_PAYMENT") // PENDING_PAYMENT, PAID
+  paidAt     DateTime?
+  paymentRef String?
+  proofUrl   String?
+  remarks    String?
+
+  audit  ComplianceAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Complaint {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId       String @db.ObjectId
+  clientId       String? @db.ObjectId
+  clientName     String
+  clientEmail    String?
+  clientMobile   String?
+  clientPan      String?
+  source         String
+  scoresRefId    String? @db.ObjectId
+  subject        String
+  description    String
+  status         String    @default("OPEN")
+  receivedAt     DateTime  @default(now())
+  deadlineAt     DateTime
+  resolvedAt     DateTime?
+  resolutionNote String?
+  atrProofUrl    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id])
+}
+
+model Resource {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  category    String   // e.g. "AGREEMENT_DOCUMENT", "SEBI_TC", "AUDIT_REPORT_FORMAT", "PERIODIC_REPORT_FORMAT", "COMPLIANCE_MATRIX", "OTHER"
+  fileUrl     String
+  fileName    String
+  uploadedAt  DateTime @default(now())
+}
+
+model TenantDocumentHistory {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId   String @db.ObjectId
+  docType    String   // "SEBI_CERTIFICATE", "NISM_CERTIFICATE"
+  fileUrl    String
+  fileName   String
+  uploadedAt DateTime @default(now())
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model State {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String   @unique
+  gstCode   String?
+  isActive  Boolean  @default(true)
+}
+
+model CustomPage {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId    String @db.ObjectId
+  title       String
+  slug        String
+  type        String   // CONTENT, URL
+  content     String?  // Rich text content
+  externalUrl String?  // URL if type is URL
+  isSystem    Boolean  @default(false)
+  status      String   @default("ACTIVE") // ACTIVE, INACTIVE
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+}
+
+model ComplaintMonthlyReport {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId    String @db.ObjectId
+  month       Int
+  year        Int
+  data        String   // JSON string containing the data for the 3 rows
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, month, year])
+}

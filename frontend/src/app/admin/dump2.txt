@@ -1,0 +1,300 @@
+                          <div>
+                            <span className="text-[10px] font-bold text-primary-600 dark:text-primary-400 tracking-wider mb-1 block">{plan.category?.name || 'UNCATEGORIZED'}</span>
+                            <h3 className="text-xl font-bold tracking-tight">{plan.name}</h3>
+                          </div>
+                          <div className="text-right">
+                             <div className="text-2xl font-bold">₹{plan.price.toLocaleString()}</div>
+                             <span className="text-[9px] text-slate-500 dark:text-slate-500 block mt-0.5">
+                               {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exclusive)' : '18% GST (Inclusive)'}
+                             </span>
+                           </div>
+                        </div>
+                        <div className="flex items-center space-x-2 mb-4">
+                           <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${isDeleted ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>
+                             {isDeleted ? 'DELETED' : plan.status}
+                           </span>
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-4 flex-grow" dangerouslySetInnerHTML={{ __html: plan.description }} />
+                        <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300 mb-6 bg-black/20 p-3 rounded-lg border border-slate-300 dark:border-white/5">
+                          <div className="flex justify-between"><span>Duration</span> <strong className="text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong></div>
+                          <div className="flex justify-between"><span>Segments</span> <strong className="text-emerald-600 dark:text-emerald-400">{plan.researchSegments}</strong></div>
+                        </div>
+                        <div className="flex space-x-2 mt-auto">
+                          {!isDeleted ? (
+                            <>
+                              {(!isStaff || hasPermission('EDIT_PLANS')) && (
+                                <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                  <Edit2 className="h-3 w-3" /> <span>Edit</span>
+                                </button>
+                              )}
+                              {(!isStaff || hasPermission('EDIT_PLANS')) && (
+                            </div>
+
+                            {/* Full log table */}
+                            <div className="glassmorphism rounded-xl border border-slate-300 dark:border-white/5 overflow-hidden">
+                              <div className="p-4 border-b border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-slate-800/40">
+                                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Purchase History Logs</h4>
+                              </div>
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="bg-slate-100 dark:bg-slate-950/40 border-b border-slate-300 dark:border-white/5 text-[9px] text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
+                                    <th className="py-3 px-4">S.No</th>
+                                    <th className="py-3 px-4">Plan Name</th>
+                                    <th className="py-3 px-4">Amount</th>
+                                    <th className="py-3 px-4">Start Date</th>
+                                    <th className="py-3 px-4">Expiry Date</th>
+                                    <th className="py-3 px-4 text-right">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300 font-medium">
+                                  {selectedClient.subscriptions && selectedClient.subscriptions.length > 0 ? (
+                                    selectedClient.subscriptions.map((sub: any, idx: number) => (
+                                      <tr key={sub.id} className="hover:bg-slate-100 dark:bg-white/5 transition">
+                                        <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{idx + 1}</td>
+                                        <td className="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">{sub.plan?.name}</td>
+                                        <td className="py-3 px-4">
+                                          {gstCalculationType === 'EXCLUSIVE' ? (
+                                            <div className="text-[10px] space-y-0.5 text-slate-600 dark:text-slate-400 leading-tight">
+                                              <div>Base: ₹{sub.plan?.price.toLocaleString()}</div>
+                                              <div>GST: ₹{Math.round(sub.plan?.price * 0.18).toLocaleString()}</div>
+                                              <div className="font-bold text-slate-800 dark:text-slate-200">Total: ₹{Math.round(sub.plan?.price * 1.18).toLocaleString()}</div>
+                                            </div>
+                                          ) : (
+                                            <div className="text-xs">
+                                              <span className="font-semibold text-slate-800 dark:text-slate-200">₹{sub.plan?.price.toLocaleString()}</span>
+                                              <span className="text-[8px] text-slate-500 dark:text-slate-500 block mt-0.5">(GST Incl.)</span>
+                                            </div>
+                                          )}
+                                        </td>
+                                        <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">{new Date(sub.startDate).toLocaleDateString('en-IN')}</td>
+                                        <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">{new Date(sub.endDate).toLocaleDateString('en-IN')}</td>
+                                        <td className="py-3 px-4 text-right">
+                                          {(() => {
+                                            const displayStatus = getDisplayStatus(sub);
+                                            const statusClass = displayStatus === 'ACTIVE'
+                                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                              : displayStatus === 'EXPIRED'
+                                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                              : 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20';
+                                            return <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${statusClass}`}>{displayStatus}</span>;
+                                          })()}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td colSpan={6} className="text-center py-6 text-slate-500 dark:text-slate-500">No subscriptions purchased yet.</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Modal Footer */}
+                      <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 flex justify-end space-x-3 text-xs">
+                        {selectedClient.user?.deletedAt === null && (
+                          <button
+                            onClick={() => {
+                              setIsViewClientModalOpen(false);
+                              startEditClient(selectedClient);
+                            }}
+                            className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-slate-900 dark:text-white transition"
+                          >
+                            Edit Client Details
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setIsViewClientModalOpen(false);
+                            setSelectedClient(null);
+                          }}
+                          className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:bg-white/5 transition"
+                        >
+                          Close Details
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+                        {/* ====================================================
+                PLAN MANAGEMENT TAB
+               ==================================================== */}
+{activeTab === 'plans' && (
+          <div className="space-y-6">
+            <div className="flex space-x-4 border-b border-slate-400 dark:border-white/10 pb-4">
+              <button onClick={() => setPlanManagementTab('categories')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'categories' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Categories</button>
+              <button onClick={() => setPlanManagementTab('plans')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'plans' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Plans</button>
+            </div>
+
+            {planManagementTab === 'categories' && (
+              <div>
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold">Category Management</h2>
+                  {(!isStaff || hasPermission('CREATE_PLANS')) && (
+                    <button onClick={() => setIsCategoryModalOpen(true)} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-sm flex items-center space-x-2">
+                      <Plus className="h-4 w-4" /> <span>Create Category</span>
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {categories.map(cat => (
+                    <div key={cat.id} className={`p-6 rounded-2xl border ${cat.status === 'ACTIVE' ? 'bg-white dark:bg-slate-900/50 border-slate-400 dark:border-white/10' : 'bg-red-900/10 border-red-500/20'}`}>
+                      <div className="flex justify-between items-start mb-4">
+                        <h3 className="text-lg font-bold">{cat.name}</h3>
+                        <span className={`px-2 py-1 text-[10px] font-bold rounded-md ${cat.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>{cat.status}</span>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">Segments: {cat.segments}</p>
+                      <button onClick={() => handleToggleCategoryStatus(cat.id)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold hover:bg-slate-200 dark:bg-slate-700">Toggle Status</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {planManagementTab === 'plans' && (
+              <div>
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-xl font-bold">Subscription Plans</h2>
+                  {(!isStaff || hasPermission('CREATE_PLANS')) && (
+                    <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-sm flex items-center space-x-2">
+                      <Plus className="h-4 w-4" /> <span>Create New Plan</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Category Filter Pills */}
+                <div className="flex space-x-3 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  <button 
+                    onClick={() => setSelectedCategoryFilter('ALL')}
+                    className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5'}`}
+                  >
+                    All Plans
+                  </button>
+                  {categories.map(cat => (
+                    <button 
+                      key={cat.id}
+                      onClick={() => setSelectedCategoryFilter(cat.id)}
+                      className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5'}`}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {adminPlans.filter(plan => selectedCategoryFilter === 'ALL' || plan.categoryId === selectedCategoryFilter).map(plan => {
+                    const isDeleted = plan.deletedAt !== null && plan.deletedAt !== undefined;
+                    return (
+                      <div key={plan.id} className={`p-6 rounded-2xl border ${isDeleted ? 'opacity-60 bg-slate-100 dark:bg-slate-950/40 border-rose-500/20' : plan.status === 'ACTIVE' ? 'bg-white dark:bg-slate-900/50 border-slate-400 dark:border-white/10' : 'bg-red-900/10 border-red-500/20'} flex flex-col`}>
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <span className="text-[10px] font-bold text-primary-600 dark:text-primary-400 tracking-wider mb-1 block">{plan.category?.name || 'UNCATEGORIZED'}</span>
+                            <h3 className="text-xl font-bold tracking-tight">{plan.name}</h3>
+                          </div>
+                          <div className="text-right">
+                             <div className="text-2xl font-bold">₹{plan.price.toLocaleString()}</div>
+                             <span className="text-[9px] text-slate-500 dark:text-slate-500 block mt-0.5">
+                               {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exclusive)' : '18% GST (Inclusive)'}
+                             </span>
+                           </div>
+                        </div>
+                        <div className="flex items-center space-x-2 mb-4">
+                           <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${isDeleted ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>
+                             {isDeleted ? 'DELETED' : plan.status}
+                           </span>
+                        </div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400 mb-4 flex-grow" dangerouslySetInnerHTML={{ __html: plan.description }} />
+                        <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300 mb-6 bg-black/20 p-3 rounded-lg border border-slate-300 dark:border-white/5">
+                          <div className="flex justify-between"><span>Duration</span> <strong className="text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong></div>
+                          <div className="flex justify-between"><span>Segments</span> <strong className="text-emerald-600 dark:text-emerald-400">{plan.researchSegments}</strong></div>
+                        </div>
+                        <div className="flex space-x-2 mt-auto">
+                          {!isDeleted ? (
+                            <>
+                              {(!isStaff || hasPermission('EDIT_PLANS')) && (
+                                <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                  <Edit2 className="h-3 w-3" /> <span>Edit</span>
+                                </button>
+                              )}
+                              {(!isStaff || hasPermission('EDIT_PLANS')) && (
+                                <button onClick={() => handleTogglePlanStatus(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                  <span>Toggle</span>
+                                </button>
+                              )}
+                              {(!isStaff || hasPermission('DELETE_PLANS')) && (
+                                <button onClick={() => handleDeletePlan(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-rose-950/20 hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold transition border border-rose-500/20">
+                                  <Trash2 className="h-3 w-3" /> <span>Delete</span>
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {(!isStaff || hasPermission('DELETE_PLANS')) && (
+                                <button onClick={() => handleRestorePlan(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-emerald-950/20 hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-bold transition border border-emerald-500/20">
+                                  <RotateCcw className="h-3 w-3" /> <span>Restore</span>
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'research' && (
+          <SignalManagement 
+            adminPlans={adminPlans} 
+            user={user} 
+            hasPermission={hasPermission} 
+          />
+        )}
+
+        {/* SETTINGS TAB */}
+        {activeTab === 'coupons' && <CouponsManager />}
+
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl">
+             <h2 className="text-2xl font-bold mb-6">Global Settings</h2>
+              <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">GST Calculation Method</label>
+                   <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">Determine how GST is applied to plan pricing on the client portal.</p>
+                   <select value={gstCalculationType} onChange={e => setGstCalculationType(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition">
+                      <option value="EXCLUSIVE">Amount + GST (Exclusive)</option>
+                      <option value="INCLUSIVE">Amount Including GST (Inclusive)</option>
+                   </select>
+                </div>
+              
+                <div className="mt-6 border-t border-slate-400 dark:border-white/10 pt-6">
+                  <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">Onboarding Flow & PDFs</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="flex items-center space-x-3">
+                        <input type="checkbox" checked={kycFirst} onChange={e => setKycFirst(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
+                        <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Require KYC before Payment</span>
+                      </label>
+                      <p className="text-xs text-slate-500 ml-8 mt-1">If unchecked, users will pay first and then do KYC.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
+                      <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Terms & Conditions PDF</label>
+                        <input type="file" accept="application/pdf" onChange={e => setTermsPdf(e.target.files[0])} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
+                        <p className="text-xs text-slate-500 mt-1">Sent automatically with Welcome Email.</p>
+                      </div>
