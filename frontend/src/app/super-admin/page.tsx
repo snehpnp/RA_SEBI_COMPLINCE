@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, LogOut, Plus, Landmark, Users, BellRing, ClipboardList, RefreshCw, CheckCircle2, XCircle, Search, Loader2, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, AlertTriangle, Key, User, FileText, ChevronLeft, ChevronRight, Download, EyeOff } from 'lucide-react';
+import { ShieldCheck, LogOut, Plus, Landmark, Users, BellRing, ClipboardList, RefreshCw, CheckCircle2, XCircle, Search, Loader2, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, AlertTriangle, Key, User, FileText, ChevronLeft, ChevronRight, Download, EyeOff, Menu, X } from 'lucide-react';
 import api from '../../services/api';
 import { formatPan } from '../../utils/formatters';
 import SuperAdminResourcesTab from '@/components/SuperAdminResourcesTab';
 import { useGlobalConfirm } from '@/components/GlobalConfirmProvider';
 import { PaginatedList } from '@/components/ui/PaginatedList';
+import { ThemeToggle } from '@/components/ThemeToggle';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import dynamic from 'next/dynamic';
 
 const renderAuditDiff = (oldStr: string | null, newStr: string | null) => {
@@ -15,9 +17,9 @@ const renderAuditDiff = (oldStr: string | null, newStr: string | null) => {
 
   let oldObj: any = null;
   let newObj: any = null;
-  
-  try { if (oldStr) oldObj = JSON.parse(oldStr); } catch(e) { oldObj = oldStr; }
-  try { if (newStr) newObj = JSON.parse(newStr); } catch(e) { newObj = newStr; }
+
+  try { if (oldStr) oldObj = JSON.parse(oldStr); } catch (e) { oldObj = oldStr; }
+  try { if (newStr) newObj = JSON.parse(newStr); } catch (e) { newObj = newStr; }
 
   const isObject = (val: any) => typeof val === 'object' && val !== null;
 
@@ -76,7 +78,9 @@ function SuperAdminDashboardContent() {
   const [user, setUser] = useState<any>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'matrix' | 'audit' | 'resources' | 'profile' | 'compliance'>('dashboard');
-  
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   // Telemetry state
   const [telemetry, setTelemetry] = useState<any>({
     totalCompanies: 0,
@@ -120,7 +124,7 @@ function SuperAdminDashboardContent() {
   useEffect(() => {
     setCurrentPageAudits(1);
   }, [activeComplianceSubTab]);
-  
+
   // Create Company Form State
   const [duplicateFields, setDuplicateFields] = useState<string[]>([]);
   const [companyName, setCompanyName] = useState('');
@@ -148,7 +152,7 @@ function SuperAdminDashboardContent() {
   const [nismPreviewData, setNismPreviewData] = useState<any>(null);
   const [showNismConfirmModal, setShowNismConfirmModal] = useState(false);
   // Custom Global Alert State (Overrides native window.alert)
-  const [globalAlert, setGlobalAlert] = useState<{message: string, isError: boolean} | null>(null);
+  const [globalAlert, setGlobalAlert] = useState<{ message: string, isError: boolean } | null>(null);
 
   // File Input Refs
   const sebiFileInputRef = useRef<HTMLInputElement>(null);
@@ -156,14 +160,14 @@ function SuperAdminDashboardContent() {
 
   const triggerAlert = (msg: string) => {
     const msgStr = String(msg);
-    const isErr = msgStr.toLowerCase().includes('failed') || 
-                  msgStr.toLowerCase().includes('error') || 
-                  msgStr.toLowerCase().includes('must be') || 
-                  msgStr.toLowerCase().includes('invalid') || 
-                  msgStr.toLowerCase().includes('could not') || 
-                  msgStr.toLowerCase().includes('mismatch') ||
-                  msgStr.toLowerCase().includes('first to') ||
-                  msgStr.toLowerCase().includes('please upload');
+    const isErr = msgStr.toLowerCase().includes('failed') ||
+      msgStr.toLowerCase().includes('error') ||
+      msgStr.toLowerCase().includes('must be') ||
+      msgStr.toLowerCase().includes('invalid') ||
+      msgStr.toLowerCase().includes('could not') ||
+      msgStr.toLowerCase().includes('mismatch') ||
+      msgStr.toLowerCase().includes('first to') ||
+      msgStr.toLowerCase().includes('please upload');
     setGlobalAlert({ message: msgStr, isError: isErr });
   };
 
@@ -185,7 +189,7 @@ function SuperAdminDashboardContent() {
   // Modals state
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isPasswordPromptOpen, setIsPasswordPromptOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<any>(null); 
+  const [confirmAction, setConfirmAction] = useState<any>(null);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewData, setViewData] = useState<any>(null);
@@ -242,8 +246,8 @@ function SuperAdminDashboardContent() {
 
   const loadComplianceMetrics = async (compId: string) => {
     try {
-      const url = compId === 'ALL' 
-        ? '/compliance/dashboard-metrics' 
+      const url = compId === 'ALL'
+        ? '/compliance/dashboard-metrics'
         : `/compliance/dashboard-metrics?tenantId=${compId}`;
       const res = await api.request(url);
       if (res.success) {
@@ -282,12 +286,12 @@ function SuperAdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/superadmin/login');
+        router.push('/admin/login');
         return;
       }
       const parsedUser = JSON.parse(userStr);
       if (parsedUser.role !== 'SUPER_ADMIN') {
-        router.push('/superadmin/login');
+        router.push('/admin/login');
         return;
       }
       setUser(parsedUser);
@@ -297,7 +301,7 @@ function SuperAdminDashboardContent() {
 
   const handleLogout = async (allDevices: boolean = false) => {
     await api.logout(allDevices);
-    router.push('/superadmin/login');
+    router.push('/admin/login');
   };
 
   const handleSebiCertificateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -315,9 +319,9 @@ function SuperAdminDashboardContent() {
     try {
       const formData = new FormData();
       formData.append('sebiCertificate', file);
-      
+
       const res = await api.parseSebiCertificate(formData);
-      
+
       if (res.success) {
         if (res.data) {
           if (!res.data.sebiRegistration || !res.data.companyName || !res.data.certificateValidity || !res.data.address) {
@@ -331,11 +335,11 @@ function SuperAdminDashboardContent() {
             setShowPdfConfirmModal(true);
           }
         } else {
-           setIsDocumentValid(false);
-           setSebiCertificate(null);
-           if (inputElement) inputElement.value = '';
-           if (res.message) triggerAlert(res.message);
-           setFormError(res.message || 'Invalid Document.');
+          setIsDocumentValid(false);
+          setSebiCertificate(null);
+          if (inputElement) inputElement.value = '';
+          if (res.message) triggerAlert(res.message);
+          setFormError(res.message || 'Invalid Document.');
         }
       } else {
         if (res.message && res.message.includes('scanned image')) {
@@ -364,12 +368,12 @@ function SuperAdminDashboardContent() {
     if (pdfPreviewData) {
       const { sebiRegistration: reg, certificateValidity: val, companyName: name, address: addr } = pdfPreviewData;
       const newParsed = { ...parsedFields };
-      
+
       if (reg) { setSebiRegistration(reg); newParsed.sebiRegistration = true; }
       if (val) { setCertificateValidity(val); newParsed.certificateValidity = true; }
       if (name) { setCompanyName(name); newParsed.companyName = true; }
       if (addr) { setAddress(addr); newParsed.address = true; }
-      
+
       setParsedFields(newParsed);
       setIsDocumentValid(true);
     }
@@ -389,9 +393,9 @@ function SuperAdminDashboardContent() {
     try {
       const formData = new FormData();
       formData.append('nismCertificate', file);
-      
+
       const res = await api.parseNismCertificate(formData);
-      
+
       if (res.success) {
         if (res.data && res.data.nismRegistration && res.data.name && res.data.nismValidity) {
           setNismPreviewData(res.data);
@@ -438,7 +442,7 @@ function SuperAdminDashboardContent() {
       setFormError('Please upload and confirm a valid SEBI Certificate before proceeding.');
       return;
     }
-    
+
     const isConfirmed = await confirm("Are you sure you want to register this company?", "Confirm Registration");
     if (!isConfirmed) return;
 
@@ -464,7 +468,7 @@ function SuperAdminDashboardContent() {
     formData.append('certificateValidity', certificateValidity);
     formData.append('nismValidity', nismValidity);
     formData.append('depositAmount', depositAmount);
-    
+
     if (sebiCertificate) formData.append('sebiCertificate', sebiCertificate);
     if (nismCertificate) formData.append('nismCertificate', nismCertificate);
 
@@ -527,12 +531,12 @@ function SuperAdminDashboardContent() {
           triggerAlert('Please enter your password to confirm permanent deletion.');
           return;
         }
-        await api.request(`/super-admin/tenants/${id}/permanent`, { 
+        await api.request(`/super-admin/tenants/${id}/permanent`, {
           method: 'DELETE',
           body: JSON.stringify({ password: confirmPassword })
         });
       }
-      
+
       loadData();
       setIsConfirmModalOpen(false);
       setConfirmPassword('');
@@ -621,7 +625,7 @@ function SuperAdminDashboardContent() {
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const isConfirmed = await confirm("Are you sure you want to save these changes?", "Confirm Edit Tenant");
     if (!isConfirmed) return;
 
@@ -649,7 +653,7 @@ function SuperAdminDashboardContent() {
 
   const handleEditRuleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const isConfirmed = await confirm("Are you sure you want to update this rule?", "Confirm Update Rule");
     if (!isConfirmed) return;
 
@@ -677,7 +681,7 @@ function SuperAdminDashboardContent() {
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const isConfirmed = await confirm("Are you sure you want to change your password?", "Confirm Password Change");
     if (!isConfirmed) return;
 
@@ -703,110 +707,152 @@ function SuperAdminDashboardContent() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex font-sans selection:bg-primary-500/30">
-      {/* Sidebar */}
-      <aside className="w-72 border-r border-slate-300 dark:border-white/5 bg-white/40 dark:bg-slate-900/40 p-6 flex flex-col justify-between backdrop-blur-xl">
-        <div className="space-y-8">
-          <div className="flex items-center space-x-3 px-2">
-            <div className="p-2 bg-primary-500/10 rounded-xl border border-primary-500/20">
-              <ShieldCheck className="h-6 w-6 text-primary-600 dark:text-primary-500" />
-            </div>
-            <div>
-              <h2 className="font-bold text-lg tracking-wide text-slate-900 dark:text-white leading-tight">Super Admin</h2>
-              <p className="text-[10px] text-slate-600 dark:text-slate-400 font-medium uppercase tracking-wider">Control Center</p>
-            </div>
+    <div className="h-dvh bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex font-sans selection:bg-primary-500/30 overflow-hidden relative">
+      {/* Mobile Menu Toggle */}
+      <button 
+        className="md:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
+        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+      >
+        {mobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
+      </button>
+
+      {/* Premium Sidebar */}
+      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${
+        mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
+      } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
+        
+        {/* Brand */}
+        <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
+          <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
+            {user?.tenantLogo ? (
+              <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
+            ) : (
+              <>
+                <div className="w-10 h-10 shrink-0 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
+                  <ShieldCheck className="w-6 h-6 text-premium-primary" />
+                </div>
+                {!isSidebarCollapsed && <span className="text-xl font-bold tracking-wider whitespace-nowrap">Super Admin</span>}
+              </>
+            )}
           </div>
-
-          <nav className="space-y-1.5 mt-8">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'dashboard' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
+          {!isSidebarCollapsed && (
+            <button 
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+              className="hidden md:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
             >
-              <Landmark className="h-4 w-4" />
-              <span>Dashboard</span>
+              <Menu className="w-5 h-5" />
             </button>
-
-            <button
-              onClick={() => setActiveTab('companies')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'companies' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
+          )}
+          {isSidebarCollapsed && (
+            <button 
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+              className="hidden md:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
             >
-              <Users className="h-4 w-4" />
-              <span>RA Companies</span>
+              <Menu className="w-5 h-5" />
             </button>
-
-            <button
-              onClick={() => setActiveTab('matrix')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'matrix' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              <span>Compliance Matrix</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('compliance')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'compliance' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
-            >
-              <AlertTriangle className="h-4 w-4" />
-              <span>Compliance Center</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('audit')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'audit' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span>Audit Trails</span>
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('resources')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'resources' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
-            >
-              <FileText className="h-4 w-4" />
-              <span>Resources</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'profile' ? 'bg-primary-600 text-slate-900 dark:text-white shadow-lg shadow-primary-500/20' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'}`}
-            >
-              <User className="h-4 w-4" />
-              <span>Profile</span>
-            </button>
-          </nav>
+          )}
         </div>
 
-        <button
-          onClick={() => setIsLogoutModalOpen(true)}
-          className="w-full flex items-center space-x-3 px-4 py-3.5 rounded-xl text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-300 transition-colors border border-transparent hover:border-rose-500/20"
-        >
-          <LogOut className="h-4 w-4" />
-          <span>Exit Session</span>
-        </button>
+        {/* Navigation */}
+        <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 hide-scrollbar">
+          {[
+            { id: 'dashboard', label: 'Dashboard', icon: Landmark },
+            { id: 'companies', label: 'RA Companies', icon: Users },
+            { id: 'matrix', label: 'Compliance Matrix', icon: ShieldCheck },
+            { id: 'compliance', label: 'Compliance Center', icon: AlertTriangle },
+            { id: 'audit', label: 'Audit Trails', icon: ClipboardList },
+            { id: 'resources', label: 'Resources', icon: FileText },
+            { id: 'profile', label: 'Profile', icon: User }
+          ].map((item) => {
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id as any);
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                  isActive 
+                  ? 'bg-premium-primary/10 text-premium-primary font-semibold' 
+                  : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                title={isSidebarCollapsed ? item.label : undefined}
+              >
+                <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{item.label}</span>}
+                {!isSidebarCollapsed && isActive && (
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* User Footer */}
+        <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
+          <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
+          
+          <div className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+            <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
+            
+            <div className="relative shrink-0">
+              <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10">
+                S
+              </div>
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
+            </div>
+            
+            {!isSidebarCollapsed && (
+              <div className="flex-1 min-w-0 relative z-10">
+                <p className="font-bold text-sm truncate text-premium-text">Super Admin</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <ShieldCheck className="w-3 h-3 text-rose-500" />
+                  <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-rose-500 via-orange-200 to-rose-500 animate-pulse">
+                    System Control
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {!isSidebarCollapsed && (
+              <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
+            )}
+          </div>
+          <div className={`flex-1 mt-4 border-t border-slate-200/20 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
+            <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-premium-danger/10 rounded-xl text-premium-text/60 hover:text-premium-danger transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
+              {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
+              <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
+            </button>
+          </div>
+        </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-grow p-10 overflow-y-auto max-w-[1600px] mx-auto">
         <header className="flex justify-between items-center mb-10 pb-6 border-b border-slate-300 dark:border-white/5 relative">
           <div>
-            <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">RAGCP Super Telemetry</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500 dark:from-white dark:to-slate-400">RAGCP Super Telemetry</h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Global multi-tenant metrics, governance audits and compliance controls</p>
           </div>
-          <div className="relative flex flex-col items-end">
-            <button
-              onClick={() => loadData(true)}
-              disabled={isReloading}
-              className={`px-4 py-2 border border-slate-400 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 rounded-xl hover:bg-slate-200 dark:bg-white/10 hover:border-slate-400 dark:border-white/20 transition-all flex items-center space-x-2 text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-sm ${isReloading ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isReloading ? 'animate-spin' : ''}`} />
-              <span>{isReloading ? 'Reloading...' : 'Reload Systems'}</span>
-            </button>
-            {reloadToastMessage && (
-              <div className="absolute top-[120%] right-0 bg-indigo-500/20 border border-indigo-500/50 text-indigo-700 dark:text-indigo-300 text-xs px-3 py-2 rounded-lg whitespace-nowrap animate-in fade-in slide-in-from-top-2 shadow-lg backdrop-blur-md z-50 flex items-center space-x-2">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>{reloadToastMessage}</span>
-              </div>
-            )}
+          <div className="relative flex items-center space-x-4">
+            <div className="relative flex flex-col items-end">
+              <button
+                onClick={() => loadData(true)}
+                disabled={isReloading}
+                className={`px-4 py-2 border border-slate-400 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 rounded-xl hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 hover:border-slate-400 dark:border-white/20 transition-all flex items-center space-x-2 text-xs font-semibold text-slate-700 dark:text-slate-300 shadow-sm ${isReloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isReloading ? 'animate-spin' : ''}`} />
+                <span>{isReloading ? 'Reloading...' : 'Reload Systems'}</span>
+              </button>
+              {reloadToastMessage && (
+                <div className="absolute top-[120%] right-0 bg-indigo-500/20 border border-indigo-500/50 text-indigo-700 dark:text-indigo-300 text-xs px-3 py-2 rounded-lg whitespace-nowrap animate-in fade-in slide-in-from-top-2 shadow-lg backdrop-blur-md z-50 flex items-center space-x-2">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>{reloadToastMessage}</span>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -861,19 +907,19 @@ function SuperAdminDashboardContent() {
         {/* 2. COMPANIES TAB */}
         {activeTab === 'companies' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex justify-between items-center bg-white/40 dark:bg-slate-900/40 p-4 rounded-2xl border border-slate-400 dark:border-white/10 backdrop-blur-sm">
-              <div className="relative w-80">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-300 dark:border-white/10 shadow-sm gap-4">
+              <div className="relative w-full md:w-96">
+                <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
                   <Search className="h-4 w-4" />
                 </span>
                 <input
                   type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-primary-500 transition-colors placeholder:text-slate-500"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-3 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all placeholder:text-slate-400 text-slate-900 dark:text-white"
                   placeholder="Search by name, SEBI Reg, PAN..."
                 />
               </div>
-              
-              <div className="flex space-x-2">
+
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                 <button
                   type="button"
                   onClick={() => {
@@ -887,7 +933,7 @@ function SuperAdminDashboardContent() {
                     }));
                     import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'RA_Companies'));
                   }}
-                  className="px-5 py-2.5 bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 text-white"
+                  className="px-5 py-3 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-sm font-bold rounded-xl transition-all flex items-center justify-center space-x-2 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5"
                 >
                   <Download className="h-4 w-4" />
                   <span>Export CSV</span>
@@ -901,79 +947,81 @@ function SuperAdminDashboardContent() {
                     setFormError(null);
                     setNewCreds(null);
                   }}
-                  className="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-500/20 flex items-center space-x-2 text-slate-900 dark:text-white border border-primary-500/50"
+                  className="px-6 py-3 bg-primary-600 hover:bg-primary-700 text-sm font-bold rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center space-x-2 text-white hover:-translate-y-0.5"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-5 w-5" />
                   <span>Onboard Company</span>
                 </button>
               </div>
             </div>
-
-            <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden shadow-xl">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/50 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                    <th className="py-4 px-6">Company Name</th>
-                    <th className="py-4 px-6">SEBI Registration</th>
-                    <th className="py-4 px-6">PAN / GST</th>
-                    <th className="py-4 px-6">Created At</th>
-                    <th className="py-4 px-6">Status</th>
-                    <th className="py-4 px-6 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm divide-y divide-slate-300 dark:divide-white/5 font-medium text-slate-700 dark:text-slate-300">
-                  {filteredCompanies.slice((currentPageCompanies - 1) * itemsPerPage, currentPageCompanies * itemsPerPage).map(comp => (
-                    <tr key={comp.id} className={`hover:bg-slate-100 dark:bg-white/5 transition-colors ${comp.status === 'DELETED' ? 'opacity-60 grayscale' : ''}`}>
-                      <td className="py-4 px-6">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-white/10 overflow-hidden shadow-sm">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16 text-center">S.No</TableHead>
+                    <TableHead>Company Name</TableHead>
+                    <TableHead>SEBI Registration</TableHead>
+                    <TableHead>PAN / GST</TableHead>
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredCompanies.slice((currentPageCompanies - 1) * itemsPerPage, currentPageCompanies * itemsPerPage).map((comp, index) => (
+                    <TableRow key={comp.id}>
+                      <TableCell className="text-center text-slate-500 font-mono text-xs">
+                        {(currentPageCompanies - 1) * itemsPerPage + index + 1}
+                      </TableCell>
+                      <TableCell>
                         <span className="font-bold text-slate-900 dark:text-white block">{comp.companyName}</span>
                         <span className="text-xs text-slate-500">{comp.email}</span>
-                      </td>
-                      <td className="py-4 px-6 font-mono text-slate-600 dark:text-slate-400 text-xs">{comp.sebiRegistration}</td>
-                      <td className="py-4 px-6">
+                      </TableCell>
+                      <TableCell className="font-mono text-slate-600 dark:text-slate-400 text-xs">{comp.sebiRegistration}</TableCell>
+                      <TableCell>
                         <span className="block font-mono text-xs">{comp.pan}</span>
                         <span className="text-[10px] text-slate-500 font-mono">{comp.gst || 'No GST'}</span>
-                      </td>
-                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400 text-xs">
+                      </TableCell>
+                      <TableCell className="text-slate-600 dark:text-slate-400 text-xs">
                         {comp.createdAt ? new Date(comp.createdAt).toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase ${
-                          comp.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 
-                          comp.status === 'SUSPENDED' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' : 
-                          'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold tracking-wider uppercase ${comp.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' :
+                          comp.status === 'SUSPENDED' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20' :
+                            'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
                           {comp.status}
                         </span>
-                      </td>
-                      <td className="py-4 px-6 text-right space-x-2">
+                      </TableCell>
+                      <TableCell className="text-right space-x-2">
                         {comp.status !== 'DELETED' ? (
-                          <>
-                            <button onClick={() => openViewModal(comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:text-blue-400 hover:bg-blue-400/10 rounded transition" title="View"><Eye className="h-4 w-4" /></button>
-                            <button onClick={() => openEditModal(comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-amber-600 dark:text-amber-400 hover:bg-amber-400/10 rounded transition" title="Edit"><Edit className="h-4 w-4" /></button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button onClick={() => openViewModal(comp.id)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all" title="View"><Eye className="h-[18px] w-[18px]" /></button>
+                            <button onClick={() => openEditModal(comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Edit"><Edit className="h-[18px] w-[18px]" /></button>
                             {comp.status === 'ACTIVE' ? (
-                              <button onClick={() => openConfirmModal('SUSPEND', comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-amber-600 dark:text-amber-400 hover:bg-amber-400/10 rounded transition" title="Suspend"><Power className="h-4 w-4" /></button>
+                              <button onClick={() => openConfirmModal('SUSPEND', comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Suspend"><Power className="h-[18px] w-[18px]" /></button>
                             ) : (
-                              <button onClick={() => openConfirmModal('ACTIVATE', comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:text-emerald-400 hover:bg-emerald-400/10 rounded transition" title="Activate"><PowerOff className="h-4 w-4" /></button>
+                              <button onClick={() => openConfirmModal('ACTIVATE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Activate"><PowerOff className="h-[18px] w-[18px]" /></button>
                             )}
-                            <button onClick={() => handleImpersonate(comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:text-primary-400 hover:bg-primary-400/10 rounded transition" title="Login as Admin"><Key className="h-4 w-4" /></button>
-                            <button onClick={() => openConfirmModal('DELETE', comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:text-rose-400 hover:bg-rose-400/10 rounded transition" title="Soft Delete"><Trash2 className="h-4 w-4" /></button>
-                          </>
+                            <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
+                            <button onClick={() => openConfirmModal('DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Soft Delete"><Trash2 className="h-[18px] w-[18px]" /></button>
+                          </div>
                         ) : (
-                          <>
-                            <button onClick={() => openConfirmModal('RESTORE', comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:text-emerald-400 hover:bg-emerald-400/10 rounded transition" title="Restore"><RotateCcw className="h-4 w-4" /></button>
-                            <button onClick={() => handleImpersonate(comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-primary-600 dark:text-primary-400 hover:bg-primary-400/10 rounded transition" title="Login as Admin"><Key className="h-4 w-4" /></button>
-                            <button onClick={() => openConfirmModal('PERMANENT_DELETE', comp.id)} className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:text-rose-500 hover:bg-rose-500/10 rounded transition" title="Permanent Delete"><Trash2 className="h-4 w-4 text-rose-600 dark:text-rose-500" /></button>
-                          </>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button onClick={() => openConfirmModal('RESTORE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Restore"><RotateCcw className="h-[18px] w-[18px]" /></button>
+                            <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
+                            <button onClick={() => openConfirmModal('PERMANENT_DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Permanent Delete"><Trash2 className="h-[18px] w-[18px] text-rose-500" /></button>
+                          </div>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {filteredCompanies.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">No active companies found matching the queries.</td>
-                    </tr>
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">No active companies found matching the queries.</TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               {/* Pagination Controls */}
               {filteredCompanies.length > itemsPerPage && (
                 <div className="px-6 py-4 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/30 flex items-center justify-between">
@@ -983,8 +1031,8 @@ function SuperAdminDashboardContent() {
                   <div className="flex items-center space-x-6">
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-slate-500">Rows per page:</span>
-                      <select 
-                        value={itemsPerPage} 
+                      <select
+                        value={itemsPerPage}
                         onChange={(e) => setItemsPerPage(Number(e.target.value))}
                         className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 rounded px-2 py-1 outline-none focus:border-primary-500"
                       >
@@ -998,7 +1046,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageCompanies(prev => Math.max(prev - 1, 1))}
                         disabled={currentPageCompanies === 1}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronLeft className="h-4 w-4" />
                       </button>
@@ -1008,7 +1056,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageCompanies(prev => Math.min(prev + 1, Math.ceil(filteredCompanies.length / itemsPerPage)))}
                         disabled={currentPageCompanies === Math.ceil(filteredCompanies.length / itemsPerPage)}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
@@ -1044,36 +1092,36 @@ function SuperAdminDashboardContent() {
               </button>
             </div>
             <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden shadow-xl">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/50 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                    <th className="py-4 px-6 w-16">Sr No</th>
-                    <th className="py-4 px-6">Requirement</th>
-                    <th className="py-4 px-6">Frequency</th>
-                    <th className="py-4 px-6">Severity</th>
-                    <th className="py-4 px-6">Penalty</th>
-                    <th className="py-4 px-6">Status</th>
-                    <th className="py-4 px-6 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 font-medium text-slate-700 dark:text-slate-300">
-                  {complianceRules.slice((currentPageMatrix - 1) * itemsPerPage, currentPageMatrix * itemsPerPage).map(rule => (
-                    <tr key={rule.id} className="hover:bg-slate-100 dark:bg-white/5 transition-colors">
-                      <td className="py-4 px-6 font-mono text-slate-600 dark:text-slate-400">{rule.serialNo}</td>
-                      <td className="py-4 px-6 text-slate-900 dark:text-white max-w-sm">{rule.requirement}</td>
-                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400">{rule.frequency}</td>
-                      <td className="py-4 px-6">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">S.No</TableHead>
+                    <TableHead>Requirement</TableHead>
+                    <TableHead>Frequency</TableHead>
+                    <TableHead>Severity</TableHead>
+                    <TableHead>Penalty</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {complianceRules.slice((currentPageMatrix - 1) * itemsPerPage, currentPageMatrix * itemsPerPage).map((rule, index) => (
+                    <TableRow key={rule.id}>
+                      <TableCell className="font-mono text-slate-500">{(currentPageMatrix - 1) * itemsPerPage + index + 1}</TableCell>
+                      <TableCell className="text-slate-900 dark:text-white max-w-sm font-bold">{rule.requirement}</TableCell>
+                      <TableCell>{rule.frequency}</TableCell>
+                      <TableCell>
                         <span className={`px-2 py-1 rounded text-[10px] font-bold ${rule.severityLevel === 'HIGH' ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' : rule.severityLevel === 'MODERATE' ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'}`}>
                           {rule.severityLevel}
                         </span>
-                      </td>
-                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400 max-w-[200px] truncate" title={rule.penaltyAmount || 'N/A'}>{rule.penaltyAmount || 'None'}</td>
-                      <td className="py-4 px-6">
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate" title={rule.penaltyAmount || 'N/A'}>{rule.penaltyAmount || 'None'}</TableCell>
+                      <TableCell>
                         <span className={`px-2 py-1 rounded text-[10px] font-bold ${rule.isActive ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-slate-500/20 text-slate-600 dark:text-slate-400'}`}>
                           {rule.isActive ? 'ACTIVE' : 'INACTIVE'}
                         </span>
-                      </td>
-                      <td className="py-4 px-6 text-right flex items-center justify-end space-x-2">
+                      </TableCell>
+                      <TableCell className="text-right flex items-center justify-end space-x-2">
                         <button
                           onClick={() => handleToggleRuleActive(rule)}
                           className={`px-3 py-1.5 rounded text-[10px] font-bold transition-all border ${rule.isActive ? 'border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10' : 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10'}`}
@@ -1091,16 +1139,16 @@ function SuperAdminDashboardContent() {
                         >
                           <Edit className="h-4 w-4" />
                         </button>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {complianceRules.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">No compliance rules found.</td>
-                    </tr>
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">No compliance rules found.</TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               {/* Pagination Controls */}
               {complianceRules.length > itemsPerPage && (
                 <div className="px-6 py-4 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/30 flex items-center justify-between">
@@ -1110,8 +1158,8 @@ function SuperAdminDashboardContent() {
                   <div className="flex items-center space-x-6">
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-slate-500">Rows per page:</span>
-                      <select 
-                        value={itemsPerPage} 
+                      <select
+                        value={itemsPerPage}
                         onChange={(e) => setItemsPerPage(Number(e.target.value))}
                         className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 rounded px-2 py-1 outline-none focus:border-primary-500"
                       >
@@ -1125,7 +1173,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageMatrix(prev => Math.max(prev - 1, 1))}
                         disabled={currentPageMatrix === 1}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronLeft className="h-4 w-4" />
                       </button>
@@ -1135,7 +1183,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageMatrix(prev => Math.min(prev + 1, Math.ceil(complianceRules.length / itemsPerPage)))}
                         disabled={currentPageMatrix === Math.ceil(complianceRules.length / itemsPerPage)}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
@@ -1171,43 +1219,45 @@ function SuperAdminDashboardContent() {
               </button>
             </div>
             <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden shadow-xl">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/50 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                    <th className="py-4 px-6">User Context</th>
-                    <th className="py-4 px-6">Action / Module</th>
-                    <th className="py-4 px-6">IP Address</th>
-                    <th className="py-4 px-6">Details Change (Old → New)</th>
-                    <th className="py-4 px-6">Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 font-mono text-slate-600 dark:text-slate-400">
-                  {auditLogs.slice((currentPageLogs - 1) * itemsPerPage, currentPageLogs * itemsPerPage).map(log => (
-                    <tr key={log.id} className="hover:bg-slate-100 dark:bg-white/5 transition-colors">
-                      <td className="py-4 px-6 text-slate-700 dark:text-slate-300">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">S.No</TableHead>
+                    <TableHead>User Context</TableHead>
+                    <TableHead>Action / Module</TableHead>
+                    <TableHead>IP Address</TableHead>
+                    <TableHead>Details Change (Old → New)</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {auditLogs.slice((currentPageLogs - 1) * itemsPerPage, currentPageLogs * itemsPerPage).map((log, index) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="font-mono text-slate-500">{(currentPageLogs - 1) * itemsPerPage + index + 1}</TableCell>
+                      <TableCell>
                         <span className="font-semibold block font-sans text-sm">{log.user?.firstName} {log.user?.lastName}</span>
                         <span className="text-[10px] text-slate-500 block">{log.user?.email}</span>
-                      </td>
-                      <td className="py-4 px-6">
+                      </TableCell>
+                      <TableCell>
                         <span className="text-primary-600 dark:text-primary-400 font-bold block">{log.action}</span>
                         <span className="text-[10px] text-slate-500 block">{log.module}</span>
-                      </td>
-                      <td className="py-4 px-6 text-slate-500">{log.ipAddress || '127.0.0.1'}</td>
-                      <td className="py-4 px-6 max-w-md text-[10px] align-top">
+                      </TableCell>
+                      <TableCell className="text-slate-500">{log.ipAddress || '127.0.0.1'}</TableCell>
+                      <TableCell className="max-w-md text-[10px] align-top">
                         {renderAuditDiff(log.oldValue, log.newValue)}
-                      </td>
-                      <td className="py-4 px-6 text-slate-500 text-[10px]">
+                      </TableCell>
+                      <TableCell className="text-slate-500 text-[10px]">
                         {new Date(log.timestamp).toLocaleString()}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {auditLogs.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">No system events logged in database.</td>
-                    </tr>
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">No system events logged in database.</TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               {/* Pagination Controls */}
               {auditLogs.length > itemsPerPage && (
                 <div className="px-6 py-4 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/30 flex items-center justify-between">
@@ -1217,8 +1267,8 @@ function SuperAdminDashboardContent() {
                   <div className="flex items-center space-x-6 font-sans">
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-slate-500">Rows per page:</span>
-                      <select 
-                        value={itemsPerPage} 
+                      <select
+                        value={itemsPerPage}
                         onChange={(e) => setItemsPerPage(Number(e.target.value))}
                         className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 rounded px-2 py-1 outline-none focus:border-primary-500"
                       >
@@ -1232,7 +1282,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageLogs(prev => Math.max(prev - 1, 1))}
                         disabled={currentPageLogs === 1}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronLeft className="h-4 w-4" />
                       </button>
@@ -1242,7 +1292,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageLogs(prev => Math.min(prev + 1, Math.ceil(auditLogs.length / itemsPerPage)))}
                         disabled={currentPageLogs === Math.ceil(auditLogs.length / itemsPerPage)}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
@@ -1263,14 +1313,14 @@ function SuperAdminDashboardContent() {
         {activeTab === 'compliance' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             {/* Header / Selection */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between p-5 rounded-2xl gap-4" style={{background: 'linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(16,185,129,0.08) 100%)', border: '1px solid rgba(99,102,241,0.25)'}}>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between p-6 rounded-2xl gap-4 bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 shadow-sm">
               <div className="flex items-center space-x-4">
-                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600">
-                  <AlertTriangle className="h-5 w-5 text-slate-900 dark:text-white" />
+                <div className="p-3.5 rounded-xl bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                  <AlertTriangle className="h-6 w-6" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Center</h2>
-                  <p className="text-xs mt-0.5 text-slate-600 dark:text-slate-400">Governance overview and verification sweeps across companies</p>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Compliance Center</h2>
+                  <p className="text-sm mt-1 text-slate-500 dark:text-slate-400 font-medium">Governance overview and verification sweeps across companies</p>
                 </div>
               </div>
 
@@ -1278,7 +1328,7 @@ function SuperAdminDashboardContent() {
                 <select
                   value={selectedCompanyForCompliance}
                   onChange={e => setSelectedCompanyForCompliance(e.target.value)}
-                  className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-4 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent cursor-pointer transition-all"
                 >
                   <option value="ALL">All Companies</option>
                   {companies.map(c => (
@@ -1289,7 +1339,7 @@ function SuperAdminDashboardContent() {
                 <button
                   onClick={handleGlobalComplianceSweep}
                   disabled={complianceSweepLoading}
-                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50 hover:shadow-lg bg-gradient-to-r from-indigo-500 to-indigo-600 text-slate-900 dark:text-white"
+                  className="px-5 py-2.5 text-xs font-bold uppercase tracking-wider rounded-xl transition-all duration-300 flex items-center space-x-2 disabled:opacity-50 hover:shadow-lg hover:-translate-y-0.5 bg-primary-600 hover:bg-primary-700 text-white"
                 >
                   {complianceSweepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   <span>Run Verification Sweep</span>
@@ -1300,19 +1350,20 @@ function SuperAdminDashboardContent() {
             {/* Dashboard Counts */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {[
-                { id: 'upcoming', label: 'Upcoming Alerts', count: complianceMetrics?.counts?.upcoming || 0, color: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/20', bg: 'bg-blue-500/10' },
-                { id: 'due', label: 'Due Alerts', count: complianceMetrics?.counts?.due || 0, color: 'text-amber-600 dark:text-amber-400', border: 'border-amber-500/20', bg: 'bg-amber-500/10' },
-                { id: 'overdue', label: 'Overdue Alerts', count: complianceMetrics?.counts?.overdue || 0, color: 'text-rose-600 dark:text-rose-400', border: 'border-rose-500/20', bg: 'bg-rose-500/10' },
-                { id: 'penalty', label: 'Penalty Alerts', count: complianceMetrics?.counts?.penalty || 0, color: 'text-red-600 dark:text-red-400', border: 'border-red-500/20', bg: 'bg-red-500/10' },
-                { id: 'closed', label: 'Closed Alerts', count: complianceMetrics?.counts?.closed || 0, color: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/20', bg: 'bg-emerald-500/10' },
+                { id: 'upcoming', label: 'Upcoming Alerts', count: complianceMetrics?.counts?.upcoming || 0, color: 'text-blue-600 dark:text-blue-400', accent: 'bg-blue-500' },
+                { id: 'due', label: 'Due Alerts', count: complianceMetrics?.counts?.due || 0, color: 'text-amber-600 dark:text-amber-400', accent: 'bg-amber-500' },
+                { id: 'overdue', label: 'Overdue Alerts', count: complianceMetrics?.counts?.overdue || 0, color: 'text-rose-600 dark:text-rose-400', accent: 'bg-rose-500' },
+                { id: 'penalty', label: 'Penalty Alerts', count: complianceMetrics?.counts?.penalty || 0, color: 'text-red-600 dark:text-red-400', accent: 'bg-red-500' },
+                { id: 'closed', label: 'Closed Alerts', count: complianceMetrics?.counts?.closed || 0, color: 'text-emerald-600 dark:text-emerald-400', accent: 'bg-emerald-500' },
               ].map(card => (
                 <button
                   key={card.id}
                   onClick={() => setActiveComplianceSubTab(card.id)}
-                  className={`p-5 rounded-2xl border text-left transition-all ${card.border} ${card.bg} ${activeComplianceSubTab === card.id ? 'ring-2 ring-indigo-500 shadow-lg' : 'hover:border-slate-400 dark:border-white/20'}`}
+                  className={`relative p-6 rounded-2xl text-left transition-all duration-300 bg-white dark:bg-slate-900 border overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-1 group ${activeComplianceSubTab === card.id ? 'border-primary-500 ring-1 ring-primary-500' : 'border-slate-300 dark:border-white/10 hover:border-slate-400 dark:hover:border-white/20'}`}
                 >
-                  <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">{card.label}</span>
-                  <p className={`text-2xl font-extrabold mt-2 ${card.color}`}>{card.count}</p>
+                  <div className={`absolute top-0 left-0 w-full h-1 ${card.accent} opacity-80`} />
+                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors">{card.label}</span>
+                  <p className={`text-3xl font-extrabold mt-3 ${card.color}`}>{card.count}</p>
                 </button>
               ))}
             </div>
@@ -1343,60 +1394,59 @@ function SuperAdminDashboardContent() {
                   <span>Export</span>
                 </button>
               </div>
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/50 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                    <th className="py-4 px-6 w-16">Sr No</th>
-                    {selectedCompanyForCompliance === 'ALL' && <th className="py-4 px-6">Company</th>}
-                    <th className="py-4 px-6">Requirement</th>
-                    <th className="py-4 px-6">Due Date</th>
-                    <th className="py-4 px-6">Status</th>
-                    {activeComplianceSubTab === 'penalty' && <th className="py-4 px-6">Penalty Details</th>}
-                    <th className="py-4 px-6">Officer Remarks</th>
-                  </tr>
-                </thead>
-                <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 font-medium text-slate-700 dark:text-slate-300">
-                  {complianceMetrics && complianceMetrics[activeComplianceSubTab] && complianceMetrics[activeComplianceSubTab].slice((currentPageAudits - 1) * itemsPerPage, currentPageAudits * itemsPerPage).map((audit: any) => (
-                    <tr key={audit.id} className="hover:bg-slate-100 dark:bg-white/5 transition-colors">
-                      <td className="py-4 px-6 font-mono text-slate-600 dark:text-slate-400">{audit.requirement?.serialNo}</td>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">S.No</TableHead>
+                    {selectedCompanyForCompliance === 'ALL' && <TableHead>Company</TableHead>}
+                    <TableHead>Requirement</TableHead>
+                    <TableHead>Due Date</TableHead>
+                    <TableHead>Status</TableHead>
+                    {activeComplianceSubTab === 'penalty' && <TableHead>Penalty Details</TableHead>}
+                    <TableHead>Officer Remarks</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {complianceMetrics && complianceMetrics[activeComplianceSubTab] && complianceMetrics[activeComplianceSubTab].slice((currentPageAudits - 1) * itemsPerPage, currentPageAudits * itemsPerPage).map((audit: any, index: number) => (
+                    <TableRow key={audit.id}>
+                      <TableCell className="font-mono text-slate-500">{(currentPageAudits - 1) * itemsPerPage + index + 1}</TableCell>
                       {selectedCompanyForCompliance === 'ALL' && (
-                        <td className="py-4 px-6 text-slate-900 dark:text-white font-bold">{audit.tenant?.companyName || '—'}</td>
+                        <TableCell className="text-slate-900 dark:text-white font-bold">{audit.tenant?.companyName || '—'}</TableCell>
                       )}
-                      <td className="py-4 px-6 text-slate-800 dark:text-slate-200 max-w-sm">{audit.requirement?.requirement}</td>
-                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
-                        {audit.dueDate ? new Date(audit.dueDate).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—'}
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          audit.status === 'COMPLIANT' || audit.status === 'PENALTY_RESOLVED'
-                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' 
-                            : audit.status === 'OVERDUE' || audit.status === 'NON_COMPLIANT'
+                      <TableCell className="text-slate-800 dark:text-slate-200 max-w-sm">{audit.requirement?.requirement}</TableCell>
+                      <TableCell className="text-slate-600 dark:text-slate-400">
+                        {audit.dueDate ? new Date(audit.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${audit.status === 'COMPLIANT' || audit.status === 'PENALTY_RESOLVED'
+                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                          : audit.status === 'OVERDUE' || audit.status === 'NON_COMPLIANT'
                             ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
                             : 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400'
-                        }`}>
+                          }`}>
                           {audit.status}
                         </span>
-                      </td>
+                      </TableCell>
                       {activeComplianceSubTab === 'penalty' && (
-                        <td className="py-4 px-6">
+                        <TableCell>
                           <span className="block font-bold text-red-600 dark:text-red-400">₹{(audit.penalty?.amount || 0).toLocaleString()}</span>
                           <span className="text-[10px] text-slate-500 block uppercase font-bold">{audit.penalty?.status}</span>
-                        </td>
+                        </TableCell>
                       )}
-                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400 max-w-[200px] truncate" title={audit.officerRemarks || 'None'}>
+                      <TableCell className="text-slate-600 dark:text-slate-400 max-w-[200px] truncate" title={audit.officerRemarks || 'None'}>
                         {audit.officerRemarks || 'No remarks submitted.'}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
                   {(!complianceMetrics || !complianceMetrics[activeComplianceSubTab] || complianceMetrics[activeComplianceSubTab].length === 0) && (
-                    <tr>
-                      <td colSpan={selectedCompanyForCompliance === 'ALL' ? 7 : 6} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">
+                    <TableRow>
+                      <TableCell colSpan={selectedCompanyForCompliance === 'ALL' ? 7 : 6} className="text-center py-12 text-slate-500 bg-slate-100 dark:bg-slate-950/20">
                         No {activeComplianceSubTab} alerts in this category.
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               {/* Pagination Controls */}
               {complianceMetrics && complianceMetrics[activeComplianceSubTab] && complianceMetrics[activeComplianceSubTab].length > itemsPerPage && (
                 <div className="px-6 py-4 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950/30 flex items-center justify-between">
@@ -1406,8 +1456,8 @@ function SuperAdminDashboardContent() {
                   <div className="flex items-center space-x-6">
                     <div className="flex items-center space-x-2">
                       <span className="text-xs text-slate-500">Rows per page:</span>
-                      <select 
-                        value={itemsPerPage} 
+                      <select
+                        value={itemsPerPage}
                         onChange={(e) => setItemsPerPage(Number(e.target.value))}
                         className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 text-xs text-slate-700 dark:text-slate-300 rounded px-2 py-1 outline-none focus:border-primary-500"
                       >
@@ -1421,7 +1471,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageAudits(prev => Math.max(prev - 1, 1))}
                         disabled={currentPageAudits === 1}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronLeft className="h-4 w-4" />
                       </button>
@@ -1431,7 +1481,7 @@ function SuperAdminDashboardContent() {
                       <button
                         onClick={() => setCurrentPageAudits(prev => Math.min(prev + 1, Math.ceil(complianceMetrics[activeComplianceSubTab].length / itemsPerPage)))}
                         disabled={currentPageAudits === Math.ceil(complianceMetrics[activeComplianceSubTab].length / itemsPerPage)}
-                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="p-1.5 rounded bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition"
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
@@ -1446,38 +1496,38 @@ function SuperAdminDashboardContent() {
         {/* 5. PROFILE TAB */}
         {activeTab === 'profile' && (
           <div className="space-y-6 max-w-xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 p-8 shadow-xl">
-               <h2 className="text-xl font-bold mb-6 flex items-center space-x-2 text-slate-900 dark:text-white">
-                 <Key className="h-5 w-5 text-primary-600 dark:text-primary-400" />
-                 <span>Change Password</span>
-               </h2>
-               {profileMessage && <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm rounded-xl font-medium">{profileMessage}</div>}
-               {profileError && <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-sm rounded-xl font-medium">{profileError}</div>}
-               <form onSubmit={handleProfileSubmit} className="space-y-4">
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
-                   <input type="password"required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">New Password</label>
-                   <input type="password"required value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
-                 </div>
-                 <button type="submit" className="w-full py-3 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-500/20 text-slate-900 dark:text-white mt-4">
-                   Update Password
-                 </button>
-               </form>
-             </div>
+            <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 p-8 shadow-xl">
+              <h2 className="text-xl font-bold mb-6 flex items-center space-x-2 text-slate-900 dark:text-white">
+                <Key className="h-5 w-5 text-primary-600 dark:text-primary-400" />
+                <span>Change Password</span>
+              </h2>
+              {profileMessage && <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm rounded-xl font-medium">{profileMessage}</div>}
+              {profileError && <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-sm rounded-xl font-medium">{profileError}</div>}
+              <form onSubmit={handleProfileSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
+                  <input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">New Password</label>
+                  <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
+                </div>
+                <button type="submit" className="w-full py-3 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-500/20 text-white mt-4">
+                  Update Password
+                </button>
+              </form>
+            </div>
           </div>
         )}
       </main>
 
       {/* Onboard Company Modal */}
       {isAddCompanyModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
             <button
               onClick={() => setIsAddCompanyModalOpen(false)}
-              className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full hover:bg-slate-200 dark:bg-white/10"
+              className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10"
             >
               <XCircle className="h-5 w-5" />
             </button>
@@ -1575,17 +1625,17 @@ function SuperAdminDashboardContent() {
                         {sebiRegistration}
                       </div>
                     ) : (
-                    <div className="relative">
-                      <input type="text" required value={sebiRegistration} onFocus={(e) => {
+                      <div className="relative">
+                        <input type="text" required value={sebiRegistration} onFocus={(e) => {
                           if (!sebiCertificate) {
                             e.target.blur();
                             triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
                           }
                         }} onChange={e => setSebiRegistration(e.target.value.toUpperCase())} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('SEBI Registration') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors uppercase font-mono`}
-                      placeholder="INZ000000000"
-                      />
-                      {duplicateFields.includes('SEBI Registration') && <p className="text-rose-500 text-xs mt-1 font-semibold">This SEBI Registration already exists.</p>}
-                    </div>
+                          placeholder="INZ000000000"
+                        />
+                        {duplicateFields.includes('SEBI Registration') && <p className="text-rose-500 text-xs mt-1 font-semibold">This SEBI Registration already exists.</p>}
+                      </div>
                     )}
                   </div>
                   <div>
@@ -1597,7 +1647,7 @@ function SuperAdminDashboardContent() {
                           triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
                         }
                       }} onChange={e => setEmail(e.target.value)} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('Email') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
-                      placeholder="name@company.com" />
+                        placeholder="name@company.com" />
                       {duplicateFields.includes('Email') && <p className="text-rose-500 text-xs mt-1 font-semibold">This Email is already associated with another company.</p>}
                     </div>
                   </div>
@@ -1609,8 +1659,8 @@ function SuperAdminDashboardContent() {
                           e.target.blur();
                           triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
                         }
-                      }} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0,10))} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('Mobile') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
-                      placeholder="9876543210" />
+                      }} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('Mobile') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
+                        placeholder="9876543210" />
                       {duplicateFields.includes('Mobile') && <p className="text-rose-500 text-xs mt-1 font-semibold">This Mobile number already exists.</p>}
                     </div>
                   </div>
@@ -1621,8 +1671,8 @@ function SuperAdminDashboardContent() {
                         if (duplicateFields.includes('PAN')) {
                           setDuplicateFields(duplicateFields.filter(f => f !== 'PAN'));
                         }
-                      }} onChange={e => setPan(formatPan(e.target.value))} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('PAN') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors uppercase`} 
-                      placeholder="ABCDE1234F" />
+                      }} onChange={e => setPan(formatPan(e.target.value))} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('PAN') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors uppercase`}
+                        placeholder="ABCDE1234F" />
                       {duplicateFields.includes('PAN') && <p className="text-rose-500 text-xs mt-1 font-semibold">This PAN already exists.</p>}
                     </div>
                   </div>
@@ -1634,8 +1684,8 @@ function SuperAdminDashboardContent() {
                           e.target.blur();
                           triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
                         }
-                      }} onChange={e => setGst(e.target.value.toUpperCase())} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('GST') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`} 
-                      placeholder="Optional" />
+                      }} onChange={e => setGst(e.target.value.toUpperCase())} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('GST') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
+                        placeholder="Optional" />
                       {duplicateFields.includes('GST') && <p className="text-rose-500 text-xs mt-1 font-semibold">This GST already exists.</p>}
                     </div>
                   </div>
@@ -1755,10 +1805,10 @@ function SuperAdminDashboardContent() {
                 </div>
 
                 <div className="flex justify-end space-x-3 pt-6 border-t border-slate-300 dark:border-white/5">
-                  <button type="button" onClick={() => setIsAddCompanyModalOpen(false)} className="px-6 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">
+                  <button type="button" onClick={() => setIsAddCompanyModalOpen(false)} className="px-6 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">
                     Cancel
                   </button>
-                  <button type="submit" disabled={formLoading} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-500/20 flex items-center space-x-2 text-slate-900 dark:text-white disabled:opacity-50">
+                  <button type="submit" disabled={formLoading} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-500/20 flex items-center space-x-2 text-white disabled:opacity-50">
                     {formLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     <span>Onboard & Setup Company</span>
                   </button>
@@ -1768,7 +1818,7 @@ function SuperAdminDashboardContent() {
 
             {formSuccess && (
               <div className="flex justify-end pt-6 border-t border-slate-300 dark:border-white/5">
-                <button type="button" onClick={() => setIsAddCompanyModalOpen(false)} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-slate-900 dark:text-white">
+                <button type="button" onClick={() => setIsAddCompanyModalOpen(false)} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white">
                   Close
                 </button>
               </div>
@@ -1779,14 +1829,14 @@ function SuperAdminDashboardContent() {
 
       {/* Confirmation Modal */}
       {isConfirmModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
             <AlertTriangle className="h-12 w-12 text-amber-600 dark:text-amber-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">Confirm Action</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Are you sure you want to {confirmAction?.type.toLowerCase().replace('_', ' ')} this tenant?</p>
             <div className="flex justify-center space-x-3">
-              <button onClick={() => setIsConfirmModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-              <button onClick={executeConfirmAction} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-slate-900 dark:text-white shadow-lg shadow-primary-500/20">Confirm</button>
+              <button onClick={() => setIsConfirmModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+              <button onClick={executeConfirmAction} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20">Confirm</button>
             </div>
           </div>
         </div>
@@ -1794,29 +1844,29 @@ function SuperAdminDashboardContent() {
 
       {/* Password Prompt Modal */}
       {isPasswordPromptOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
             <Key className="h-12 w-12 text-primary-600 dark:text-primary-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2">Authentication Required</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Please enter your Super Admin password to proceed.</p>
             <div className="mb-6 text-left">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Password</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
-                    <Key className="h-4 w-4" />
-                  </span>
-                  <input
-                    type="password"required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-300 dark:border-white/10 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-primary-500 transition placeholder:text-slate-500"
-                    placeholder="Enter your password"
-                  />
-                </div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Password</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
+                  <Key className="h-4 w-4" />
+                </span>
+                <input
+                  type="password" required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-300 dark:border-white/10 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-primary-500 transition placeholder:text-slate-500"
+                  placeholder="Enter your password"
+                />
+              </div>
             </div>
             <div className="flex justify-center space-x-3">
-              <button onClick={() => setIsPasswordPromptOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-              <button 
+              <button onClick={() => setIsPasswordPromptOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+              <button
                 onClick={() => {
                   if (!confirmPassword) {
                     triggerAlert('Please enter your password.');
@@ -1824,8 +1874,8 @@ function SuperAdminDashboardContent() {
                   }
                   setIsPasswordPromptOpen(false);
                   setIsConfirmModalOpen(true);
-                }} 
-                className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-slate-900 dark:text-white shadow-lg shadow-primary-500/20"
+                }}
+                className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20"
               >
                 Continue
               </button>
@@ -1836,7 +1886,7 @@ function SuperAdminDashboardContent() {
 
       {/* View Modal */}
       {isViewModalOpen && viewData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
             <button onClick={() => setIsViewModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
               <XCircle className="h-5 w-5" />
@@ -1869,7 +1919,7 @@ function SuperAdminDashboardContent() {
 
       {/* Edit Rule Modal */}
       {isEditRuleModalOpen && editRuleData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-lg shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
             <button onClick={() => setIsEditRuleModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
               <XCircle className="h-5 w-5" />
@@ -1878,21 +1928,21 @@ function SuperAdminDashboardContent() {
             <form onSubmit={handleEditRuleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Requirement Description</label>
-                <textarea 
+                <textarea
                   rows={3}
-                  value={editRuleData.requirement} 
-                  onChange={e => setEditRuleData({...editRuleData, requirement: e.target.value})} 
-                  className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white focus:border-primary-500 transition-colors" 
+                  value={editRuleData.requirement}
+                  onChange={e => setEditRuleData({ ...editRuleData, requirement: e.target.value })}
+                  className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white focus:border-primary-500 transition-colors"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Frequency</label>
-                  <input type="text" value={editRuleData.frequency} onChange={e => setEditRuleData({...editRuleData, frequency: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                  <input type="text" value={editRuleData.frequency} onChange={e => setEditRuleData({ ...editRuleData, frequency: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Severity Level</label>
-                  <select value={editRuleData.severityLevel} onChange={e => setEditRuleData({...editRuleData, severityLevel: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white appearance-none">
+                  <select value={editRuleData.severityLevel} onChange={e => setEditRuleData({ ...editRuleData, severityLevel: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white appearance-none">
                     <option value="HIGH">HIGH</option>
                     <option value="MODERATE">MODERATE</option>
                     <option value="LOW">LOW</option>
@@ -1901,14 +1951,14 @@ function SuperAdminDashboardContent() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Penalty Amount / Action</label>
-                <input type="text" value={editRuleData.penaltyAmount || ''} onChange={e => setEditRuleData({...editRuleData, penaltyAmount: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="e.g. ₹10,000 per violation" />
+                <input type="text" value={editRuleData.penaltyAmount || ''} onChange={e => setEditRuleData({ ...editRuleData, penaltyAmount: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="e.g. ₹10,000 per violation" />
               </div>
               <div className="flex items-center space-x-3 pt-2">
-                <input type="checkbox" id="isActive" checked={editRuleData.isActive} onChange={e => setEditRuleData({...editRuleData, isActive: e.target.checked})} className="h-4 w-4 rounded border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950 text-primary-600 dark:text-primary-500 focus:ring-primary-500 focus:ring-offset-slate-900" />
+                <input type="checkbox" id="isActive" checked={editRuleData.isActive} onChange={e => setEditRuleData({ ...editRuleData, isActive: e.target.checked })} className="h-4 w-4 rounded border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-950 text-primary-600 dark:text-primary-500 focus:ring-primary-500 focus:ring-offset-slate-900" />
                 <label htmlFor="isActive" className="text-sm font-bold text-slate-700 dark:text-slate-300">Rule is Active (Generates Alerts/Penalties)</label>
               </div>
               <div className="pt-4 flex space-x-4">
-                <button type="submit" className="flex-1 bg-primary-600 hover:bg-primary-500 text-slate-900 dark:text-white font-bold py-3 rounded-xl transition-all">Save Rule Changes</button>
+                <button type="submit" className="flex-1 bg-primary-600 hover:bg-primary-500 text-white font-bold py-3 rounded-xl transition-all">Save Rule Changes</button>
               </div>
             </form>
           </div>
@@ -1917,158 +1967,160 @@ function SuperAdminDashboardContent() {
 
       {/* Edit Modal */}
       {isEditModalOpen && editData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
             <button onClick={() => setIsEditModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
               <XCircle className="h-5 w-5" />
             </button>
             <h2 className="text-2xl font-bold mb-6">Edit Tenant</h2>
             <form onSubmit={handleEditSubmit} className="space-y-6">
-               <div className="grid grid-cols-2 gap-4">
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Name</label>
-                   <input type="text" value={editData.companyName} onChange={e => setEditData({...editData, companyName: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                 </div>
-                 <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Type</label>
-                    <select value={editData.companyType} onChange={e => setEditData({...editData, companyType: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white h-[38px]">
-                       <option value="INDIVIDUAL">Individual</option>
-                       <option value="SOLE_PROPRIETORSHIP">Sole Proprietorship</option>
-                       <option value="PARTNERSHIP">Partnership</option>
-                       <option value="LLP">LL.P</option>
-                       <option value="PVT_LTD">Pvt. Ltd.</option>
-                       <option value="PUBLIC_LTD">Public Ltd.</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">RA Type</label>
-                    <select value={editData.raType} onChange={e => setEditData({...editData, raType: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white h-[38px]">
-                       <option value="FULL_TIME">Full Time RA</option>
-                       <option value="PART_TIME">Part Time RA</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Registration</label>
-                    <input type="text" value={editData.sebiRegistration} onChange={e => setEditData({...editData, sebiRegistration: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
-                  </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">BSE Enrollment No</label>
-                   <input type="text" value={editData.bseEnrollment} onChange={e => setEditData({...editData, bseEnrollment: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">PAN</label>
-                   <input type="text" value={editData.pan} onChange={e => setEditData({...editData, pan: formatPan(e.target.value)})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Website</label>
-                   <input type="text" value={editData.website} onChange={e => setEditData({...editData, website: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                 </div>
-                 <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Validity Date</label>
-                    <input type="date" value={editData.certificateValidity} onChange={e => setEditData({...editData, certificateValidity: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">NISM Validity Date</label>
-                    <input type="date" value={editData.nismValidity} onChange={e => setEditData({...editData, nismValidity: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">GST</label>
-                    <input type="text" value={editData.gst} onChange={e => setEditData({...editData, gst: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Mobile</label>
-                    <input type="text" value={editData.tenantMobile} onChange={e => setEditData({...editData, tenantMobile: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Deposit Float (INR)</label>
-                    <input type="number" value={editData.depositAmount} onChange={e => setEditData({...editData, depositAmount: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Address</label>
-                    <input type="text" value={editData.address} onChange={e => setEditData({...editData, address: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Name</label>
+                  <input type="text" value={editData.companyName} onChange={e => setEditData({ ...editData, companyName: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Type</label>
+                  <select value={editData.companyType} onChange={e => setEditData({ ...editData, companyType: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white h-[38px]">
+                    <option value="INDIVIDUAL">Individual</option>
+                    <option value="SOLE_PROPRIETORSHIP">Sole Proprietorship</option>
+                    <option value="PARTNERSHIP">Partnership</option>
+                    <option value="LLP">LL.P</option>
+                    <option value="PVT_LTD">Pvt. Ltd.</option>
+                    <option value="PUBLIC_LTD">Public Ltd.</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">RA Type</label>
+                  <select value={editData.raType} onChange={e => setEditData({ ...editData, raType: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white h-[38px]">
+                    <option value="FULL_TIME">Full Time RA</option>
+                    <option value="PART_TIME">Part Time RA</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Registration</label>
+                  <input type="text" value={editData.sebiRegistration} onChange={e => setEditData({ ...editData, sebiRegistration: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">BSE Enrollment No</label>
+                  <input type="text" value={editData.bseEnrollment} onChange={e => setEditData({ ...editData, bseEnrollment: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">PAN</label>
+                  <input type="text" value={editData.pan} onChange={e => setEditData({ ...editData, pan: formatPan(e.target.value) })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Website</label>
+                  <input type="text" value={editData.website} onChange={e => setEditData({ ...editData, website: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Validity Date</label>
+                  <input type="date" value={editData.certificateValidity} onChange={e => setEditData({ ...editData, certificateValidity: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">NISM Validity Date</label>
+                  <input type="date" value={editData.nismValidity} onChange={e => setEditData({ ...editData, nismValidity: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">GST</label>
+                  <input type="text" value={editData.gst} onChange={e => setEditData({ ...editData, gst: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Mobile</label>
+                  <input type="text" value={editData.tenantMobile} onChange={e => setEditData({ ...editData, tenantMobile: e.target.value.replace(/\D/g, '').slice(0, 10) })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Deposit Float (INR)</label>
+                  <input type="number" value={editData.depositAmount} onChange={e => setEditData({ ...editData, depositAmount: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Address</label>
+                  <input type="text" value={editData.address} onChange={e => setEditData({ ...editData, address: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
 
-                  <div className="col-span-2 my-2 border-t border-slate-400 dark:border-white/10 pt-4">
-                    <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">Certificates</h3>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Certificate</label>
-                    {editData.certificateUrl && (
-                      <div className="mb-2">
-                        <a href={`${api.getBaseUrl()}${editData.certificateUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:underline text-xs">View Current SEBI Certificate</a>
-                      </div>
-                    )}
-                    <input type="file" onChange={e => setEditSebiCertificate(e.target.files?.[0] || null)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400" accept=".pdf" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">NISM Certificate</label>
-                    {editData.nismCertificateUrl && (
-                      <div className="mb-2">
-                        <a href={`${api.getBaseUrl()}${editData.nismCertificateUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:underline text-xs">View Current NISM Certificate</a>
-                      </div>
-                    )}
-                    <input type="file" onChange={e => setEditNismCertificate(e.target.files?.[0] || null)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400" accept=".pdf" />
-                  </div>
-
-                  {documentHistory.length > 0 && (
-                    <div className="col-span-2 mt-4">
-                      <h4 className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase tracking-wider">Document Upload History</h4>
-                      <div className="bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl overflow-hidden">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-slate-100 dark:bg-white/5 border-b border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400">
-                            <tr>
-                              <th className="py-2 px-4 font-semibold">Date</th>
-                              <th className="py-2 px-4 font-semibold">Type</th>
-                              <th className="py-2 px-4 font-semibold">File Name</th>
-                              <th className="py-2 px-4 font-semibold text-right">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                            {documentHistory.map((doc: any) => (
-                              <tr key={doc.id} className="hover:bg-slate-100 dark:bg-white/5">
-                                <td className="py-2 px-4 whitespace-nowrap">{new Date(doc.uploadedAt).toLocaleString()}</td>
-                                <td className="py-2 px-4">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${doc.docType === 'SEBI_CERTIFICATE' ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                    {doc.docType.replace('_', ' ')}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-4 truncate max-w-[150px]" title={doc.fileName}>{doc.fileName}</td>
-                                <td className="py-2 px-4 text-right">
-                                  <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 hover:underline font-semibold">Download</a>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
+                <div className="col-span-2 my-2 border-t border-slate-400 dark:border-white/10 pt-4">
+                  <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">Certificates</h3>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Certificate</label>
+                  {editData.certificateUrl && (
+                    <div className="mb-2">
+                      <a href={`${api.getBaseUrl()}${editData.certificateUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:underline text-xs">View Current SEBI Certificate</a>
                     </div>
                   )}
+                  <input type="file" onChange={e => setEditSebiCertificate(e.target.files?.[0] || null)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400" accept=".pdf" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">NISM Certificate</label>
+                  {editData.nismCertificateUrl && (
+                    <div className="mb-2">
+                      <a href={`${api.getBaseUrl()}${editData.nismCertificateUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:underline text-xs">View Current NISM Certificate</a>
+                    </div>
+                  )}
+                  <input type="file" onChange={e => setEditNismCertificate(e.target.files?.[0] || null)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400" accept=".pdf" />
+                </div>
 
-                  <div className="col-span-2 my-2 border-t border-slate-400 dark:border-white/10 pt-4">
-                    <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">Admin Details</h3>
+                {documentHistory.length > 0 && (
+                  <div className="col-span-2 mt-4">
+                    <h4 className="text-xs font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase tracking-wider">Document Upload History</h4>
+                    <div className="bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-12 text-center">S.No</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>File Name</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {documentHistory.map((doc: any, index: number) => (
+                            <TableRow key={doc.id}>
+                              <TableCell className="text-center font-mono text-slate-500">{index + 1}</TableCell>
+                              <TableCell className="whitespace-nowrap">{new Date(doc.uploadedAt).toLocaleString()}</TableCell>
+                              <TableCell>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${doc.docType === 'SEBI_CERTIFICATE' ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
+                                  {doc.docType.replace('_', ' ')}
+                                </span>
+                              </TableCell>
+                              <TableCell className="truncate max-w-[150px]" title={doc.fileName}>{doc.fileName}</TableCell>
+                              <TableCell className="text-right">
+                                <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 hover:underline font-semibold">Download</a>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
-                 
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Name</label>
-                   <input type="text" value={editData.adminName} onChange={e => setEditData({...editData, adminName: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Email</label>
-                   <input type="email" value={editData.adminEmail} onChange={e => setEditData({...editData, adminEmail: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Mobile</label>
-                   <input type="text" value={editData.adminMobile} onChange={e => setEditData({...editData, adminMobile: e.target.value.replace(/\D/g, '').slice(0, 10)})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">New Password (leave blank to keep)</label>
-                   <input type="password"value={editData.adminPassword} onChange={e => setEditData({...editData, adminPassword: e.target.value})} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="••••••••" />
-                 </div>
-               </div>
-               <div className="flex justify-end space-x-3 pt-6 border-t border-slate-300 dark:border-white/5">
-                 <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-                 <button type="submit" className="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-slate-900 dark:text-white shadow-lg shadow-primary-500/20">Save Changes</button>
-               </div>
+                )}
+
+                <div className="col-span-2 my-2 border-t border-slate-400 dark:border-white/10 pt-4">
+                  <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">Admin Details</h3>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Name</label>
+                  <input type="text" value={editData.adminName} onChange={e => setEditData({ ...editData, adminName: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Email</label>
+                  <input type="email" value={editData.adminEmail} onChange={e => setEditData({ ...editData, adminEmail: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Mobile</label>
+                  <input type="text" value={editData.adminMobile} onChange={e => setEditData({ ...editData, adminMobile: e.target.value.replace(/\D/g, '').slice(0, 10) })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">New Password (leave blank to keep)</label>
+                  <input type="password" value={editData.adminPassword} onChange={e => setEditData({ ...editData, adminPassword: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="••••••••" />
+                </div>
+              </div>
+              <div className="flex justify-end space-x-3 pt-6 border-t border-slate-300 dark:border-white/5">
+                <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+                <button type="submit" className="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20">Save Changes</button>
+              </div>
             </form>
           </div>
         </div>
@@ -2076,20 +2128,20 @@ function SuperAdminDashboardContent() {
 
       {/* Logout Modal */}
       {isLogoutModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
             <LogOut className="h-12 w-12 text-rose-600 dark:text-rose-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold mb-2">Exit Session</h2>
+            <h2 className="text-xl font-bold mb-2">Logout</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">Are you sure you want to log out of the super admin console?</p>
             {user?.allowMultiDeviceLogin ? (
               <div className="flex flex-col space-y-3">
                 <button onClick={() => handleLogout(false)} className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-rose-500/20">Sign out on this device</button>
                 <button onClick={() => handleLogout(true)} className="w-full py-2.5 bg-rose-950/40 border border-rose-500/30 text-rose-500 hover:bg-rose-900/40 text-sm font-bold rounded-xl transition-colors">Sign out on ALL devices</button>
-                <button onClick={() => setIsLogoutModalOpen(false)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300 mt-2">Cancel</button>
+                <button onClick={() => setIsLogoutModalOpen(false)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300 mt-2">Cancel</button>
               </div>
             ) : (
               <div className="flex justify-center space-x-3">
-                <button onClick={() => setIsLogoutModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+                <button onClick={() => setIsLogoutModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
                 <button onClick={() => handleLogout(false)} className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-rose-500/20">Log Out</button>
               </div>
             )}
@@ -2099,32 +2151,32 @@ function SuperAdminDashboardContent() {
 
       {/* PDF Confirm Modal */}
       {showPdfConfirmModal && pdfPreviewData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
             <CheckCircle2 className="h-12 w-12 text-emerald-600 dark:text-emerald-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">Valid Document Detected!</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">We extracted the following details. Please confirm to auto-fill the form.</p>
             <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl text-left text-sm space-y-4 mb-6 border border-slate-300 dark:border-white/5">
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Company Name</label>
-                  <input type="text" value={pdfPreviewData.companyName || ''} onChange={e => setPdfPreviewData({...pdfPreviewData, companyName: e.target.value})} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">SEBI Reg No</label>
-                  <input type="text" value={pdfPreviewData.sebiRegistration || ''} onChange={e => setPdfPreviewData({...pdfPreviewData, sebiRegistration: e.target.value})} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 uppercase" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Validity Date</label>
-                  <input type="date" value={pdfPreviewData.certificateValidity || ''} onChange={e => setPdfPreviewData({...pdfPreviewData, certificateValidity: e.target.value})} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Address</label>
-                  <textarea value={pdfPreviewData.address || ''} onChange={e => setPdfPreviewData({...pdfPreviewData, address: e.target.value})} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 min-h-[60px]" />
-                </div>
+              <div>
+                <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Company Name</label>
+                <input type="text" value={pdfPreviewData.companyName || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, companyName: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
+              </div>
+              <div>
+                <label className="text-slate-500 block text-xs font-bold uppercase mb-1">SEBI Reg No</label>
+                <input type="text" value={pdfPreviewData.sebiRegistration || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, sebiRegistration: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 uppercase" />
+              </div>
+              <div>
+                <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Validity Date</label>
+                <input type="date" value={pdfPreviewData.certificateValidity || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, certificateValidity: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
+              </div>
+              <div>
+                <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Address</label>
+                <textarea value={pdfPreviewData.address || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, address: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 min-h-[60px]" />
+              </div>
             </div>
             <div className="flex justify-center space-x-3">
-              <button onClick={() => { setShowPdfConfirmModal(false); setSebiCertificate(null); setIsDocumentValid(false); }} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-              <button onClick={handleConfirmPdf} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-slate-900 dark:text-white shadow-lg shadow-primary-500/20">Confirm & Auto-Fill</button>
+              <button onClick={() => { setShowPdfConfirmModal(false); setSebiCertificate(null); setIsDocumentValid(false); }} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+              <button onClick={handleConfirmPdf} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20">Confirm & Auto-Fill</button>
             </div>
           </div>
         </div>
@@ -2132,24 +2184,24 @@ function SuperAdminDashboardContent() {
 
       {/* NISM PDF Confirm Modal */}
       {showNismConfirmModal && nismPreviewData && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-100 dark:bg-slate-950/80 backdrop-blur-md p-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 border border-emerald-500/30 rounded-2xl p-8 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
             <CheckCircle2 className="h-12 w-12 text-emerald-600 dark:text-emerald-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">NISM Certificate Detected!</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">We extracted the following details. Please confirm to auto-fill the form.</p>
             <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl text-left text-sm space-y-4 mb-6 border border-slate-300 dark:border-white/5">
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">NISM Reg No</label>
-                  <input type="text" value={nismPreviewData.nismRegistration || ''} onChange={e => setNismPreviewData({...nismPreviewData, nismRegistration: e.target.value})} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 uppercase" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Validity Date</label>
-                  <input type="date" value={nismPreviewData.nismValidity || ''} onChange={e => setNismPreviewData({...nismPreviewData, nismValidity: e.target.value})} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
-                </div>
+              <div>
+                <label className="text-slate-500 block text-xs font-bold uppercase mb-1">NISM Reg No</label>
+                <input type="text" value={nismPreviewData.nismRegistration || ''} onChange={e => setNismPreviewData({ ...nismPreviewData, nismRegistration: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 uppercase" />
+              </div>
+              <div>
+                <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Validity Date</label>
+                <input type="date" value={nismPreviewData.nismValidity || ''} onChange={e => setNismPreviewData({ ...nismPreviewData, nismValidity: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
+              </div>
             </div>
             <div className="flex justify-center space-x-3">
-              <button onClick={() => { setShowNismConfirmModal(false); setNismCertificate(null); }} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-              <button onClick={handleConfirmNism} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-slate-900 dark:text-white shadow-lg shadow-primary-500/20">Confirm & Auto-Fill</button>
+              <button onClick={() => { setShowNismConfirmModal(false); setNismCertificate(null); }} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+              <button onClick={handleConfirmNism} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20">Confirm & Auto-Fill</button>
             </div>
           </div>
         </div>
@@ -2169,7 +2221,7 @@ function SuperAdminDashboardContent() {
               </div>
             </div>
             <div className="mt-6 flex justify-end">
-              <button onClick={() => setGlobalAlert(null)} className={`px-5 py-2 text-xs font-bold text-slate-900 dark:text-white rounded-xl transition ${globalAlert.isError ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
+              <button onClick={() => setGlobalAlert(null)} className={`px-5 py-2 text-xs font-bold text-white rounded-xl transition ${globalAlert.isError ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
                 Okay
               </button>
             </div>
@@ -2181,3 +2233,6 @@ function SuperAdminDashboardContent() {
 }
 
 export default dynamic(() => Promise.resolve(SuperAdminDashboardContent), { ssr: false });
+
+
+

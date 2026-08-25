@@ -87,7 +87,7 @@ export default function ProfileSettings() {
       setTimeout(() => {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        window.location.href = '/login';
+        window.location.href = '/client-login';
       }, 1500);
     } catch (err: any) {
       setMsg({ type: 'error', text: err.message || 'Failed to change password.' });
@@ -243,7 +243,7 @@ export default function ProfileSettings() {
             <h3 className="text-xl font-black text-center mb-2 text-slate-800 dark:text-white">Sign Out</h3>
             <p className="text-slate-600 dark:text-slate-400 text-sm text-center mb-6">Are you sure you want to sign out of your account?</p>
             <div className="flex justify-center space-x-3">
-              <button onClick={() => setIsLogoutModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+              <button onClick={() => setIsLogoutModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
               <button onClick={handleLogout} className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-rose-500/20">Log Out</button>
             </div>
           </div>

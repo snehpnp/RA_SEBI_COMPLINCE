@@ -54,7 +54,7 @@ export default function AdminResourcesTab({ triggerAlert }: { triggerAlert: (msg
                   </div>
                 </div>
                 <div className="mt-auto pt-4 border-t border-slate-300 dark:border-white/5">
-                  <a href={getFileUrl(res.fileUrl)} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center space-x-2 w-full text-sm font-semibold text-slate-900 dark:text-white bg-primary-600 hover:bg-primary-500 py-2.5 rounded-xl transition shadow-lg shadow-primary-600/20">
+                  <a href={getFileUrl(res.fileUrl)} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center space-x-2 w-full text-sm font-semibold text-white bg-primary-600 hover:bg-primary-500 py-2.5 rounded-xl transition shadow-lg shadow-primary-600/20">
                     <Download className="w-4 h-4" />
                     <span>Download</span>
                   </a>

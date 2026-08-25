@@ -71,10 +71,16 @@ class ApiClient {
           localStorage.removeItem('user');
           localStorage.removeItem('tenantId');
           
+          let loginPath = '/admin/login';
+          const currentPath = window.location.pathname;
+          if (currentPath.startsWith('/client')) {
+            loginPath = '/client-login';
+          }
+          
           if (response.status === 403) {
-            window.location.href = '/login?error=inactive';
+            window.location.href = `${loginPath}?error=inactive`;
           } else {
-            window.location.href = '/login?error=expired';
+            window.location.href = `${loginPath}?error=expired`;
           }
         }
         return new Promise(() => {}); // Never resolve to prevent multiple alerts from component catch blocks

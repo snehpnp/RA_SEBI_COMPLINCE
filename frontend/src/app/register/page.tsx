@@ -124,8 +124,8 @@ export default function RegisterPage() {
               </p>
               <div className="pt-6">
                 <button
-                  onClick={() => router.push('/login?role=client')}
-                  className="bg-primary-600 hover:bg-primary-500 text-slate-900 dark:text-white font-semibold py-3 px-8 rounded-xl transition-all"
+                  onClick={() => router.push('/client-login')}
+                  className="bg-primary-600 hover:bg-primary-500 text-white font-semibold py-3 px-8 rounded-xl transition-all"
                 >
                   Go to Login
                 </button>
@@ -399,7 +399,7 @@ export default function RegisterPage() {
 
               <div className="mt-6 text-center text-xs text-slate-600 dark:text-slate-400 border-t border-slate-300 dark:border-white/5 pt-4">
                 <span>Already registered? </span>
-                <Link href="/login?role=client" className="text-primary-600 dark:text-primary-400 hover:underline font-semibold">
+                <Link href="/client-login" className="text-primary-600 dark:text-primary-400 hover:underline font-semibold">
                   Log in here
                 </Link>
               </div>

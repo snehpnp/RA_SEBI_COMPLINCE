@@ -95,20 +95,20 @@ export const login = async (req: Request, res: Response) => {
 
     // Generate tokens
     const accessToken = jwt.sign(
-      { 
-        id: user.id, 
-        email: user.email, 
-        role: user.role.name, 
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role.name,
         tenantId: user.tenantId,
         tokenVersion: user.tokenVersion,
         sessionId: sessionId
       },
       JWT_SECRET,
-      { expiresIn: '1h' }
+      { expiresIn: '12h' }
     );
 
     const refreshToken = jwt.sign(
-      { 
+      {
         id: user.id,
         tokenVersion: user.tokenVersion,
         sessionId: sessionId
@@ -120,7 +120,7 @@ export const login = async (req: Request, res: Response) => {
     // Update last login and session tracking
     await prisma.user.update({
       where: { id: user.id },
-      data: { 
+      data: {
         lastLogin: new Date(),
         currentSessionId: sessionId,
         sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
@@ -426,7 +426,7 @@ export const changePassword = async (req: Request, res: Response) => {
 
     await prisma.user.update({
       where: { id: userId },
-      data: { 
+      data: {
         passwordHash: newHash,
         tokenVersion: { increment: 1 },
         currentSessionId: null,

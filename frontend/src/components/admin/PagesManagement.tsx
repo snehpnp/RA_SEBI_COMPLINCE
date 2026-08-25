@@ -196,11 +196,7 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                   const confirmed = await confirm('Are you sure you want to set this page as Active?', 'Confirm Action');
                   if (confirmed) setFormData({ ...formData, status: 'ACTIVE' });
                 }}
-                className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center space-x-1.5 transition ${
-                  formData.status === 'ACTIVE' 
-                    ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center space-x-1.5 transition ${ formData.status === 'ACTIVE' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300' }`}
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Active</span>
@@ -211,11 +207,7 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                   const confirmed = await confirm('Are you sure you want to set this page as Inactive?', 'Confirm Action');
                   if (confirmed) setFormData({ ...formData, status: 'INACTIVE' });
                 }}
-                className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center space-x-1.5 transition ${
-                  formData.status === 'INACTIVE' 
-                    ? 'bg-white dark:bg-slate-700 text-red-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center space-x-1.5 transition ${ formData.status === 'INACTIVE' ? 'bg-white dark:bg-slate-700 text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300' }`}
               >
                 <XCircle className="w-4 h-4" />
                 <span>Inactive</span>
@@ -249,7 +241,7 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                     slug: (!formData.id || !formData.isSystem) ? title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : formData.slug 
                   });
                 }}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-primary-500 outline-none"
                 placeholder="e.g. Refund Policy"
               />
             </div>
@@ -291,7 +283,7 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                 required
                 value={formData.externalUrl || ''}
                 onChange={(e) => setFormData({ ...formData, externalUrl: e.target.value })}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-primary-500 outline-none"
                 placeholder="https://example.com/document.pdf"
               />
             </div>

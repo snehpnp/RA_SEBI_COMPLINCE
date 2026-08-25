@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export const getStocks = async (req: Request, res: Response) => {
-console.log('GET STOCKS QUERY:', req.query);
+  console.log('GET STOCKS QUERY:', req.query);
   try {
     const { query } = req.query;
     let whereClause = {};
@@ -64,10 +64,10 @@ export const createSignal = async (req: Request, res: Response) => {
     let parsedPlanIds: string[] = [];
     try {
       parsedPlanIds = JSON.parse(planIds);
-    } catch(e) {
+    } catch (e) {
       if (typeof planIds === 'string') parsedPlanIds = [planIds];
     }
-    
+
     if (!parsedPlanIds || parsedPlanIds.length === 0) {
       return res.status(400).json({ success: false, message: 'Please select at least one plan.' });
     }
@@ -115,7 +115,7 @@ export const listSignals = async (req: Request, res: Response) => {
   try {
     const tenantId = (req as any).user.tenantId;
     const userRole = (req as any).user.role;
-    
+
     let whereClause: any = { tenantId };
 
     if (userRole === 'CLIENT') {
@@ -182,8 +182,7 @@ export const listSignals = async (req: Request, res: Response) => {
         }
       }
     }
-    
-    console.log("LIST SIGNALS WHERE CLAUSE:", JSON.stringify(whereClause, null, 2));
+
     const signals = await prisma.signal.findMany({
       where: whereClause,
       include: {
@@ -250,7 +249,7 @@ export const closeSignal = async (req: Request, res: Response) => {
 
     // Notify clients who were subscribed to this plan AT THE TIME the signal was created
     const allSubs = await prisma.subscription.findMany({
-      where: { 
+      where: {
         planId: signal.planId,
         startDate: { lte: signal.createdAt }
       },
@@ -337,7 +336,7 @@ export const addSignalMessage = async (req: Request, res: Response) => {
 
       // Notify clients who were subscribed to this plan AT THE TIME the signal was created
       const allSubs = await prisma.subscription.findMany({
-        where: { 
+        where: {
           planId: signal.planId,
           startDate: { lte: signal.createdAt }
         },

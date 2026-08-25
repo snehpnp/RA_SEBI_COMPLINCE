@@ -119,7 +119,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
         <div className="w-full md:w-1/3 border-r border-slate-200 dark:border-white/10 p-6 flex flex-col overflow-y-auto">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Configure Report</h2>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-white/5 transition">
+            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/5 transition">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -139,7 +139,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                     if (e.target.value.trim()) setSectorErr('');
                     setSectorDropdownOpen(true);
                   }}
-                  className={`w-full bg-slate-50 dark:bg-slate-800/50 border ${sectorErr ? 'border-red-500' : 'border-slate-300 dark:border-white/10'} rounded-xl p-3 pr-10 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all`}
+                  className={`w-full bg-slate-50 dark:bg-slate-800/50 border ${sectorErr ? 'border-red-500' : 'border-slate-300 dark:border-white/10'} rounded-xl p-3 pr-10 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all`}
                   placeholder="Select or type custom sector..."
                 />
                 <button
@@ -189,7 +189,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
               <textarea
                 value={technicalOutlook}
                 onChange={(e) => setTechnicalOutlook(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
+                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
                 placeholder="Enter technical outlook..."
               />
             </div>
@@ -199,7 +199,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
               <textarea
                 value={rationale}
                 onChange={(e) => setRationale(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
+                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
                 placeholder="Enter fundamental/technical rationale..."
               />
             </div>

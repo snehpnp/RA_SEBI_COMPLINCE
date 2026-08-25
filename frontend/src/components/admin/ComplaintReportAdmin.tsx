@@ -426,7 +426,7 @@ export default function ComplaintReportAdmin() {
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex justify-end">
               <button
                 onClick={() => setIsHistoryOpen(false)}
-                className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-bold rounded-xl transition"
+                className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-bold rounded-xl transition"
               >
                 Close
               </button>

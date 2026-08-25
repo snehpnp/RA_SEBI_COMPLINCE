@@ -444,13 +444,13 @@ export default function SignalManagement({
             <div className="flex space-x-2">
               <button 
                 onClick={() => setSignalStatusFilter('OPEN')} 
-                className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${signalStatusFilter === 'OPEN' ? 'bg-[#d4f23b] text-black shadow-[0_0_20px_rgba(212,242,59,0.4)]' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:border-slate-400 dark:border-white/30 hover:bg-slate-100 dark:bg-white/5'}`}
+                className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${signalStatusFilter === 'OPEN' ? 'bg-[#d4f23b] text-black shadow-[0_0_20px_rgba(212,242,59,0.4)]' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:border-slate-400 dark:border-white/30 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
               >
                 Open Signals
               </button>
               <button 
                 onClick={() => setSignalStatusFilter('CLOSED')} 
-                className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${signalStatusFilter === 'CLOSED' ? 'bg-[#d4f23b] text-black shadow-[0_0_20px_rgba(212,242,59,0.4)]' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:border-slate-400 dark:border-white/30 hover:bg-slate-100 dark:bg-white/5'}`}
+                className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${signalStatusFilter === 'CLOSED' ? 'bg-[#d4f23b] text-black shadow-[0_0_20px_rgba(212,242,59,0.4)]' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:border-slate-400 dark:border-white/30 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
               >
                 Closed Signals
               </button>
@@ -458,8 +458,8 @@ export default function SignalManagement({
             
             {!isViewOnly && (
               <div className="flex space-x-2">
-                <button onClick={() => setView('TABLE')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'TABLE' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:bg-white/10'}`}>Table View</button>
-                <button onClick={() => setView('CARD')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'CARD' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:bg-white/10'}`}>Card View</button>
+                <button onClick={() => setView('TABLE')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'TABLE' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>Table View</button>
+                <button onClick={() => setView('CARD')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'CARD' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>Card View</button>
               </div>
             )}
           </div>
@@ -551,7 +551,7 @@ export default function SignalManagement({
                     <option key={s.id} value={s.id}>{s.symbol}</option>
                   ))}
                 </select>
-                <button onClick={handleResetFilters} className="p-2 bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded hover:bg-slate-100 dark:bg-white/5">
+                <button onClick={handleResetFilters} className="p-2 bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5">
                   <RefreshCcw className="h-4 w-4" />
                 </button>
               </div>
@@ -593,7 +593,7 @@ export default function SignalManagement({
                           </tr>
                         ) : (
                           pageData.map((s: any, idx: number) => (
-                            <tr key={s.id} className="border-b border-slate-300 dark:border-white/5 hover:bg-slate-100 dark:bg-white/5 hover:shadow-lg transition-all duration-300">
+                            <tr key={s.id} className="border-b border-slate-300 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 hover:shadow-lg transition-all duration-300">
                               <td className="px-4 py-1 w-[1%] text-left font-medium text-slate-600 dark:text-gray-400">{idx + 1}</td>
                               <td className="px-4 py-1 w-[1%] text-left">
                                 <div className="flex items-center space-x-2">
@@ -776,7 +776,7 @@ export default function SignalManagement({
                                 return (
                                   <div 
                                     key={pId}
-                                    className="px-4 py-3 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between text-sm transition-colors border-b border-slate-200 dark:border-white/5 last:border-0"
+                                    className="px-4 py-3 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between text-sm transition-colors border-b border-slate-200 dark:border-white/5 last:border-0"
                                     onClick={() => {
                                        if (planIds.includes(pId)) {
                                          setPlanIds(planIds.filter(id => id !== pId));
@@ -843,7 +843,7 @@ export default function SignalManagement({
                         {stocks.map(s => (
                           <div 
                             key={s.id} 
-                            className="px-4 py-2 hover:bg-slate-200 dark:bg-white/10 cursor-pointer text-sm font-bold"
+                            className="px-4 py-2 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 cursor-pointer text-sm font-bold"
                             onClick={() => {
                               setStockId(s.id);
                               setStockSearchQuery(s.symbol);
@@ -1032,7 +1032,7 @@ export default function SignalManagement({
               <button 
                 type="button"
                 onClick={() => setShowConfirmModal(false)} 
-                className="px-5 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 text-slate-900 dark:text-white rounded font-semibold text-sm transition"
+                className="px-5 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-900 dark:text-white rounded font-semibold text-sm transition"
               >
                 Cancel
               </button>
@@ -1069,7 +1069,7 @@ export default function SignalManagement({
                 {/* Radio Buttons (Pill Cards) */}
                 <div className="flex flex-wrap gap-3 border-b border-slate-300 dark:border-white/5 pb-6">
                   {['Fully Closed', 'Partially Closed', 'SL Hit', 'Closed Signal', 'Avoid Signal'].map(status => (
-                    <label key={status} className={`flex-1 min-w-[120px] p-3 rounded-xl border cursor-pointer transition-all duration-300 text-center ${closeStatus === status ? 'border-[#d4f23b] bg-[#d4f23b]/10 shadow-[0_0_15px_rgba(212,242,59,0.2)]' : 'border-slate-400 dark:border-white/10 hover:border-slate-400 dark:border-white/30 hover:bg-slate-100 dark:bg-white/5'}`}>
+                    <label key={status} className={`flex-1 min-w-[120px] p-3 rounded-xl border cursor-pointer transition-all duration-300 text-center ${closeStatus === status ? 'border-[#d4f23b] bg-[#d4f23b]/10 shadow-[0_0_15px_rgba(212,242,59,0.2)]' : 'border-slate-400 dark:border-white/10 hover:border-slate-400 dark:border-white/30 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}>
                       <input 
                         type="radio" 
                         name="closeStatus" 
@@ -1139,7 +1139,7 @@ export default function SignalManagement({
 
               </div>
               <div className="p-6 border-t border-slate-300 dark:border-white/5 bg-white dark:bg-[#151c2c] flex justify-end gap-4 rounded-b-2xl">
-                <button type="button" onClick={() => setCloseSignalModal(null)} className="px-6 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 text-slate-900 dark:text-white rounded-xl font-semibold text-sm transition-all duration-300">
+                <button type="button" onClick={() => setCloseSignalModal(null)} className="px-6 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-900 dark:text-white rounded-xl font-semibold text-sm transition-all duration-300">
                   Cancel
                 </button>
                 <button type="submit" disabled={loading} className="px-8 py-2.5 bg-[#d4f23b] text-black font-bold rounded-xl shadow-[0_0_15px_rgba(212,242,59,0.3)] hover:bg-[#c3e031] hover:shadow-[0_0_25px_rgba(212,242,59,0.5)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -1260,7 +1260,7 @@ export default function SignalManagement({
                 <Eye className="w-5 h-5 text-lime-700 dark:text-[#d4f23b]" />
                 Signal Details
               </h3>
-              <button onClick={() => setViewSignalDetails(null)} className="p-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition-all">
+              <button onClick={() => setViewSignalDetails(null)} className="p-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 rounded-lg text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition-all">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1332,7 +1332,7 @@ export default function SignalManagement({
               )}
             </div>
             <div className="p-5 border-t border-slate-300 dark:border-white/5 bg-white dark:bg-[#0B101E] text-right shrink-0 rounded-b-2xl">
-              <button onClick={() => setViewSignalDetails(null)} className="px-6 py-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 rounded-lg font-bold transition-all">Close</button>
+              <button onClick={() => setViewSignalDetails(null)} className="px-6 py-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 rounded-lg font-bold transition-all">Close</button>
             </div>
           </div>
         </div>
@@ -1447,7 +1447,7 @@ export default function SignalManagement({
             <div className="px-6 py-4 bg-slate-50 dark:bg-white/5 flex justify-end gap-3">
               <button
                 onClick={() => setShowAlertModal(false)}
-                className="px-4 py-2 text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-white/10 rounded-xl transition-colors"
+                className="px-4 py-2 text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10 rounded-xl transition-colors"
               >
                 {isViewOnly ? 'Close' : 'Cancel'}
               </button>

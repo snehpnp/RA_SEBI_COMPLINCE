@@ -2641,7 +2641,7 @@ const [orgAddress, setOrgAddress] = useState('');
   const handleBulkExport = async (type: string, isZip: boolean) => {
     try {
       setExportLoading(type);
-      const API_URL = process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : (process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : api.getBaseUrl() + '/api/v1') + '';
+      const API_URL = process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : api.getBaseUrl() + '/api/v1';
       let url = `${API_URL}/admin/exports/${type}`;
       if (exportRange === 'date' && exportStartDate && exportEndDate) {
         url += `?range=date&startDate=${exportStartDate}&endDate=${exportEndDate}`;
@@ -2678,183 +2678,235 @@ const [orgAddress, setOrgAddress] = useState('');
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
-      <div className="h-screen overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex relative">
-      {/* Mobile Sidebar Overlay */}
-      {isMobileMenuOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={() => setIsMobileMenuOpen(false)}
-        />
-      )}
+      <div className="h-screen h-dvh overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex relative">
+      {/* Mobile Menu Toggle */}
+      <button 
+        className="lg:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
+        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+      >
+        {isMobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
+      </button>
 
-      {/* Sidebar */}
-      <aside className={`w-64 border-r border-slate-300 dark:border-white/5 bg-white dark:bg-slate-900 p-6 flex flex-col justify-between fixed lg:relative z-50 h-full overflow-y-auto custom-scrollbar transition-transform duration-300 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="space-y-8">
-          <div className="flex items-center space-x-2 mb-2">
+      {/* Premium Sidebar */}
+      <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${
+        isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
+      } ${!isMobileMenuOpen && isSidebarCollapsed ? 'lg:w-20' : 'lg:w-72'}`}>
+        
+        {/* Brand */}
+        <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
+          <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
             {user?.tenantLogo ? (
-              <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className="max-h-10 max-w-[180px] object-contain" />
+              <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
             ) : (
               <>
-                <Landmark className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
-                <span className="font-bold text-lg tracking-wider">{user?.tenantName || 'Advisor Portal'}</span>
+                <div className="w-10 h-10 shrink-0 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
+                  <ShieldCheck className="w-6 h-6 text-premium-primary" />
+                </div>
+                {!isSidebarCollapsed && <span className="text-xl font-bold tracking-wider whitespace-nowrap">{user?.tenantName || 'Advisor Portal'}</span>}
               </>
             )}
           </div>
-
-          {/* AUTO-GENERATED from NAV_CONFIG — add new modules there, not here */}
-          <nav className="space-y-1">
-            {NAV_CONFIG.map((mod) => {
-              if (!hasPermission(mod.accessKey)) return null;
-              if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
-              const Icon = ICON_MAP[mod.icon] || Layers;
-              if (mod.tab === 'customPages') {
-                return (
-                  <div key={mod.tab} className="space-y-1">
-                    <button
-                      onClick={() => {
-                        setIsPagesExpanded(!isPagesExpanded);
-                        if (!isPagesExpanded && activeTab !== 'customPages') {
-                          // Optionally select first page, but let's just expand
-                        }
-                      }}
-                      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition ${
-                        activeTab.startsWith('customPages')
-                          ? 'bg-primary-600 text-slate-900 dark:text-white'
-                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <Icon className="h-4 w-4" />
-                        <span>{mod.label}</span>
-                      </div>
-                      <svg className={`w-4 h-4 transition-transform ${isPagesExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
-                    </button>
-                    {isPagesExpanded && (
-                      <div className="pl-4 pr-2 py-1 space-y-1 border-l-2 border-slate-200 dark:border-slate-800 ml-6 mt-1">
-                        {adminPagesList.filter((page: any) => page.slug !== 'complaint-status').map((page: any) => (
-                          <button
-                            key={page.id}
-                            onClick={() => setActiveTab(`customPages_${page.slug}`)}
-                            className={`w-full text-left px-3 py-2 text-xs rounded-lg transition truncate ${activeTab === `customPages_${page.slug}` ? 'bg-primary-500/10 text-primary-600 font-bold' : 'text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/5'}`}
-                          >
-                            {page.title}
-                          </button>
-                        ))}
-                        {!isStaff && (
-                          <button
-                            onClick={() => setActiveTab('customPages_new')}
-                            className="w-full text-left px-3 py-2 text-xs rounded-lg transition font-medium text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 mt-2"
-                          >
-                            + Add New Page
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              return (
-                <button
-                  key={mod.tab}
-                  onClick={() => setActiveTab(mod.tab)}
-                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-semibold transition ${
-                    activeTab === mod.tab
-                      ? 'bg-primary-600 text-slate-900 dark:text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>{mod.label}</span>
-                </button>
-              );
-            })}
-
-            {user?.role !== 'ADMIN' && user?.role !== 'SUPER_ADMIN' && (
-              <>
-                <button
-                  onClick={() => setActiveTab('legalView')}
-                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-semibold transition ${
-                    activeTab === 'legalView'
-                      ? 'bg-primary-600 text-slate-900 dark:text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 hover:text-slate-900 dark:text-white'
-                  }`}
-                >
-                  <FileText className="h-4 w-4" />
-                  <span>Legal & Disclosures</span>
-                </button>
-              </>
-            )}
-          </nav>
+          {!isSidebarCollapsed && (
+            <button 
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+              className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
+          {isSidebarCollapsed && (
+            <button 
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+              className="hidden lg:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
-        <div className="space-y-4">
-          <div className="p-3 bg-slate-100 dark:bg-white/5 rounded-xl border border-slate-300 dark:border-white/5 text-center">
-            <span className="text-[10px] text-slate-600 dark:text-slate-400 block mb-1">Wizard Completeness</span>
-            <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all duration-500 ${completeness >= 80 ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                style={{ width: `${completeness}%` }}
-              />
-            </div>
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-1 block">{completeness}% Complete</span>
-          </div>
+        {/* Navigation */}
+        <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 hide-scrollbar">
+          {NAV_CONFIG.map((mod) => {
+            if (!hasPermission(mod.accessKey)) return null;
+            if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
+            const Icon = ICON_MAP[mod.icon] || Layers;
+            
+            if (mod.tab === 'customPages') {
+              return (
+                <div key={mod.tab} className="pt-2">
+                  <button
+                    onClick={() => {
+                      if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                      setIsPagesExpanded(!isPagesExpanded);
+                    }}
+                    className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-premium-text/70 hover:bg-premium-bg hover:text-premium-text group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                    title={isSidebarCollapsed ? mod.label : undefined}
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <Icon className="w-5 h-5 text-premium-text/50 group-hover:text-premium-text/80 shrink-0" />
+                      {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
+                    </div>
+                    {!isSidebarCollapsed && (
+                      <div className={`transition-transform duration-200 ${isPagesExpanded ? 'rotate-90' : ''}`}>
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
+                    )}
+                  </button>
+                  
+                  {!isSidebarCollapsed && isPagesExpanded && (
+                    <div className="pl-12 pr-4 space-y-1 mt-1">
+                      {adminPagesList.filter((page: any) => page.slug !== 'complaint-status').map((page: any) => (
+                        <button
+                          key={page.id}
+                          onClick={() => {
+                            setActiveTab(`customPages_${page.slug}`);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${
+                            activeTab === `customPages_${page.slug}`
+                            ? 'bg-premium-primary/10 text-premium-primary font-medium'
+                            : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                          }`}
+                        >
+                          {page.title}
+                        </button>
+                      ))}
+                      {!isStaff && (
+                        <button
+                          onClick={() => setActiveTab('customPages_new')}
+                          className="w-full text-left px-3 py-2 text-xs rounded-lg transition font-medium text-emerald-600 hover:text-emerald-500 hover:bg-emerald-500/10 mt-2"
+                        >
+                          + Add New Page
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
 
-          <button
-            onClick={() => setIsLogoutModalOpen(true)}
-            className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-500/10 transition"
-          >
-            <LogOut className="h-4 w-4" />
-            <span>Exit Session</span>
-          </button>
+            const isActive = activeTab === mod.tab;
+            return (
+              <button
+                key={mod.tab}
+                onClick={() => {
+                  setActiveTab(mod.tab);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                  isActive 
+                  ? 'bg-premium-primary/10 text-premium-primary font-semibold' 
+                  : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                title={isSidebarCollapsed ? mod.label : undefined}
+              >
+                <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
+                {!isSidebarCollapsed && isActive && (
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                )}
+              </button>
+            );
+          })}
+
+          {user?.role !== 'ADMIN' && user?.role !== 'SUPER_ADMIN' && (
+            <button
+              onClick={() => { setActiveTab('legalView'); setIsMobileMenuOpen(false); }}
+              className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                activeTab === 'legalView' 
+                ? 'bg-premium-primary/10 text-premium-primary font-semibold' 
+                : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+              } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+              title={isSidebarCollapsed ? "Legal & Disclosures" : undefined}
+            >
+              <FileText className={`w-5 h-5 transition-colors shrink-0 ${activeTab === 'legalView' ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+              {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">Legal & Disclosures</span>}
+              {!isSidebarCollapsed && activeTab === 'legalView' && (
+                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* User Footer */}
+        <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
+          {/* Subtle background glow */}
+          <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
+          
+          <div className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+            
+            {/* Shimmer effect inside the card */}
+            <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
+            
+            <div className="relative shrink-0">
+              {/* Pulsing ring around avatar */}
+              <div className="absolute inset-0 rounded-full border-2 border-premium-primary/50 animate-ping opacity-75" />
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-premium-primary to-indigo-600 flex items-center justify-center font-bold text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-primary)] relative z-10">
+                {user?.firstName ? user.firstName.charAt(0).toUpperCase() : 'A'}
+              </div>
+              {/* Online indicator */}
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
+            </div>
+            
+            {!isSidebarCollapsed && (
+              <div className="flex-1 min-w-0 relative z-10">
+                <p className="font-bold text-sm truncate text-premium-text">{user?.firstName || 'Admin'}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <ShieldCheck className="w-3 h-3 text-premium-primary" />
+                  <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-premium-primary via-indigo-200 to-premium-primary animate-pulse">
+                    {user?.role || 'Staff'}
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {!isSidebarCollapsed && (
+              <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
+            )}
+          </div>
+          <div className={`flex-1 mt-4 border-t border-slate-200/20 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
+            <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-premium-danger/10 rounded-xl text-premium-text/60 hover:text-premium-danger transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
+              {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
+              <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 h-full overflow-y-auto w-full">
-        <div className="p-4 md:p-8 max-w-7xl mx-auto">
-        <header className="flex justify-between items-start md:items-center mb-8 pb-4 border-b border-slate-300 dark:border-white/5 flex-col md:flex-row gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="lg:hidden p-2 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 text-slate-700 dark:text-slate-300"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold tracking-tight">Advisor Operations Desk</h1>
-              <p className="text-[10px] md:text-xs text-slate-600 dark:text-slate-400">Manage research calls, internal policies, and SEBI compliance alerts</p>
+      <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
+        <header className="shrink-0 px-4 md:px-8 py-4 md:py-6 border-b border-slate-300 dark:border-white/5 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md z-10">
+          <div className="flex justify-between items-start md:items-center flex-col md:flex-row gap-4 max-w-7xl mx-auto w-full">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="lg:hidden p-2 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 text-slate-700 dark:text-slate-300"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold tracking-tight">Advisor Operations Desk</h1>
+                <p className="text-[10px] md:text-xs text-slate-600 dark:text-slate-400">Manage research calls, internal policies, and SEBI compliance alerts</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 md:space-x-3 text-xs text-slate-700 dark:text-slate-300 w-full md:w-auto justify-end">
+              {user?.isImpersonated && (
+                <button
+                  onClick={handleRevertImpersonate}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 hover:text-indigo-700 dark:text-indigo-300 transition flex items-center space-x-1.5 font-semibold"
+                  title="Back to Super Admin"
+                >
+                  <LogOut className="h-3.5 w-3.5 rotate-180" />
+                  <span>Back to Super Admin</span>
+                </button>
+              )}
+              {/* Reverted ThemeToggle and Profile from Top Header as requested */}
             </div>
           </div>
-          <div className="flex items-center space-x-2 md:space-x-3 text-xs text-slate-700 dark:text-slate-300 w-full md:w-auto justify-end">
-            {user?.isImpersonated && (
-              <button
-                onClick={handleRevertImpersonate}
-                className="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 hover:text-indigo-700 dark:text-indigo-300 transition flex items-center space-x-1.5 font-semibold"
-                title="Back to Super Admin"
-              >
-                <LogOut className="h-3.5 w-3.5 rotate-180" />
-                <span>Back to Super Admin</span>
-              </button>
-            )}
-            <span className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5">
-              Role: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{user.role}</strong>
-            </span>
-            <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 hover:bg-slate-100 hover:border-slate-400 dark:hover:bg-slate-200 dark:bg-white/10 dark:hover:border-slate-400 dark:border-white/10 transition flex items-center justify-center cursor-pointer"
-              title="Toggle Theme"
-            >
-              {isDarkMode ? <Sun className="h-4 w-4 text-amber-600 dark:text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
-            </button>
-            <button
-              onClick={() => setIsProfileModalOpen(true)}
-              className="p-2 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 hover:bg-slate-100 hover:border-slate-400 dark:hover:bg-slate-200 dark:bg-white/10 dark:hover:border-slate-400 dark:border-white/10 transition flex items-center justify-center cursor-pointer"
-              title="View Profile Details"
-            >
-              <User className="h-4 w-4 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white" />
-            </button>
-          </div>
         </header>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+          <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
 
         {/* ====================================================
             PROFILE COMPLETENESS WIZARD (Only for ADMIN, if completeness < 80%)
@@ -3117,7 +3169,7 @@ const [orgAddress, setOrgAddress] = useState('');
                             {upcomingAlerts.slice(0, 10).map((alert: any) => {
                               const daysLeft = Math.ceil((new Date(alert.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24));
                               return (
-                                <div key={alert.id} className="flex justify-between items-center p-3 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 hover:bg-slate-200 dark:bg-white/10 transition">
+                                <div key={alert.id} className="flex justify-between items-center p-3 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 transition">
                                   <div>
                                     <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-200" title={alert.description}>{(alert.description || '').substring(0, 80)}{alert.description?.length > 80 ? '...' : ''}</h4>
                                     <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">{alert.title}</p>
@@ -3131,7 +3183,7 @@ const [orgAddress, setOrgAddress] = useState('');
                               );
                             })}
                             {upcomingAlerts.length > 10 && (
-                              <button onClick={() => window.dispatchEvent(new CustomEvent('nav-to-upcoming'))} className="w-full text-center text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white py-2 mt-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 border border-slate-300 dark:border-white/5 rounded-lg transition">
+                              <button onClick={() => window.dispatchEvent(new CustomEvent('nav-to-upcoming'))} className="w-full text-center text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white py-2 mt-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-300 dark:border-white/5 rounded-lg transition">
                                 View all {upcomingAlerts.length} upcoming alerts <ArrowRight className="inline h-3 w-3 ml-1" />
                               </button>
                             )}
@@ -3297,14 +3349,14 @@ const [orgAddress, setOrgAddress] = useState('');
                               <button 
                                 type="button"
                                 onClick={() => setDashboardTimeframe('monthly')}
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${dashboardTimeframe === 'monthly' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:text-slate-200'}`}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${dashboardTimeframe === 'monthly' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:text-slate-200'}`}
                               >
                                 Month
                               </button>
                               <button 
                                 type="button"
                                 onClick={() => setDashboardTimeframe('yearly')}
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${dashboardTimeframe === 'yearly' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:text-slate-200'}`}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${dashboardTimeframe === 'yearly' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:text-slate-200'}`}
                               >
                                 Year
                               </button>
@@ -3548,7 +3600,7 @@ const [orgAddress, setOrgAddress] = useState('');
                             return (
                               <tr
                                 key={st.id}
-                                className={`hover:bg-slate-100 dark:bg-white/5 transition ${isDeleted ? 'opacity-50 bg-slate-100 dark:bg-slate-950/20' : ''}`}
+                                className={`hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition ${isDeleted ? 'opacity-50 bg-slate-100 dark:bg-slate-950/20' : ''}`}
                               >
                                 <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
                                   {st.user?.createdAt ? (
@@ -3604,7 +3656,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                   <button
                                     onClick={() => setSelectedStaff(st)}
                                     title="View Details"
-                                    className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+                                    className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
                                   >
                                     <Eye className="h-3.5 w-3.5" />
                                   </button>
@@ -3820,11 +3872,7 @@ const [orgAddress, setOrgAddress] = useState('');
 
                           <div className="space-y-2">
                             <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Upload NISM Certificate Document <span className="text-slate-500 dark:text-slate-500">(PDF auto-fills details)</span></label>
-                            <div className={`border border-dashed rounded-xl p-4 text-center transition relative ${
-                              isParsingStaffNism ? 'border-amber-500/30 bg-amber-500/5' :
-                              staffNismParsed ? 'border-emerald-500/30 bg-emerald-500/5' :
-                              'border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10'
-                            }`}>
+                            <div className={`border border-dashed rounded-xl p-4 text-center transition relative ${ isParsingStaffNism ? 'border-amber-500/30 bg-amber-500/5' : staffNismParsed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10' }`}>
                               <input
                                 type="file"
                                 accept=".pdf,.png,.jpg,.jpeg"
@@ -3886,7 +3934,7 @@ const [orgAddress, setOrgAddress] = useState('');
                               setIsStaffModalOpen(false);
                               resetStaffForm();
                             }}
-                            className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:bg-white/5"
+                            className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5"
                           >
                             Cancel
                           </button>
@@ -3928,7 +3976,7 @@ const [orgAddress, setOrgAddress] = useState('');
                             <span className="font-mono text-sm text-emerald-700 dark:text-emerald-300 font-bold break-all">{createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}</span>
                             <button
                               onClick={() => navigator.clipboard.writeText(createdStaffCreds?.staff?.email || createdStaffCreds?.email || '')}
-                              className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
+                              className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
                             >Copy</button>
                           </div>
                         </div>
@@ -3939,7 +3987,7 @@ const [orgAddress, setOrgAddress] = useState('');
                             <span className="font-mono text-sm text-amber-700 dark:text-amber-300 font-bold tracking-widest">{createdStaffCreds?.generatedPassword || '—'}</span>
                             <button
                               onClick={() => navigator.clipboard.writeText(createdStaffCreds?.generatedPassword || '')}
-                              className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
+                              className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
                             >Copy</button>
                           </div>
                         </div>
@@ -3954,7 +4002,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           setShowStaffCredsPopup(false);
                           setCreatedStaffCreds(null);
                         }}
-                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-slate-900 dark:text-white font-bold rounded-xl transition text-sm"
+                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition text-sm"
                       >
                         Done — Credentials Saved
                       </button>
@@ -4089,7 +4137,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                 href={`${api.getBaseUrl()}${selectedStaff.nismUpload}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
+                                className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
                               >
                                 <Eye className="h-3 w-3" />
                                 Open Full
@@ -4101,7 +4149,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                   const fileName = selectedStaff.nismUpload.split('/').pop() || 'nism_certificate';
                                   downloadFile(fileUrl, fileName);
                                 }}
-                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-900 dark:text-white rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition cursor-pointer"
                               >
                                 <UploadCloud className="h-3 w-3 rotate-180" />
                                 Download File
@@ -4143,7 +4191,7 @@ const [orgAddress, setOrgAddress] = useState('');
                               setSelectedStaff(null);
                               startEditStaff(selectedStaff);
                             }}
-                            className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-slate-900 dark:text-white transition"
+                            className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-white transition"
                           >
                             Edit Profile
                           </button>
@@ -4151,7 +4199,7 @@ const [orgAddress, setOrgAddress] = useState('');
                         <button
                           type="button"
                           onClick={() => setSelectedStaff(null)}
-                          className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:bg-white/5"
+                          className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5"
                         >
                           Close Details
                         </button>
@@ -4209,7 +4257,7 @@ const [orgAddress, setOrgAddress] = useState('');
                         {(pageData) => (
                           <tbody className="divide-y divide-slate-300 dark:divide-white/5 font-medium">
                             {pageData.map((p: any) => (
-                              <tr key={p.id} className="hover:bg-slate-100 dark:bg-white/5 transition group">
+                              <tr key={p.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition group">
                                 <td className="py-4 px-6">
                                   <div className="text-slate-700 dark:text-slate-300 font-mono text-xs">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString() : new Date(p.createdAt).toLocaleDateString()}</div>
                                 </td>
@@ -4347,13 +4395,13 @@ const [orgAddress, setOrgAddress] = useState('');
                       <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                         <button
                           onClick={() => setChecklistSubTab('active')}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
                         >
                           Active Checklist ({activeList.length})
                         </button>
                         <button
                           onClick={() => setChecklistSubTab('history')}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
                         >
                           Checklist History ({checklistHistory.length})
                         </button>
@@ -4363,9 +4411,9 @@ const [orgAddress, setOrgAddress] = useState('');
                       {checklistSubTab === 'active' && (
                         <div className="space-y-4">
                           <div className="flex gap-2">
-                            <button onClick={() => setChecklistStatusFilter('ALL')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'ALL' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>All Tasks</button>
+                            <button onClick={() => setChecklistStatusFilter('ALL')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'ALL' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>All Tasks</button>
                             <button onClick={() => setChecklistStatusFilter('PENDING')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'PENDING' ? 'bg-amber-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>Pending</button>
-                            <button onClick={() => setChecklistStatusFilter('OVERDUE')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'OVERDUE' ? 'bg-rose-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>Non-Compliant</button>
+                            <button onClick={() => setChecklistStatusFilter('OVERDUE')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'OVERDUE' ? 'bg-rose-600 text-slate-900 dark:text-white ' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>Non-Compliant</button>
                           </div>
                           <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
                             <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
@@ -4412,7 +4460,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                           : 'Ongoing';
 
                                         return (
-                                          <tr key={item.id} className="hover:bg-slate-100 dark:bg-white/5 transition">
+                                          <tr key={item.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                             <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{item.serialNo}</td>
                                             <td className="py-3 px-4 font-medium max-w-xs">{item.requirement}</td>
                                             <td className="py-3 px-4">
@@ -4438,7 +4486,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                             {user.role === 'COMPLIANCE_OFFICER' && (
                                               <td className="py-3 px-4 text-center">
                                                 {requiresAction && (
-                                                  <button onClick={() => { setAuditModalReq(item); setAuditStatus(status !== 'PENDING' ? status : ''); setAuditRemarks(item.audit?.officerRemarks || ''); }} className="px-3 py-1 bg-primary-600 hover:bg-primary-500 text-slate-900 dark:text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] rounded-lg text-[10px] font-bold transition">Update</button>
+                                                  <button onClick={() => { setAuditModalReq(item); setAuditStatus(status !== 'PENDING' ? status : ''); setAuditRemarks(item.audit?.officerRemarks || ''); }} className="px-3 py-1 bg-primary-600 hover:bg-primary-500 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] rounded-lg text-[10px] font-bold transition">Update</button>
                                                 )}
                                               </td>
                                             )}
@@ -4563,7 +4611,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                     };
 
                                     return (
-                                      <tr key={h.id} className="hover:bg-slate-100 dark:bg-white/5 transition">
+                                      <tr key={h.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                         <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{h.requirement?.serialNo}</td>
                                         <td className="py-3 px-4 font-medium max-w-xs">{h.requirement?.requirement}</td>
                                         <td className="py-3 px-4 font-semibold text-primary-700 dark:text-primary-300">{h.periodLabel || '—'}</td>
@@ -4658,7 +4706,7 @@ const [orgAddress, setOrgAddress] = useState('');
                       { id: 'complaints', label: `Complaints (${complaints.filter(c => c.status === 'OPEN').length} Open)` },
                       { id: 'audit_history', label: 'Audit Log' }
                     ].map(tab => (
-                      <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}>
+                      <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}>
                         {tab.label}
                       </button>
                     ))}
@@ -4673,7 +4721,7 @@ const [orgAddress, setOrgAddress] = useState('');
                     <select
                       value={selectedFinancialYear}
                       onChange={(e) => setSelectedFinancialYear(e.target.value)}
-                      className="bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-1.5 px-3 rounded-lg focus:ring-0 focus:outline-none hover:bg-slate-200 dark:bg-slate-700 transition cursor-pointer"
+                      className="bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-1.5 px-3 rounded-lg focus:ring-0 focus:outline-none hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 transition cursor-pointer"
                     >
                       <option value="All">All Financial Years</option>
                       {availableFinancialYears.map(fy => (
@@ -4875,7 +4923,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           </button>
                           <button
                             onClick={() => setAlertsSubTab('history')}
-                            className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-slate-900 dark:text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                            className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
                           >
                             Resolved History ({alerts.filter((a:any) => a.status === 'CLOSED').length})
                           </button>
@@ -4884,14 +4932,14 @@ const [orgAddress, setOrgAddress] = useState('');
                         <div className="flex items-center space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl border border-slate-300 dark:border-white/5 shadow-sm">
                           <button
                             onClick={() => setAlertViewMode('card')}
-                            className={`p-1.5 rounded-lg transition ${alertViewMode === 'card' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                            className={`p-1.5 rounded-lg transition ${alertViewMode === 'card' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-slate-800'}`}
                             title="Card View"
                           >
                             <LayoutGrid className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => setAlertViewMode('table')}
-                            className={`p-1.5 rounded-lg transition ${alertViewMode === 'table' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+                            className={`p-1.5 rounded-lg transition ${alertViewMode === 'table' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-slate-800'}`}
                             title="Table View"
                           >
                             <TableIcon className="w-4 h-4" />
@@ -5111,7 +5159,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                 const isWarning = daysLeft >= 0 && daysLeft <= 5 && c.status !== 'CLOSED';
                                 
                                 return (
-                                  <tr key={c.id} className="hover:bg-slate-100 dark:bg-white/5 transition">
+                                  <tr key={c.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                     <td className="px-6 py-4 font-medium">{c.clientName}</td>
                                     <td className="px-6 py-4">{c.source} {c.scoresRefId && <span className="block text-xs text-slate-600 dark:text-slate-400">{c.scoresRefId}</span>}</td>
                                     <td className="px-6 py-4">{c.subject}</td>
@@ -5173,7 +5221,7 @@ const [orgAddress, setOrgAddress] = useState('');
                         {(pageData) => (
                           <tbody className="text-[13px] divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
                             {pageData.map((p: any) => (
-                              <tr key={p.id} className="hover:bg-slate-100 dark:bg-slate-800/40 transition-colors duration-200 group border-b border-slate-300 dark:border-white/5">
+                              <tr key={p.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/40 transition-colors duration-200 group border-b border-slate-300 dark:border-white/5">
                                   <td className="py-4 px-6 font-semibold max-w-xs text-slate-900 dark:text-white">
                                     <div className="font-bold text-slate-900 dark:text-white text-sm max-w-[200px] truncate" title={p.audit?.requirement?.requirement || '-'}>{p.audit?.requirement?.requirement || '-'}</div>
                                     <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1" title={p.reason}>BSE suggested Penalty: ₹{p.amount.toLocaleString()}</div>
@@ -5196,7 +5244,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                   {user.role === 'COMPLIANCE_OFFICER' && (
                                     <td className="py-4 px-6 text-center">
                                       {p.status === 'PENDING_PAYMENT' ? (
-                                        <button onClick={() => { setPenaltyResolveId(p.id); setPenaltyResolutionType(''); setPenaltyPayRef(''); setPenaltyProof(null); setPenaltyRemarks(''); }} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-900 dark:text-white rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-500/20 hover:-translate-y-0.5 hover:shadow-emerald-500/40">Submit Proof</button>
+                                        <button onClick={() => { setPenaltyResolveId(p.id); setPenaltyResolutionType(''); setPenaltyPayRef(''); setPenaltyProof(null); setPenaltyRemarks(''); }} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-500/20 hover:-translate-y-0.5 hover:shadow-emerald-500/40">Submit Proof</button>
                                       ) : (
                                         <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold px-4 py-1.5 bg-slate-100 dark:bg-slate-800/50 rounded-lg">Resolved</span>
                                       )}
@@ -5253,7 +5301,7 @@ const [orgAddress, setOrgAddress] = useState('');
                         {(pageData) => (
                           <div className="space-y-4">
                             {pageData.length > 0 ? pageData.map((item: any) => (
-                              <div key={item.id} className="p-4 bg-white dark:bg-slate-900/40 border border-slate-300 dark:border-white/5 rounded-xl flex items-start gap-4 hover:bg-slate-100 dark:bg-white/5 transition">
+                              <div key={item.id} className="p-4 bg-white dark:bg-slate-900/40 border border-slate-300 dark:border-white/5 rounded-xl flex items-start gap-4 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                 <div className={`p-2 rounded-lg mt-1 shrink-0 ${
                                   item.type === 'ALERT_RESOLVED' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
                                   item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
@@ -5478,7 +5526,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           setClientAddress(''); setClientCity(''); setClientState(''); setClientZip('');
                           setIsClientModalOpen(true);
                         }}
-                        className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-slate-900 dark:text-white rounded-xl font-bold text-xs transition inline-flex items-center shadow-lg shadow-primary-500/20"
+                        className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-xs transition inline-flex items-center shadow-lg shadow-primary-500/20"
                       >
                         <Plus className="h-4 w-4 mr-1.5" />
                         Add Client
@@ -5511,14 +5559,14 @@ const [orgAddress, setOrgAddress] = useState('');
                       placeholder="Search name, PAN, email..."
                       value={clientSearch}
                       onChange={(e) => setClientSearch(e.target.value)}
-                      className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white"
+                      className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                     />
                   </div>
                   
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white"
+                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                   >
                     <option value="ALL">All Status</option>
                     <option value="ACTIVE">Active</option>
@@ -5530,7 +5578,7 @@ const [orgAddress, setOrgAddress] = useState('');
                   <select
                     value={kraFilter}
                     onChange={(e) => setKraFilter(e.target.value)}
-                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white"
+                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                   >
                     <option value="ALL">All KRA</option>
                     <option value="VERIFIED">Verified</option>
@@ -5541,7 +5589,7 @@ const [orgAddress, setOrgAddress] = useState('');
                   <select
                     value={esignFilter}
                     onChange={(e) => setEsignFilter(e.target.value)}
-                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white"
+                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                   >
                     <option value="ALL">All eSign</option>
                     <option value="SIGNED">Signed</option>
@@ -5551,7 +5599,7 @@ const [orgAddress, setOrgAddress] = useState('');
                   <select
                     value={sourceFilter}
                     onChange={(e) => setSourceFilter(e.target.value)}
-                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white font-medium"
+                    className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white font-medium"
                   >
                     <option value="ALL">All Sources</option>
                     <option value="SELF">Self Signup</option>
@@ -5564,7 +5612,7 @@ const [orgAddress, setOrgAddress] = useState('');
                       type="date"
                       value={clientStartDate}
                       onChange={(e) => setClientStartDate(e.target.value)}
-                      className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white"
+                      className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                       title="Start Date"
                     />
                     <span className="text-slate-500">to</span>
@@ -5572,7 +5620,7 @@ const [orgAddress, setOrgAddress] = useState('');
                       type="date"
                       value={clientEndDate}
                       onChange={(e) => setClientEndDate(e.target.value)}
-                      className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-white"
+                      className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                       title="End Date"
                     />
                   </div>
@@ -5697,7 +5745,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                   const displayAadhaar = cl.aadhaar?.replace(deleteSuffix, '') || cl.aadhaar;
 
                                   return (
-                                    <tr key={cl.id} className={`hover:bg-slate-100 dark:bg-white/5 transition border-b border-slate-300 dark:border-white/5 ${isDeleted ? 'opacity-60 bg-rose-50 dark:bg-rose-950/10' : ''}`}>
+                                    <tr key={cl.id} className={`hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition border-b border-slate-300 dark:border-white/5 ${isDeleted ? 'opacity-60 bg-rose-50 dark:bg-rose-950/10' : ''}`}>
                                       <td className="py-4 px-5">
                                         <div className="font-bold text-slate-900 dark:text-white">{displayName}</div>
                                         <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">{displayEmail}</div>
@@ -5783,7 +5831,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                   setClientDetailsTab('profile');
                                 }}
                                 title="View Details"
-                                className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+                                className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
                               >
                                 <Eye className="h-3.5 w-3.5" />
                               </button>
@@ -5959,12 +6007,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                           setAssignCustomAmount('');
                                           setAssignCustomDays('');
                                         }}
-                                      className={`
-                                        cursor-pointer p-3 rounded-xl border text-left transition relative
-                                        ${isSelected 
-                                          ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' 
-                                          : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:bg-slate-800/60'}
-                                      `}
+                                      className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
                                     >
                                       <div className="flex justify-between items-start">
                                         <div>
@@ -6170,7 +6213,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           <button
                             type="button"
                             onClick={() => setIsAssignPlanModalOpen(false)}
-                            className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:bg-white/5 transition"
+                            className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"
                           >
                             Cancel
                           </button>
@@ -6232,9 +6275,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                     setClientDuplicateError(null);
                                   }
                                 }}
-                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${
-                                  clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'
-                                }`}
+                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${ clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500' }`}
                                 placeholder="rahul@example.com"
                               />
                               {clientDuplicateField === 'email' && (
@@ -6253,9 +6294,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                     setClientDuplicateError(null);
                                   }
                                 }}
-                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${
-                                  clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'
-                                }`}
+                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${ clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500' }`}
                                 placeholder="10-digit mobile number"
                                 maxLength={10}
                               />
@@ -6299,9 +6338,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                     setClientDuplicateError(null);
                                   }
                                 }}
-                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${
-                                  clientDuplicateField === 'pan' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'
-                                }`}
+                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${ clientDuplicateField === 'pan' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500' }`}
                                 placeholder="ABCDE1234F"
                                 maxLength={10}
                               />
@@ -6320,9 +6357,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                     setClientDuplicateError(null);
                                   }
                                 }}
-                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${
-                                  clientDuplicateField === 'aadhaar' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'
-                                }`}
+                                className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${ clientDuplicateField === 'aadhaar' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500' }`}
                                 placeholder="12-digit Aadhaar"
                                 maxLength={12}
                               />
@@ -6411,7 +6446,7 @@ const [orgAddress, setOrgAddress] = useState('');
                             setClientDuplicateField(null);
                             setClientDuplicateError(null);
                           }}
-                          className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
+                          className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
                         >
                           Cancel
                         </button>
@@ -6477,7 +6512,7 @@ const [orgAddress, setOrgAddress] = useState('');
                               setClientModalLoading(false);
                             }
                           }}
-                          className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-900 dark:text-white rounded-xl text-xs font-bold transition"
+                          className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition"
                         >
                           {clientModalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                           <span>{clientModalLoading ? 'Registering...' : 'Register Client'}</span>
@@ -6649,7 +6684,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           <button
                             type="button"
                             onClick={() => setIsEditClientModalOpen(false)}
-                            className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
+                            className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
                           >
                             Cancel
                           </button>
@@ -6705,7 +6740,7 @@ const [orgAddress, setOrgAddress] = useState('');
                           <button
                             key={tab.id}
                             onClick={() => setClientDetailsTab(tab.id as any)}
-                            className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-slate-900 dark:text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                            className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
                           >
                             {tab.label}
                           </button>
@@ -6789,7 +6824,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                         </div>
                                         <div className="flex items-center space-x-2">
                                           <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${doc.status === 'VERIFIED' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>{doc.status}</span>
-                                          <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white transition"><Eye className="h-3 w-3" /></a>
+                                          <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white transition"><Eye className="h-3 w-3" /></a>
                                         </div>
                                       </div>
                                     ))}
@@ -6818,7 +6853,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                         href={`${api.getBaseUrl()}${agr.agreementUrl}`}
                                         target="_blank"
                                         rel="noreferrer"
-                                        className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
+                                        className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
                                       >
                                         <Eye className="h-3.5 w-3.5" />
                                         <span>View Agreement</span>
@@ -6854,7 +6889,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                         const isActive = date && date > now;
                                         const isExpired = date && date <= now;
                                         return (
-                                          <tr key={name} className="hover:bg-slate-100 dark:bg-white/5 transition">
+                                          <tr key={name} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                             <td className="py-2.5 px-4 font-bold text-slate-800 dark:text-slate-200">{name}</td>
                                             <td className="py-2.5 px-4 text-right font-mono">
                                               {isActive ? (
@@ -6944,7 +6979,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                       const isCustom = isCustomAmount || isCustomDays;
 
                                       return (
-                                        <tr key={sub.id} className="hover:bg-slate-100 dark:bg-white/5 transition">
+                                        <tr key={sub.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                           <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{idx + 1}</td>
                                           <td className="py-3 px-4">
                                             <div className="flex items-center space-x-2">
@@ -7032,7 +7067,7 @@ const [orgAddress, setOrgAddress] = useState('');
                               setIsViewClientModalOpen(false);
                               startEditClient(selectedClient);
                             }}
-                            className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-slate-900 dark:text-white transition"
+                            className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-white transition"
                           >
                             Edit Client Details
                           </button>
@@ -7042,7 +7077,7 @@ const [orgAddress, setOrgAddress] = useState('');
                             setIsViewClientModalOpen(false);
                             setSelectedClient(null);
                           }}
-                          className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:bg-white/5 transition"
+                          className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"
                         >
                           Close Details
                         </button>
@@ -7074,8 +7109,8 @@ const [orgAddress, setOrgAddress] = useState('');
 {activeTab === 'plans' && (
           <div className="space-y-6">
             <div className="flex space-x-4 border-b border-slate-400 dark:border-white/10 pb-4">
-              <button onClick={() => setPlanManagementTab('categories')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'categories' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Categories</button>
-              <button onClick={() => setPlanManagementTab('plans')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'plans' ? 'bg-primary-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Plans</button>
+              <button onClick={() => setPlanManagementTab('categories')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'categories' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Categories</button>
+              <button onClick={() => setPlanManagementTab('plans')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'plans' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Plans</button>
             </div>
 
             {planManagementTab === 'categories' && (
@@ -7096,7 +7131,7 @@ const [orgAddress, setOrgAddress] = useState('');
                         <span className={`px-2 py-1 text-[10px] font-bold rounded-md ${cat.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>{cat.status}</span>
                       </div>
                       <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">Segments: {cat.segments}</p>
-                      <button onClick={() => handleToggleCategoryStatus(cat.id)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold hover:bg-slate-200 dark:bg-slate-700">Toggle Status</button>
+                      <button onClick={() => handleToggleCategoryStatus(cat.id)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700">Toggle Status</button>
                     </div>
                   ))}
                 </div>
@@ -7112,7 +7147,7 @@ const [orgAddress, setOrgAddress] = useState('');
                       <Trash2 className="h-4 w-4" /> <span>{showDeletedPlans ? 'View Active Plans' : 'View Deleted Plans'}</span>
                     </button>
                     {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                      <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-slate-900 font-bold rounded-xl text-xs transition flex items-center space-x-2">
+                      <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
                         <Plus className="h-4 w-4" /> <span>Create New Plan</span>
                       </button>
                     )}
@@ -7123,7 +7158,7 @@ const [orgAddress, setOrgAddress] = useState('');
                 <div className="flex space-x-3 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                   <button 
                     onClick={() => setSelectedCategoryFilter('ALL')}
-                    className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5'}`}
+                    className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
                   >
                     All Plans
                   </button>
@@ -7131,7 +7166,7 @@ const [orgAddress, setOrgAddress] = useState('');
                     <button 
                       key={cat.id}
                       onClick={() => setSelectedCategoryFilter(cat.id)}
-                      className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5'}`}
+                      className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
                     >
                       {cat.name}
                     </button>
@@ -7175,12 +7210,12 @@ const [orgAddress, setOrgAddress] = useState('');
                           {!isDeleted ? (
                             <>
                               {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
                                   <Edit2 className="h-3 w-3" /> <span>Edit</span>
                                 </button>
                               )}
                               {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                <button onClick={() => handleTogglePlanStatus(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                <button onClick={() => handleTogglePlanStatus(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
                                   <span>Toggle</span>
                                 </button>
                               )}
@@ -7236,11 +7271,7 @@ const [orgAddress, setOrgAddress] = useState('');
                 <button
                   key={tab.id}
                   onClick={() => setSettingsTab(tab.id as any)}
-                  className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${
-                    settingsTab === tab.id 
-                      ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
-                  }`}
+                  className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${ settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50' }`}
                 >
                   <tab.icon className="h-4 w-4" />
                   <span>{tab.label}</span>
@@ -7483,11 +7514,7 @@ const [orgAddress, setOrgAddress] = useState('');
                     <button
                       key={tab.id}
                       onClick={() => setIntegrationTab(tab.id as any)}
-                      className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${
-                        integrationTab === tab.id 
-                          ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' 
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'
-                      }`}
+                      className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${ integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50' }`}
                     >
                       <tab.icon className="h-4 w-4" />
                       <span>{tab.label}</span>
@@ -7870,7 +7897,7 @@ const [orgAddress, setOrgAddress] = useState('');
                                 setIsEditRoleModalOpen(true);
                               }}
                               disabled={selectedRole.isAssigned}
-                              className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                               title={selectedRole.isAssigned ? "This role is currently assigned to users and cannot be modified." : "Edit this custom role's name and description"}
                             >
                               <Edit2 className="h-3 w-3 mr-1" /> Edit Role
@@ -8028,7 +8055,7 @@ const [orgAddress, setOrgAddress] = useState('');
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
               <h3 className="text-xl font-bold">{editingPlan ? 'Edit Plan' : 'Create New Plan'}</h3>
-              <button onClick={() => setIsPlanModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+              <button onClick={() => setIsPlanModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6 overflow-y-auto">
               <form id="planForm" onSubmit={async (e) => {
@@ -8086,7 +8113,7 @@ const [orgAddress, setOrgAddress] = useState('');
               </form>
             </div>
             <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-              <button onClick={() => setIsPlanModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5 transition">Cancel</button>
+              <button onClick={() => setIsPlanModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
               <button type="submit" form="planForm" className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20">{editingPlan ? 'Update Plan' : 'Create Plan'}</button>
             </div>
           </div>
@@ -8099,7 +8126,7 @@ const [orgAddress, setOrgAddress] = useState('');
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
             <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
               <h3 className="text-xl font-bold">Create Category</h3>
-              <button onClick={() => setIsCategoryModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+              <button onClick={() => setIsCategoryModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6">
               <form id="catForm" onSubmit={handleCreateCategory} className="space-y-5">
@@ -8124,7 +8151,7 @@ const [orgAddress, setOrgAddress] = useState('');
               </form>
             </div>
             <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-              <button onClick={() => setIsCategoryModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5 transition">Cancel</button>
+              <button onClick={() => setIsCategoryModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
               <button type="submit" form="catForm" className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20">Create Category</button>
             </div>
           </div>
@@ -8137,7 +8164,7 @@ const [orgAddress, setOrgAddress] = useState('');
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
             <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
               <h3 className="text-xl font-bold">Create Custom Role</h3>
-              <button onClick={() => setIsRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+              <button onClick={() => setIsRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6">
               <form id="roleForm" onSubmit={handleCreateRole} className="space-y-5">
@@ -8165,7 +8192,7 @@ const [orgAddress, setOrgAddress] = useState('');
               </form>
             </div>
             <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-              <button onClick={() => setIsRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5 transition">Cancel</button>
+              <button onClick={() => setIsRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
               <button type="submit" form="roleForm" disabled={roleModalLoading} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50">
                 {roleModalLoading ? 'Creating...' : 'Create Role'}
               </button>
@@ -8180,7 +8207,7 @@ const [orgAddress, setOrgAddress] = useState('');
           <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
             <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
               <h3 className="text-xl font-bold">Edit Custom Role</h3>
-              <button onClick={() => setIsEditRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+              <button onClick={() => setIsEditRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6">
               <form id="editRoleForm" onSubmit={handleEditRole} className="space-y-5">
@@ -8208,7 +8235,7 @@ const [orgAddress, setOrgAddress] = useState('');
               </form>
             </div>
             <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-              <button onClick={() => setIsEditRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-white/5 transition">Cancel</button>
+              <button onClick={() => setIsEditRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
               <button type="submit" form="editRoleForm" disabled={editRoleModalLoading} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50">
                 {editRoleModalLoading ? 'Saving...' : 'Save Changes'}
               </button>
@@ -8233,7 +8260,7 @@ const [orgAddress, setOrgAddress] = useState('');
               </div>
               <button 
                 onClick={() => setIsProfileModalOpen(false)} 
-                className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:bg-white/5 transition"
+                className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -8452,7 +8479,7 @@ const [orgAddress, setOrgAddress] = useState('');
               </div>
               <div>
                 <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">ATR Proof Document (PDF / Image) *</label>
-                <div className="border border-dashed border-slate-400 dark:border-white/15 rounded-xl p-4 text-center bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:bg-white/10 transition relative">
+                <div className="border border-dashed border-slate-400 dark:border-white/15 rounded-xl p-4 text-center bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 transition relative">
                   <input
                     type="file"
                     accept=".pdf,.jpg,.jpeg,.png"
@@ -8506,6 +8533,7 @@ const [orgAddress, setOrgAddress] = useState('');
         />
       )}
       </div>
+      </div>
       </main>
 
       {closingAlertId && (() => {
@@ -8547,7 +8575,7 @@ const [orgAddress, setOrgAddress] = useState('');
                   />
                 </div>
                 <div className="flex space-x-3 pt-2 justify-end text-xs">
-                  <button type="button" onClick={() => setClosingAlertId(null)} className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-lg hover:bg-slate-100 dark:bg-white/5">Cancel</button>
+                  <button type="button" onClick={() => setClosingAlertId(null)} className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5">Cancel</button>
                   <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold">Submit & Close Alert</button>
                 </div>
               </form>
@@ -8632,8 +8660,8 @@ const [orgAddress, setOrgAddress] = useState('');
               </div>
               
               <div className="mt-6 flex justify-end space-x-3">
-                <button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-lg hover:bg-slate-100 dark:bg-white/5 text-sm transition">Cancel</button>
-                <button type="submit" disabled={downloadingReport} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-900 dark:text-white rounded-lg font-bold text-sm transition flex items-center space-x-2 disabled:opacity-50">
+                <button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 text-sm transition">Cancel</button>
+                <button type="submit" disabled={downloadingReport} className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-sm transition flex items-center space-x-2 disabled:opacity-50">
                   {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                   <span>Agree & Download</span>
                 </button>
@@ -8802,7 +8830,7 @@ const [orgAddress, setOrgAddress] = useState('');
                     <textarea required rows={4} value={complaintDescription} onChange={(e) => setComplaintDescription(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500" placeholder="Provide full details of the complaint..."></textarea>
                   </div>
                   <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200 dark:border-white/10">
-                    <button type="button" onClick={() => setIsComplaintModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+                    <button type="button" onClick={() => setIsComplaintModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
                     <button type="submit" disabled={isSubmittingComplaint} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors flex items-center shadow-lg shadow-primary-500/20 disabled:opacity-50">
                       {isSubmittingComplaint ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />} Submit Complaint
                     </button>
@@ -8825,11 +8853,11 @@ const [orgAddress, setOrgAddress] = useState('');
               <div className="flex flex-col space-y-3">
                 <button onClick={() => handleLogout(false)} className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-rose-500/20">Sign out on this device</button>
                 <button onClick={() => handleLogout(true)} className="w-full py-2.5 bg-rose-950/40 border border-rose-500/30 text-rose-500 hover:bg-rose-900/40 text-sm font-bold rounded-xl transition-colors">Sign out on ALL devices</button>
-                <button onClick={() => setIsLogoutModalOpen(false)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300 mt-2">Cancel</button>
+                <button onClick={() => setIsLogoutModalOpen(false)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300 mt-2">Cancel</button>
               </div>
             ) : (
               <div className="flex justify-center space-x-3">
-                <button onClick={() => setIsLogoutModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
+                <button onClick={() => setIsLogoutModalOpen(false)} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
                 <button onClick={() => handleLogout(false)} className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-rose-500/20">Log Out</button>
               </div>
             )}
@@ -8842,3 +8870,5 @@ const [orgAddress, setOrgAddress] = useState('');
 }
 
 export default dynamic(() => Promise.resolve(AdminDashboardContent), { ssr: false });
+
+

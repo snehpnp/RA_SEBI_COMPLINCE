@@ -14,6 +14,7 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
   const [showPassword, setShowPassword] = useState(false);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
@@ -64,12 +65,14 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setIsSubmitting(true);
     setError(null);
 
     try {
       const res = await api.login({ email, password });
       if (res.success) {
+        setIsSubmitting(false);
+        setLoading(true);
         const user = res.data.user;
         if (user.tenantName) setTenantName(user.tenantName);
         if (user.tenantLogo) setTenantLogo(user.tenantLogo);
@@ -83,17 +86,17 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
         }
         return; // Early return to avoid setting loading to false
       } else {
-        setLoading(false);
+        setIsSubmitting(false);
       }
     } catch (err: any) {
       setError(err.message || 'Login failed. Check credentials.');
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setIsSubmitting(true);
     setError(null);
     setForgotSuccess(null);
 
@@ -107,7 +110,7 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
     } catch (err: any) {
       setError(err.message || 'Failed to request password reset.');
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -132,7 +135,7 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
                 )}
                 <h1 className="text-4xl sm:text-5xl font-black tracking-widest uppercase">
                   <span className="bg-gradient-to-r from-primary-400 via-emerald-400 to-primary-600 bg-clip-text text-transparent drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">
-                    {tenantName}
+                    RAGCP
                   </span>
                 </h1>
               </div>
@@ -191,20 +194,20 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
         {/* Brand */}
         <div className="flex items-center justify-center space-x-2 mb-8">
           <ShieldCheck className="h-10 w-10 text-primary-600 dark:text-primary-500" />
-          <span className="text-2xl font-black tracking-wider bg-gradient-to-r from-white to-primary-400 bg-clip-text text-transparent">
+          <span className="text-2xl font-black tracking-wider bg-gradient-to-r from-slate-900 dark:from-white to-primary-600 dark:to-primary-400 bg-clip-text text-transparent">
             RAGCP
           </span>
         </div>
 
         {/* Card */}
-        <div className="glassmorphism p-8 rounded-2xl border border-slate-400 dark:border-white/10 shadow-2xl">
+        <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-10 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.1)] relative">
           <h2 className="text-xl font-bold mb-2">Access Platform</h2>
           <p className="text-slate-600 dark:text-slate-400 text-xs mb-6">Enter your credential tokens to authenticate session</p>
 
           {error && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-200 text-xs rounded-xl flex items-center space-x-2">
-              <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
-              <span>{error}</span>
+            <div className="mb-4 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-200 text-sm rounded-xl flex items-center space-x-3 shadow-sm shadow-red-100 dark:shadow-none animate-fade-in-up">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <span className="font-medium">{error}</span>
             </div>
           )}
 
@@ -220,45 +223,44 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Email Address</label>
               <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
-                  <Mail className="h-4 w-4" />
+                <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                  <Mail className="h-5 w-5" />
                 </span>
-                <div className="relative w-full"><input
+                <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-900/50 border border-slate-400 dark:border-white/15 rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none focus:border-primary-500 transition placeholder:text-slate-600"
+                  className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   placeholder="name@company.com"
                 />
-              </div>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Password</label>
               <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
-                  <Lock className="h-4 w-4" />
+                <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                  <Lock className="h-5 w-5" />
                 </span>
                 <input
                   type={showPassword ? 'text' : 'password'}required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-900/50 border border-slate-400 dark:border-white/15 rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none focus:border-primary-500 transition placeholder:text-slate-600"
+                  className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl py-3.5 pl-11 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   placeholder="••••••••"
                 />
 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary-500 focus:outline-none">
-  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
 </button></div>
               </div>
             </div>
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full py-3 bg-primary-600 hover:bg-primary-500 rounded-xl font-semibold text-sm transition hover-lift shadow-lg shadow-primary-600/20 flex items-center justify-center space-x-2 disabled:opacity-50"
+              disabled={isSubmitting}
+              className="w-full py-3.5 bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 text-white rounded-xl font-semibold text-sm transition-all duration-300 hover:shadow-lg hover:shadow-primary-500/30 active:scale-[0.98] flex items-center justify-center space-x-2 disabled:opacity-50 disabled:pointer-events-none"
             >
-              {loading ? (
+              {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span>Authenticating...</span>
@@ -287,25 +289,25 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Registered Email Address</label>
                 <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
-                    <Mail className="h-4 w-4" />
+                  <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                    <Mail className="h-5 w-5" />
                   </span>
                   <input
                     type="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-white dark:bg-slate-900/50 border border-slate-400 dark:border-white/15 rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none focus:border-primary-500 transition placeholder:text-slate-600"
+                    className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl py-3.5 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500"
                     placeholder="name@company.com"
                   />
                 </div>
               </div>
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-semibold text-sm transition hover-lift shadow-lg shadow-emerald-600/20 flex items-center justify-center space-x-2 disabled:opacity-50"
+                disabled={isSubmitting}
+                className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl font-semibold text-sm transition-all duration-300 hover:shadow-lg hover:shadow-emerald-500/30 active:scale-[0.98] flex items-center justify-center space-x-2 disabled:opacity-50 disabled:pointer-events-none"
               >
-                {loading ? (
+                {isSubmitting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <span>Reset Password</span>
@@ -346,7 +348,7 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
               <div className="mt-6 flex justify-end">
                 <button 
                   onClick={() => setInactivePopup(false)}
-                  className="px-6 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-900 dark:text-white rounded-xl text-sm font-bold transition"
+                  className="px-6 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-white rounded-xl text-sm font-bold transition"
                 >
                   Close
                 </button>

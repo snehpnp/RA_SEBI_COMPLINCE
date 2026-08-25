@@ -109,7 +109,7 @@ export default function TicketManagement({
                 setAdminTicketStatusFilter(status);
                 setSelectedTicket(null);
               }}
-              className={`flex-1 text-xs py-2 font-semibold rounded-lg transition-colors ${adminTicketStatusFilter === status ? 'bg-primary-500 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+              className={`flex-1 text-xs py-2 font-semibold rounded-lg transition-colors ${adminTicketStatusFilter === status ? 'bg-primary-500 text-slate-900 dark:text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
             >
               {status}
             </button>

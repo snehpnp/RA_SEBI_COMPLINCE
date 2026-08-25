@@ -6,7 +6,7 @@ async function main() {
     orderBy: { createdAt: 'desc' },
     take: 5
   });
-  console.log("Recent 5 Ticket Messages:");
+
   console.dir(msgs, { depth: null });
 }
 

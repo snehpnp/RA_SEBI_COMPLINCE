@@ -477,6 +477,14 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     <div className="min-h-screen bg-premium-bg text-premium-text flex flex-col items-center justify-center p-4 relative font-sans">
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-premium-primary/10 blur-[120px]" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-premium-success/10 blur-[120px]" />
+      
+      <button 
+        onClick={onComplete}
+        className="absolute top-8 left-8 flex items-center space-x-2 text-premium-text/60 hover:text-premium-primary font-medium transition-colors z-20 bg-premium-cards/50 px-4 py-2 rounded-xl border border-premium-border backdrop-blur-sm"
+      >
+        <ChevronLeft className="w-4 h-4" />
+        <span className="text-sm">Back to Dashboard</span>
+      </button>
 
       <div className="w-full max-w-4xl bg-premium-cards border border-premium-border rounded-3xl shadow-2xl relative z-10 flex flex-col md:flex-row min-h-[600px]">
         <div className="w-full md:w-1/3 bg-premium-bg/50 border-r border-premium-border p-8 hidden md:flex flex-col">

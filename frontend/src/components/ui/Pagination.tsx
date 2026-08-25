@@ -48,7 +48,7 @@ export function Pagination({
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage === 1}
-          className="p-1 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          className="p-1 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -71,11 +71,7 @@ export function Pagination({
               <button
                 key={pageNum}
                 onClick={() => onPageChange(pageNum)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition ${
-                  currentPage === pageNum
-                    ? 'bg-primary-600 text-slate-900 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-slate-800'
-                }`}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition ${ currentPage === pageNum ? 'bg-primary-600 text-white ' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800' }`}
               >
                 {pageNum}
               </button>
@@ -86,7 +82,7 @@ export function Pagination({
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage === totalPages}
-          className="p-1 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          className="p-1 rounded-md text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -94,3 +90,4 @@ export function Pagination({
     </div>
   );
 }
+

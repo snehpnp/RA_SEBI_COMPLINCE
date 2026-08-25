@@ -7,7 +7,6 @@ async function seedHistory() {
   const tenant = await prisma.tenant.findFirst({ where: { deletedAt: null } });
   if (!tenant) return console.log('No tenant found.');
 
-  console.log(`Seeding history for Tenant: ${tenant.companyName}`);
 
   // 1. Wipe existing
   await prisma.penalty.deleteMany({ where: { tenantId: tenant.id } });
@@ -106,7 +105,7 @@ async function seedHistory() {
     }
   }
 
-  console.log('Seeding completed successfully!');
+
 }
 
 seedHistory().catch(console.error).finally(() => prisma.$disconnect());
