@@ -12,10 +12,8 @@ import path from 'path';
 import cron from 'node-cron';
 import router from './routes/api';
 import prisma from './config/db';
-import { calculateCompleteness } from './controllers/adminController';
 import { initCronJobs } from './services/cronService';
-import swaggerUi from 'swagger-ui-express';
-import YAML from 'yamljs';
+
 
 
 const app = express();
