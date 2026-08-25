@@ -17,8 +17,6 @@ import { initCronJobs } from './services/cronService';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 
-const swaggerDocument = YAML.load(path.join(__dirname, '../swagger-output.yml'));
-
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
@@ -41,8 +39,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 // Routes mapping
 app.use('/api/v1', router);
 
-// Swagger Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
 
 // Health check endpoint
 app.get('/health', async (req: express.Request, res: express.Response) => {
