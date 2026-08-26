@@ -2691,12 +2691,12 @@ function AdminDashboardContent() {
           {isMobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
         </button>
 
-        {/* Premium Sidebar */}
-        <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
+        {/* Premium Sidebar (Blue in Light Mode) */}
+        <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
           } ${!isMobileMenuOpen && isSidebarCollapsed ? 'lg:w-20' : 'lg:w-72'}`}>
 
           {/* Brand */}
-          <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
+          <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
               {user?.tenantLogo ? (
                 <img src={user.tenantLogo} alt={user?.tenantName || appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
@@ -2712,7 +2712,7 @@ function AdminDashboardContent() {
             {!isSidebarCollapsed && (
               <button
                 onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
+                className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors shrink-0"
               >
                 <Menu className="w-5 h-5" />
               </button>
@@ -2720,7 +2720,7 @@ function AdminDashboardContent() {
             {isSidebarCollapsed && (
               <button
                 onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                className="hidden lg:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
+                className="hidden lg:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
               >
                 <Menu className="w-5 h-5" />
               </button>
@@ -2742,11 +2742,11 @@ function AdminDashboardContent() {
                         if (isSidebarCollapsed) setIsSidebarCollapsed(false);
                         setIsPagesExpanded(!isPagesExpanded);
                       }}
-                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-premium-text/70 hover:bg-premium-bg hover:text-premium-text group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                       title={isSidebarCollapsed ? mod.label : undefined}
                     >
                       <div className="flex items-center gap-4 min-w-0">
-                        <Icon className="w-5 h-5 text-premium-text/50 group-hover:text-premium-text/80 shrink-0" />
+                        <Icon className="w-5 h-5 text-blue-200 dark:text-white/50 group-hover:text-white shrink-0" />
                         {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
                       </div>
                       {!isSidebarCollapsed && (
@@ -2766,8 +2766,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                              ? 'bg-premium-primary/10 text-premium-primary font-medium'
-                              : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                              ? 'bg-white/20 text-white font-medium shadow-inner'
+                              : 'text-blue-100 dark:text-white/60 hover:text-white hover:bg-white/10'
                               }`}
                           >
                             {page.title}
@@ -2776,7 +2776,7 @@ function AdminDashboardContent() {
                         {!isStaff && (
                           <button
                             onClick={() => setActiveTab('customPages_new')}
-                            className="w-full text-left px-3 py-2 text-xs rounded-lg transition font-medium text-emerald-600 hover:text-emerald-500 hover:bg-emerald-500/10 mt-2"
+                            className="w-full text-left px-3 py-2 text-xs rounded-lg transition font-medium text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 mt-2"
                           >
                             + Add New Page
                           </button>
@@ -2796,15 +2796,15 @@ function AdminDashboardContent() {
                     setIsMobileMenuOpen(false);
                   }}
                   className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                    ? 'bg-white/20 text-white font-semibold shadow-inner'
+                    : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
                     } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                   title={isSidebarCollapsed ? mod.label : undefined}
                 >
-                  <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                  <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
                   {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
                   {!isSidebarCollapsed && isActive && (
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
                   )}
                 </button>
               );
@@ -2814,36 +2814,36 @@ function AdminDashboardContent() {
               <button
                 onClick={() => { setActiveTab('legalView'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${activeTab === 'legalView'
-                  ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                  : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                  ? 'bg-white/20 text-white font-semibold shadow-inner'
+                  : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                 title={isSidebarCollapsed ? "Legal & Disclosures" : undefined}
               >
-                <FileText className={`w-5 h-5 transition-colors shrink-0 ${activeTab === 'legalView' ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                <FileText className={`w-5 h-5 transition-colors shrink-0 ${activeTab === 'legalView' ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
                 {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">Legal & Disclosures</span>}
                 {!isSidebarCollapsed && activeTab === 'legalView' && (
-                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
                 )}
               </button>
             )}
           </div>
 
           {/* User Footer */}
-          <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
+          <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
             {/* Subtle background glow */}
-            <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
 
             <div
               onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+              className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
 
               {/* Shimmer effect inside the card */}
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
+              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
 
               <div className="relative shrink-0">
                 {/* Pulsing ring around avatar */}
-                <div className="absolute inset-0 rounded-full border-2 border-premium-primary/50 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-premium-primary to-indigo-600 flex items-center justify-center font-bold text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-primary)] relative z-10">
+                <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10">
                   {user?.firstName ? user.firstName.charAt(0).toUpperCase() : 'A'}
                 </div>
                 {/* Online indicator */}
@@ -2852,10 +2852,10 @@ function AdminDashboardContent() {
 
               {!isSidebarCollapsed && (
                 <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-premium-text">{user?.firstName || 'Admin'}</p>
+                  <p className="font-bold text-sm truncate text-white">{user?.firstName || 'Admin'}</p>
                   <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-premium-primary" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-premium-primary via-indigo-200 to-premium-primary animate-pulse">
+                    <ShieldCheck className="w-3 h-3 text-rose-500" />
+                    <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-rose-500 via-orange-200 to-rose-500 animate-pulse">
                       {user?.role || 'Staff'}
                     </p>
                   </div>
@@ -2866,8 +2866,8 @@ function AdminDashboardContent() {
                 <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
               )}
             </div>
-            <div className={`flex-1 mt-4 border-t border-slate-200/20 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-premium-danger/10 rounded-xl text-premium-text/60 hover:text-premium-danger transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
+            <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
+              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
                 {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
                 <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
               </button>
