@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  Layers, Target, FileText, CreditCard, Receipt, 
-  ShieldCheck, ShieldAlert, MessageSquare, Bell, User, Settings, 
-  Scale, LogOut, Menu, X, Loader2, ChevronRight, BarChart 
+import {
+  Layers, Target, FileText, CreditCard, Receipt,
+  ShieldCheck, ShieldAlert, MessageSquare, Bell, User, Settings,
+  Scale, LogOut, Menu, X, Loader2, ChevronRight, BarChart
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -43,7 +43,7 @@ function ClientPortalContent() {
 
   useEffect(() => {
     // Let ThemeProvider handle theme
-    
+
     const fetchData = async () => {
       try {
         const [profileRes, subRes, pagesRes] = await Promise.all([
@@ -51,21 +51,21 @@ function ClientPortalContent() {
           api.getClientSubscriptions().catch(() => ({ success: false, data: [] })),
           api.request('/pages').catch(() => ({ success: false, data: [] }))
         ]);
-        
+
         if (pagesRes?.success && pagesRes.data) {
           setPages(pagesRes.data);
         }
-        
+
         if (profileRes?.success && profileRes.data) {
           const p = profileRes.data;
           setProfile(p);
-          
+
           // Determine if user needs onboarding
           // Criteria: Needs VERIFIED KYC, signed agreement, and at least 1 active subscription.
           const isKycDone = p.kycStatus === 'VERIFIED' || p.kycStatus === 'APPROVED' || p.status === 'ACTIVE' || p.status === 'PAYMENT_PENDING' || p.status === 'AGREEMENT_PENDING';
           const isAgreementDone = !!p.agreementSigned || p.status === 'ACTIVE' || p.status === 'PAYMENT_PENDING';
           const hasActivePlan = subRes.success && subRes.data.length > 0;
-          
+
           if (hasActivePlan && (!isKycDone || !isAgreementDone)) {
             // Force onboarding if they have a plan (e.g. assigned by admin) but missing KYC/Agreement
             setShowOnboarding(true);
@@ -95,7 +95,6 @@ function ClientPortalContent() {
     { id: 'complaint-status', label: 'Complaint Data', icon: BarChart },
     { id: 'support', label: 'Support', icon: MessageSquare },
     { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'profile', label: 'My Profile', icon: User },
     { id: 'legal', label: 'Legal', icon: Scale },
   ];
 
@@ -117,17 +116,17 @@ function ClientPortalContent() {
       case 'support': return <SupportCenter />;
       case 'notifications': return <Notifications />;
       case 'profile': return <ProfileSettings />;
-      case 'legal': 
+      case 'legal':
         return (
-          <Legal 
-            pages={pages} 
+          <Legal
+            pages={pages}
             onReadDocument={(page: any) => {
               if (page.type === 'URL' && page.externalUrl) {
                 window.open(page.externalUrl, '_blank');
               } else {
                 setActiveTab(page.slug);
               }
-            }} 
+            }}
           />
         );
       default: {
@@ -157,16 +156,16 @@ function ClientPortalContent() {
 
   return (
     <div className="h-dvh bg-premium-bg text-premium-text flex font-sans overflow-hidden">
-      
 
-      <WelcomeInstructionModal 
-        profile={profile} 
-        onClose={() => {}} 
-        onStart={() => setShowOnboarding(true)} 
+
+      <WelcomeInstructionModal
+        profile={profile}
+        onClose={() => { }}
+        onStart={() => setShowOnboarding(true)}
       />
 
       {/* Mobile Menu Toggle */}
-      <button 
+      <button
         className="md:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
       >
@@ -174,10 +173,9 @@ function ClientPortalContent() {
       </button>
 
       {/* Premium Sidebar */}
-      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col ${
-        mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
-      } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
-        
+      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col ${mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
+        } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
+
         {/* Brand */}
         <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
@@ -191,16 +189,16 @@ function ClientPortalContent() {
             )}
           </div>
           {!isSidebarCollapsed && (
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="hidden md:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
             >
               <Menu className="w-5 h-5" />
             </button>
           )}
           {isSidebarCollapsed && (
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="hidden md:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
             >
               <Menu className="w-5 h-5" />
@@ -219,11 +217,10 @@ function ClientPortalContent() {
                   setActiveTab(item.id);
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${
-                  isActive 
-                  ? 'bg-premium-primary/10 text-premium-primary font-semibold' 
-                  : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
-                } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
+                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
+                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                  } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
               >
                 <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
                 {!isSidebarCollapsed && <span>{item.label}</span>}
@@ -251,7 +248,7 @@ function ClientPortalContent() {
                   </div>
                 )}
               </button>
-              
+
               {!isSidebarCollapsed && policiesExpanded && (
                 <div className="pl-12 pr-4 space-y-1 mt-1">
                   {pages.map((page) => (
@@ -265,11 +262,10 @@ function ClientPortalContent() {
                           setMobileMenuOpen(false);
                         }
                       }}
-                      className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${
-                        activeTab === page.slug
-                        ? 'bg-premium-primary/10 text-premium-primary font-medium'
-                        : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
-                      }`}
+                      className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === page.slug
+                          ? 'bg-premium-primary/10 text-premium-primary font-medium'
+                          : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                        }`}
                     >
                       {page.title}
                     </button>
@@ -284,12 +280,14 @@ function ClientPortalContent() {
         <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
           {/* Subtle background glow */}
           <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
-          
-          <div className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-            
+
+          <div
+            onClick={() => { setActiveTab('profile' as any); setMobileMenuOpen(false); }}
+            className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+
             {/* Shimmer effect inside the card */}
             <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-            
+
             <div className="relative shrink-0">
               {/* Pulsing ring around avatar */}
               <div className="absolute inset-0 rounded-full border-2 border-premium-warning/50 animate-ping opacity-75" />
@@ -299,10 +297,10 @@ function ClientPortalContent() {
               {/* Online/Verified indicator */}
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
             </div>
-            
+
             {!isSidebarCollapsed && (
               <div className="flex-1 min-w-0 relative z-10">
-                <p className="font-bold text-sm truncate text-premium-text">{profile?.name || 'Himanshu'}</p>
+                <p className="font-bold text-sm truncate text-premium-text">{profile?.name}</p>
                 <div className="flex items-center gap-1 mt-0.5">
                   <ShieldCheck className="w-3 h-3 text-premium-warning" />
                   <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-premium-warning via-amber-200 to-premium-warning animate-pulse">
@@ -311,7 +309,7 @@ function ClientPortalContent() {
                 </div>
               </div>
             )}
-            
+
             {!isSidebarCollapsed && (
               <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
             )}
@@ -329,7 +327,7 @@ function ClientPortalContent() {
       <main className="flex-1 h-dvh overflow-y-auto custom-scrollbar bg-premium-bg relative">
         {/* Subtle background glow for main content */}
         <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-premium-primary/5 blur-[150px] pointer-events-none" />
-        
+
         <div className="p-6 md:p-10 max-w-7xl mx-auto min-h-full relative z-10">
           {renderContent()}
         </div>

@@ -67,7 +67,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Background Cron Jobs
 // Run daily compliance check (Deposit levels, SEBI/NISM exipires, missing agreements)
 cron.schedule('0 0 * * *', async () => {
-  console.log('Running daily automated compliance sweep...');
+ 
   try {
     const tenants = await prisma.tenant.findMany({ where: { status: 'ACTIVE', deletedAt: null } });
     for (const tenant of tenants) {
@@ -124,7 +124,7 @@ cron.schedule('0 0 * * *', async () => {
         }
       }
     }
-    console.log('Automated compliance sweep finished.');
+   
   } catch (error) {
     console.error('Error running automated daily compliance cron:', error);
   }
@@ -132,7 +132,7 @@ cron.schedule('0 0 * * *', async () => {
 
 // Seed default permissions and bind to ADMIN / SUPER_ADMIN
 const ensurePermissions = async () => {
-  console.log('Verifying & seeding granular permissions...');
+ 
   try {
     const newPerms = [
       { code: 'CREATE_PLANS', name: 'Create Plans' },
@@ -167,7 +167,7 @@ const ensurePermissions = async () => {
     }
 
     // Seed missing system roles (SALES, MARKETING)
-    console.log('Verifying system roles...');
+   
     const rolesToSeed = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT', 'SALES', 'MARKETING'];
     for (const r of rolesToSeed) {
       await prisma.role.upsert({
@@ -230,7 +230,7 @@ const ensurePermissions = async () => {
       }
     }
 
-    console.log('Granular permissions seeding/verification complete.');
+ 
   } catch (err: any) {
     console.error('Failed to seed granular permissions:', err.message);
   }

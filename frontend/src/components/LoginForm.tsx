@@ -129,7 +129,7 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
               {/* Animated Company Name */}
               <div className="relative z-10 flex items-center justify-center animate-[float_4s_ease-in-out_infinite]">
                 {tenantLogo ? (
-                  <img src={`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${tenantLogo}`} alt="Company Logo" className="h-16 object-contain" />
+                  <img src={`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${tenantLogo}`} alt="Company Logo" className="h-16 object-contain" />
                 ) : (
                   <>
                     <img src="/logo-light.png" alt="RAGCP Logo" className="dark:hidden object-contain max-h-16" />

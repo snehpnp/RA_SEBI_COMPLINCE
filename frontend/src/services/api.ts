@@ -2,7 +2,7 @@ const getApiBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location.hostname.includes('pnpuniverse.in')) {
     return 'https://compliance.pnpuniverse.in/backend/api/v1';
   }
-  return process.env.NODE_ENV === 'production' 
+  return (process.env.NODE_ENV as string) === 'production' 
     ? 'https://compliance.pnpuniverse.in/backend/api/v1' 
     : 'http://localhost:5000/api/v1';
 };
@@ -90,12 +90,50 @@ class ApiClient {
     const data = await response.json();
     if (!response.ok) {
       const err = new Error(data.message || 'Something went wrong') as any;
+      err.response = { data };
       err.duplicateField = data.duplicateField;
       err.duplicateFields = data.duplicateFields || [];
       err.errors = data.errors;
       throw err;
     }
     return data;
+  }
+
+  async get(endpoint: string, options: RequestInit = {}) {
+    const data = await this.request(endpoint, { ...options, method: 'GET' });
+    return { data };
+  }
+
+  async post(endpoint: string, payload?: any, options: RequestInit = {}) {
+    const data = await this.request(endpoint, {
+      ...options,
+      method: 'POST',
+      body: payload ? (payload instanceof FormData ? payload : JSON.stringify(payload)) : undefined,
+    });
+    return { data };
+  }
+
+  async put(endpoint: string, payload?: any, options: RequestInit = {}) {
+    const data = await this.request(endpoint, {
+      ...options,
+      method: 'PUT',
+      body: payload ? (payload instanceof FormData ? payload : JSON.stringify(payload)) : undefined,
+    });
+    return { data };
+  }
+
+  async delete(endpoint: string, options: RequestInit = {}) {
+    const data = await this.request(endpoint, { ...options, method: 'DELETE' });
+    return { data };
+  }
+
+  async patch(endpoint: string, payload?: any, options: RequestInit = {}) {
+    const data = await this.request(endpoint, {
+      ...options,
+      method: 'PATCH',
+      body: payload ? (payload instanceof FormData ? payload : JSON.stringify(payload)) : undefined,
+    });
+    return { data };
   }
 
   // Auth Methods
@@ -395,7 +433,7 @@ class ApiClient {
     });
   }
 
-  async verifyKRA(payload: { pan: string; statusInput: string; aadhaar?: string }) {
+  async verifyKRA(payload: { pan: string; statusInput?: string; aadhaar?: string }) {
     return this.request('/client/kyc/verify', {
       method: 'POST',
       body: JSON.stringify(payload)

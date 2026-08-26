@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { MessageSquare, PhoneCall, HelpCircle, Plus, Search, ChevronDown, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
+import { MessageSquare, PhoneCall, HelpCircle, Plus, Search, ChevronDown, CheckCircle2, ShieldCheck, Loader2, User } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 

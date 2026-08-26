@@ -6,7 +6,7 @@ import { logAudit } from '../services/auditService';
 import { calculateCompleteness } from './adminController';
 
 export const checkComplianceForTenant = async (tenantId: string) => {
-  console.log("HELLO FROM SWEEP - EXECUTING MODIFIED FILE");
+
   const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId },
     include: { users: { include: { staff: true, client: true } } }
@@ -536,9 +536,7 @@ export const checkComplianceForTenant = async (tenantId: string) => {
 
   // 5D. MISSING COMPLIANCE OFFICER CHECK (SR.8)
   const hasComplianceOfficer = staffMembers.some(st => st.user?.role?.name === 'COMPLIANCE_OFFICER');
-  console.log("hasComplianceOfficer:", hasComplianceOfficer);
-  console.log("Staff roles:", staffMembers.map(st => st.user?.role?.name));
-  const existingCoAlert = await prisma.complianceAlert.findFirst({
+ const existingCoAlert = await prisma.complianceAlert.findFirst({
     where: { tenantId, alertType: 'MISSING_COMPLIANCE_OFFICER', status: 'OPEN' }
   });
   if (!hasComplianceOfficer) {

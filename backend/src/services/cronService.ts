@@ -5,7 +5,7 @@ import { getAlertThresholdsForFrequency } from '../utils/complianceDateHelper';
 export const initCronJobs = () => {
   // Run every night at midnight
   cron.schedule('0 0 * * *', async () => {
-    console.log('[CRON] Running daily compliance deadline check...');
+   
     try {
       const now = new Date();
       // Find all pending audits with a due date
@@ -46,8 +46,7 @@ export const initCronJobs = () => {
 
           if (isProgressive && pastViolationsCount === 0) {
             // First time missing it -> WARNING
-            console.log(`[CRON] First Violation Warning for tenant ${audit.tenant.companyName} on rule ${audit.requirement.serialNo}`);
-            
+           
             await prisma.complianceAudit.update({
               where: { id: audit.id },
               data: { status: 'WARNING_ISSUED' }
@@ -63,8 +62,7 @@ export const initCronJobs = () => {
             });
 
           } else {
-            // Second time, or regular rule -> Financial Penalty
-            console.log(`[CRON] Penalty applied for tenant ${audit.tenant.companyName} on rule ${audit.requirement.serialNo}`);
+      
             
             await prisma.complianceAudit.update({
               where: { id: audit.id },
@@ -144,11 +142,11 @@ export const initCronJobs = () => {
         */
       }
       
-      console.log(`[CRON] Daily check completed. Applied ${pendingAudits.length} penalties.`);
+
     } catch (error) {
       console.error('[CRON] Error running compliance check:', error);
     }
   });
 
-  console.log('[CRON] Compliance job scheduled (runs at midnight).');
+ 
 };

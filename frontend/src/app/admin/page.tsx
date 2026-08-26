@@ -1,11 +1,15 @@
 'use client';
 
+import AdminProfilePage from './profile/page';
+import StaffProfilePage from './staff-profile/page';
+import PAProfilePage from './pa-profile/page';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import AdminResourcesTab from '@/components/AdminResourcesTab';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { toast } from 'react-hot-toast';
 import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
@@ -2641,7 +2645,7 @@ const [orgAddress, setOrgAddress] = useState('');
   const handleBulkExport = async (type: string, isZip: boolean) => {
     try {
       setExportLoading(type);
-      const API_URL = process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : api.getBaseUrl() + '/api/v1';
+      const API_URL = (process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : api.getBaseUrl() + '/api/v1';
       let url = `${API_URL}/admin/exports/${type}`;
       if (exportRange === 'date' && exportStartDate && exportEndDate) {
         url += `?range=date&startDate=${exportStartDate}&endDate=${exportEndDate}`;
@@ -2831,7 +2835,9 @@ const [orgAddress, setOrgAddress] = useState('');
           {/* Subtle background glow */}
           <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
           
-          <div className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+          <div 
+            onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
+            className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
             
             {/* Shimmer effect inside the card */}
             <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
@@ -3052,6 +3058,54 @@ const [orgAddress, setOrgAddress] = useState('');
            ==================================================== */}
         {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
           <div className="space-y-8">
+            {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
+            {(() => {
+              const currentNav = NAV_CONFIG.find(n => 
+                n.tab === activeTab || 
+                (activeTab.startsWith('customPages_') && n.tab === 'customPages')
+              );
+              
+              if (!currentNav || activeTab === 'dashboard') return null;
+
+              const tabsMissingHeader = [
+                'checklist',
+                'compliance',
+                'plans',
+                'signature_settings',
+                'activeClientSummary',
+                'complaintDataView',
+                'legalView'
+              ];
+
+              if (!tabsMissingHeader.includes(activeTab) && !activeTab.startsWith('customPages_')) {
+                return null;
+              }
+
+              return (
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-2">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+                      {activeTab.startsWith('customPages_') 
+                        ? adminPagesList?.find((p: any) => p.slug === activeTab.split('_')[1])?.title || 'Custom Page'
+                        : currentNav.label}
+                    </h2>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                      {currentNav.moduleDesc || 'Manage and view details for this section.'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* PROFILE TAB */}
+            {activeTab === 'profile' && (
+              <>
+                {user?.role === 'ADMIN' && <AdminProfilePage />}
+                {(user?.role === 'STAFF' || user?.role === 'COMPLIANCE_OFFICER' || user?.role === 'RESEARCHER') && <StaffProfilePage />}
+                {user?.role === 'PRINCIPAL_ANALYST' && <PAProfilePage />}
+              </>
+            )}
+
             {/* DASHBOARD WIDGETS TAB */}
             {activeTab === 'dashboard' && (
               <div className="space-y-8">

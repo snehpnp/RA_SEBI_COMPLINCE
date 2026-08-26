@@ -42,7 +42,7 @@ const states = [
 ];
 
 async function main() {
-  console.log('Seeding states...');
+ 
   for (const state of states) {
     await prisma.state.upsert({
       where: { name: state.name },
@@ -56,7 +56,7 @@ async function main() {
 main()
   .catch((e) => {
     console.error(e);
-    process.exit(1);
+ 
   })
   .finally(async () => {
     await prisma.$disconnect();

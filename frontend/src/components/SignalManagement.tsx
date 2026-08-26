@@ -92,7 +92,7 @@ export default function SignalManagement({
     try {
       const formData = new FormData();
       formData.append('coSignature', file);
-      const res = await fetch((process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : (process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1') + '/admin/signature', {
+      const res = await fetch(((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1') + '/admin/signature', {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -207,7 +207,7 @@ export default function SignalManagement({
     try {
       const formData = new FormData();
       formData.append('report', file);
-      const res = await fetch(`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : (process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1')}/signals/${signal.id}/report`, {
+      const res = await fetch(`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1')}/signals/${signal.id}/report`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -663,7 +663,7 @@ export default function SignalManagement({
                                   )}
                                   {s.reportUrl && (
                                     <>
-                                      <a href={`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}/api/v1/download?path=${encodeURIComponent(s.reportUrl)}`} target="_blank" rel="noreferrer" className="p-1 bg-blue-500/10 hover:bg-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg transition-all duration-300 inline-flex" title="Download Report">
+                                      <a href={`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}/api/v1/download?path=${encodeURIComponent(s.reportUrl)}`} target="_blank" rel="noreferrer" className="p-1 bg-blue-500/10 hover:bg-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg transition-all duration-300 inline-flex" title="Download Report">
                                         <Download className="w-4 h-4" />
                                       </a>
                                       {!isViewOnly && (
@@ -1323,7 +1323,7 @@ export default function SignalManagement({
                   {viewSignalDetails.reportUrl && (
                     <div>
                       <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-2">Attached Report</p>
-                      <a href={`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}/api/v1/download?path=${encodeURIComponent(viewSignalDetails.reportUrl)}`} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center gap-2">
+                      <a href={`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}/api/v1/download?path=${encodeURIComponent(viewSignalDetails.reportUrl)}`} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline text-sm flex items-center gap-2">
                         <Download className="w-4 h-4" /> Download Report
                       </a>
                     </div>

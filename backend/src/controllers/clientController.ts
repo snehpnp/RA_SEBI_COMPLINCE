@@ -397,8 +397,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
         where: { id: clientId },
         data: { category: 'NON_INDIVIDUAL' }
       });
-      console.log(`High-value transaction detected. Client ${client.name} category upgraded to NON_INDIVIDUAL.`);
-    }
+     }
 
     // Check cash payment rule (if UPI/Bank cash deposit)
     // Cash payment >= 50,000 triggers an FIU case (ComplianceAlert)
@@ -575,8 +574,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
               where: { id: client.id },
               data: { category: 'NON_INDIVIDUAL' }
             });
-            console.log(`High-value manual transaction detected. Client ${client.name} category forced to NON_INDIVIDUAL.`);
-          }
+            }
           if (payment.paymentMode !== 'ONLINE_RAZORPAY' && payment.amount >= 50000) {
             await prisma.complianceAlert.create({
               data: {

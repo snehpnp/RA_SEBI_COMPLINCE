@@ -159,7 +159,7 @@ export default function MarketSignals() {
               </button>
               {signal.reportUrl && (
                  <a 
-                   href={`${(process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${signal.reportUrl}`} 
+                   href={`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${signal.reportUrl}`} 
                    target="_blank" 
                    rel="noreferrer"
                    onClick={(e) => e.stopPropagation()}

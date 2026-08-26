@@ -1999,8 +1999,6 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
   const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, address, website, mobile } = req.body;
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-  console.log('[DEBUG] updateTenantSettings req.body:', req.body);
-
 
   try {
     const oldTenant = await prisma.tenant.findUnique({ where: { id: tenantId } });

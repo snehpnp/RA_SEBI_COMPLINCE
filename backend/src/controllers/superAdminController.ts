@@ -99,11 +99,7 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
 
     let ocrExtractedReg = sebiRegistration;
     
-    // Simulate OCR Extraction
-    if (certificateUrl) {
-      console.log('Running mock SEBI Certificate OCR extraction...');
-    }
-
+  
     // Generate credentials
     const randomPassword = 'Temp@' + Math.floor(1000 + Math.random() * 9000);
     const salt = await bcrypt.genSalt(10);
@@ -756,9 +752,7 @@ export const parseSebiCertificate = async (req: AuthenticatedRequest, res: Respo
     // Extract text using OCR-enabled utility (tries native first, then OCR fallback)
     const text = await extractTextFromPdf(file.path);
 
-    console.log('--- SEBI PDF EXTRACTION TEXT ---');
-    console.log(text);
-    console.log('--------------------------------');
+
 
     // If still no readable text after OCR, return graceful fallback
     if (!text || text.trim().length < 20) {
@@ -851,9 +845,7 @@ export const parseNismCertificate = async (req: AuthenticatedRequest, res: Respo
     // Extract text using OCR-enabled utility (tries native first, then OCR fallback)
     const text = await extractTextFromPdf(file.path);
 
-    console.log('--- NISM PDF EXTRACTION TEXT ---');
-    console.log(text);
-    console.log('--------------------------------');
+
 
     // If still no readable text after OCR, return graceful fallback
     if (!text || text.trim().length < 20) {

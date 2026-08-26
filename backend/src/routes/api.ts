@@ -23,6 +23,7 @@ import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission 
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
+import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
 
 const router = Router();
 
@@ -94,6 +95,18 @@ router.post('/auth/logout', authenticateJWT, logout);
 router.get('/public/tenants', getPublicTenants);
 router.post('/public/request-otp', requestOtp);
 router.post('/public/verify-otp', verifyOtp);
+// ----------------------------------------------------
+// PROFILE
+// ----------------------------------------------------
+router.get('/profile/super-admin', authenticateJWT, requireRoles(['SUPER_ADMIN']), getSuperAdminProfile);
+router.put('/profile/super-admin', authenticateJWT, requireRoles(['SUPER_ADMIN']), updateSuperAdminProfile);
+
+router.get('/profile/admin', authenticateJWT, requireRoles(['ADMIN']), getAdminProfile);
+router.put('/profile/admin', authenticateJWT, requireRoles(['ADMIN']), updateAdminProfile);
+
+router.get('/profile/staff', authenticateJWT, requireRoles(['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED']), getStaffProfile);
+router.put('/profile/staff', authenticateJWT, requireRoles(['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED']), updateStaffProfile);
+
 // ----------------------------------------------------
 // SUPER ADMIN PORTAL
 // ----------------------------------------------------

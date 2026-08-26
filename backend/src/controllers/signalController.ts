@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 export const getStocks = async (req: Request, res: Response) => {
-  console.log('GET STOCKS QUERY:', req.query);
+ 
   try {
     const { query } = req.query;
     let whereClause = {};

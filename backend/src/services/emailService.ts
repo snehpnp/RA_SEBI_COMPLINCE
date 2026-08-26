@@ -58,7 +58,7 @@ export async function sendEmail(
       },
     });
 
-    console.log('[EMAIL] Sent successfully to:', to, '| Subject:', subject);
+
     return true;
   } catch (err: any) {
     console.error('[EMAIL] Failed to send email to:', to, '| Error:', err.message);

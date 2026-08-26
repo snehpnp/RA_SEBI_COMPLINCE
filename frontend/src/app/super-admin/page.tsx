@@ -11,6 +11,8 @@ import { PaginatedList } from '@/components/ui/PaginatedList';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import dynamic from 'next/dynamic';
+import SuperAdminProfilePage from './profile/page';
+
 
 const renderAuditDiff = (oldStr: string | null, newStr: string | null) => {
   if (!oldStr && !newStr) return <span className="text-slate-600 italic">No diff payload</span>;
@@ -759,8 +761,7 @@ function SuperAdminDashboardContent() {
             { id: 'matrix', label: 'Compliance Matrix', icon: ShieldCheck },
             { id: 'compliance', label: 'Compliance Center', icon: AlertTriangle },
             { id: 'audit', label: 'Audit Trails', icon: ClipboardList },
-            { id: 'resources', label: 'Resources', icon: FileText },
-            { id: 'profile', label: 'Profile', icon: User }
+            { id: 'resources', label: 'Resources', icon: FileText }
           ].map((item) => {
             const isActive = activeTab === item.id;
             return (
@@ -790,8 +791,9 @@ function SuperAdminDashboardContent() {
         {/* User Footer */}
         <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
           <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
-          
-          <div className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+          <div 
+            onClick={() => { setActiveTab('profile'); setMobileMenuOpen(false); }}
+            className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
             <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
             
             <div className="relative shrink-0">
@@ -830,6 +832,42 @@ function SuperAdminDashboardContent() {
       {/* Main Content Area */}
       <main className="flex-grow p-10 overflow-y-auto max-w-[1600px] mx-auto">
 
+        {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
+        {(() => {
+          if (activeTab === 'dashboard') return null;
+
+          const tabsMissingHeader = [
+            'matrix',
+            'audit',
+            'resources',
+            'compliance'
+          ];
+
+          if (!tabsMissingHeader.includes(activeTab)) return null;
+
+          const tabLabels: Record<string, { title: string, desc: string }> = {
+            matrix: { title: 'Pricing Matrix', desc: 'Manage system pricing and tiers' },
+            audit: { title: 'Compliance Audit', desc: 'System-wide compliance and event logs' },
+            resources: { title: 'Global Resources', desc: 'Manage global resource documents' },
+            compliance: { title: 'Compliance Telemetry', desc: 'Monitor compliance across all tenants' }
+          };
+
+          const currentNav = tabLabels[activeTab];
+          if (!currentNav) return null;
+
+          return (
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-6">
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+                  {currentNav.title}
+                </h2>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  {currentNav.desc}
+                </p>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 1. DASHBOARD TAB */}
         {activeTab === 'dashboard' && (
@@ -1470,28 +1508,8 @@ function SuperAdminDashboardContent() {
 
         {/* 5. PROFILE TAB */}
         {activeTab === 'profile' && (
-          <div className="space-y-6 max-w-xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 p-8 shadow-xl">
-              <h2 className="text-xl font-bold mb-6 flex items-center space-x-2 text-slate-900 dark:text-white">
-                <Key className="h-5 w-5 text-primary-600 dark:text-primary-400" />
-                <span>Change Password</span>
-              </h2>
-              {profileMessage && <div className="mb-6 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm rounded-xl font-medium">{profileMessage}</div>}
-              {profileError && <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-sm rounded-xl font-medium">{profileError}</div>}
-              <form onSubmit={handleProfileSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Current Password</label>
-                  <input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">New Password</label>
-                  <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
-                </div>
-                <button type="submit" className="w-full py-3 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-all shadow-lg shadow-primary-500/20 text-white mt-4">
-                  Update Password
-                </button>
-              </form>
-            </div>
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <SuperAdminProfilePage />
           </div>
         )}
       </main>

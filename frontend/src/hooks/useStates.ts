@@ -13,9 +13,9 @@ export function useStates() {
   useEffect(() => {
     const fetchStates = async () => {
       try {
-        const baseUrl = process.env.NODE_ENV === 'production' 
+        const baseUrl = (process.env.NODE_ENV as string) === 'production' 
           ? 'https://compliance.pnpuniverse.in/backend/api/v1' 
-          : (process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : (process.env.NODE_ENV === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1') + '';
+          : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1') + '';
         
         const response = await fetch(`${baseUrl}/locations/states`);
         const data = await response.json();
