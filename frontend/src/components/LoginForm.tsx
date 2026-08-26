@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, Handshake, CheckCircle2, Shield } from 'lucide-react';
 import api from '../services/api';
+import { useBranding } from '@/contexts/BrandingContext';
 
 export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
+  const { logoUrl, appName } = useBranding();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -138,13 +140,17 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
         <div className="relative z-10 my-auto flex flex-col items-center text-center max-w-lg mx-auto">
           <div className="relative mb-8 group">
             <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full scale-90 group-hover:scale-110 transition-transform duration-500" />
-            <div className="relative w-24 h-24 rounded-2xl bg-gradient-to-b from-slate-800 to-slate-900 border border-slate-700/80 shadow-2xl flex items-center justify-center p-4">
-              <Shield className="w-12 h-12 text-blue-400 stroke-[1.5]" />
+            <div className="relative w-32 h-32 rounded-2xl bg-gradient-to-b from-slate-800 to-slate-900 border border-slate-700/80 shadow-2xl flex items-center justify-center p-4">
+              {logoUrl ? (
+                <img src={logoUrl} alt={appName} className="object-contain max-h-full max-w-full" />
+              ) : (
+                <Shield className="w-12 h-12 text-blue-400 stroke-[1.5]" />
+              )}
             </div>
           </div>
 
-          <h1 className="text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight">
-            RAGCF GOVERNANCE
+          <h1 className="text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight uppercase">
+            {appName} GOVERNANCE
           </h1>
           <p className="mt-3 text-sm xl:text-base text-slate-400 font-medium tracking-wide">
             Securing Financial Compliance and Trading Audit
@@ -190,10 +196,14 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
 
         {/* Mobile Logo */}
         <div className="lg:hidden flex flex-col items-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-2 shadow-md">
-            <Shield className="w-7 h-7 text-blue-400" />
+          <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-2 shadow-md p-2">
+            {logoUrl ? (
+              <img src={logoUrl} alt={appName} className="object-contain max-h-full max-w-full" />
+            ) : (
+              <Shield className="w-7 h-7 text-blue-400" />
+            )}
           </div>
-          <span className="text-lg font-bold text-slate-900 dark:text-white">RAGCF Governance</span>
+          <span className="text-lg font-bold text-slate-900 dark:text-white">{appName} Governance</span>
         </div>
 
         {/* Login Box */}

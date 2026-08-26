@@ -9,6 +9,7 @@ import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
+import { useBranding } from '@/contexts/BrandingContext';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -45,6 +46,7 @@ export default function RegisterPage() {
 
   const { states } = useStates();
   const { cities } = useCities(state);
+  const { logoUrl, appName } = useBranding();
 
   useEffect(() => {
     // Load companies
@@ -144,21 +146,67 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Background gradients */}
-      <div className="absolute top-[10%] left-[20%] w-[350px] h-[350px] rounded-full bg-primary-600/10 blur-[100px]" />
-      <div className="absolute bottom-[5%] right-[5%] w-[400px] h-[400px] rounded-full bg-emerald-500/10 blur-[120px]" />
-      
-      <div className="w-full max-w-xl relative z-10 py-6">
-        
-        {/* Brand */}
-        <div className="flex items-center justify-center mb-6">
-          <img src="/logo-light.png" alt="RAGCP Logo" className="dark:hidden object-contain max-h-14" />
-          <img src="/logo-dark.png" alt="RAGCP Logo" className="hidden dark:block object-contain max-h-14" />
+    <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#F4F7FB] dark:bg-slate-950 font-sans antialiased overflow-x-hidden">
+      {/* ── LEFT PANEL (Branding & Trust Showcase) ── */}
+      <div className="hidden lg:flex lg:w-1/2 min-h-screen bg-[#070D1B] relative flex-col justify-between p-12 xl:p-16 border-r border-slate-800/80">
+        {/* Glow ambient effects */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-10 right-10 w-72 h-72 bg-emerald-600/10 rounded-full blur-[100px] pointer-events-none" />
+
+        {/* Top Tagline / Micro Header */}
+        <div className="relative z-10 flex items-center space-x-2.5">
+          <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+            Client Registration Portal
+          </span>
         </div>
 
-        {/* Card */}
-        <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.1)] relative">
+        {/* Center Hero Branding */}
+        <div className="relative z-10 my-auto flex flex-col items-center text-center max-w-lg mx-auto">
+          <div className="relative mb-8 group">
+            <div className="absolute inset-0 bg-emerald-500/20 blur-2xl rounded-full scale-90 group-hover:scale-110 transition-transform duration-500" />
+            <div className="relative w-32 h-32 rounded-2xl bg-gradient-to-b from-slate-800 to-slate-900 border border-slate-700/80 shadow-2xl flex items-center justify-center p-4">
+              {logoUrl ? (
+                <img src={logoUrl} alt={appName} className="object-contain max-h-full max-w-full" />
+              ) : (
+                <ShieldCheck className="w-12 h-12 text-emerald-400 stroke-[1.5]" />
+              )}
+            </div>
+          </div>
+
+          <h1 className="text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight uppercase">
+            {appName} REGISTRATION
+          </h1>
+          <p className="mt-3 text-sm xl:text-base text-slate-400 font-medium tracking-wide">
+            Seamless Onboarding and Compliance Checks
+          </p>
+        </div>
+
+        {/* Bottom Compliance Label */}
+        <div className="relative z-10 flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-800/50 pt-4">
+          <span>AES-256 Bit Encryption</span>
+          <span>ISO 27001 Certified System</span>
+        </div>
+      </div>
+
+      {/* ── RIGHT PANEL (Register Form) ── */}
+      <div className="w-full lg:w-1/2 min-h-screen flex flex-col justify-center items-center px-6 py-12 sm:px-12 relative bg-[#F8FAFC] dark:bg-slate-950 overflow-y-auto">
+        {/* Subtle radial light background */}
+        <div className="absolute top-1/3 right-1/4 w-[400px] h-[400px] rounded-full bg-emerald-400/5 blur-[120px] pointer-events-none" />
+
+        {/* Mobile Logo */}
+        <div className="lg:hidden flex flex-col items-center mb-8 mt-8">
+          <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-2 shadow-md p-2">
+            {logoUrl ? (
+              <img src={logoUrl} alt={appName} className="object-contain max-h-full max-w-full" />
+            ) : (
+              <ShieldCheck className="w-7 h-7 text-emerald-400" />
+            )}
+          </div>
+          <span className="text-lg font-bold text-slate-900 dark:text-white">{appName} Registration</span>
+        </div>
+
+        <div className="w-full max-w-[500px] bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-[0_20px_50px_rgba(15,23,42,0.06)] relative z-10 backdrop-blur-xl my-auto">
           
           {success ? (
             <div className="text-center py-12 space-y-6 animate-fade-in-up">
@@ -409,6 +457,11 @@ export default function RegisterPage() {
             </>
           )}
         </div>
+
+        {/* Bottom Security Footer */}
+        <p className="mt-8 text-[11px] text-slate-400 dark:text-slate-600 text-center font-medium w-full relative z-10 pb-6 lg:pb-0">
+          Secured Session Encryption · SSL · AES-256
+        </p>
       </div>
     </div>
   );
