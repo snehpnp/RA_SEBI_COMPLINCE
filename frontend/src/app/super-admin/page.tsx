@@ -655,7 +655,7 @@ function SuperAdminDashboardContent() {
   return (
     <div className="h-dvh bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex font-sans selection:bg-primary-500/30 overflow-hidden relative">
       {/* Mobile Menu Toggle */}
-      <button 
+      <button
         className="md:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
         onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
       >
@@ -663,10 +663,9 @@ function SuperAdminDashboardContent() {
       </button>
 
       {/* Premium Sidebar */}
-      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${
-        mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
-      } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
-        
+      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
+        } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
+
         {/* Brand */}
         <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
@@ -680,16 +679,16 @@ function SuperAdminDashboardContent() {
             )}
           </div>
           {!isSidebarCollapsed && (
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="hidden md:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
             >
               <Menu className="w-5 h-5" />
             </button>
           )}
           {isSidebarCollapsed && (
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="hidden md:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
             >
               <Menu className="w-5 h-5" />
@@ -715,11 +714,10 @@ function SuperAdminDashboardContent() {
                   setActiveTab(item.id as any);
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${
-                  isActive 
-                  ? 'bg-premium-primary/10 text-premium-primary font-semibold' 
+                className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
+                  ? 'bg-premium-primary/10 text-premium-primary font-semibold'
                   : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
-                } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                  } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                 title={isSidebarCollapsed ? item.label : undefined}
               >
                 <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
@@ -735,11 +733,11 @@ function SuperAdminDashboardContent() {
         {/* User Footer */}
         <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
           <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
-          <div 
+          <div
             onClick={() => { setActiveTab('profile'); setMobileMenuOpen(false); }}
             className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
             <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-            
+
             <div className="relative shrink-0">
               <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10">
@@ -747,7 +745,7 @@ function SuperAdminDashboardContent() {
               </div>
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
             </div>
-            
+
             {!isSidebarCollapsed && (
               <div className="flex-1 min-w-0 relative z-10">
                 <p className="font-bold text-sm truncate text-premium-text">Super Admin</p>
@@ -759,7 +757,7 @@ function SuperAdminDashboardContent() {
                 </div>
               </div>
             )}
-            
+
             {!isSidebarCollapsed && (
               <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
             )}
@@ -778,22 +776,28 @@ function SuperAdminDashboardContent() {
 
         {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
         {(() => {
-          if (activeTab === 'dashboard') return null;
+
 
           const tabsMissingHeader = [
+            'dashboard',
+            'companies',
             'matrix',
             'audit',
             'resources',
-            'compliance'
+            'compliance',
+            'profile'
           ];
 
           if (!tabsMissingHeader.includes(activeTab)) return null;
 
           const tabLabels: Record<string, { title: string, desc: string }> = {
+            dashboard: { title: 'Dashboard', desc: 'Manage system pricing and tiers' },
+            companies: { title: 'Companies', desc: 'Manage system pricing and tiers' },
             matrix: { title: 'Pricing Matrix', desc: 'Manage system pricing and tiers' },
             audit: { title: 'Compliance Audit', desc: 'System-wide compliance and event logs' },
             resources: { title: 'Global Resources', desc: 'Manage global resource documents' },
-            compliance: { title: 'Compliance Telemetry', desc: 'Monitor compliance across all tenants' }
+            compliance: { title: 'Compliance Telemetry', desc: 'Monitor compliance across all tenants' },
+            profile: { title: 'Super Admin Profile', desc: 'Manage your profile and settings' }
           };
 
           const currentNav = tabLabels[activeTab];
@@ -886,28 +890,33 @@ function SuperAdminDashboardContent() {
           />
         )}
 
+        {/* PROFILE TAB */}
+        {activeTab === 'profile' && (
+          <SuperAdminProfilePage />
+        )}
+
         {/* Global Custom Alert Modal */}
-      {globalAlert && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
-          <div className={`border shadow-2xl rounded-2xl p-6 max-w-sm w-full animate-in zoom-in-95 duration-200 relative overflow-hidden ${globalAlert.isError ? 'bg-white dark:bg-slate-900 border-rose-500/30 shadow-rose-500/10' : 'bg-white dark:bg-slate-900 border-indigo-500/30 shadow-indigo-500/10'}`}>
-            <div className={`absolute top-0 left-0 w-1.5 h-full ${globalAlert.isError ? 'bg-rose-500' : 'bg-indigo-500'}`}></div>
-            <div className="flex items-start gap-4 pl-2">
-              <div className={`p-2 rounded-xl mt-0.5 ${globalAlert.isError ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'}`}>
-                {globalAlert.isError ? <AlertTriangle className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />}
+        {globalAlert && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+            <div className={`border shadow-2xl rounded-2xl p-6 max-w-sm w-full animate-in zoom-in-95 duration-200 relative overflow-hidden ${globalAlert.isError ? 'bg-white dark:bg-slate-900 border-rose-500/30 shadow-rose-500/10' : 'bg-white dark:bg-slate-900 border-indigo-500/30 shadow-indigo-500/10'}`}>
+              <div className={`absolute top-0 left-0 w-1.5 h-full ${globalAlert.isError ? 'bg-rose-500' : 'bg-indigo-500'}`}></div>
+              <div className="flex items-start gap-4 pl-2">
+                <div className={`p-2 rounded-xl mt-0.5 ${globalAlert.isError ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'}`}>
+                  {globalAlert.isError ? <AlertTriangle className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">{globalAlert.isError ? 'Error / Notice' : 'Notification'}</h3>
+                  <p className="text-[13px] text-slate-700 dark:text-slate-300 whitespace-pre-line leading-relaxed">{globalAlert.message}</p>
+                </div>
               </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">{globalAlert.isError ? 'Error / Notice' : 'Notification'}</h3>
-                <p className="text-[13px] text-slate-700 dark:text-slate-300 whitespace-pre-line leading-relaxed">{globalAlert.message}</p>
+              <div className="mt-6 flex justify-end">
+                <button onClick={() => setGlobalAlert(null)} className={`px-5 py-2 text-xs font-bold text-white rounded-xl transition ${globalAlert.isError ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
+                  Okay
+                </button>
               </div>
-            </div>
-            <div className="mt-6 flex justify-end">
-              <button onClick={() => setGlobalAlert(null)} className={`px-5 py-2 text-xs font-bold text-white rounded-xl transition ${globalAlert.isError ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
-                Okay
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
       </main>
     </div>
   );

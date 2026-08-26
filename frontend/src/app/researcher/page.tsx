@@ -101,6 +101,22 @@ const NAV_CONFIG: NavModule[] = [
     moduleLabel: 'Research Reports',
     moduleDesc: 'Manage and upload PDF research reports',
   },
+  {
+    tab: 'clients',
+    label: 'Client Management',
+    icon: 'ClipboardList',
+    accessKey: 'ACCESS_CLIENTS',
+    moduleLabel: 'Client Management Module',
+    moduleDesc: 'Control access to client profiles and registration details',
+  },
+  {
+    tab: 'settings',
+    label: 'Personal Setting',
+    icon: 'Settings',
+    accessKey: 'ACCESS_SETTINGS',
+    moduleLabel: 'Personal Setting',
+    moduleDesc: 'Manage personal settings',
+  },
 ];
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)

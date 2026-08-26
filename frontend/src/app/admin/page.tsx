@@ -227,7 +227,7 @@ const NAV_CONFIG: NavModule[] = [
     tab: 'signature_settings',
     label: 'Personal Settings',
     icon: 'Settings',
-    accessKey: 'ADD_RESEARCH',
+    accessKey: 'ACCESS_DASHBOARD',
     moduleLabel: 'Personal Settings',
     moduleDesc: 'Configure your signature and UI preferences',
   },
