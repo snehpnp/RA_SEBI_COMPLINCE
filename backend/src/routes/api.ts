@@ -24,6 +24,7 @@ import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
 import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
+import { getGlobalBranding, updateGlobalBranding } from '../controllers/systemSettingController';
 
 const router = Router();
 
@@ -218,6 +219,19 @@ router.get(
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   getGlobalTelemetry
+);
+
+// ----------------------------------------------------
+// SYSTEM SETTINGS (GLOBAL BRANDING)
+// ----------------------------------------------------
+router.get('/system-settings/branding', getGlobalBranding);
+
+router.put(
+  '/system-settings/branding',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }]),
+  updateGlobalBranding
 );
 
 // ----------------------------------------------------

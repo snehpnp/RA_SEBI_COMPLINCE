@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { GlobalConfirmProvider } from '@/components/GlobalConfirmProvider';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { BrandingProvider } from '@/contexts/BrandingContext';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -16,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
         <script src="https://app.digio.in/sdk/v11/digio.js"></script>
@@ -26,13 +27,15 @@ export default function RootLayout({
           }
         ` }} />
       </head>
-      <body className="antialiased min-h-screen transition-colors duration-200">
-        <ThemeProvider>
-          <GlobalConfirmProvider>
-            {children}
-            <Toaster position="top-right" toastOptions={{ className: 'dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-white/10 shadow-2xl', duration: 4000 }} />
-          </GlobalConfirmProvider>
-        </ThemeProvider>
+      <body className="antialiased min-h-screen transition-colors duration-200" suppressHydrationWarning>
+        <BrandingProvider>
+          <ThemeProvider>
+            <GlobalConfirmProvider>
+              {children}
+              <Toaster position="top-right" toastOptions={{ className: 'dark:bg-slate-800 dark:text-white border border-slate-200 dark:border-white/10 shadow-2xl', duration: 4000 }} />
+            </GlobalConfirmProvider>
+          </ThemeProvider>
+        </BrandingProvider>
       </body>
     </html>
   );
