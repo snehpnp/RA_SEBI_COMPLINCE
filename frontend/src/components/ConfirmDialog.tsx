@@ -28,28 +28,28 @@ const VARIANT_MAP: Record<ConfirmVariant, {
     border: 'border-rose-500/30',
     iconBg: 'bg-rose-500/15',
     iconColor: 'text-rose-600 dark:text-rose-400',
-    confirmBtn: 'bg-rose-600 hover:bg-rose-500 focus:ring-rose-500/40',
+    confirmBtn: 'bg-rose-600 hover:bg-rose-500 focus:ring-rose-500/40 text-white shadow-sm',
     Icon: Trash2,
   },
   warning: {
     border: 'border-amber-500/30',
     iconBg: 'bg-amber-500/15',
     iconColor: 'text-amber-600 dark:text-amber-400',
-    confirmBtn: 'bg-amber-600 hover:bg-amber-500 focus:ring-amber-500/40',
+    confirmBtn: 'bg-amber-500 hover:bg-amber-600 focus:ring-amber-500/40 text-white shadow-sm',
     Icon: AlertTriangle,
   },
   info: {
     border: 'border-blue-500/30',
     iconBg: 'bg-blue-500/15',
     iconColor: 'text-blue-600 dark:text-blue-400',
-    confirmBtn: 'bg-blue-600 hover:bg-blue-500 focus:ring-blue-500/40',
+    confirmBtn: 'bg-blue-600 hover:bg-blue-500 focus:ring-blue-500/40 text-white shadow-sm',
     Icon: Info,
   },
   success: {
     border: 'border-emerald-500/30',
     iconBg: 'bg-emerald-500/15',
     iconColor: 'text-emerald-600 dark:text-emerald-400',
-    confirmBtn: 'bg-emerald-600 hover:bg-emerald-500 focus:ring-emerald-500/40',
+    confirmBtn: 'bg-emerald-600 hover:bg-emerald-500 focus:ring-emerald-500/40 text-white shadow-sm',
     Icon: CheckCircle,
   },
 };
@@ -137,7 +137,7 @@ export default function ConfirmDialog({
               onClick={onConfirm}
               disabled={loading}
               className={`
-                px-5 py-2 text-xs font-bold text-slate-900 dark:text-white rounded-xl transition
+                px-5 py-2 text-xs font-bold rounded-xl transition
                 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed
                 flex items-center gap-2 ${v.confirmBtn}
               `}

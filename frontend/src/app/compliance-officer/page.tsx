@@ -240,9 +240,19 @@ function AdminDashboardContent() {
   });
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const activeTabRef = useRef<string>('dashboard');
-  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('complianceOfficerActiveTab') || 'dashboard';
+    }
+    return 'dashboard';
+  });
+  const activeTabRef = useRef<string>(activeTab);
+  useEffect(() => { 
+    activeTabRef.current = activeTab;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('complianceOfficerActiveTab', activeTab);
+    }
+  }, [activeTab]);
   const [dashboardStats, setDashboardStats] = useState({ staffCount: 0, clientCount: 0, researchCount: 0, planCount: 0 });
   const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'reports' | 'policies' | 'billing' | 'security'>('general');
   const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc'>('payments');

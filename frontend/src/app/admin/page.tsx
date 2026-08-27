@@ -27,6 +27,7 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import { usePagination } from '../../hooks/usePagination';
 import { Pagination } from '../../components/ui/Pagination';
 import { PaginatedList } from '../../components/ui/PaginatedList';
+import DataTable from 'react-data-table-component';
 import dynamic from 'next/dynamic';
 import { generatePeriodicReport } from '@/utils/generatePeriodicReport';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, Cell, XAxis, YAxis, Tooltip } from 'recharts';
@@ -337,6 +338,59 @@ const downloadCSV = (data: any[], filename: string) => {
 };
 
 import CouponsManager from '../../components/CouponsManager';
+
+const tableCustomStyles = {
+  table: {
+    style: {
+      backgroundColor: 'transparent',
+    },
+  },
+  headRow: {
+    style: {
+      backgroundColor: 'rgba(241, 245, 249, 0.5)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      minHeight: '44px',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px',
+      fontWeight: '700',
+      textTransform: 'uppercase' as any,
+      letterSpacing: '0.05em',
+      color: 'rgb(71, 85, 105)',
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+  rows: {
+    style: {
+      fontSize: '13px',
+      color: 'rgb(51, 65, 85)',
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(203, 213, 225, 0.3)',
+      minHeight: '52px',
+      '&:hover': {
+        backgroundColor: 'rgba(241, 245, 249, 0.8)',
+        transition: 'all 0.2s',
+      },
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+  pagination: {
+    style: {
+      backgroundColor: 'transparent',
+      color: 'rgb(71, 85, 105)',
+      borderTopColor: 'rgba(203, 213, 225, 0.5)',
+      fontSize: '12px',
+    },
+  },
+};
 
 function AdminDashboardContent() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -2578,14 +2632,6 @@ function AdminDashboardContent() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-center items-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary-600 dark:text-primary-500 mb-4" />
-        <span>Loading Advisor Dashboard...</span>
-      </div>
-    );
-  }
 
   // Profile Wizard Check
   const isProfileComplete = completeness >= 80;
@@ -2688,6 +2734,747 @@ function AdminDashboardContent() {
       setExportLoading(null);
     }
   };
+
+  const staffColumns = useMemo(() => [
+    {
+      name: 'S.No',
+      width: '70px',
+      selector: (row: any, index?: number) => index !== undefined ? index + 1 : 0,
+      cell: (row: any, index?: number) => (
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+          {index !== undefined ? index + 1 : ''}
+        </span>
+      ),
+    },
+    {
+      name: 'Registered On',
+      width: '130px',
+      selector: (row: any) => row.user?.createdAt,
+      cell: (row: any) => row.user?.createdAt ? (
+        <span className="block">
+          {new Date(row.user.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+        </span>
+      ) : (
+        <span className="text-slate-600 block">N/A</span>
+      ),
+    },
+    {
+      name: 'Staff Member',
+      minWidth: '200px',
+      selector: (row: any) => row.name,
+      cell: (row: any) => {
+        const isDeleted = row.user?.deletedAt !== null;
+        return (
+          <div>
+            <span className="font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              {row.name}
+              {isDeleted && (
+                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                  DELETED
+                </span>
+              )}
+            </span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{row.email}</span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{row.mobile}</span>
+          </div>
+        );
+      }
+    },
+    {
+      name: 'SEBI System Role',
+      width: '160px',
+      selector: (row: any) => row.user?.role?.name,
+      cell: (row: any) => (
+        <div>
+          <span className="px-2 py-0.5 rounded bg-primary-500/10 text-primary-600 dark:text-primary-400 text-[9px] border border-primary-500/20 font-bold uppercase tracking-wider font-mono">
+            {row.user?.role?.name || 'N/A'}
+          </span>
+          {row.personAssociated && (
+            <span className="text-[10px] text-slate-600 dark:text-slate-400 block mt-1 font-mono">
+              ({row.personAssociated.roleType === 'OTHER' ? row.personAssociated.customRole : row.personAssociated.roleType})
+            </span>
+          )}
+        </div>
+      )
+    },
+    {
+      name: 'NISM Validity',
+      width: '140px',
+      selector: (row: any) => row.nismValidity,
+      cell: (row: any) => (
+        <div>
+          {row.nismValidity ? (
+            <span className="block">
+              {new Date(row.nismValidity).toDateString()}
+            </span>
+          ) : (
+            <span className="text-slate-600 block">N/A</span>
+          )}
+          {row.nismNumber && (
+            <span className="text-[10px] text-slate-500 dark:text-slate-500 font-mono block">
+              No: {row.nismNumber}
+            </span>
+          )}
+        </div>
+      )
+    },
+    {
+      name: 'Status',
+      width: '100px',
+      selector: (row: any) => row.status,
+      cell: (row: any) => (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold ${row.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
+          {row.status}
+        </span>
+      )
+    },
+    {
+      name: 'Actions',
+      width: '180px',
+      right: true,
+      cell: (row: any) => {
+        const isDeleted = row.user?.deletedAt !== null;
+        return (
+          <div className="flex items-center justify-end space-x-2">
+            <button
+              onClick={() => setSelectedStaff(row)}
+              title="View Details"
+              className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </button>
+            {!isDeleted && (
+              <>
+                <button
+                  onClick={() => startEditStaff(row)}
+                  title="Edit Profile"
+                  className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center"
+                >
+                  <Edit2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => handleToggleStaffStatus(row.id)}
+                  title={row.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition ${row.status === 'ACTIVE' ? 'border border-amber-500/20 text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10' : 'border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
+                >
+                  {row.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                </button>
+                <button
+                  onClick={() => handleDeleteStaff(row.id)}
+                  title="Delete Staff"
+                  className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            {isDeleted && (
+              <button
+                onClick={() => handleRestoreStaff(row.id)}
+                title="Restore Staff"
+                className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        );
+      }
+    }
+  ], [setSelectedStaff, startEditStaff, handleToggleStaffStatus, handleDeleteStaff, handleRestoreStaff]);
+
+  const paymentColumns = useMemo(() => [
+    {
+      name: 'Payment Date',
+      width: '130px',
+      selector: (row: any) => row.paymentDate || row.createdAt,
+      cell: (row: any) => (
+        <div className="text-slate-700 dark:text-slate-300 font-mono text-xs">
+          {row.paymentDate ? new Date(row.paymentDate).toLocaleDateString() : new Date(row.createdAt).toLocaleDateString()}
+        </div>
+      ),
+    },
+    {
+      name: 'Client Details',
+      minWidth: '220px',
+      selector: (row: any) => row.client?.user?.email,
+      cell: (row: any) => (
+        <div className="text-[10px] space-y-0.5 text-slate-600 dark:text-slate-400">
+          <div className="flex items-center gap-1"><span className="text-slate-500">EMAIL:</span> {row.client?.user?.email || 'N/A'}</div>
+          <div className="flex items-center gap-1"><span className="text-slate-500">MOB:</span> {row.client?.user?.mobile || 'N/A'}</div>
+          <div className="flex items-center gap-1"><span className="text-slate-500">PAN:</span> {row.client?.pan || 'N/A'}</div>
+        </div>
+      ),
+    },
+    {
+      name: 'Plan',
+      width: '140px',
+      selector: (row: any) => row.plan?.name,
+      cell: (row: any) => (
+        <div className="flex flex-col gap-1 items-start">
+          <span className="font-bold text-primary-600 dark:text-primary-400 font-mono">{row.plan?.name || 'Custom'}</span>
+          {(row.paymentMode === 'CUSTOM_PRO_RATA' || row.remarks?.includes('[PRO-RATA]')) && (
+            <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold uppercase border border-amber-500/20">CUSTOM</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      name: 'Amount',
+      width: '120px',
+      selector: (row: any) => row.amount,
+      cell: (row: any) => (
+        <span className="font-semibold">INR {row.amount}</span>
+      ),
+    },
+    {
+      name: 'Payment Info',
+      width: '140px',
+      selector: (row: any) => row.transactionRef,
+      cell: (row: any) => (
+        <div>
+          <span className="block text-[10px] text-slate-600 dark:text-slate-400">{row.paymentMode}</span>
+          <span className="font-mono text-slate-500 text-[10px]">{row.transactionRef}</span>
+        </div>
+      ),
+    },
+    {
+      name: 'Receipt',
+      width: '140px',
+      cell: (row: any) => (
+        <div className="text-slate-600 dark:text-slate-400 space-y-1">
+          <div>
+            <button
+              onClick={() => {
+                import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id, `Invoice_${row.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
+              }}
+              className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
+            >
+              Download Invoice
+            </button>
+          </div>
+          {row.receiptUrl && (
+            <div className="text-[10px] pt-1">
+              <span className="text-slate-500">Receipt:</span> <a href={row.receiptUrl} target="_blank" rel="noreferrer" className="underline text-primary-600 font-bold hover:text-primary-700">View</a>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      name: 'Status',
+      width: '100px',
+      right: true,
+      selector: (row: any) => 'SUCCESS',
+      cell: (row: any) => (
+        <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg text-[10px] font-bold uppercase">Success</span>
+      ),
+    }
+  ], []);
+
+  const activeChecklistColumns = useMemo(() => {
+    return [
+      {
+        name: 'Sr.',
+        width: '60px',
+        selector: (row: any) => row.serialNo,
+        cell: (row: any) => <span className="text-slate-500 dark:text-slate-500">{row.serialNo}</span>,
+      },
+      {
+        name: 'Requirement',
+        minWidth: '250px',
+        selector: (row: any) => row.requirement,
+        cell: (row: any) => <span className="font-medium max-w-xs">{row.requirement}</span>,
+      },
+      {
+        name: 'Frequency / Next Check',
+        width: '180px',
+        selector: (row: any) => row.frequency,
+        cell: (row: any) => {
+          const dueDateMs = row.currentPeriod?.dueDate ? new Date(row.currentPeriod.dueDate).getTime() : null;
+          const daysLeft = dueDateMs ? Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24)) : null;
+          let dateColorClass = 'text-slate-600 dark:text-slate-400';
+          if (daysLeft !== null) {
+            if (daysLeft < 0) dateColorClass = 'text-red-600 dark:text-red-500 font-bold';
+            else if (daysLeft <= 7) dateColorClass = 'text-rose-600 dark:text-rose-400 font-bold';
+            else if (daysLeft <= 30) dateColorClass = 'text-orange-600 dark:text-orange-400 font-bold';
+            else dateColorClass = 'text-emerald-600 dark:text-emerald-400 font-medium';
+          }
+          const dueDateText = row.currentPeriod?.dueDate
+            ? new Date(row.currentPeriod.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+            : 'Ongoing';
+          return (
+            <div>
+              <span className="block font-medium">{row.frequency}</span>
+              <span className={`block text-[10px] mt-0.5 ${dateColorClass}`}>Due: {dueDateText}</span>
+            </div>
+          );
+        },
+      },
+      {
+        name: 'Priority',
+        width: '120px',
+        selector: (row: any) => row.severityLevel,
+        cell: (row: any) => {
+          if (row.severityLevel === 'HIGH') return <span className="bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/50 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-[0_0_10px_rgba(244,63,94,0.4)]">High</span>;
+          if (row.severityLevel === 'MODERATE' || row.severityLevel === 'MEDIUM') return <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide">Moderate</span>;
+          if (row.severityLevel === 'LOW') return <span className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide">Low</span>;
+          return <span className="text-slate-500 dark:text-slate-500">—</span>;
+        }
+      },
+      {
+        name: 'Penalty',
+        width: '120px',
+        selector: (row: any) => row.penaltyAmount,
+        cell: (row: any) => <span className="text-slate-600 dark:text-slate-400 max-w-[180px]">{row.penaltyAmount || '—'}</span>,
+      },
+      {
+        name: 'Status',
+        width: '130px',
+        selector: (row: any) => row.audit?.status,
+        cell: (row: any) => {
+          const status = row.audit?.status || 'PENDING';
+          const colors: Record<string, string> = {
+            COMPLIANT: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+            NON_COMPLIANT: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+            PENDING: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
+            OVERDUE: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+            PENALTY_RESOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+            PAID: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+          };
+          return <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border uppercase ${colors[status] || 'bg-slate-500/10 text-slate-600 dark:text-slate-400'}`}>{status.replace('_', ' ')}</span>;
+        }
+      },
+      ...(user.role === 'COMPLIANCE_OFFICER' ? [{
+        name: 'Action',
+        width: '100px',
+        right: true,
+        cell: (row: any) => {
+          const status = row.audit?.status || 'PENDING';
+          const dueDateMs = row.currentPeriod?.dueDate ? new Date(row.currentPeriod.dueDate).getTime() : null;
+          const daysLeft = dueDateMs ? Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24)) : null;
+          const requiresAction = daysLeft === null || daysLeft <= 30;
+          if (!requiresAction) return null;
+          return (
+            <button onClick={() => { setAuditModalReq(row); setAuditStatus(status !== 'PENDING' ? status : ''); setAuditRemarks(row.audit?.officerRemarks || ''); }} className="px-3 py-1 bg-primary-600 hover:bg-primary-500 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] rounded-lg text-[10px] font-bold transition">Update</button>
+          );
+        }
+      }] : [])
+    ];
+  }, [user.role, setAuditModalReq, setAuditStatus, setAuditRemarks]);
+
+  const checklistHistoryColumns = useMemo(() => [
+    {
+      name: 'Sr.',
+      width: '60px',
+      selector: (row: any) => row.requirement?.serialNo,
+    },
+    {
+      name: 'Requirement',
+      minWidth: '200px',
+      selector: (row: any) => row.requirement?.requirement,
+      cell: (row: any) => <span className="font-medium max-w-xs">{row.requirement?.requirement}</span>,
+    },
+    {
+      name: 'Period',
+      width: '140px',
+      selector: (row: any) => row.periodLabel,
+      cell: (row: any) => <span className="font-semibold text-primary-700 dark:text-primary-300">{row.periodLabel || '—'}</span>,
+    },
+    {
+      name: 'Change Log',
+      width: '180px',
+      cell: (row: any) => {
+        const prevStatus = row.previousStatus || 'PENDING';
+        const newStatus = row.newStatus;
+        const colors: Record<string, string> = {
+          COMPLIANT: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+          NON_COMPLIANT: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+          PENDING: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
+          OVERDUE: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
+          PENALTY_RESOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+          PAID: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+        };
+        return (
+          <div className="flex items-center space-x-1">
+            <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded border uppercase ${colors[prevStatus] || 'bg-slate-500/10'}`}>{prevStatus.replace('_', ' ')}</span>
+            <span className="text-slate-500 dark:text-slate-500">→</span>
+            <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded border uppercase ${colors[newStatus] || 'bg-slate-500/10'}`}>{newStatus.replace('_', ' ')}</span>
+          </div>
+        );
+      }
+    },
+    {
+      name: 'Remarks',
+      width: '150px',
+      selector: (row: any) => row.officerRemarks,
+      cell: (row: any) => <span className="text-slate-600 dark:text-slate-400 max-w-xs truncate" title={row.officerRemarks}>{row.officerRemarks || '—'}</span>,
+    },
+    {
+      name: 'Proof',
+      width: '100px',
+      cell: (row: any) => row.proofDocumentUrl ? (
+        <button
+          onClick={() => window.open(api.getBaseUrl() + '' + row.proofDocumentUrl, '_blank')}
+          className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium underline flex items-center"
+        >
+          <Eye className="h-3 w-3 mr-1" /> View
+        </button>
+      ) : <span className="text-slate-600">—</span>,
+    },
+    {
+      name: 'Updated By',
+      width: '120px',
+      selector: (row: any) => row.updatedByName,
+      cell: (row: any) => <span className="text-slate-600 dark:text-slate-400">{row.updatedByName || 'System'}</span>,
+    },
+    {
+      name: 'Date',
+      width: '130px',
+      right: true,
+      selector: (row: any) => row.createdAt,
+      cell: (row: any) => <span className="text-slate-500 dark:text-slate-500">{new Date(row.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>,
+    }
+  ], []);
+
+  const alertColumns = useMemo(() => [
+    {
+      name: 'Alert Type',
+      width: '180px',
+      selector: (row: any) => row.alertType,
+      cell: (row: any) => <span className="font-bold">{row.alertType === 'PENALTY_LEVIED' ? 'PENALTY RISK' : row.alertType.replace(/_/g, ' ')}</span>,
+    },
+    {
+      name: 'Severity',
+      width: '120px',
+      selector: (row: any) => row.severity,
+      cell: (row: any) => {
+        let severityBadge = "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400";
+        if (row.severity === 'HIGH') severityBadge = "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400 font-bold";
+        else if (row.severity === 'MEDIUM') severityBadge = "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 font-bold";
+        else if (row.severity === 'LOW') severityBadge = "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 font-bold";
+        return <span className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider ${severityBadge}`}>{row.severity}</span>;
+      },
+    },
+    {
+      name: 'Description',
+      minWidth: '250px',
+      selector: (row: any) => row.description,
+      cell: (row: any) => <span className="whitespace-normal text-xs min-w-[300px] max-w-[500px] block">{formatAlertDescription(row.description)}</span>,
+    },
+    {
+      name: 'Created Date',
+      width: '130px',
+      selector: (row: any) => row.createdAt,
+      cell: (row: any) => <span className="text-xs">{new Date(row.createdAt).toLocaleDateString()}</span>,
+    },
+    {
+      name: 'Status',
+      width: '120px',
+      center: true,
+      selector: (row: any) => row.status,
+      cell: (row: any) => {
+        let statusBadge = row.status === 'CLOSED' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400';
+        return <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border border-transparent ${statusBadge}`}>{row.status}</span>;
+      },
+    },
+    {
+      name: 'Action',
+      width: '120px',
+      right: true,
+      cell: (row: any) => {
+        if (row.status !== 'OPEN') return null;
+        let resolveBtnColor = "bg-amber-600 hover:bg-amber-500 text-white";
+        if (row.severity === 'HIGH') resolveBtnColor = "bg-rose-600 hover:bg-rose-500 text-white";
+        else if (row.severity === 'MEDIUM') resolveBtnColor = "bg-orange-600 hover:bg-orange-500 text-white";
+        else if (row.severity === 'LOW') resolveBtnColor = "bg-yellow-600 hover:bg-yellow-500 text-white";
+        return (
+          <button
+            onClick={() => {
+              if (row.alertType === 'PENALTY_LEVIED' && row.penaltyId) {
+                setPenaltyResolveId(row.penaltyId);
+                setPenaltyPayRef('');
+                setPenaltyProof(null);
+                setPenaltyRemarks('');
+              } else if (['KYC_MISSING', 'KYC_FAILED', 'AGREEMENT_MISSING', 'PAN_MISSING'].includes(row.alertType)) {
+                handleResolveAlert(row.id, row.alertType);
+              } else {
+                setClosingAlertId(row.id);
+                setDepositTopup(row.alertType === 'DEPOSIT_LOW' ? '50000' : '');
+                setCloseRemarks('');
+                setAlertProof(null);
+              }
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm ${resolveBtnColor}`}
+          >
+            Resolve
+          </button>
+        );
+      }
+    }
+  ], [setPenaltyResolveId, setPenaltyPayRef, setPenaltyProof, setPenaltyRemarks, handleResolveAlert, setClosingAlertId, setDepositTopup, setCloseRemarks, setAlertProof]);
+
+  const activeComplaintsColumns = useMemo(() => [
+    {
+      name: 'Client',
+      width: '160px',
+      selector: (row: any) => row.clientName,
+      cell: (row: any) => <span className="font-medium">{row.clientName}</span>,
+    },
+    {
+      name: 'Source',
+      width: '140px',
+      selector: (row: any) => row.source,
+      cell: (row: any) => <div>{row.source} {row.scoresRefId && <span className="block text-xs text-slate-600 dark:text-slate-400">{row.scoresRefId}</span>}</div>,
+    },
+    {
+      name: 'Subject',
+      minWidth: '200px',
+      selector: (row: any) => row.subject,
+    },
+    {
+      name: 'Received',
+      width: '130px',
+      selector: (row: any) => row.receivedAt,
+      cell: (row: any) => <span>{new Date(row.receivedAt).toLocaleDateString()}</span>,
+    },
+    {
+      name: 'Deadline',
+      width: '130px',
+      selector: (row: any) => row.deadlineAt,
+      cell: (row: any) => {
+        if (row.status === 'CLOSED') return <span>-</span>;
+        const daysLeft = Math.ceil((new Date(row.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24));
+        const isBreached = daysLeft < 0;
+        const isWarning = daysLeft >= 0 && daysLeft <= 5;
+        return (
+          <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
+            {daysLeft} days left
+          </span>
+        );
+      },
+    },
+    {
+      name: 'Status',
+      width: '110px',
+      selector: (row: any) => row.status,
+      cell: (row: any) => (
+        <span className={`px-2 py-1 rounded-md text-xs font-bold ${row.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{row.status}</span>
+      ),
+    },
+    {
+      name: 'Action',
+      width: '120px',
+      right: true,
+      cell: (row: any) => {
+        if (row.status !== 'CLOSED') {
+          return (
+            <button
+              onClick={() => {
+                setComplaintResolveId(row.id);
+                setComplaintAtrProof(null);
+                setComplaintAtrRemarks('');
+              }}
+              className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
+            >Resolve</button>
+          );
+        } else if (row.atrProofUrl) {
+          return (
+            <button onClick={() => window.open(api.getBaseUrl() + '' + row.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
+          );
+        }
+        return null;
+      },
+    }
+  ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks]);
+
+  const clientColumns = useMemo(() => [
+    {
+      name: 'Client Name',
+      minWidth: '200px',
+      selector: (row: any) => row.name,
+      cell: (row: any) => {
+        const isDeleted = row.user?.deletedAt !== null && row.user?.deletedAt !== undefined;
+        const deleteSuffix = `_deleted_${row.id}`;
+        const displayName = row.name?.replace(deleteSuffix, '') || row.name;
+        const displayEmail = row.email?.replace(deleteSuffix, '') || row.email;
+        const displayMobile = row.mobile?.replace(deleteSuffix, '') || row.mobile;
+        return (
+          <div className={`${isDeleted ? 'opacity-60' : ''}`}>
+            <div className="font-bold text-slate-900 dark:text-white">{displayName}</div>
+            <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">{displayEmail}</div>
+            <div className="text-[10px] text-slate-500 dark:text-slate-500">{displayMobile}</div>
+          </div>
+        );
+      }
+    },
+    {
+      name: 'PAN / Aadhaar',
+      width: '150px',
+      cell: (row: any) => {
+        const deleteSuffix = `_deleted_${row.id}`;
+        const displayPan = row.pan?.replace(deleteSuffix, '') || row.pan;
+        const displayAadhaar = row.aadhaar?.replace(deleteSuffix, '') || row.aadhaar;
+        return (
+          <div>
+            <div className="font-mono text-slate-700 dark:text-slate-300 text-[11px]">{displayPan}</div>
+            <div className="font-mono text-slate-500 dark:text-slate-500 text-[10px] mt-0.5">{displayAadhaar?.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3')}</div>
+          </div>
+        );
+      }
+    },
+    {
+      name: 'Location',
+      width: '140px',
+      cell: (row: any) => row.profile?.city || row.profile?.state ? (
+        <div>
+          <div className="text-slate-700 dark:text-slate-300">{row.profile.city || '—'}</div>
+          <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-0.5">{row.profile.state || '—'}</div>
+        </div>
+      ) : (
+        <span className="text-slate-500 dark:text-slate-500 italic text-[10px]">No Location</span>
+      )
+    },
+    {
+      name: 'Registered On',
+      width: '130px',
+      selector: (row: any) => row.user?.createdAt,
+      cell: (row: any) => (
+        <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-1 uppercase tracking-wider">
+          {new Date(row.user?.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+        </div>
+      )
+    },
+    {
+      name: 'Status',
+      width: '130px',
+      selector: (row: any) => row.user?.status,
+      cell: (row: any) => {
+        const isDeleted = row.user?.deletedAt !== null && row.user?.deletedAt !== undefined;
+        return (
+          <div>
+            <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase border ${row.user?.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : row.user?.status === 'PENDING_APPROVAL' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
+              {row.user?.status}
+            </span>
+            {isDeleted && row.user?.deletedBy && (
+              <div className="text-[9px] font-bold uppercase text-rose-600 dark:text-rose-400 mt-1">
+                Deleted by: {row.user.deletedBy}
+              </div>
+            )}
+          </div>
+        );
+      }
+    },
+    {
+      name: 'Added By / Source',
+      width: '150px',
+      cell: (row: any) => {
+        if (row.createdByInfo?.type === 'SELF' || !row.createdById) {
+          return (
+            <span className="text-[9px] font-bold uppercase text-sky-700 dark:text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+              👤 Self Signup
+            </span>
+          );
+        } else if (row.createdByInfo?.type === 'ADMIN') {
+          return (
+            <span className="text-[9px] font-bold uppercase text-purple-700 dark:text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+              🛡️ {row.createdByInfo?.label || 'Added by Admin'}
+            </span>
+          );
+        } else {
+          return (
+            <span className="text-[9px] font-bold uppercase text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
+              👨‍💼 {row.createdByInfo?.label || 'Added by Staff'}
+            </span>
+          );
+        }
+      }
+    },
+    {
+      name: 'Esign/KRA',
+      width: '140px',
+      cell: (row: any) => (
+        <div className="flex flex-col gap-1.5 items-start">
+          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' : (row.status && row.status !== 'PENDING_ONBOARDING' && row.status !== 'KYC_PENDING' && row.status !== 'KYC_FAILED') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
+            KRA: {row.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? 'FAILED' : (row.status && row.status !== 'PENDING_ONBOARDING' && row.status !== 'KYC_PENDING' && row.status !== 'KYC_FAILED') ? 'VERIFIED' : 'PENDING'}
+          </span>
+          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
+            eSign: {row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
+          </span>
+        </div>
+      )
+    },
+    {
+      name: 'Actions',
+      width: '260px',
+      right: true,
+      cell: (row: any) => {
+        const isDeleted = row.user?.deletedAt !== null && row.user?.deletedAt !== undefined;
+        return (
+          <div className="flex justify-end space-x-2 whitespace-nowrap">
+            <button
+              onClick={() => { setSelectedClient(row); setIsViewClientModalOpen(true); setClientDetailsTab('profile'); }}
+              title="View Details"
+              className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </button>
+            {row.user?.status === 'PENDING_APPROVAL' && (
+              <button
+                onClick={() => handleApproveClient(row.id)}
+                title="Approve Client"
+                className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
+              >
+                <Check className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {!isDeleted ? (
+              <>
+                {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
+                  <button onClick={() => startEditClient(row)} title="Edit Profile" className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center">
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {(!isStaff || hasPermission('DELETE_CLIENTS')) && (
+                  <button onClick={() => handleDeleteClient(row.id)} title="Delete Client" className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
+                  <button onClick={() => handleToggleClientStatus(row.id, row.user?.status, row.name)} className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition ${row.user?.status === 'ACTIVE' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'}`}>
+                    {row.user?.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                  </button>
+                )}
+                {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
+                  <button onClick={() => { setAssignPlanClient(row); setAssignPlanCategoryId(''); setAssignPlanId(''); setAssignPlanRemarks(''); setIsAssignPlanModalOpen(true); }} title="Assign Plan" className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 inline-flex items-center gap-1">
+                    <CreditCard className="h-3 w-3" />
+                    <span>Assign</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                {(!isStaff || hasPermission('DELETE_CLIENTS')) && (
+                  <button onClick={() => handleRestoreClient(row.id)} title="Restore Client" className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center">
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        );
+      }
+    }
+  ], [setSelectedClient, setIsViewClientModalOpen, setClientDetailsTab, handleApproveClient, startEditClient, handleDeleteClient, handleToggleClientStatus, setAssignPlanClient, setAssignPlanCategoryId, setAssignPlanId, setAssignPlanRemarks, setIsAssignPlanModalOpen, handleRestoreClient, isStaff, hasPermission]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-center items-center">
+        <Loader2 className="h-10 w-10 animate-spin text-primary-600 dark:text-primary-500 mb-4" />
+        <span>Loading Advisor Dashboard...</span>
+      </div>
+    );
+  }
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
@@ -3638,142 +4425,17 @@ function AdminDashboardContent() {
                       {/* Staff directory table */}
                       <div className="rounded-2xl border border-slate-200 dark:border-slate-800/60 overflow-hidden w-full shadow-xl shadow-slate-200/20 dark:shadow-none bg-white dark:bg-[#0F172A]">
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                                <th className="py-4 px-6 font-semibold">S.No</th>
-                                <th className="py-4 px-6 font-semibold">Registered On</th>
-                                <th className="py-4 px-6 font-semibold">Staff Member</th>
-                                <th className="py-4 px-6 font-semibold">SEBI System Role</th>
-                                <th className="py-4 px-6 font-semibold">NISM Validity</th>
-                                <th className="py-4 px-6 font-semibold">Status</th>
-                                <th className="py-4 px-6 text-right font-semibold">Actions</th>
-                              </tr>
-                            </thead>
-                            <PaginatedList data={staff} itemsPerPage={10}>
-                              {(pageData) => (
-                                <tbody className="text-xs divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-700 dark:text-slate-300 font-medium">
-                                  {pageData.map((st: any, index: number) => {
-                                    const isDeleted = st.user?.deletedAt !== null;
-                                    return (
-                                      <tr
-                                        key={st.id}
-                                        className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors duration-200 ${isDeleted ? 'opacity-50 bg-slate-50 dark:bg-slate-900/20' : 'bg-white dark:bg-transparent'}`}
-                                      >
-                                        <td className="py-4 px-6">
-                                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
-                                            {index + 1}
-                                          </span>
-                                        </td>
-                                        <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
-                                          {st.user?.createdAt ? (
-                                            <span className="block">
-                                              {new Date(st.user.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
-                                            </span>
-                                          ) : (
-                                            <span className="text-slate-600 block">N/A</span>
-                                          )}
-                                        </td>
-                                        <td className="py-4 px-6">
-                                          <span className="font-bold text-slate-900 dark:text-white block flex items-center gap-2">
-                                            {st.name}
-                                            {isDeleted && (
-                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
-                                                DELETED
-                                              </span>
-                                            )}
-                                          </span>
-                                          <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.email}</span>
-                                          <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.mobile}</span>
-                                        </td>
-                                        <td className="py-4 px-6">
-                                          <span className="px-2 py-0.5 rounded bg-primary-500/10 text-primary-600 dark:text-primary-400 text-[9px] border border-primary-500/20 font-bold uppercase tracking-wider font-mono">
-                                            {st.user?.role?.name || 'N/A'}
-                                          </span>
-                                          {st.personAssociated && (
-                                            <span className="text-[10px] text-slate-600 dark:text-slate-400 block mt-1 font-mono">
-                                              ({st.personAssociated.roleType === 'OTHER' ? st.personAssociated.customRole : st.personAssociated.roleType})
-                                            </span>
-                                          )}
-                                        </td>
-                                        <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
-                                          {st.nismValidity ? (
-                                            <span className="block">
-                                              {new Date(st.nismValidity).toDateString()}
-                                            </span>
-                                          ) : (
-                                            <span className="text-slate-600 block">N/A</span>
-                                          )}
-                                          {st.nismNumber && (
-                                            <span className="text-[10px] text-slate-500 dark:text-slate-500 font-mono block">
-                                              No: {st.nismNumber}
-                                            </span>
-                                          )}
-                                        </td>
-                                        <td className="py-4 px-6">
-                                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold ${st.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
-                                            {st.status}
-                                          </span>
-                                        </td>
-                                        <td className="py-4 px-6 text-right space-x-2">
-                                          <button
-                                            onClick={() => setSelectedStaff(st)}
-                                            title="View Details"
-                                            className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
-                                          >
-                                            <Eye className="h-3.5 w-3.5" />
-                                          </button>
-
-                                          {!isDeleted && (
-                                            <>
-                                              <button
-                                                onClick={() => startEditStaff(st)}
-                                                title="Edit Profile"
-                                                className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center"
-                                              >
-                                                <Edit2 className="h-3.5 w-3.5" />
-                                              </button>
-                                              <button
-                                                onClick={() => handleToggleStaffStatus(st.id)}
-                                                title={st.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition ${st.status === 'ACTIVE' ? 'border border-amber-500/20 text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10' : 'border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
-                                              >
-                                                {st.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                                              </button>
-                                              <button
-                                                onClick={() => handleDeleteStaff(st.id)}
-                                                title="Delete Staff"
-                                                className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center"
-                                              >
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                              </button>
-                                            </>
-                                          )}
-
-                                          {isDeleted && (
-                                            <button
-                                              onClick={() => handleRestoreStaff(st.id)}
-                                              title="Restore Staff"
-                                              className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
-                                            >
-                                              <RotateCcw className="h-3.5 w-3.5" />
-                                            </button>
-                                          )}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                  {pageData.length === 0 && (
-                                    <tr>
-                                      <td colSpan={7} className="text-center py-8 text-slate-500 dark:text-slate-500">
-                                        No staff members registered.
-                                      </td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              )}
-                            </PaginatedList>
-                          </table>
+                          <DataTable
+                            columns={staffColumns}
+                            data={staff}
+                            pagination
+                            paginationPerPage={10}
+                            highlightOnHover
+                            responsive
+                            customStyles={tableCustomStyles}
+                            theme={isDarkMode ? 'dark' : 'default'}
+                            noDataComponent={<div className="p-8 text-center text-slate-500 dark:text-slate-400 font-medium">No staff members found.</div>}
+                          />
                         </div>
                       </div>
 
@@ -4304,75 +4966,17 @@ function AdminDashboardContent() {
 
                       <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left text-sm whitespace-nowrap">
-                            <thead>
-                              <tr className="bg-white dark:bg-slate-900/50 border-b border-slate-400 dark:border-white/10 text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400 font-bold">
-                                <th className="py-4 px-6 w-[15%]">Payment Date</th>
-                                <th className="py-4 px-6 w-[25%]">Client Details</th>
-                                <th className="py-4 px-6 w-[15%]">Plan</th>
-                                <th className="py-4 px-6 w-[15%]">Amount</th>
-                                <th className="py-4 px-6 w-[15%]">Payment Info</th>
-                                <th className="py-4 px-6 w-[10%]">Receipt</th>
-                                <th className="py-4 px-6 w-[5%] text-right">Status</th>
-                              </tr>
-                            </thead>
-                            <PaginatedList data={allPayments} itemsPerPage={10}>
-                              {(pageData) => (
-                                <tbody className="divide-y divide-slate-300 dark:divide-white/5 font-medium">
-                                  {pageData.map((p: any) => (
-                                    <tr key={p.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition group">
-                                      <td className="py-4 px-6">
-                                        <div className="text-slate-700 dark:text-slate-300 font-mono text-xs">{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString() : new Date(p.createdAt).toLocaleDateString()}</div>
-                                      </td>
-                                      <td className="py-4 px-6 text-[10px] space-y-0.5 text-slate-600 dark:text-slate-400">
-                                        <div className="flex items-center gap-1"><span className="text-slate-500">EMAIL:</span> {p.client?.user?.email || 'N/A'}</div>
-                                        <div className="flex items-center gap-1"><span className="text-slate-500">MOB:</span> {p.client?.user?.mobile || 'N/A'}</div>
-                                        <div className="flex items-center gap-1"><span className="text-slate-500">PAN:</span> {p.client?.pan || 'N/A'}</div>
-                                      </td>
-                                      <td className="py-4 px-6">
-                                        <div className="flex items-center space-x-2">
-                                          <span className="font-bold text-primary-600 dark:text-primary-400 font-mono">{p.plan?.name || 'Custom'}</span>
-                                          {(p.paymentMode === 'CUSTOM_PRO_RATA' || p.remarks?.includes('[PRO-RATA]')) && (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold uppercase border border-amber-500/20">CUSTOM</span>
-                                          )}
-                                        </div>
-                                      </td>
-                                      <td className="py-4 px-6 font-semibold">INR {p.amount}</td>
-                                      <td className="py-4 px-6">
-                                        <span className="block text-[10px] text-slate-600 dark:text-slate-400">{p.paymentMode}</span>
-                                        <span className="font-mono text-slate-500 text-[10px]">{p.transactionRef}</span>
-                                      </td>
-                                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400 space-y-1">
-                                        <div>
-                                          <button
-                                            onClick={() => {
-                                              import('@/services/api').then(m => m.default.downloadInvoicePdf(p.id, `Invoice_${p.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
-                                            }}
-                                            className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
-                                          >
-                                            Download Invoice
-                                          </button>
-                                        </div>
-                                        {p.receiptUrl && (
-                                          <div className="text-[10px] pt-1">
-                                            <span className="text-slate-500">Receipt:</span> <a href={p.receiptUrl} target="_blank" rel="noreferrer" className="underline text-primary-600 font-bold hover:text-primary-700">View</a>
-                                          </div>
-                                        )}
-                                      </td>
-                                      <td className="py-4 px-6 text-right">
-                                        <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg text-[10px] font-bold uppercase">Success</span>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                  {pageData.length === 0 && (
-                                    <tr>
-                                      <td colSpan={7} className="text-center py-8 text-slate-500">No payment history available.</td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              )}
-                            </PaginatedList>
-                          </table>
+                          <DataTable
+                            columns={paymentColumns}
+                            data={allPayments}
+                            pagination
+                            paginationPerPage={10}
+                            highlightOnHover
+                            responsive
+                            customStyles={tableCustomStyles}
+                            theme={isDarkMode ? 'dark' : 'default'}
+                            noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No payment history available.</div>}
+                          />
                         </div>
                       </div>
                     </div>
@@ -4480,121 +5084,40 @@ function AdminDashboardContent() {
                               </div>
                               <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
                                 <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
-                                  <PaginatedList data={activeList} itemsPerPage={10}>
-                                    {(pageData) => (
-                                      <>
-                                        <table className="w-full text-left">
-                                          <thead>
-                                            <tr className="border-b border-slate-400 dark:border-white/10 bg-white dark:bg-slate-900/40 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                                              <th className="py-3 px-4">Sr.</th>
-                                              <th className="py-3 px-4">Requirement</th>
-                                              <th className="py-3 px-4">Frequency / Next Check</th>
-                                              <th className="py-3 px-4">Priority</th>
-                                              <th className="py-3 px-4">Penalty</th>
-                                              <th className="py-3 px-4">Status</th>
-                                              {user.role === 'COMPLIANCE_OFFICER' && <th className="py-3 px-4 text-center">Action</th>}
-                                            </tr>
-                                          </thead>
-                                          <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                                            {pageData.map((item: any) => {
-                                              const status = item.audit?.status || 'PENDING';
-                                              const colors: Record<string, string> = {
-                                                COMPLIANT: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-                                                NON_COMPLIANT: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-                                                PENDING: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
-                                                OVERDUE: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-                                                PENALTY_RESOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-                                                PAID: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                              };
-                                              const dueDateMs = item.currentPeriod?.dueDate ? new Date(item.currentPeriod.dueDate).getTime() : null;
-                                              const daysLeft = dueDateMs ? Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24)) : null;
-                                              const requiresAction = daysLeft === null || daysLeft <= 30;
-
-                                              let dateColorClass = 'text-slate-600 dark:text-slate-400';
-                                              if (daysLeft !== null) {
-                                                if (daysLeft < 0) dateColorClass = 'text-red-600 dark:text-red-500 font-bold';
-                                                else if (daysLeft <= 7) dateColorClass = 'text-rose-600 dark:text-rose-400 font-bold';
-                                                else if (daysLeft <= 30) dateColorClass = 'text-orange-600 dark:text-orange-400 font-bold';
-                                                else dateColorClass = 'text-emerald-600 dark:text-emerald-400 font-medium';
-                                              }
-
-                                              const dueDateText = item.currentPeriod?.dueDate
-                                                ? new Date(item.currentPeriod.dueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-                                                : 'Ongoing';
-
-                                              return (
-                                                <tr key={item.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
-                                                  <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{item.serialNo}</td>
-                                                  <td className="py-3 px-4 font-medium max-w-xs">{item.requirement}</td>
-                                                  <td className="py-3 px-4">
-                                                    <span className="block font-medium">{item.frequency}</span>
-                                                    <span className={`block text-[10px] mt-0.5 ${dateColorClass}`}>Due: {dueDateText}</span>
-                                                  </td>
-                                                  <td className="py-3 px-4">
-                                                    {item.severityLevel === 'HIGH' && (
-                                                      <span className="bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/50 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider shadow-[0_0_10px_rgba(244,63,94,0.4)]">High</span>
-                                                    )}
-                                                    {(item.severityLevel === 'MODERATE' || item.severityLevel === 'MEDIUM') && (
-                                                      <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide">Moderate</span>
-                                                    )}
-                                                    {item.severityLevel === 'LOW' && (
-                                                      <span className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide">Low</span>
-                                                    )}
-                                                    {!item.severityLevel && <span className="text-slate-500 dark:text-slate-500">—</span>}
-                                                  </td>
-                                                  <td className="py-3 px-4 text-slate-600 dark:text-slate-400 max-w-[180px]">{item.penaltyAmount || '—'}</td>
-                                                  <td className="py-3 px-4">
-                                                    <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border uppercase ${colors[status] || 'bg-slate-500/10 text-slate-600 dark:text-slate-400'}`}>{status.replace('_', ' ')}</span>
-                                                  </td>
-                                                  {user.role === 'COMPLIANCE_OFFICER' && (
-                                                    <td className="py-3 px-4 text-center">
-                                                      {requiresAction && (
-                                                        <button onClick={() => { setAuditModalReq(item); setAuditStatus(status !== 'PENDING' ? status : ''); setAuditRemarks(item.audit?.officerRemarks || ''); }} className="px-3 py-1 bg-primary-600 hover:bg-primary-500 text-white shadow-[0_0_10px_rgba(37,99,235,0.4)] rounded-lg text-[10px] font-bold transition">Update</button>
-                                                      )}
-                                                    </td>
-                                                  )}
-                                                </tr>
-                                              );
-                                            })}
-                                            {activeList.length === 0 && checklist.length > 0 && (
-                                              <tr>
-                                                <td colSpan={7} className="text-center py-12 text-slate-600 dark:text-slate-400">
-                                                  <div className="flex flex-col items-center justify-center space-y-2">
-                                                    <CheckSquare className="h-10 w-10 text-emerald-600 dark:text-emerald-400 animate-bounce" />
-                                                    <p className="text-sm font-bold text-slate-900 dark:text-white">🎉 All compliance tasks completed!</p>
-                                                    <p className="text-xs text-slate-600 dark:text-slate-400">There are no pending manual compliance tasks for the current period.</p>
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            )}
-                                            {checklist.length === 0 && loading && (
-                                              <tr>
-                                                <td colSpan={7} className="text-center py-12">
-                                                  <div className="flex flex-col items-center justify-center space-y-3 text-slate-500 dark:text-slate-400">
-                                                    <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
-                                                    <p className="font-medium text-sm animate-pulse">Loading compliance checklist...</p>
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            )}
-                                            {checklist.length === 0 && !loading && (
-                                              <tr>
-                                                <td colSpan={7} className="text-center py-12">
-                                                  <div className="flex flex-col items-center justify-center space-y-4">
-                                                    <p className="text-sm text-slate-500 dark:text-slate-400">No checklist items found for this period.</p>
-                                                    <button onClick={() => loadData(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-sm hover:shadow">
-                                                      <RefreshCw className="w-4 h-4" />
-                                                      <span>Reload Checklist</span>
-                                                    </button>
-                                                  </div>
-                                                </td>
-                                              </tr>
-                                            )}
-                                          </tbody>
-                                        </table>
-                                      </>
-                                    )}
-                                  </PaginatedList>
+                                  <DataTable
+                                    columns={activeChecklistColumns}
+                                    data={activeList}
+                                    pagination
+                                    paginationPerPage={10}
+                                    highlightOnHover
+                                    responsive
+                                    customStyles={tableCustomStyles}
+                                    theme={isDarkMode ? 'dark' : 'default'}
+                                    noDataComponent={
+                                      checklist.length === 0 && loading ? (
+                                        <div className="flex flex-col items-center justify-center space-y-3 text-slate-500 dark:text-slate-400 p-8">
+                                          <Loader2 className="w-8 h-8 animate-spin text-primary-500" />
+                                          <p className="font-medium text-sm animate-pulse">Loading compliance checklist...</p>
+                                        </div>
+                                      ) : checklist.length === 0 && !loading ? (
+                                        <div className="flex flex-col items-center justify-center space-y-4 p-8">
+                                          <p className="text-sm text-slate-500 dark:text-slate-400">No checklist items found for this period.</p>
+                                          <button onClick={() => loadData(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-sm hover:shadow">
+                                            <RefreshCw className="w-4 h-4" />
+                                            <span>Reload Checklist</span>
+                                          </button>
+                                        </div>
+                                      ) : activeList.length === 0 && checklist.length > 0 ? (
+                                        <div className="flex flex-col items-center justify-center space-y-2 p-8">
+                                          <CheckSquare className="h-10 w-10 text-emerald-600 dark:text-emerald-400 animate-bounce" />
+                                          <p className="text-sm font-bold text-slate-900 dark:text-white">🎉 All compliance tasks completed!</p>
+                                          <p className="text-xs text-slate-600 dark:text-slate-400">There are no pending manual compliance tasks for the current period.</p>
+                                        </div>
+                                      ) : (
+                                        <div className="p-8 text-center text-slate-500">No checklist items found.</div>
+                                      )
+                                    }
+                                  />
                                 </div>
                               </div>
                             </div>
@@ -4633,79 +5156,13 @@ function AdminDashboardContent() {
                                 </div>
 
                                 <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
-                                  <table className="w-full text-left">
-                                    <thead>
-                                      <tr className="border-b border-slate-400 dark:border-white/10 bg-white dark:bg-slate-900/40 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                                        <th className="py-3 px-4">Sr.</th>
-                                        <th className="py-3 px-4">Requirement</th>
-                                        <th className="py-3 px-4">Period</th>
-                                        <th className="py-3 px-4">Change Log</th>
-                                        <th className="py-3 px-4">Remarks</th>
-                                        <th className="py-3 px-4">Proof</th>
-                                        <th className="py-3 px-4">Updated By</th>
-                                        <th className="py-3 px-4">Date</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                                      {(() => {
-                                        const pageData = historyPagination.currentData;
-
-                                        if (pageData.length === 0) {
-                                          return (
-                                            <tr>
-                                              <td colSpan={8} className="text-center py-10 text-slate-500 dark:text-slate-500">
-                                                {historyFilterText ? 'No matching history records found.' : 'No audit history records yet.'}
-                                              </td>
-                                            </tr>
-                                          );
-                                        }
-
-                                        return pageData.map((h: any) => {
-                                          const prevStatus = h.previousStatus || 'PENDING';
-                                          const newStatus = h.newStatus;
-
-                                          const colors: Record<string, string> = {
-                                            COMPLIANT: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-                                            NON_COMPLIANT: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-                                            PENDING: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
-                                            OVERDUE: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
-                                            PENALTY_RESOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
-                                            PAID: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                          };
-
-                                          return (
-                                            <tr key={h.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
-                                              <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{h.requirement?.serialNo}</td>
-                                              <td className="py-3 px-4 font-medium max-w-xs">{h.requirement?.requirement}</td>
-                                              <td className="py-3 px-4 font-semibold text-primary-700 dark:text-primary-300">{h.periodLabel || '—'}</td>
-                                              <td className="py-3 px-4">
-                                                <div className="flex items-center space-x-1">
-                                                  <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded border uppercase ${colors[prevStatus] || 'bg-slate-500/10'}`}>{prevStatus.replace('_', ' ')}</span>
-                                                  <span className="text-slate-500 dark:text-slate-500">→</span>
-                                                  <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded border uppercase ${colors[newStatus] || 'bg-slate-500/10'}`}>{newStatus.replace('_', ' ')}</span>
-                                                </div>
-                                              </td>
-                                              <td className="py-3 px-4 text-slate-600 dark:text-slate-400 max-w-xs truncate" title={h.officerRemarks}>{h.officerRemarks || '—'}</td>
-                                              <td className="py-3 px-4">
-                                                {h.proofDocumentUrl ? (
-                                                  <button
-                                                    onClick={() => window.open(api.getBaseUrl() + '' + h.proofDocumentUrl, '_blank')}
-                                                    className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium underline flex items-center"
-                                                  >
-                                                    <Eye className="h-3 w-3 mr-1" /> View
-                                                  </button>
-                                                ) : (
-                                                  <span className="text-slate-600">—</span>
-                                                )}
-                                              </td>
-                                              <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{h.updatedByName || 'System'}</td>
-                                              <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{new Date(h.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-                                            </tr>
-                                          );
-                                        });
-                                      })()}
-                                    </tbody>
-                                  </table>
+                                  <DataTable
+                                    columns={checklistHistoryColumns}
+                                    data={historyPagination.currentData}
+                                    customStyles={tableCustomStyles}
+                                    theme={isDarkMode ? 'dark' : 'default'}
+                                    noDataComponent={<div className="p-8 text-center text-slate-500">{historyFilterText ? 'No matching history records found.' : 'No audit history records yet.'}</div>}
+                                  />
                                 </div>
 
                                 <Pagination
@@ -5014,76 +5471,13 @@ function AdminDashboardContent() {
                                 {(pageData) => (
                                   alertViewMode === 'table' ? (
                                     <div className="overflow-x-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl shadow-sm">
-                                      <table className="w-full text-left text-sm whitespace-nowrap">
-                                        <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-300 dark:border-white/5 text-slate-600 dark:text-slate-400 font-semibold">
-                                          <tr>
-                                            <th className="px-6 py-4">Alert Type</th>
-                                            <th className="px-6 py-4">Severity</th>
-                                            <th className="px-6 py-4">Description</th>
-                                            <th className="px-6 py-4">Created Date</th>
-                                            <th className="px-6 py-4 text-center">Status</th>
-                                            <th className="px-6 py-4 text-right">Action</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-200 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                                          {pageData.map((a: any) => {
-                                            let severityBadge = "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400";
-                                            let statusBadge = a.status === 'CLOSED' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400';
-                                            let resolveBtnColor = "bg-amber-600 hover:bg-amber-500 text-white";
-
-                                            if (a.severity === 'HIGH') {
-                                              severityBadge = "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400 font-bold";
-                                              resolveBtnColor = "bg-rose-600 hover:bg-rose-500 text-white";
-                                            } else if (a.severity === 'MEDIUM') {
-                                              severityBadge = "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400 font-bold";
-                                              resolveBtnColor = "bg-orange-600 hover:bg-orange-500 text-white";
-                                            } else if (a.severity === 'LOW') {
-                                              severityBadge = "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 font-bold";
-                                              resolveBtnColor = "bg-yellow-600 hover:bg-yellow-500 text-white";
-                                            }
-
-                                            return (
-                                              <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                                <td className="px-6 py-4 font-bold">{a.alertType === 'PENALTY_LEVIED' ? 'PENALTY RISK' : a.alertType.replace(/_/g, ' ')}</td>
-                                                <td className="px-6 py-4">
-                                                  <span className={`px-2.5 py-1 rounded-md text-[10px] uppercase tracking-wider ${severityBadge}`}>{a.severity}</span>
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-normal min-w-[300px] max-w-[500px] text-xs">
-                                                  {formatAlertDescription(a.description)}
-                                                </td>
-                                                <td className="px-6 py-4 text-xs">{new Date(a.createdAt).toLocaleDateString()}</td>
-                                                <td className="px-6 py-4 text-center">
-                                                  <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border border-transparent ${statusBadge}`}>{a.status}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                  {a.status === 'OPEN' && (
-                                                    <button
-                                                      onClick={() => {
-                                                        if (a.alertType === 'PENALTY_LEVIED' && a.penaltyId) {
-                                                          setPenaltyResolveId(a.penaltyId);
-                                                          setPenaltyPayRef('');
-                                                          setPenaltyProof(null);
-                                                          setPenaltyRemarks('');
-                                                        } else if (['KYC_MISSING', 'KYC_FAILED', 'AGREEMENT_MISSING', 'PAN_MISSING'].includes(a.alertType)) {
-                                                          handleResolveAlert(a.id, a.alertType);
-                                                        } else {
-                                                          setClosingAlertId(a.id);
-                                                          setDepositTopup(a.alertType === 'DEPOSIT_LOW' ? '50000' : '');
-                                                          setCloseRemarks('');
-                                                          setAlertProof(null);
-                                                        }
-                                                      }}
-                                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm ${resolveBtnColor}`}
-                                                    >
-                                                      Resolve
-                                                    </button>
-                                                  )}
-                                                </td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
+                                      <DataTable
+                                        columns={alertColumns}
+                                        data={pageData}
+                                        customStyles={tableCustomStyles}
+                                        theme={isDarkMode ? 'dark' : 'default'}
+                                        noDataComponent={<div className="p-8 text-center text-slate-500">No alerts found.</div>}
+                                      />
                                     </div>
                                   ) : (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -5209,55 +5603,13 @@ function AdminDashboardContent() {
                             <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
                               <PaginatedList data={complaints.filter((c: any) => selectedFinancialYear === 'All' || getFinancialYear(c.receivedAt) === selectedFinancialYear)} itemsPerPage={10}>
                                 {(pageData) => (
-                                  <table className="w-full text-left">
-                                    <thead className="bg-slate-100 dark:bg-white/5 text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400 border-b border-slate-400 dark:border-white/10">
-                                      <tr><th className="px-6 py-4">Client</th><th className="px-6 py-4">Source</th><th className="px-6 py-4">Subject</th><th className="px-6 py-4">Received</th><th className="px-6 py-4">Deadline</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Action</th></tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-sm">
-                                      {pageData.length === 0 ? (
-                                        <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-600 dark:text-slate-400">No complaints logged.</td></tr>
-                                      ) : pageData.map((c: any) => {
-                                        const daysLeft = Math.ceil((new Date(c.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24));
-                                        const isBreached = daysLeft < 0 && c.status !== 'CLOSED';
-                                        const isWarning = daysLeft >= 0 && daysLeft <= 5 && c.status !== 'CLOSED';
-
-                                        return (
-                                          <tr key={c.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
-                                            <td className="px-6 py-4 font-medium">{c.clientName}</td>
-                                            <td className="px-6 py-4">{c.source} {c.scoresRefId && <span className="block text-xs text-slate-600 dark:text-slate-400">{c.scoresRefId}</span>}</td>
-                                            <td className="px-6 py-4">{c.subject}</td>
-                                            <td className="px-6 py-4">{new Date(c.receivedAt).toLocaleDateString()}</td>
-                                            <td className="px-6 py-4">
-                                              {c.status === 'CLOSED' ? '-' : (
-                                                <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                                  {daysLeft} days left
-                                                </span>
-                                              )}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              <span className={`px-2 py-1 rounded-md text-xs font-bold ${c.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{c.status}</span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              {c.status !== 'CLOSED' ? (
-                                                <button
-                                                  onClick={() => {
-                                                    setComplaintResolveId(c.id);
-                                                    setComplaintAtrProof(null);
-                                                    setComplaintAtrRemarks('');
-                                                  }}
-                                                  className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
-                                                >Resolve</button>
-                                              ) : (
-                                                c.atrProofUrl && (
-                                                  <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
-                                                )
-                                              )}
-                                            </td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
+                                  <DataTable
+                                    columns={activeComplaintsColumns}
+                                    data={pageData}
+                                    customStyles={tableCustomStyles}
+                                    theme={isDarkMode ? 'dark' : 'default'}
+                                    noDataComponent={<div className="px-6 py-8 text-center text-slate-600 dark:text-slate-400">No complaints logged.</div>}
+                                  />
                                 )}
                               </PaginatedList>
                             </div>
@@ -5267,61 +5619,75 @@ function AdminDashboardContent() {
 
                         {/* PENALTIES TAB */}
                         {complianceTab === 'penalties' && (
-                          <div className="bg-gradient-to-br from-white dark:from-[#0f1523] to-slate-50 dark:to-[#0a0f18] rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden shadow-2xl">
-                            <table className="w-full text-left">
-                              <thead>
-                                <tr className="border-b border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 text-slate-700 dark:text-slate-300 text-[11px] font-extrabold uppercase tracking-widest backdrop-blur-md">
-                                  <th className="py-4 px-6">Requirement</th>
-                                  <th className="py-4 px-6">Overdue Date</th>
-                                  <th className="py-4 px-6">Resolved Date</th>
-                                  <th className="py-4 px-6">Remarks</th>
-                                  <th className="py-4 px-6">Proof</th>
-                                  <th className="py-4 px-6">Status</th>
-                                  {user.role === 'COMPLIANCE_OFFICER' && <th className="py-4 px-6 text-center">Action</th>}
-                                </tr>
-                              </thead>
-                              <PaginatedList data={penalties.filter((p: any) => selectedFinancialYear === 'All' || getFinancialYear(p.createdAt || p.audit?.createdAt) === selectedFinancialYear)} itemsPerPage={10}>
-                                {(pageData) => (
-                                  <tbody className="text-[13px] divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                                    {pageData.map((p: any) => (
-                                      <tr key={p.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/40 transition-colors duration-200 group border-b border-slate-300 dark:border-white/5">
-                                        <td className="py-4 px-6 font-semibold max-w-xs text-slate-900 dark:text-white">
-                                          <div className="font-bold text-slate-900 dark:text-white text-sm max-w-[200px] truncate" title={p.audit?.requirement?.requirement || '-'}>{p.audit?.requirement?.requirement || '-'}</div>
-                                          <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1" title={p.reason}>BSE suggested Penalty: ₹{p.amount.toLocaleString()}</div>
-                                        </td>
-                                        <td className="py-4 px-6 text-slate-500 dark:text-slate-500 font-medium">{(p.audit?.dueDate || p.audit?.createdAt) ? new Date(p.audit.dueDate || p.audit.createdAt).toLocaleDateString() : 'N/A'}</td>
-                                        <td className="py-4 px-6 text-slate-500 dark:text-slate-500 font-medium">{p.paidAt ? new Date(p.paidAt).toLocaleDateString() : '-'}</td>
-                                        <td className="py-4 px-6 text-slate-500 dark:text-slate-500 font-medium"><span className="block max-w-[150px] truncate" title={p.remarks || '-'}>{p.remarks || '-'}</span></td>
-                                        <td className="py-4 px-6 text-sm">
-                                          {p.proofUrl ? (
-                                            <a href={getFullUrl(p.proofUrl)} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:text-indigo-300 flex items-center gap-1 font-semibold text-xs">
-                                              <Eye className="w-3 h-3" /> View Image
-                                            </a>
-                                          ) : (
-                                            <span className="text-slate-500 dark:text-slate-500 text-xs">-</span>
-                                          )}
-                                        </td>
-                                        <td className="py-4 px-6">
-                                          <span className={`px-3 py-1 text-[10px] font-black rounded-lg border uppercase tracking-wider ${p.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 shadow-[0_0_10px_rgba(244,63,94,0.1)]'}`}>{p.status === 'PENDING_PAYMENT' ? 'NON-COMPLIANT' : p.status === 'PAID' ? 'COMPLIANT' : p.status.replace('_', ' ')}</span>
-                                        </td>
-                                        {user.role === 'COMPLIANCE_OFFICER' && (
-                                          <td className="py-4 px-6 text-center">
-                                            {p.status === 'PENDING_PAYMENT' ? (
-                                              <button onClick={() => { setPenaltyResolveId(p.id); setPenaltyResolutionType(''); setPenaltyPayRef(''); setPenaltyProof(null); setPenaltyRemarks(''); }} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-500/20 hover:-translate-y-0.5 hover:shadow-emerald-500/40">Submit Proof</button>
-                                            ) : (
-                                              <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold px-4 py-1.5 bg-slate-100 dark:bg-slate-800/50 rounded-lg">Resolved</span>
-                                            )}
-                                          </td>
-                                        )}
-                                      </tr>
-                                    ))}
-                                    {pageData.length === 0 && (
-                                      <tr><td colSpan={6} className="text-center py-16 text-slate-500 dark:text-slate-500 font-medium">No penalties levied. Great job!</td></tr>
-                                    )}
-                                  </tbody>
-                                )}
-                              </PaginatedList>
-                            </table>
+                          <div className="rounded-3xl glassmorphism border border-slate-300 dark:border-white/10 overflow-hidden w-full shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.2)]">
+                            <DataTable
+                              columns={[
+                                {
+                                  name: 'Requirement',
+                                  cell: (p: any) => (
+                                    <div className="py-2">
+                                      <div className="font-bold text-slate-900 dark:text-white text-sm max-w-[200px] truncate" title={p.audit?.requirement?.requirement || '-'}>{p.audit?.requirement?.requirement || '-'}</div>
+                                      <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1" title={p.reason}>BSE suggested Penalty: ₹{p.amount.toLocaleString()}</div>
+                                    </div>
+                                  ),
+                                },
+                                {
+                                  name: 'Overdue Date',
+                                  cell: (p: any) => <div className="text-slate-500 dark:text-slate-500 font-medium">{(p.audit?.dueDate || p.audit?.createdAt) ? new Date(p.audit.dueDate || p.audit.createdAt).toLocaleDateString() : 'N/A'}</div>
+                                },
+                                {
+                                  name: 'Resolved Date',
+                                  cell: (p: any) => <div className="text-slate-500 dark:text-slate-500 font-medium">{p.paidAt ? new Date(p.paidAt).toLocaleDateString() : '-'}</div>
+                                },
+                                {
+                                  name: 'Remarks',
+                                  cell: (p: any) => <div className="text-slate-500 dark:text-slate-500 font-medium"><span className="block max-w-[150px] truncate" title={p.remarks || '-'}>{p.remarks || '-'}</span></div>
+                                },
+                                {
+                                  name: 'Proof',
+                                  cell: (p: any) => (
+                                    <div className="text-sm py-2">
+                                      {p.proofUrl ? (
+                                        <a href={getFullUrl(p.proofUrl)} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:text-indigo-300 flex items-center gap-1 font-semibold text-xs">
+                                          <Eye className="w-3 h-3" /> View Image
+                                        </a>
+                                      ) : (
+                                        <span className="text-slate-500 dark:text-slate-500 text-xs">-</span>
+                                      )}
+                                    </div>
+                                  )
+                                },
+                                {
+                                  name: 'Status',
+                                  cell: (p: any) => (
+                                    <span className={`px-3 py-1 text-[10px] font-black rounded-lg border uppercase tracking-wider ${p.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 shadow-[0_0_10px_rgba(16,185,129,0.1)]' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20 shadow-[0_0_10px_rgba(244,63,94,0.1)]'}`}>{p.status === 'PENDING_PAYMENT' ? 'NON-COMPLIANT' : p.status === 'PAID' ? 'COMPLIANT' : p.status.replace('_', ' ')}</span>
+                                  )
+                                },
+                                ...(user.role === 'COMPLIANCE_OFFICER' ? [{
+                                  name: 'Action',
+                                  right: true,
+                                  cell: (p: any) => (
+                                    <div className="text-center">
+                                      {p.status === 'PENDING_PAYMENT' ? (
+                                        <button onClick={() => { setPenaltyResolveId(p.id); setPenaltyResolutionType(''); setPenaltyPayRef(''); setPenaltyProof(null); setPenaltyRemarks(''); }} className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-500/20 hover:-translate-y-0.5 hover:shadow-emerald-500/40">Submit Proof</button>
+                                      ) : (
+                                        <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold px-4 py-1.5 bg-slate-100 dark:bg-slate-800/50 rounded-lg">Resolved</span>
+                                      )}
+                                    </div>
+                                  )
+                                }] : [])
+                              ]}
+                              data={penalties.filter((p: any) => selectedFinancialYear === 'All' || getFinancialYear(p.createdAt || p.audit?.createdAt) === selectedFinancialYear)}
+                              pagination
+                              highlightOnHover
+                              responsive
+                              theme={isDarkMode ? 'dark' : 'default'}
+                              noDataComponent={
+                                <div className="text-center py-16 text-slate-500 dark:text-slate-500 font-medium">
+                                  No penalties levied. Great job!
+                                </div>
+                              }
+                            />
                           </div>
                         )}
 
@@ -5781,204 +6147,19 @@ function AdminDashboardContent() {
                             {(paginatedClients: any) => (
                               <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/5 overflow-hidden">
                                 <div className="overflow-x-auto">
-                                  <table className="w-full text-left border-collapse min-w-[900px]">
-                                    <thead className="bg-slate-100 dark:bg-white/5 border-b border-slate-400 dark:border-white/10 text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                                      <tr>
-                                        <th className="py-4 px-5 font-semibold">Client Name</th>
-                                        <th className="py-4 px-5 font-semibold">PAN / Aadhaar</th>
-                                        <th className="py-4 px-5 font-semibold">Location</th>
-                                        <th className="py-4 px-5 font-semibold">Registered On</th>
-                                        <th className="py-4 px-4 font-semibold">Status</th>
-                                        <th className="py-4 px-4 font-semibold">Added By / Source</th>
-                                        <th className="py-4 px-5 font-semibold">Esign/KRA</th>
-                                        <th className="py-4 px-5 text-right font-semibold">Actions</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                                      {paginatedClients.map((cl: any) => {
-                                        const activeSub = cl.subscriptions?.find((s: any) => s.status === 'ACTIVE');
-                                        const isDeleted = cl.user?.deletedAt !== null && cl.user?.deletedAt !== undefined;
-
-                                        const deleteSuffix = `_deleted_${cl.id}`;
-                                        const displayName = cl.name?.replace(deleteSuffix, '') || cl.name;
-                                        const displayEmail = cl.email?.replace(deleteSuffix, '') || cl.email;
-                                        const displayMobile = cl.mobile?.replace(deleteSuffix, '') || cl.mobile;
-                                        const displayPan = cl.pan?.replace(deleteSuffix, '') || cl.pan;
-                                        const displayAadhaar = cl.aadhaar?.replace(deleteSuffix, '') || cl.aadhaar;
-
-                                        return (
-                                          <tr key={cl.id} className={`hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition border-b border-slate-300 dark:border-white/5 ${isDeleted ? 'opacity-60 bg-rose-50 dark:bg-rose-950/10' : ''}`}>
-                                            <td className="py-4 px-5">
-                                              <div className="font-bold text-slate-900 dark:text-white">{displayName}</div>
-                                              <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">{displayEmail}</div>
-                                              <div className="text-[10px] text-slate-500 dark:text-slate-500">{displayMobile}</div>
-                                            </td>
-                                            <td className="py-4 px-5">
-                                              <div className="font-mono text-slate-700 dark:text-slate-300 text-[11px]">{displayPan}</div>
-                                              <div className="font-mono text-slate-500 dark:text-slate-500 text-[10px] mt-0.5">{displayAadhaar?.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3')}</div>
-                                            </td>
-                                            <td className="py-4 px-5">
-                                              {cl.profile?.city || cl.profile?.state ? (
-                                                <div>
-                                                  <div className="text-slate-700 dark:text-slate-300">{cl.profile.city || '—'}</div>
-                                                  <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-0.5">{cl.profile.state || '—'}</div>
-                                                </div>
-                                              ) : (
-                                                <span className="text-slate-500 dark:text-slate-500 italic text-[10px]">No Location</span>
-                                              )}
-                                            </td>
-                                            <td className="py-4 px-5">
-                                              <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-1 uppercase tracking-wider">
-                                                {new Date(cl.user?.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                              </div>
-                                            </td>
-                                            <td className="py-4 px-4">
-                                              <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase border ${cl.user?.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : cl.user?.status === 'PENDING_APPROVAL' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
-                                                {cl.user?.status}
-                                              </span>
-                                              {isDeleted && cl.user?.deletedBy && (
-                                                <div className="text-[9px] font-bold uppercase text-rose-600 dark:text-rose-400 mt-1">
-                                                  Deleted by: {cl.user.deletedBy}
-                                                </div>
-                                              )}
-                                            </td>
-                                            <td className="py-4 px-4">
-                                              {cl.createdByInfo?.type === 'SELF' || !cl.createdById ? (
-                                                <span className="text-[9px] font-bold uppercase text-sky-700 dark:text-sky-400 bg-sky-500/10 border border-sky-500/20 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                                                  👤 Self Signup
-                                                </span>
-                                              ) : cl.createdByInfo?.type === 'ADMIN' ? (
-                                                <span className="text-[9px] font-bold uppercase text-purple-700 dark:text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                                                  🛡️ {cl.createdByInfo?.label || 'Added by Admin'}
-                                                </span>
-                                              ) : (
-                                                <span className="text-[9px] font-bold uppercase text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-full inline-flex items-center gap-1">
-                                                  👨‍💼 {cl.createdByInfo?.label || 'Added by Staff'}
-                                                </span>
-                                              )}
-                                            </td>
-                                            <td className="py-4 px-5">
-                                              <div className="flex flex-col gap-1.5 items-start">
-                                                {/* KRA Status Badge */}
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                                  : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                    : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
-                                                  }`}>
-                                                  KRA: {
-                                                    cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                      ? 'FAILED'
-                                                      : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                        ? 'VERIFIED'
-                                                        : 'PENDING'
-                                                  }
-                                                </span>
-                                                {/* eSign Status Badge */}
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
-                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                                                  }`}>
-                                                  eSign: {cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
-                                                </span>
-                                              </div>
-                                            </td>
-                                            <td className="py-4 px-5 text-right space-x-2 whitespace-nowrap">
-                                              <button
-                                                onClick={() => {
-                                                  setSelectedClient(cl);
-                                                  setIsViewClientModalOpen(true);
-                                                  setClientDetailsTab('profile');
-                                                }}
-                                                title="View Details"
-                                                className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
-                                              >
-                                                <Eye className="h-3.5 w-3.5" />
-                                              </button>
-                                              {cl.user?.status === 'PENDING_APPROVAL' && (
-                                                <button
-                                                  onClick={() => handleApproveClient(cl.id)}
-                                                  title="Approve Client"
-                                                  className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
-                                                >
-                                                  <Check className="h-3.5 w-3.5" />
-                                                </button>
-                                              )}
-                                              {!isDeleted ? (
-                                                <>
-                                                  {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
-                                                    <button
-                                                      onClick={() => startEditClient(cl)}
-                                                      title="Edit Profile"
-                                                      className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center"
-                                                    >
-                                                      <Edit2 className="h-3.5 w-3.5" />
-                                                    </button>
-                                                  )}
-                                                  {(!isStaff || hasPermission('DELETE_CLIENTS')) && (
-                                                    <button
-                                                      onClick={() => handleDeleteClient(cl.id)}
-                                                      title="Delete Client"
-                                                      className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center"
-                                                    >
-                                                      <Trash2 className="h-3.5 w-3.5" />
-                                                    </button>
-                                                  )}
-                                                  {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
-                                                    <button
-                                                      onClick={() => handleToggleClientStatus(cl.id, cl.user?.status, cl.name)}
-                                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition ${cl.user?.status === 'ACTIVE' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20'}`}
-                                                    >
-                                                      {cl.user?.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                                                    </button>
-                                                  )}
-                                                  {/* -- Assign Plan Button -- */}
-                                                  {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
-                                                    <button
-                                                      onClick={() => {
-                                                        setAssignPlanClient(cl);
-                                                        setAssignPlanCategoryId('');
-                                                        setAssignPlanId('');
-                                                        setAssignPlanRemarks('');
-                                                        setIsAssignPlanModalOpen(true);
-                                                      }}
-                                                      title="Assign Plan"
-                                                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 inline-flex items-center gap-1"
-                                                    >
-                                                      <CreditCard className="h-3 w-3" />
-                                                      <span>Assign</span>
-                                                    </button>
-                                                  )}
-                                                </>
-
-                                              ) : (
-                                                <>
-                                                  {(!isStaff || hasPermission('DELETE_CLIENTS')) && (
-                                                    <button
-                                                      onClick={() => handleRestoreClient(cl.id)}
-                                                      title="Restore Client"
-                                                      className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
-                                                    >
-                                                      <RotateCcw className="h-3.5 w-3.5" />
-                                                    </button>
-                                                  )}
-                                                </>
-                                              )}
-                                            </td>
-                                          </tr>
-                                        );
-                                      })}
-                                      {clients.length === 0 && (
-                                        <tr>
-                                          <td colSpan={9} className="text-center py-12 text-slate-500 dark:text-slate-500">
-                                            <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                                            <p>No clients registered yet.</p>
-                                            <p className="text-[10px] mt-1 text-slate-600">Click "Add Client" to register your first client.</p>
-                                          </td>
-                                        </tr>
-                                      )}
-                                    </tbody>
-                                  </table>
+                                  <DataTable
+                                    columns={clientColumns}
+                                    data={paginatedClients}
+                                    customStyles={tableCustomStyles}
+                                    theme={isDarkMode ? 'dark' : 'default'}
+                                    noDataComponent={
+                                      <div className="text-center py-12 text-slate-500 dark:text-slate-500">
+                                        <Users className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                                        <p>No clients registered yet.</p>
+                                        <p className="text-[10px] mt-1 text-slate-600">Click "Add Client" to register your first client.</p>
+                                      </div>
+                                    }
+                                  />
                                 </div>
                               </div>
                             )}
@@ -6934,42 +7115,41 @@ function AdminDashboardContent() {
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
                                     <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Segment-wise Expiry Overview</h4>
                                     <div className="overflow-x-auto rounded-xl border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-slate-950/20">
-                                      <table className="w-full text-left text-xs">
-                                        <thead>
-                                          <tr className="bg-slate-100 dark:bg-slate-950/40 border-b border-slate-300 dark:border-white/5 text-[9px] text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
-                                            <th className="py-2.5 px-4">Service Name</th>
-                                            <th className="py-2.5 px-4 text-right">Expiry Date</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300 font-medium">
-                                          {(() => {
-                                            const segExpiries = calculateSegmentExpiries(selectedClient.subscriptions || []);
-                                            const now = new Date();
-                                            return Object.entries(segExpiries).map(([name, date]) => {
-                                              const isActive = date && date > now;
-                                              const isExpired = date && date <= now;
+                                      <DataTable
+                                        columns={[
+                                          {
+                                            name: 'Service Name',
+                                            selector: (row: any) => row.name,
+                                            cell: (row: any) => <span className="font-bold text-slate-800 dark:text-slate-200">{row.name}</span>
+                                          },
+                                          {
+                                            name: 'Expiry Date',
+                                            right: true,
+                                            cell: (row: any) => {
+                                              const now = new Date();
+                                              const isActive = row.date && row.date > now;
+                                              const isExpired = row.date && row.date <= now;
                                               return (
-                                                <tr key={name} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
-                                                  <td className="py-2.5 px-4 font-bold text-slate-800 dark:text-slate-200">{name}</td>
-                                                  <td className="py-2.5 px-4 text-right font-mono">
-                                                    {isActive ? (
-                                                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                                        {date!.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                      </span>
-                                                    ) : isExpired ? (
-                                                      <span className="text-rose-600 dark:text-rose-400 line-through opacity-60">
-                                                        {date!.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} (Expired)
-                                                      </span>
-                                                    ) : (
-                                                      <span className="text-slate-500 dark:text-slate-500">Not Subscribed</span>
-                                                    )}
-                                                  </td>
-                                                </tr>
-                                              );
-                                            });
-                                          })()}
-                                        </tbody>
-                                      </table>
+                                                <span className="font-mono">
+                                                  {isActive ? (
+                                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                                      {row.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                    </span>
+                                                  ) : isExpired ? (
+                                                    <span className="text-rose-600 dark:text-rose-400 line-through opacity-60">
+                                                      {row.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} (Expired)
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-slate-500 dark:text-slate-500">Not Subscribed</span>
+                                                  )}
+                                                </span>
+                                              )
+                                            }
+                                          }
+                                        ]}
+                                        data={Object.entries(calculateSegmentExpiries(selectedClient.subscriptions || [])).map(([name, date]) => ({name, date}))}
+                                        theme={isDarkMode ? 'dark' : 'default'}
+                                      />
                                     </div>
                                   </div>
 
@@ -7018,72 +7198,77 @@ function AdminDashboardContent() {
                                     <div className="p-4 border-b border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-slate-800/40">
                                       <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Purchase History Logs</h4>
                                     </div>
-                                    <table className="w-full text-left text-xs">
-                                      <thead>
-                                        <tr className="bg-slate-100 dark:bg-slate-950/40 border-b border-slate-300 dark:border-white/5 text-[9px] text-slate-600 dark:text-slate-400 font-bold uppercase tracking-wider">
-                                          <th className="py-3 px-4">S.No</th>
-                                          <th className="py-3 px-4">Plan Name</th>
-                                          <th className="py-3 px-4">Amount</th>
-                                          <th className="py-3 px-4">Start Date</th>
-                                          <th className="py-3 px-4">Expiry Date</th>
-                                          <th className="py-3 px-4 text-right">Status</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300 font-medium">
-                                        {selectedClient.subscriptions && selectedClient.subscriptions.length > 0 ? (
-                                          selectedClient.subscriptions.map((sub: any, idx: number) => {
+                                    <DataTable
+                                      columns={[
+                                        {
+                                          name: 'S.No',
+                                          width: '60px',
+                                          cell: (row: any, index?: number) => <span className="font-mono text-slate-500">{index !== undefined ? index + 1 : 0}</span>
+                                        },
+                                        {
+                                          name: 'Plan Name',
+                                          cell: (sub: any) => {
                                             const isCustomAmount = sub.amountTotal != null && (gstCalculationType === 'EXCLUSIVE' ? Math.abs(sub.amountTotal - Math.round((sub.plan?.price || 0) * 1.18)) > 2 : Math.abs(sub.amountTotal - (sub.plan?.price || 0)) > 2);
                                             const defaultDays = (sub.plan?.durationMonths || 1) * 30;
                                             const actualDays = Math.round((new Date(sub.endDate).getTime() - new Date(sub.startDate).getTime()) / (1000 * 60 * 60 * 24));
                                             const isCustomDays = Math.abs(actualDays - defaultDays) > 4;
                                             const isCustom = isCustomAmount || isCustomDays;
-
                                             return (
-                                              <tr key={sub.id} className="hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
-                                                <td className="py-3 px-4 text-slate-500 dark:text-slate-500">{idx + 1}</td>
-                                                <td className="py-3 px-4">
-                                                  <div className="flex items-center space-x-2">
-                                                    <span className="font-bold text-slate-800 dark:text-slate-200">{sub.plan?.name}</span>
-                                                    {isCustom && <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold uppercase border border-amber-500/20">CUSTOM</span>}
-                                                  </div>
-                                                </td>
-                                                <td className="py-3 px-4">
-                                                  {gstCalculationType === 'EXCLUSIVE' ? (
-                                                    <div className="text-[10px] space-y-0.5 text-slate-600 dark:text-slate-400 leading-tight">
-                                                      <div>Base: ₹{(sub.amountBase ?? sub.plan?.price)?.toLocaleString()}</div>
-                                                      <div>GST: ₹{(sub.amountGst ?? Math.round((sub.plan?.price || 0) * 0.18))?.toLocaleString()}</div>
-                                                      <div className="font-bold text-slate-800 dark:text-slate-200">Total: ₹{(sub.amountTotal ?? Math.round((sub.plan?.price || 0) * 1.18))?.toLocaleString()}</div>
-                                                    </div>
-                                                  ) : (
-                                                    <div className="text-xs">
-                                                      <span className="font-semibold text-slate-800 dark:text-slate-200">₹{(sub.amountTotal ?? sub.plan?.price)?.toLocaleString()}</span>
-                                                      <span className="text-[8px] text-slate-500 dark:text-slate-500 block mt-0.5">(GST Incl.)</span>
-                                                    </div>
-                                                  )}
-                                                </td>
-                                                <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">{new Date(sub.startDate).toLocaleDateString('en-IN')}</td>
-                                                <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400">{new Date(sub.endDate).toLocaleDateString('en-IN')}</td>
-                                                <td className="py-3 px-4 text-right">
-                                                  {(() => {
-                                                    const displayStatus = getDisplayStatus(sub);
-                                                    const statusClass = displayStatus === 'ACTIVE'
-                                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                                                      : displayStatus === 'EXPIRED'
-                                                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20';
-                                                    return <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${statusClass}`}>{displayStatus}</span>;
-                                                  })()}
-                                                </td>
-                                              </tr>
-                                            );
-                                          })
-                                        ) : (
-                                          <tr>
-                                            <td colSpan={6} className="text-center py-6 text-slate-500 dark:text-slate-500">No subscriptions purchased yet.</td>
-                                          </tr>
-                                        )}
-                                      </tbody>
-                                    </table>
+                                              <div className="flex items-center space-x-2">
+                                                <span className="font-bold text-slate-800 dark:text-slate-200">{sub.plan?.name}</span>
+                                                {isCustom && <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold uppercase border border-amber-500/20">CUSTOM</span>}
+                                              </div>
+                                            )
+                                          }
+                                        },
+                                        {
+                                          name: 'Amount',
+                                          cell: (sub: any) => (
+                                            <>
+                                              {gstCalculationType === 'EXCLUSIVE' ? (
+                                                <div className="text-[10px] space-y-0.5 text-slate-600 dark:text-slate-400 leading-tight py-2">
+                                                  <div>Base: ₹{(sub.amountBase ?? sub.plan?.price)?.toLocaleString()}</div>
+                                                  <div>GST: ₹{(sub.amountGst ?? Math.round((sub.plan?.price || 0) * 0.18))?.toLocaleString()}</div>
+                                                  <div className="font-bold text-slate-800 dark:text-slate-200">Total: ₹{(sub.amountTotal ?? Math.round((sub.plan?.price || 0) * 1.18))?.toLocaleString()}</div>
+                                                </div>
+                                              ) : (
+                                                <div className="text-xs">
+                                                  <span className="font-semibold text-slate-800 dark:text-slate-200">₹{(sub.amountTotal ?? sub.plan?.price)?.toLocaleString()}</span>
+                                                  <span className="text-[8px] text-slate-500 dark:text-slate-500 block mt-0.5">(GST Incl.)</span>
+                                                </div>
+                                              )}
+                                            </>
+                                          )
+                                        },
+                                        {
+                                          name: 'Start Date',
+                                          cell: (sub: any) => <span className="font-mono text-slate-600 dark:text-slate-400">{new Date(sub.startDate).toLocaleDateString('en-IN')}</span>
+                                        },
+                                        {
+                                          name: 'Expiry Date',
+                                          cell: (sub: any) => <span className="font-mono text-slate-600 dark:text-slate-400">{new Date(sub.endDate).toLocaleDateString('en-IN')}</span>
+                                        },
+                                        {
+                                          name: 'Status',
+                                          right: true,
+                                          cell: (sub: any) => {
+                                            const displayStatus = getDisplayStatus(sub);
+                                            const statusClass = displayStatus === 'ACTIVE'
+                                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                              : displayStatus === 'EXPIRED'
+                                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20';
+                                            return <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${statusClass}`}>{displayStatus}</span>;
+                                          }
+                                        }
+                                      ]}
+                                      data={selectedClient.subscriptions || []}
+                                      pagination
+                                      highlightOnHover
+                                      responsive
+                                      theme={isDarkMode ? 'dark' : 'default'}
+                                      noDataComponent={<div className="text-center py-6 text-slate-500 dark:text-slate-500">No subscriptions purchased yet.</div>}
+                                    />
                                   </div>
                                 </div>
                               )}

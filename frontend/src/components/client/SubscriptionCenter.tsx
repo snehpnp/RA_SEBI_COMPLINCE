@@ -36,6 +36,18 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
     }
   };
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') return resolve(false);
+      if ((window as any).Razorpay) return resolve(true);
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handleConfirmPurchase = async () => {
     if (!checkoutPlan) return;
     
@@ -64,36 +76,95 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
         price = price * 1.18; // Add 18% GST
       }
 
-      const res = await api.initiateCCAvenuePayment({
-        planId: checkoutPlan.id || checkoutPlan._id,
-        couponCode: appliedCoupon ? appliedCoupon.code : undefined
-      });
-      
-      if (res.success && res.url) {
-        // Create dynamic form and submit to CCAvenue
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = res.url;
-        
-        const encRequestInput = document.createElement('input');
-        encRequestInput.type = 'hidden';
-        encRequestInput.name = 'encRequest';
-        encRequestInput.value = res.encRequest;
-        form.appendChild(encRequestInput);
+      const activeGateway = profile?.user?.tenant?.activePaymentGateway || 'CCAVENUE';
 
-        const accessCodeInput = document.createElement('input');
-        accessCodeInput.type = 'hidden';
-        accessCodeInput.name = 'access_code';
-        accessCodeInput.value = res.accessCode;
-        form.appendChild(accessCodeInput);
+      if (activeGateway === 'RAZORPAY') {
+        const res = await api.initiateRazorpayPayment({
+          planId: checkoutPlan.id || checkoutPlan._id,
+          couponCode: appliedCoupon ? appliedCoupon.code : undefined
+        });
 
-        document.body.appendChild(form);
-        form.submit();
+        if (res.success && res.orderId) {
+          const isLoaded = await loadRazorpayScript();
+          if (!isLoaded) throw new Error('Razorpay SDK failed to load');
+
+          const options = {
+            key: res.keyId,
+            amount: res.amount,
+            currency: res.currency,
+            name: profile?.user?.tenant?.companyName || 'Premium Advisory',
+            description: 'Subscription Payment',
+            order_id: res.orderId,
+            handler: async function (response: any) {
+              try {
+                const verifyRes = await api.verifyRazorpayPayment({
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                  planId: checkoutPlan.id || checkoutPlan._id,
+                  couponCode: appliedCoupon ? appliedCoupon.code : undefined
+                });
+                if (verifyRes.success) {
+                  toast.success('Payment successful!');
+                  window.location.href = '/client?payment=success';
+                } else {
+                  throw new Error(verifyRes.message || 'Payment verification failed');
+                }
+              } catch (err: any) {
+                toast.error(err.message || 'Verification failed');
+                window.location.href = '/client?payment=failed';
+              }
+            },
+            prefill: {
+              name: profile?.name || '',
+              email: profile?.email || '',
+              contact: profile?.phone || profile?.mobile || ''
+            },
+            theme: {
+              color: profile?.user?.tenant?.themeColor || '#4F46E5'
+            }
+          };
+
+          const rzp = new (window as any).Razorpay(options);
+          rzp.on('payment.failed', function (response: any) {
+            toast.error(response.error.description || 'Payment failed');
+          });
+          rzp.open();
+        } else {
+          throw new Error(res.message || 'Failed to initiate Razorpay payment');
+        }
       } else {
-        throw new Error(res.message || 'Failed to initiate payment');
+        const res = await api.initiateCCAvenuePayment({
+          planId: checkoutPlan.id || checkoutPlan._id,
+          couponCode: appliedCoupon ? appliedCoupon.code : undefined
+        });
+        
+        if (res.success && res.url) {
+          // Create dynamic form and submit to CCAvenue
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = res.url;
+          
+          const encRequestInput = document.createElement('input');
+          encRequestInput.type = 'hidden';
+          encRequestInput.name = 'encRequest';
+          encRequestInput.value = res.encRequest;
+          form.appendChild(encRequestInput);
+
+          const accessCodeInput = document.createElement('input');
+          accessCodeInput.type = 'hidden';
+          accessCodeInput.name = 'access_code';
+          accessCodeInput.value = res.accessCode;
+          form.appendChild(accessCodeInput);
+
+          document.body.appendChild(form);
+          form.submit();
+        } else {
+          throw new Error(res.message || 'Failed to initiate payment');
+        }
       }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to select plan');
+      toast.error(err.message || 'Failed to process payment');
     } finally {
       setLoading(false);
     }
