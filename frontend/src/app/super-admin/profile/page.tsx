@@ -7,7 +7,7 @@ import { toast } from 'react-hot-toast';
 import { useBranding } from '../../../contexts/BrandingContext';
 
 export default function SuperAdminProfilePage() {
-  const { refreshBranding, logoUrl: currentLogoUrl, faviconUrl: currentFaviconUrl } = useBranding();
+  const { refreshBranding, logoUrl: currentLogoUrl, faviconUrl: currentFaviconUrl, loginLogoUrl: currentLoginLogoUrl } = useBranding();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -23,8 +23,10 @@ export default function SuperAdminProfilePage() {
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
+  const [loginLogoFile, setLoginLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [faviconPreview, setFaviconPreview] = useState<string | null>(null);
+  const [loginLogoPreview, setLoginLogoPreview] = useState<string | null>(null);
 
   const fetchProfile = async () => {
     try {
@@ -75,6 +77,7 @@ export default function SuperAdminProfilePage() {
       fd.append('appName', brandingData.appName);
       if (logoFile) fd.append('logo', logoFile);
       if (faviconFile) fd.append('favicon', faviconFile);
+      if (loginLogoFile) fd.append('loginLogo', loginLogoFile);
 
       const res = await api.put('/system-settings/branding', fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -84,8 +87,10 @@ export default function SuperAdminProfilePage() {
         toast.success('Global branding updated! Sidebar logo updated instantly.');
         setLogoFile(null);
         setFaviconFile(null);
+        setLoginLogoFile(null);
         setLogoPreview(null);
         setFaviconPreview(null);
+        setLoginLogoPreview(null);
         await refreshBranding(); // ← sidebar logo turant update karega
       } else {
         toast.error(res.data.message || 'Branding update failed');
@@ -233,6 +238,44 @@ export default function SuperAdminProfilePage() {
                   <div>
                     <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Current Logo</p>
                     <p className="text-[10px] text-gray-500">Leave empty to keep existing logo</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">Leave empty to keep existing logo</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Login/Register Logo</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setLoginLogoFile(file);
+                  if (file) {
+                    const url = URL.createObjectURL(file);
+                    setLoginLogoPreview(url);
+                  } else {
+                    setLoginLogoPreview(null);
+                  }
+                }}
+                className="w-full text-gray-900 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-400"
+              />
+              {loginLogoPreview ? (
+                <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                  <img src={loginLogoPreview} alt="Login Logo Preview" className="h-10 w-auto object-contain rounded" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{loginLogoFile?.name}</p>
+                    <p className="text-[10px] text-gray-400">{loginLogoFile ? (loginLogoFile.size / 1024).toFixed(1) + ' KB' : ''}</p>
+                  </div>
+                </div>
+              ) : currentLoginLogoUrl ? (
+                <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg">
+                  <img src={currentLoginLogoUrl} alt="Current Login Logo" className="h-10 w-auto object-contain rounded" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Current Login Logo</p>
+                    <p className="text-[10px] text-gray-500">Leave empty to keep existing</p>
                   </div>
                 </div>
               ) : (

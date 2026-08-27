@@ -2718,7 +2718,7 @@ function AdminDashboardContent() {
                 {/* Pulsing ring around avatar */}
                 <div className="absolute inset-0 rounded-full border-2 border-premium-primary/50 animate-ping opacity-75" />
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-premium-primary to-indigo-600 flex items-center justify-center font-bold text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-primary)] relative z-10">
-                  {user?.firstName ? user.firstName.charAt(0).toUpperCase() : 'A'}
+                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : 'A'}
                 </div>
                 {/* Online indicator */}
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />

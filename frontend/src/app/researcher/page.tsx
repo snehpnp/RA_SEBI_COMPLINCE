@@ -2715,7 +2715,7 @@ function AdminDashboardContent() {
               <div className="relative shrink-0">
                 <div className="absolute inset-0 rounded-full border-2 border-white/30 animate-ping opacity-75" />
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(99,102,241,0.6)] relative z-10">
-                  {user?.firstName ? user.firstName.charAt(0).toUpperCase() : 'A'}
+                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : 'A'}
                 </div>
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-blue-900 rounded-full z-20" />
               </div>

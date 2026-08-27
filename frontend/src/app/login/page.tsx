@@ -4,7 +4,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import LoginForm from '../../components/LoginForm';
+import AuthFlipContainer from '../../components/AuthFlipContainer';
 
 export default function UnifiedLoginPage() {
   const router = useRouter();
@@ -50,7 +50,7 @@ export default function UnifiedLoginPage() {
         </div>
       </div>
     }>
-      <LoginForm />
+      <AuthFlipContainer initialView="login" />
     </Suspense>
   );
 }

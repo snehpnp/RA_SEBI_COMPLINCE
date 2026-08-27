@@ -18,7 +18,8 @@ export const getGlobalBranding = async (req: Request, res: Response) => {
         data: {
           appName: 'RAGCP',
           logoUrl: '/logo-light.png',
-          faviconUrl: '/favicon.ico'
+          faviconUrl: '/favicon.ico',
+          loginLogoUrl: '/logo-light.png'
         }
       });
     }
@@ -45,7 +46,7 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
     }
 
     // Read existing branding to preserve fields not being updated
-    let existingData: any = { appName: 'RAGCP', logoUrl: '/logo-light.png', faviconUrl: '/favicon.ico' };
+    let existingData: any = { appName: 'RAGCP', logoUrl: '/logo-light.png', faviconUrl: '/favicon.ico', loginLogoUrl: '/logo-light.png' };
     const existing = await prisma.systemSetting.findUnique({ where: { key: BRANDING_KEY } });
     if (existing) {
       try { existingData = JSON.parse(existing.value); } catch {}
@@ -56,6 +57,7 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
 
     let logoUrl = existingData.logoUrl;
     let faviconUrl = existingData.faviconUrl;
+    let loginLogoUrl = existingData.loginLogoUrl;
 
     if (files?.logo?.[0]) {
       // Build a URL path relative to server root (multer saves to /uploads/branding/)
@@ -70,10 +72,17 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
       faviconUrl = req.body.faviconUrl;
     }
 
+    if (files?.loginLogo?.[0]) {
+      loginLogoUrl = '/uploads/branding/' + files.loginLogo[0].filename;
+    } else if (req.body.loginLogoUrl) {
+      loginLogoUrl = req.body.loginLogoUrl;
+    }
+
     const brandingData = {
       appName: appName || existingData.appName || 'RAGCP',
       logoUrl,
-      faviconUrl
+      faviconUrl,
+      loginLogoUrl
     };
 
     const setting = await prisma.systemSetting.upsert({

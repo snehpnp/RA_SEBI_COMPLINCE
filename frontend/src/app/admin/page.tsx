@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -376,6 +376,7 @@ function AdminDashboardContent() {
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
   const [roles, setRoles] = useState<any[]>([]);
   const [selectedRole, setSelectedRole] = useState<any | null>(null);
+  const rolesScrollRef = useRef<HTMLDivElement>(null);
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
@@ -1150,7 +1151,14 @@ function AdminDashboardContent() {
 
         try {
           const rolesReq = await api.getRoles();
-          if (rolesReq.success) setRoles(rolesReq.data);
+          if (rolesReq.success) {
+            setRoles(rolesReq.data);
+            setSelectedRole((prev: any) => {
+              if (prev) return prev;
+              const adminRole = rolesReq.data.find((r: any) => r.name === 'ADMIN');
+              return adminRole || rolesReq.data[0] || null;
+            });
+          }
         } catch (e: any) { }
       }
 
@@ -1508,7 +1516,7 @@ function AdminDashboardContent() {
 
   const [uploadingCoSignature, setUploadingCoSignature] = useState<boolean>(false);
 
-  const [showMobilePreview, setShowMobilePreview] = useState<boolean>(true);
+  const [showMobilePreview, setShowMobilePreview] = useState<boolean>(false);
   useEffect(() => {
     if (selectedClient && selectedClient.id) {
       api.getClientCommunicationsAdmin(selectedClient.id)
@@ -2682,6 +2690,7 @@ function AdminDashboardContent() {
 
   return (
     <div className={isDarkMode ? 'dark' : ''}>
+
       <div className="h-screen h-dvh overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex relative">
         {/* Mobile Menu Toggle */}
         <button
@@ -2843,8 +2852,8 @@ function AdminDashboardContent() {
               <div className="relative shrink-0">
                 {/* Pulsing ring around avatar */}
                 <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10">
-                  {user?.firstName ? user.firstName.charAt(0).toUpperCase() : 'A'}
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10 text-lg">
+                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : (user?.name ? user.name.trim().charAt(0).toUpperCase() : 'A')}
                 </div>
                 {/* Online indicator */}
                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
@@ -2852,7 +2861,7 @@ function AdminDashboardContent() {
 
               {!isSidebarCollapsed && (
                 <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-white">{user?.firstName || 'Admin'}</p>
+                  <p className="font-bold text-sm truncate text-white">{user?.firstName || user?.name || 'Admin'}</p>
                   <div className="flex items-center gap-1 mt-0.5">
                     <ShieldCheck className="w-3 h-3 text-rose-500" />
                     <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-rose-500 via-orange-200 to-rose-500 animate-pulse">
@@ -2863,7 +2872,12 @@ function AdminDashboardContent() {
               )}
 
               {!isSidebarCollapsed && (
-                <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
+                <div
+                  className="relative z-10 shrink-0 mr-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ThemeToggle />
+                </div>
               )}
             </div>
             <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
@@ -3621,137 +3635,145 @@ function AdminDashboardContent() {
                       </div>
 
                       {/* Staff directory table */}
-                      <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
-                        <table className="w-full text-left">
-                          <thead>
-                            <tr className="border-b border-slate-400 dark:border-white/10 bg-white dark:bg-slate-900/40 text-slate-600 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-                              <th className="py-4 px-6">Registered On</th>
-                              <th className="py-4 px-6">Staff Member</th>
-                              <th className="py-4 px-6">SEBI System Role</th>
-                              <th className="py-4 px-6">NISM Validity</th>
-                              <th className="py-4 px-6">Status</th>
-                              <th className="py-4 px-6 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <PaginatedList data={staff} itemsPerPage={10}>
-                            {(pageData) => (
-                              <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300 font-medium">
-                                {pageData.map((st: any) => {
-                                  const isDeleted = st.user?.deletedAt !== null;
-                                  return (
-                                    <tr
-                                      key={st.id}
-                                      className={`hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition ${isDeleted ? 'opacity-50 bg-slate-100 dark:bg-slate-950/20' : ''}`}
-                                    >
-                                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
-                                        {st.user?.createdAt ? (
-                                          <span className="block">
-                                            {new Date(st.user.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-800/60 overflow-hidden w-full shadow-xl shadow-slate-200/20 dark:shadow-none bg-white dark:bg-[#0F172A]">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                                <th className="py-4 px-6 font-semibold">S.No</th>
+                                <th className="py-4 px-6 font-semibold">Registered On</th>
+                                <th className="py-4 px-6 font-semibold">Staff Member</th>
+                                <th className="py-4 px-6 font-semibold">SEBI System Role</th>
+                                <th className="py-4 px-6 font-semibold">NISM Validity</th>
+                                <th className="py-4 px-6 font-semibold">Status</th>
+                                <th className="py-4 px-6 text-right font-semibold">Actions</th>
+                              </tr>
+                            </thead>
+                            <PaginatedList data={staff} itemsPerPage={10}>
+                              {(pageData) => (
+                                <tbody className="text-xs divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-700 dark:text-slate-300 font-medium">
+                                  {pageData.map((st: any, index: number) => {
+                                    const isDeleted = st.user?.deletedAt !== null;
+                                    return (
+                                      <tr
+                                        key={st.id}
+                                        className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors duration-200 ${isDeleted ? 'opacity-50 bg-slate-50 dark:bg-slate-900/20' : 'bg-white dark:bg-transparent'}`}
+                                      >
+                                        <td className="py-4 px-6">
+                                          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+                                            {index + 1}
                                           </span>
-                                        ) : (
-                                          <span className="text-slate-600 block">N/A</span>
-                                        )}
-                                      </td>
-                                      <td className="py-4 px-6">
-                                        <span className="font-bold text-slate-900 dark:text-white block flex items-center gap-2">
-                                          {st.name}
-                                          {isDeleted && (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
-                                              DELETED
+                                        </td>
+                                        <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
+                                          {st.user?.createdAt ? (
+                                            <span className="block">
+                                              {new Date(st.user.createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+                                            </span>
+                                          ) : (
+                                            <span className="text-slate-600 block">N/A</span>
+                                          )}
+                                        </td>
+                                        <td className="py-4 px-6">
+                                          <span className="font-bold text-slate-900 dark:text-white block flex items-center gap-2">
+                                            {st.name}
+                                            {isDeleted && (
+                                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                                                DELETED
+                                              </span>
+                                            )}
+                                          </span>
+                                          <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.email}</span>
+                                          <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.mobile}</span>
+                                        </td>
+                                        <td className="py-4 px-6">
+                                          <span className="px-2 py-0.5 rounded bg-primary-500/10 text-primary-600 dark:text-primary-400 text-[9px] border border-primary-500/20 font-bold uppercase tracking-wider font-mono">
+                                            {st.user?.role?.name || 'N/A'}
+                                          </span>
+                                          {st.personAssociated && (
+                                            <span className="text-[10px] text-slate-600 dark:text-slate-400 block mt-1 font-mono">
+                                              ({st.personAssociated.roleType === 'OTHER' ? st.personAssociated.customRole : st.personAssociated.roleType})
                                             </span>
                                           )}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.email}</span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.mobile}</span>
-                                      </td>
-                                      <td className="py-4 px-6">
-                                        <span className="px-2 py-0.5 rounded bg-primary-500/10 text-primary-600 dark:text-primary-400 text-[9px] border border-primary-500/20 font-bold uppercase tracking-wider font-mono">
-                                          {st.user?.role?.name || 'N/A'}
-                                        </span>
-                                        {st.personAssociated && (
-                                          <span className="text-[10px] text-slate-600 dark:text-slate-400 block mt-1 font-mono">
-                                            ({st.personAssociated.roleType === 'OTHER' ? st.personAssociated.customRole : st.personAssociated.roleType})
+                                        </td>
+                                        <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
+                                          {st.nismValidity ? (
+                                            <span className="block">
+                                              {new Date(st.nismValidity).toDateString()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-slate-600 block">N/A</span>
+                                          )}
+                                          {st.nismNumber && (
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-500 font-mono block">
+                                              No: {st.nismNumber}
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-4 px-6">
+                                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold ${st.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
+                                            {st.status}
                                           </span>
-                                        )}
-                                      </td>
-                                      <td className="py-4 px-6 text-slate-600 dark:text-slate-400">
-                                        {st.nismValidity ? (
-                                          <span className="block">
-                                            {new Date(st.nismValidity).toDateString()}
-                                          </span>
-                                        ) : (
-                                          <span className="text-slate-600 block">N/A</span>
-                                        )}
-                                        {st.nismNumber && (
-                                          <span className="text-[10px] text-slate-500 dark:text-slate-500 font-mono block">
-                                            No: {st.nismNumber}
-                                          </span>
-                                        )}
-                                      </td>
-                                      <td className="py-4 px-6">
-                                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold ${st.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
-                                          {st.status}
-                                        </span>
-                                      </td>
-                                      <td className="py-4 px-6 text-right space-x-2">
-                                        <button
-                                          onClick={() => setSelectedStaff(st)}
-                                          title="View Details"
-                                          className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
-                                        >
-                                          <Eye className="h-3.5 w-3.5" />
-                                        </button>
-
-                                        {!isDeleted && (
-                                          <>
-                                            <button
-                                              onClick={() => startEditStaff(st)}
-                                              title="Edit Profile"
-                                              className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center"
-                                            >
-                                              <Edit2 className="h-3.5 w-3.5" />
-                                            </button>
-                                            <button
-                                              onClick={() => handleToggleStaffStatus(st.id)}
-                                              title={st.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition ${st.status === 'ACTIVE' ? 'border border-amber-500/20 text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10' : 'border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
-                                            >
-                                              {st.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                                            </button>
-                                            <button
-                                              onClick={() => handleDeleteStaff(st.id)}
-                                              title="Delete Staff"
-                                              className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center"
-                                            >
-                                              <Trash2 className="h-3.5 w-3.5" />
-                                            </button>
-                                          </>
-                                        )}
-
-                                        {isDeleted && (
+                                        </td>
+                                        <td className="py-4 px-6 text-right space-x-2">
                                           <button
-                                            onClick={() => handleRestoreStaff(st.id)}
-                                            title="Restore Staff"
-                                            className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
+                                            onClick={() => setSelectedStaff(st)}
+                                            title="View Details"
+                                            className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
                                           >
-                                            <RotateCcw className="h-3.5 w-3.5" />
+                                            <Eye className="h-3.5 w-3.5" />
                                           </button>
-                                        )}
+
+                                          {!isDeleted && (
+                                            <>
+                                              <button
+                                                onClick={() => startEditStaff(st)}
+                                                title="Edit Profile"
+                                                className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center"
+                                              >
+                                                <Edit2 className="h-3.5 w-3.5" />
+                                              </button>
+                                              <button
+                                                onClick={() => handleToggleStaffStatus(st.id)}
+                                                title={st.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition ${st.status === 'ACTIVE' ? 'border border-amber-500/20 text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10' : 'border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
+                                              >
+                                                {st.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                                              </button>
+                                              <button
+                                                onClick={() => handleDeleteStaff(st.id)}
+                                                title="Delete Staff"
+                                                className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </button>
+                                            </>
+                                          )}
+
+                                          {isDeleted && (
+                                            <button
+                                              onClick={() => handleRestoreStaff(st.id)}
+                                              title="Restore Staff"
+                                              className="p-1.5 rounded-lg border border-emerald-500/10 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 transition inline-flex items-center"
+                                            >
+                                              <RotateCcw className="h-3.5 w-3.5" />
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {pageData.length === 0 && (
+                                    <tr>
+                                      <td colSpan={7} className="text-center py-8 text-slate-500 dark:text-slate-500">
+                                        No staff members registered.
                                       </td>
                                     </tr>
-                                  );
-                                })}
-                                {pageData.length === 0 && (
-                                  <tr>
-                                    <td colSpan={6} className="text-center py-8 text-slate-500 dark:text-slate-500">
-                                      No staff members registered.
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            )}
-                          </PaginatedList>
-                        </table>
+                                  )}
+                                </tbody>
+                              )}
+                            </PaginatedList>
+                          </table>
+                        </div>
                       </div>
 
                       {/* Register/Edit Staff Modal Popup */}
@@ -7290,9 +7312,6 @@ function AdminDashboardContent() {
                           <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Settings</h2>
                           <p className="text-xs text-slate-500 mt-1">Manage global preferences and integrations</p>
                         </div>
-                        <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-sm text-white transition shadow-lg shadow-primary-600/20">
-                          💾 Save Settings
-                        </button>
                       </div>
 
                       {/* TABS */}
@@ -7301,13 +7320,12 @@ function AdminDashboardContent() {
                           { id: 'general', label: 'General Info', icon: Settings },
                           { id: 'policies', label: 'Documents & Policies', icon: FileText },
                           { id: 'billing', label: 'Banking & Invoicing', icon: Landmark },
-                          { id: 'integrations', label: 'Integrations', icon: LayoutGrid },
-                          { id: 'security', label: 'Security', icon: Shield }
+                          { id: 'integrations', label: 'Integrations', icon: LayoutGrid }
                         ].map(tab => (
                           <button
                             key={tab.id}
                             onClick={() => setSettingsTab(tab.id as any)}
-                            className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
+                            className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700/50'}`}
                           >
                             <tab.icon className="h-4 w-4" />
                             <span>{tab.label}</span>
@@ -7317,14 +7335,23 @@ function AdminDashboardContent() {
 
                       {settingsTab === 'general' && (
                         <div className="space-y-6 animate-fade-in">
-                          <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
                             <div>
                               <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">🏢 Company Details</h3>
                               <p className="text-xs text-slate-500 mb-6">Basic information about your firm.</p>
 
                               <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Company Logo</label>
-                              <input type="file" accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] as any)} className="w-full max-w-md text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                              <p className="text-xs text-slate-500 mt-1 mb-6">Appears on Research Reports & Invoices.</p>
+                              <div className="flex items-start gap-6">
+                                {(logoFile || appLogo) && (
+                                  <div className="shrink-0 p-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                                    <img src={logoFile ? URL.createObjectURL(logoFile) : appLogo} alt="Company Logo" className="h-16 w-auto object-contain max-w-[120px]" />
+                                  </div>
+                                )}
+                                <div className="flex-1">
+                                  <input type="file" accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] as any)} className="w-full max-w-md text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
+                                  <p className="text-xs text-slate-500 mt-2">Appears on Research Reports & Invoices.</p>
+                                </div>
+                              </div>
                             </div>
 
                             <div className="border-t border-slate-400 dark:border-white/10 pt-6">
@@ -7336,7 +7363,7 @@ function AdminDashboardContent() {
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer">
                                   <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
                                 </label>
                               </div>
                             </div>
@@ -7378,7 +7405,7 @@ function AdminDashboardContent() {
 
                       {settingsTab === 'policies' && (
                         <div className="space-y-6 animate-fade-in">
-                          <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
                             <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">📄 Documents, Policies & Onboarding</h3>
                             <p className="text-xs text-slate-500 mb-6">Manage mandatory compliance files and customer flow preferences.</p>
 
@@ -7443,7 +7470,7 @@ function AdminDashboardContent() {
 
                       {settingsTab === 'billing' && (
                         <div className="space-y-6 animate-fade-in">
-                          <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
                             <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">💳 GST & Tax Calculation</h3>
                             <p className="text-xs text-slate-500 mb-6">Manage how taxes apply to your clients.</p>
 
@@ -7505,7 +7532,7 @@ function AdminDashboardContent() {
                             </div>
                           </div>
 
-                          <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
                             <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">🏦 Bank Account Details</h3>
                             <p className="text-xs text-slate-500 mb-6">Displayed on generated invoices.</p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -7550,7 +7577,7 @@ function AdminDashboardContent() {
                               <button
                                 key={tab.id}
                                 onClick={() => setIntegrationTab(tab.id as any)}
-                                className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
+                                className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700/50'}`}
                               >
                                 <tab.icon className="h-4 w-4" />
                                 <span>{tab.label}</span>
@@ -7560,7 +7587,7 @@ function AdminDashboardContent() {
 
                           {/* Payment Gateways */}
                           {integrationTab === 'payments' && (
-                            <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6 animate-fade-in">
+                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
                               <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">💳 Payment Gateways</h3>
                               <p className="text-xs text-slate-500 mb-4">Configure your payment gateway integration here.</p>
                               <div>
@@ -7633,7 +7660,7 @@ function AdminDashboardContent() {
 
                           {/* Email & SMTP Configuration */}
                           {integrationTab === 'email' && (
-                            <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6 animate-fade-in">
+                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
                               <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">📧 Email & SMTP Configuration</h3>
                               <p className="text-xs text-slate-500 dark:text-slate-500">Configure your own email server to send welcome emails and password reset links to your users.</p>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -7659,7 +7686,7 @@ function AdminDashboardContent() {
 
                           {/* Digio KYC */}
                           {integrationTab === 'kyc' && (
-                            <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6 animate-fade-in">
+                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
                               <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300 mb-2">Digio KYC & eSign Configuration</h3>
                               <p className="text-xs text-slate-500 mb-4">Configure your Digio credentials to enable Aadhaar KYC and Agreement eSigning for your clients.</p>
 
@@ -7682,56 +7709,17 @@ function AdminDashboardContent() {
                         </div>
                       )}
 
-                      {settingsTab === 'security' && (
-                        <div className="space-y-6 animate-fade-in">
-                          <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
-                            <div>
-                              <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Security & Password</h3>
-                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Update your password to ensure account security.</p>
-                            </div>
-                            <form onSubmit={handleAdminChangePassword} className="space-y-4 max-w-md">
-                              <div>
-                                <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-bold">Current Password</label>
-                                <input
-                                  type="password" required
-                                  value={profileCurrentPassword}
-                                  onChange={e => setProfileCurrentPassword(e.target.value)}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-bold">New Password</label>
-                                <input
-                                  type="password" required
-                                  minLength={8}
-                                  value={profileNewPassword}
-                                  onChange={e => setProfileNewPassword(e.target.value)}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-bold">Confirm New Password</label>
-                                <input
-                                  type="password" required
-                                  minLength={8}
-                                  value={profileConfirmPassword}
-                                  onChange={e => setProfileConfirmPassword(e.target.value)}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <button
-                                  type="submit"
-                                  disabled={isChangingPassword}
-                                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold transition disabled:opacity-50 w-full md:w-auto"
-                                >
-                                  {isChangingPassword ? 'Updating...' : 'Update Password'}
-                                </button>
-                              </div>
-                            </form>
-                          </div>
+
+                      {/* Save Settings Footer */}
+                      <div className="mt-8 p-6 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/60 rounded-2xl flex items-center justify-between shadow-xl shadow-slate-200/20 dark:shadow-none animate-fade-in">
+                        <div>
+                          <h4 className="font-bold text-slate-800 dark:text-slate-200">Save Your Changes</h4>
+                          <p className="text-xs text-slate-500 mt-1">Make sure to save your settings before leaving this page.</p>
                         </div>
-                      )}
+                        <button onClick={handleSaveSettings} className="bg-primary-600 hover:bg-primary-500 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 hover:shadow-primary-500/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center">
+                          <Save className="h-5 w-5 mr-2" /> Save Settings
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -7760,7 +7748,7 @@ function AdminDashboardContent() {
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
                           </label>
                         </div>
                       </div>
@@ -7844,31 +7832,44 @@ function AdminDashboardContent() {
                   )}
                   {activeTab === 'roles' && hasPermission('ACCESS_ROLES') && (
                     <div className="space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold tracking-tight">Access Control & Role Permissions</h2>
-                        <p className="text-xs text-slate-600 dark:text-slate-400">Configure permission access matrices for default and custom roles in the platform</p>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                        <div>
+                          <h2 className="text-2xl font-bold tracking-tight">Access Control & Role Permissions</h2>
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Configure permission access matrices for default and custom roles in the platform</p>
+                        </div>
+                        {hasPermission('ACCESS_ROLES') && (
+                          <button
+                            onClick={() => {
+                              setNewRoleName('');
+                              setNewRoleDesc('');
+                              setIsRoleModalOpen(true);
+                            }}
+                            className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-xs font-bold transition flex items-center shadow-lg shadow-primary-500/20 shrink-0"
+                          >
+                            <Plus className="h-4 w-4 mr-1.5" /> Create Custom Role
+                          </button>
+                        )}
                       </div>
 
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-                        {/* Roles List */}
-                        <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-4">
-                          <div className="flex justify-between items-center">
-                            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">System Roles</h3>
-                            {hasPermission('ACCESS_ROLES') && (
-                              <button
-                                onClick={() => {
-                                  setNewRoleName('');
-                                  setNewRoleDesc('');
-                                  setIsRoleModalOpen(true);
-                                }}
-                                className="px-2.5 py-1.5 bg-primary-600 hover:bg-primary-500 rounded-lg text-xs font-bold transition flex items-center"
-                              >
-                                <Plus className="h-3 w-3 mr-1" /> Custom Role
-                              </button>
-                            )}
-                          </div>
+                      <div className="space-y-6">
+                        {/* Horizontal Roles List (Carousel) */}
+                        <div className="bg-white dark:bg-[#0F172A] p-3 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-sm flex items-center relative group">
+                          {/* Carousel Prev Button */}
+                          <button
+                            onClick={() => {
+                              if (rolesScrollRef.current) {
+                                rolesScrollRef.current.scrollBy({ left: -300, behavior: 'smooth' });
+                              }
+                            }}
+                            className="absolute left-2 z-10 p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-600 dark:text-slate-400 hover:text-primary-600 transition opacity-0 group-hover:opacity-100 hidden md:block"
+                          >
+                            <ChevronLeft className="h-5 w-5" />
+                          </button>
 
-                          <div className="space-y-2">
+                          <div
+                            ref={rolesScrollRef}
+                            className="flex gap-3 px-2 md:px-10 pb-1 pt-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth w-full"
+                          >
                             {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
                               const isSelected = selectedRole?.id === r.id;
                               const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
@@ -7876,40 +7877,53 @@ function AdminDashboardContent() {
                                 <button
                                   key={r.id}
                                   onClick={() => setSelectedRole(r)}
-                                  className={`w-full text-left p-3.5 rounded-xl border transition flex flex-col space-y-1 ${isSelected ? 'bg-primary-500/10 border-primary-500/40' : 'bg-white dark:bg-slate-900/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'}`}
+                                  className={`shrink-0 text-left px-4 py-3 rounded-xl border transition-all duration-200 flex flex-col w-[200px] ${isSelected ? 'bg-primary-50/50 dark:bg-primary-900/10 border-primary-500/50 ring-1 ring-primary-500/20 shadow-sm' : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 hover:border-primary-500/30 hover:bg-white dark:hover:bg-slate-800/50'}`}
                                 >
-                                  <div className="flex justify-between items-center w-full">
-                                    <span className="font-bold text-xs text-slate-900 dark:text-slate-100 tracking-wide font-mono uppercase">{r.name.replace(/_/g, ' ')}</span>
+                                  <span className="font-bold text-xs text-slate-900 dark:text-slate-100 tracking-wide font-mono uppercase truncate w-full mb-2">
+                                    {r.name.replace(/_/g, ' ')}
+                                  </span>
+                                  <div className="flex items-center justify-between w-full">
+                                    <div className="flex items-center text-[10px] text-slate-500 dark:text-slate-500 font-mono">
+                                      <ShieldCheck className="h-3 w-3 mr-1 text-slate-600 dark:text-slate-400" />
+                                      <span>{r.permissions?.length || 0} perms</span>
+                                    </div>
                                     {isSystemRole ? (
-                                      <span className="text-[9px] bg-slate-500/10 border border-slate-500/20 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded font-mono">System</span>
+                                      <span className="text-[9px] bg-slate-500/10 border border-slate-500/20 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded font-mono shrink-0">System</span>
                                     ) : (
-                                      <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono">Custom</span>
+                                      <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">Custom</span>
                                     )}
-                                  </div>
-                                  <p className="text-[11px] text-slate-600 dark:text-slate-400 line-clamp-1">{r.description || 'No description provided.'}</p>
-                                  <div className="flex items-center text-[10px] text-slate-500 dark:text-slate-500 font-mono pt-1">
-                                    <ShieldCheck className="h-3 w-3 mr-1 text-slate-600 dark:text-slate-400" />
-                                    <span>{r.permissions?.length || 0} permissions active</span>
                                   </div>
                                 </button>
                               );
                             })}
                           </div>
+
+                          {/* Carousel Next Button */}
+                          <button
+                            onClick={() => {
+                              if (rolesScrollRef.current) {
+                                rolesScrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
+                              }
+                            }}
+                            className="absolute right-2 z-10 p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-600 dark:text-slate-400 hover:text-primary-600 transition opacity-0 group-hover:opacity-100 hidden md:block"
+                          >
+                            <ChevronRight className="h-5 w-5" />
+                          </button>
                         </div>
 
-                        {/* Permissions Configuration */}
-                        <div className="lg:col-span-2 space-y-6">
+                        {/* Permissions Configuration (Full Width Below) */}
+                        <div className="w-full space-y-6">
                           {!selectedRole ? (
-                            <div className="glassmorphism p-12 rounded-2xl border border-slate-400 dark:border-white/10 text-center flex flex-col items-center justify-center space-y-4">
-                              <ShieldCheck className="h-16 w-16 text-slate-600 animate-pulse" />
+                            <div className="bg-white dark:bg-[#0F172A] p-12 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none text-center flex flex-col items-center justify-center space-y-4">
+                              <ShieldCheck className="h-16 w-16 text-slate-400 dark:text-slate-600 animate-pulse" />
                               <div>
                                 <h3 className="font-bold text-base text-slate-700 dark:text-slate-300">Select a Role</h3>
                                 <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 max-w-sm">Choose a system or custom role from the left panel to configure its access controls and dashboard page visibility.</p>
                               </div>
                             </div>
                           ) : (
-                            <div className="glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-6">
-                              <div className="pb-4 border-b border-slate-300 dark:border-white/5 flex flex-col md:flex-row justify-between md:items-center gap-2">
+                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
+                              <div className="pb-5 border-b border-slate-200 dark:border-slate-800/60 flex flex-col md:flex-row justify-between md:items-center gap-4">
                                 <div>
                                   <div className="flex items-center space-x-2">
                                     <h3 className="text-lg font-bold font-mono tracking-wide">{selectedRole.name.replace(/_/g, ' ')}</h3>
@@ -7957,8 +7971,8 @@ function AdminDashboardContent() {
                               </div>
 
                               {/* Login Device Constraint */}
-                              <div className="p-5 rounded-2xl border border-slate-400 dark:border-white/10 glassmorphism space-y-4">
-                                <div className="border-b border-slate-300 dark:border-white/5 pb-3">
+                              <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 space-y-4">
+                                <div className="border-b border-slate-200 dark:border-slate-800/60 pb-3">
                                   <h4 className="font-bold text-xs uppercase tracking-wider text-primary-600 dark:text-primary-400">Login Settings</h4>
                                   <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Configure device login constraints for this role.</p>
                                 </div>
@@ -8014,49 +8028,44 @@ function AdminDashboardContent() {
                               </div>
 
                               {/* AUTO-GENERATED from NAV_CONFIG — add new modules in NAV_CONFIG at the top of this file */}
-                              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                                {/* Modules WITH sub-permissions: rendered as expanded cards */}
-                                <div className="space-y-6">
-                                  {NAV_CONFIG.filter(m => m.subPermissions && m.subPermissions.length > 0).map(mod => (
-                                    <div key={mod.tab} className="p-5 rounded-2xl border border-slate-400 dark:border-white/10 glassmorphism space-y-4">
-                                      <div className="border-b border-slate-300 dark:border-white/5 pb-3">
-                                        <h4 className="font-bold text-xs uppercase tracking-wider text-lime-700 dark:text-[#E1F13D]">{mod.moduleLabel}</h4>
-                                        <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">{mod.moduleDesc}</p>
+                              <div className="space-y-4">
+                                {NAV_CONFIG.map(mod => {
+                                  const hasSub = mod.subPermissions && mod.subPermissions.length > 0;
+                                  return (
+                                    <div key={mod.tab} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 transition-all hover:border-slate-300 dark:hover:border-slate-700">
+                                      <div className={`flex flex-col lg:flex-row lg:items-start justify-between gap-5 ${hasSub ? 'border-b border-slate-200 dark:border-slate-800/60 pb-5 mb-5' : ''}`}>
+                                        <div className="flex-1 pr-4">
+                                          <div className="flex items-center space-x-2">
+                                            <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">{mod.moduleLabel}</h4>
+                                          </div>
+                                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1.5">{mod.moduleDesc}</p>
+                                        </div>
+                                        <div className="shrink-0 w-full lg:w-72">
+                                          {renderPermissionCheckbox(mod.accessKey, 'Enable Module', 'Toggle access to this entire tab')}
+                                        </div>
                                       </div>
-                                      {/* Tab-level toggle */}
-                                      <div className="w-full">
-                                        {renderPermissionCheckbox(mod.accessKey, `${mod.moduleLabel} Tab Access`, `Enables or disables visibility of the entire ${mod.label} tab in the portal`)}
-                                      </div>
-                                      {/* Sub-action grid */}
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {mod.subPermissions!
-                                          .filter(sp => {
-                                            if (sp.code === 'ADD_RESEARCH' && selectedRole?.permissions?.includes('OWN_RESEARCH')) return false;
-                                            if (sp.code === 'OWN_RESEARCH' && selectedRole?.permissions?.includes('ADD_RESEARCH')) return false;
-                                            if (sp.code === 'VIEW_ALL_TICKETS' && selectedRole?.permissions?.includes('VIEW_OWN_TICKETS')) return false;
-                                            if (sp.code === 'VIEW_OWN_TICKETS' && selectedRole?.permissions?.includes('VIEW_ALL_TICKETS')) return false;
-                                            return true;
-                                          })
-                                          .map(sp => (
-                                            renderPermissionCheckbox(sp.code, sp.label, sp.desc, mod.accessKey)
-                                          ))}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
 
-                                {/* Modules WITHOUT sub-permissions: grouped into one "General Desk Access" card */}
-                                <div className="p-5 rounded-2xl border border-slate-400 dark:border-white/10 glassmorphism space-y-4">
-                                  <div className="border-b border-slate-300 dark:border-white/5 pb-3">
-                                    <h4 className="font-bold text-xs uppercase tracking-wider text-lime-700 dark:text-[#E1F13D]">General & Desk Access</h4>
-                                    <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Configure general platform sections and administrative privileges</p>
-                                  </div>
-                                  <div className="space-y-4">
-                                    {NAV_CONFIG.filter(m => !m.subPermissions || m.subPermissions.length === 0).map(mod => (
-                                      renderPermissionCheckbox(mod.accessKey, mod.moduleLabel, mod.moduleDesc)
-                                    ))}
-                                  </div>
-                                </div>
+                                      {hasSub && (
+                                        <div className="space-y-3">
+                                          <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Granular Permissions (Module Actions)</h5>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white dark:bg-[#0F172A] p-4 rounded-xl border border-slate-100 dark:border-slate-800/40">
+                                            {mod.subPermissions!
+                                              .filter(sp => {
+                                                if (sp.code === 'ADD_RESEARCH' && selectedRole?.permissions?.includes('OWN_RESEARCH')) return false;
+                                                if (sp.code === 'OWN_RESEARCH' && selectedRole?.permissions?.includes('ADD_RESEARCH')) return false;
+                                                if (sp.code === 'VIEW_ALL_TICKETS' && selectedRole?.permissions?.includes('VIEW_OWN_TICKETS')) return false;
+                                                if (sp.code === 'VIEW_OWN_TICKETS' && selectedRole?.permissions?.includes('VIEW_ALL_TICKETS')) return false;
+                                                return true;
+                                              })
+                                              .map(sp => (
+                                                renderPermissionCheckbox(sp.code, sp.label, sp.desc, mod.accessKey)
+                                              ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
 
                               {!['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name) && (
@@ -8079,6 +8088,7 @@ function AdminDashboardContent() {
                             </div>
                           )}
                         </div>
+
                       </div>
                     </div>
                   )}
@@ -8229,7 +8239,7 @@ function AdminDashboardContent() {
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
                       <button onClick={() => setIsRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
-                      <button type="submit" form="roleForm" disabled={roleModalLoading} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50">
+                      <button type="submit" form="roleForm" disabled={roleModalLoading} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-white dark:bg-primary-500 dark:hover:bg-primary-400 dark:text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-500/20 disabled:opacity-50">
                         {roleModalLoading ? 'Creating...' : 'Create Role'}
                       </button>
                     </div>
@@ -8272,7 +8282,7 @@ function AdminDashboardContent() {
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
                       <button onClick={() => setIsEditRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
-                      <button type="submit" form="editRoleForm" disabled={editRoleModalLoading} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50">
+                      <button type="submit" form="editRoleForm" disabled={editRoleModalLoading} className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 text-white dark:bg-primary-500 dark:hover:bg-primary-400 dark:text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-primary-500/20 disabled:opacity-50">
                         {editRoleModalLoading ? 'Saving...' : 'Save Changes'}
                       </button>
                     </div>
@@ -8703,7 +8713,9 @@ function AdminDashboardContent() {
                   </button>
                 </div>
               </form>
-            </div>
+           
+          </div>
+
           </div>
         )}
 

@@ -6,6 +6,7 @@ import api from '../services/api';
 interface BrandingContextType {
   appName: string;
   logoUrl: string;
+  loginLogoUrl: string;
   faviconUrl: string;
   refreshBranding: () => Promise<void>;
 }
@@ -13,6 +14,7 @@ interface BrandingContextType {
 const defaultBranding = {
   appName: 'RAGCP',
   logoUrl: '/logo-light.png',
+  loginLogoUrl: '/logo-light.png',
   faviconUrl: '/favicon.ico',
 };
 
@@ -45,6 +47,7 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const newBranding = {
           appName: res.data.data.appName || defaultBranding.appName,
           logoUrl: resolveUrl(res.data.data.logoUrl, defaultBranding.logoUrl),
+          loginLogoUrl: resolveUrl(res.data.data.loginLogoUrl, defaultBranding.loginLogoUrl),
           faviconUrl: resolveUrl(res.data.data.faviconUrl, defaultBranding.faviconUrl),
         };
         setBranding(newBranding);

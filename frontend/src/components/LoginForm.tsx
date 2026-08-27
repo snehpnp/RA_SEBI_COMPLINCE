@@ -7,7 +7,7 @@ import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, Handshake, 
 import api from '../services/api';
 import { useBranding } from '@/contexts/BrandingContext';
 
-export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
+export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: string; onFlip?: () => void }) {
   const { logoUrl, appName } = useBranding();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -120,94 +120,8 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#F4F7FB] dark:bg-slate-950 font-sans antialiased overflow-x-hidden">
-
-      {/* ── LEFT PANEL (Branding & Trust Showcase) ── */}
-      <div className="hidden lg:flex lg:w-1/2 min-h-screen bg-[#070D1B] relative flex-col justify-between p-12 xl:p-16 border-r border-slate-800/80">
-        {/* Glow ambient effects */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-10 right-10 w-72 h-72 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none" />
-
-        {/* Top Tagline / Micro Header */}
-        <div className="relative z-10 flex items-center space-x-2.5">
-          <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-            Institutional Audit System
-          </span>
-        </div>
-
-        {/* Center Hero Branding */}
-        <div className="relative z-10 my-auto flex flex-col items-center text-center max-w-lg mx-auto">
-          <div className="relative mb-8 group">
-            <div className="absolute inset-0 bg-blue-500/20 blur-2xl rounded-full scale-90 group-hover:scale-110 transition-transform duration-500" />
-            <div className="relative w-32 h-32 rounded-2xl bg-gradient-to-b from-slate-800 to-slate-900 border border-slate-700/80 shadow-2xl flex items-center justify-center p-4">
-              {logoUrl ? (
-                <img src={logoUrl} alt={appName} className="object-contain max-h-full max-w-full" />
-              ) : (
-                <Shield className="w-12 h-12 text-blue-400 stroke-[1.5]" />
-              )}
-            </div>
-          </div>
-
-          <h1 className="text-3xl xl:text-4xl font-black text-white tracking-tight leading-tight uppercase">
-            {appName} GOVERNANCE
-          </h1>
-          <p className="mt-3 text-sm xl:text-base text-slate-400 font-medium tracking-wide">
-            Securing Financial Compliance and Trading Audit
-          </p>
-
-          {/* Key Metric Pills */}
-          <div className="mt-12 grid grid-cols-3 gap-6 w-full pt-8 border-t border-slate-800/60">
-            <div className="flex flex-col items-center">
-              <div className="w-12 h-12 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center mb-2.5 shadow-inner">
-                <ShieldCheck className="w-6 h-6 text-blue-400" />
-              </div>
-              <span className="text-xs font-semibold text-slate-300">Trusted</span>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <div className="w-12 h-12 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center mb-2.5 shadow-inner">
-                <Handshake className="w-6 h-6 text-blue-400" />
-              </div>
-              <span className="text-xs font-semibold text-slate-300">Secure</span>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <div className="w-12 h-12 rounded-xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center mb-2.5 shadow-inner">
-                <CheckCircle2 className="w-6 h-6 text-blue-400" />
-              </div>
-              <span className="text-xs font-semibold text-slate-300">Compliant</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom Compliance Label */}
-        <div className="relative z-10 flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-800/50 pt-4">
-          <span>AES-256 Bit Encryption</span>
-          <span>ISO 27001 Certified System</span>
-        </div>
-      </div>
-
-      {/* ── RIGHT PANEL (Login Form) ── */}
-      <div className="w-full lg:w-1/2 min-h-screen flex flex-col justify-center items-center px-6 py-12 sm:px-12 relative bg-[#F8FAFC] dark:bg-slate-950">
-
-        {/* Subtle radial light background */}
-        <div className="absolute top-1/3 right-1/4 w-[400px] h-[400px] rounded-full bg-blue-400/5 blur-[120px] pointer-events-none" />
-
-        {/* Mobile Logo */}
-        <div className="lg:hidden flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-2 shadow-md p-2">
-            {logoUrl ? (
-              <img src={logoUrl} alt={appName} className="object-contain max-h-full max-w-full" />
-            ) : (
-              <Shield className="w-7 h-7 text-blue-400" />
-            )}
-          </div>
-          <span className="text-lg font-bold text-slate-900 dark:text-white">{appName} Governance</span>
-        </div>
-
-        {/* Login Box */}
-        <div className="w-full max-w-[430px] bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-8 sm:p-10 shadow-[0_20px_50px_rgba(15,23,42,0.06)] relative z-10 backdrop-blur-xl">
+    <>
+      <div className="w-full">
 
           <div className="mb-6">
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Access Platform</h2>
@@ -302,9 +216,20 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
                 </button>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   Don't have an account?{' '}
-                  <Link href="/register" className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      if (onFlip) {
+                        e.preventDefault();
+                        onFlip();
+                      } else {
+                        router.push('/register');
+                      }
+                    }}
+                    className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                  >
                     Sign up here
-                  </Link>
+                  </button>
                 </div>
               </div>
             </form>
@@ -347,12 +272,6 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
             </form>
           )}
         </div>
-
-        {/* Bottom Security Footer */}
-        <p className="mt-8 text-[11px] text-slate-400 dark:text-slate-600 text-center font-medium">
-          Secured Session Encryption · SSL · AES-256
-        </p>
-      </div>
 
       {/* ── Loading Overlay Modal ── */}
       {loading && (
@@ -402,6 +321,6 @@ export default function LoginForm({ defaultRole }: { defaultRole?: string }) {
           100% { width: 95%; }
         }
       `}</style>
-    </div>
+    </>
   );
 }

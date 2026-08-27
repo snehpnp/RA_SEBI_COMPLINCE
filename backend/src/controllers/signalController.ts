@@ -134,7 +134,7 @@ export const listSignals = async (req: Request, res: Response) => {
       });
 
       if (allSubs.length === 0) {
-        whereClause.id = 'NO_ACCESS_DUE_TO_NO_SUBSCRIPTIONS';
+        return res.json({ success: true, data: [] });
       } else {
         // Construct OR clause: Signal must be created during the active window of the subscription
         const subConditions = allSubs.map(sub => {

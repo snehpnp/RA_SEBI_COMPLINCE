@@ -230,7 +230,7 @@ router.put(
   '/system-settings/branding',
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
-  upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }]),
+  upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }, { name: 'loginLogo', maxCount: 1 }]),
   updateGlobalBranding
 );
 

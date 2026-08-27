@@ -5,13 +5,13 @@ import { MessageSquare, CheckCircle2, ShieldCheck, Loader2, User } from 'lucide-
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 
-export default function TicketManagement({ 
-  adminTickets, 
-  fetchAdminTickets, 
-  adminTicketStatusFilter, 
-  setAdminTicketStatusFilter 
-}: { 
-  adminTickets: any[], 
+export default function TicketManagement({
+  adminTickets,
+  fetchAdminTickets,
+  adminTicketStatusFilter,
+  setAdminTicketStatusFilter
+}: {
+  adminTickets: any[],
   fetchAdminTickets: () => Promise<void>,
   adminTicketStatusFilter: string,
   setAdminTicketStatusFilter: (status: any) => void
@@ -33,7 +33,7 @@ export default function TicketManagement({
       if (updated) {
         // Fetch full ticket to get messages
         api.getAdminTicket(updated.id).then(res => {
-          if(res.success) setSelectedTicket(res.data);
+          if (res.success) setSelectedTicket(res.data);
         }).catch(console.error);
       }
     }
@@ -55,7 +55,7 @@ export default function TicketManagement({
   const handleReply = async () => {
     if (!replyText.trim() || !selectedTicket) return;
     if (selectedTicket.status === 'CLOSED') return toast.error('Ticket is closed.');
-    
+
     setSubmitting(true);
     try {
       const res = await api.replyAdminTicket(selectedTicket.id, { message: replyText });
@@ -101,7 +101,7 @@ export default function TicketManagement({
       {/* Ticket List */}
       <div className="md:w-1/3 flex flex-col gap-4">
         {/* Filters */}
-        <div className="flex bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl overflow-hidden p-1 shadow-sm">
+        <div className="flex bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800/60 rounded-xl overflow-hidden p-1 shadow-sm">
           {['ALL', 'PENDING', 'OPEN', 'CLOSED'].map((status) => (
             <button
               key={status}
@@ -109,26 +109,26 @@ export default function TicketManagement({
                 setAdminTicketStatusFilter(status);
                 setSelectedTicket(null);
               }}
-              className={`flex-1 text-xs py-2 font-semibold rounded-lg transition-colors ${adminTicketStatusFilter === status ? 'bg-primary-500 text-slate-900 dark:text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
+              className={`flex-1 text-xs py-2 font-bold rounded-lg transition-all ${adminTicketStatusFilter === status ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800'}`}
             >
               {status}
             </button>
           ))}
         </div>
-        
+
         {/* List */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl p-2 flex-1 overflow-y-auto shadow-sm">
+        <div className="bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/60 rounded-2xl p-3 flex-1 overflow-y-auto shadow-xl shadow-slate-200/20 dark:shadow-none [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-slate-200 dark:[&::-webkit-scrollbar-thumb]:bg-slate-800 [&::-webkit-scrollbar-thumb]:rounded-full">
           {filteredTickets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 p-4 text-center">
               <MessageSquare className="w-10 h-10 mb-2 opacity-20" />
-              <p className="text-sm">No tickets found</p>
+              <p className="text-sm font-medium">No tickets found</p>
             </div>
           ) : (
             filteredTickets.map(tkt => (
-              <div 
-                key={tkt.id} 
-                onClick={() => handleSelectTicket(tkt)} 
-                className={`p-4 rounded-xl cursor-pointer border transition-all mb-2 ${selectedTicket?.id === tkt.id ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-500' : 'bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent hover:border-slate-300 dark:hover:border-slate-700'}`}
+              <div
+                key={tkt.id}
+                onClick={() => handleSelectTicket(tkt)}
+                className={`p-4 rounded-xl cursor-pointer border transition-all mb-3 ${selectedTicket?.id === tkt.id ? 'bg-primary-50/50 dark:bg-primary-900/10 border-primary-500/50 ring-1 ring-primary-500/20 shadow-sm' : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 hover:border-primary-500/30 hover:bg-white dark:hover:bg-slate-800/50'}`}
               >
                 <div className="flex justify-between items-start mb-2">
                   <span className="text-xs font-bold font-mono text-slate-500 dark:text-slate-400">{tkt.ticketId || 'TKT'}</span>
@@ -146,12 +146,12 @@ export default function TicketManagement({
           )}
         </div>
       </div>
-      
+
       {/* Ticket Chat View */}
-      <div className="md:w-2/3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl flex flex-col shadow-sm">
+      <div className="md:w-2/3 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/60 rounded-2xl flex flex-col shadow-xl shadow-slate-200/20 dark:shadow-none overflow-hidden">
         {selectedTicket ? (
           <>
-            <div className="p-5 border-b border-slate-200 dark:border-white/10 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50 rounded-t-2xl">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800/60 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/40">
               <div>
                 <div className="flex items-center gap-3 mb-1">
                   <span className="text-xs font-bold font-mono text-slate-500 dark:text-slate-400">{selectedTicket.ticketId}</span>
@@ -163,7 +163,7 @@ export default function TicketManagement({
                 <p className="text-xs text-slate-500 mt-1">Client: {selectedTicket.client?.firstName} {selectedTicket.client?.lastName} ({selectedTicket.client?.email})</p>
               </div>
               {selectedTicket.status !== 'CLOSED' && (
-                <button 
+                <button
                   onClick={handleClose}
                   disabled={closing}
                   className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-lg transition-colors flex items-center gap-2"
@@ -173,49 +173,49 @@ export default function TicketManagement({
                 </button>
               )}
             </div>
-            
-            <div className="flex-1 p-6 overflow-y-auto space-y-6 bg-slate-50/50 dark:bg-[#0b101a]">
+
+            <div className="flex-1 p-6 overflow-y-auto space-y-6 bg-slate-50/50 dark:bg-slate-900/20 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:bg-slate-200 dark:[&::-webkit-scrollbar-thumb]:bg-slate-800 [&::-webkit-scrollbar-thumb]:rounded-full">
               {/* All Messages (including initial) */}
               {selectedTicket.messages?.map((msg: any, i: number) => {
-                 const isAdmin = msg.sender?.role?.name !== 'CLIENT';
-                 return (
-                    <div key={i} className={`flex gap-4 ${isAdmin ? 'flex-row-reverse' : ''}`}>
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isAdmin ? 'bg-primary-100 dark:bg-primary-500/20' : 'bg-blue-100 dark:bg-blue-500/20'}`}>
-                        {isAdmin ? <ShieldCheck className="w-4 h-4 text-primary-600 dark:text-primary-400" /> : <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />}
-                      </div>
-                      <div className={`p-4 rounded-2xl max-w-[80%] ${isAdmin ? 'bg-primary-500 text-white rounded-tr-none' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-tl-none'}`}>
-                        <p className={`text-xs font-bold mb-1 ${isAdmin ? 'text-primary-100' : 'text-slate-800 dark:text-slate-200'}`}>
-                          {isAdmin ? (msg.sender?.firstName ? `${msg.sender.firstName} ${msg.sender.lastName || ''}` : 'Admin / Staff') : (msg.sender?.firstName || selectedTicket.client?.firstName || 'Client')}
-                        </p>
-                        <p className={`text-sm whitespace-pre-wrap ${isAdmin ? 'text-white' : 'text-slate-700 dark:text-slate-300'}`}>{msg.message}</p>
-                        <p className={`text-[10px] mt-2 ${isAdmin ? 'text-primary-200' : 'text-slate-400'}`}>
-                          {new Date(msg.createdAt).toLocaleString()}
-                        </p>
-                      </div>
+                const isAdmin = msg.sender?.role?.name !== 'CLIENT';
+                return (
+                  <div key={i} className={`flex gap-4 ${isAdmin ? 'flex-row-reverse' : ''}`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ${isAdmin ? 'bg-primary-100 dark:bg-primary-500/20' : 'bg-slate-200 dark:bg-slate-700'}`}>
+                      {isAdmin ? <ShieldCheck className="w-4 h-4 text-primary-600 dark:text-primary-400" /> : <User className="w-4 h-4 text-slate-600 dark:text-slate-400" />}
                     </div>
-                 )
+                    <div className={`p-4 rounded-2xl max-w-[80%] shadow-sm ${isAdmin ? 'bg-primary-600 text-white rounded-tr-none shadow-primary-500/20' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-tl-none'}`}>
+                      <p className={`text-xs font-bold mb-1 ${isAdmin ? 'text-primary-100' : 'text-slate-900 dark:text-slate-100'}`}>
+                        {isAdmin ? (msg.sender?.firstName ? `${msg.sender.firstName} ${msg.sender.lastName || ''}` : 'Admin / Staff') : (msg.sender?.firstName || selectedTicket.client?.firstName || 'Client')}
+                      </p>
+                      <p className={`text-sm leading-relaxed whitespace-pre-wrap ${isAdmin ? 'text-white' : 'text-slate-700 dark:text-slate-300'}`}>{msg.message}</p>
+                      <p className={`text-[10px] mt-2 font-mono ${isAdmin ? 'text-primary-200' : 'text-slate-400'}`}>
+                        {new Date(msg.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                      </p>
+                    </div>
+                  </div>
+                )
               })}
             </div>
-            
-            <div className="p-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
+
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800/60 bg-white dark:bg-slate-900/40">
               {selectedTicket.status === 'CLOSED' ? (
                 <p className="text-center text-sm text-slate-500 py-2 font-medium">This ticket has been closed.</p>
               ) : (
                 <div className="flex gap-3">
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={replyText}
                     onChange={e => setReplyText(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleReply()}
-                    placeholder="Type your reply here..." 
-                    className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-all text-slate-900 dark:text-white" 
+                    placeholder="Type your reply here..."
+                    className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-5 py-3 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all text-slate-900 dark:text-white placeholder-slate-400 shadow-inner"
                   />
-                  <button 
-                    onClick={handleReply} 
-                    disabled={submitting || !replyText.trim()} 
-                    className="bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white px-6 py-3 rounded-xl font-bold text-sm transition-colors flex items-center justify-center min-w-[100px] shadow-md shadow-primary-500/20"
+                  <button
+                    onClick={handleReply}
+                    disabled={submitting || !replyText.trim()}
+                    className="bg-primary-600 hover:bg-primary-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 disabled:shadow-none text-white px-8 py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center min-w-[120px] shadow-lg shadow-primary-500/30 hover:shadow-primary-500/40 hover:-translate-y-0.5 active:translate-y-0"
                   >
-                    {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send Reply'}
+                    {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send'}
                   </button>
                 </div>
               )}
