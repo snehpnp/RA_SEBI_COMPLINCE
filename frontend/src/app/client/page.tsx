@@ -25,11 +25,13 @@ import OnboardingWizard from '../../components/client/OnboardingWizard';
 import WelcomeInstructionModal from '../../components/client/WelcomeInstructionModal';
 import CustomPageView from '../../components/client/CustomPageView';
 import { ThemeToggle } from '../../components/ThemeToggle';
+import { useBranding } from '../../contexts/BrandingContext';
 
 import dynamic from 'next/dynamic';
 
 function ClientPortalContent() {
   const router = useRouter();
+  const { appName, logoUrl } = useBranding();
   const currentUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {};
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<any>(null);
@@ -173,13 +175,15 @@ function ClientPortalContent() {
       </button>
 
       {/* Premium Sidebar */}
-      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col ${mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
+      <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col ${mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
         } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
 
         {/* Brand */}
-        <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
+        <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-            {currentUser?.tenantLogo ? (
+            {logoUrl && logoUrl !== '/logo-light.png' ? (
+              <img src={logoUrl} alt={appName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
+            ) : currentUser?.tenantLogo ? (
               <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
             ) : (
               <>
@@ -191,7 +195,7 @@ function ClientPortalContent() {
           {!isSidebarCollapsed && (
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="hidden md:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
+              className="hidden md:flex items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors shrink-0"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -199,7 +203,7 @@ function ClientPortalContent() {
           {isSidebarCollapsed && (
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="hidden md:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
+              className="hidden md:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -218,14 +222,14 @@ function ClientPortalContent() {
                   setMobileMenuOpen(false);
                 }}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                  ? 'bg-white/10 text-white font-semibold'
+                  : 'text-white/70 hover:bg-white/5 hover:text-white'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
               >
-                <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`} />
                 {!isSidebarCollapsed && <span>{item.label}</span>}
                 {!isSidebarCollapsed && isActive && (
-                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_white]" />
                 )}
               </button>
             )
@@ -236,10 +240,10 @@ function ClientPortalContent() {
             <div className="pt-2">
               <button
                 onClick={() => setPoliciesExpanded(!policiesExpanded)}
-                className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-premium-text/70 hover:bg-premium-bg hover:text-premium-text group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-white/70 hover:bg-white/5 hover:text-white group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
               >
                 <div className="flex items-center gap-4">
-                  <FileText className="w-5 h-5 text-premium-text/50 group-hover:text-premium-text/80 shrink-0" />
+                  <FileText className="w-5 h-5 text-white/50 group-hover:text-white/80 shrink-0" />
                   {!isSidebarCollapsed && <span>Policies</span>}
                 </div>
                 {!isSidebarCollapsed && (
@@ -263,8 +267,8 @@ function ClientPortalContent() {
                         }
                       }}
                       className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === page.slug
-                          ? 'bg-premium-primary/10 text-premium-primary font-medium'
-                          : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                        ? 'bg-white/10 text-white font-medium'
+                        : 'text-white/60 hover:text-white hover:bg-white/5'
                         }`}
                     >
                       {page.title}
@@ -277,33 +281,33 @@ function ClientPortalContent() {
         </div>
 
         {/* User Footer */}
-        <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
+        <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
           {/* Subtle background glow */}
-          <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
+          <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
 
           <div
             onClick={() => { setActiveTab('profile' as any); setMobileMenuOpen(false); }}
-            className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+            className={`bg-white/5 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
 
             {/* Shimmer effect inside the card */}
-            <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
+            <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
 
             <div className="relative shrink-0">
               {/* Pulsing ring around avatar */}
-              <div className="absolute inset-0 rounded-full border-2 border-premium-warning/50 animate-ping opacity-75" />
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-premium-warning to-amber-600 flex items-center justify-center font-bold text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-warning)] relative z-10">
+              <div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-ping opacity-75" />
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(251,191,36,0.5)] relative z-10">
                 {profile?.name ? profile.name.charAt(0).toUpperCase() : 'H'}
               </div>
               {/* Online/Verified indicator */}
-              <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-blue-900 rounded-full z-20" />
             </div>
 
             {!isSidebarCollapsed && (
               <div className="flex-1 min-w-0 relative z-10">
-                <p className="font-bold text-sm truncate text-premium-text">{profile?.name}</p>
+                <p className="font-bold text-sm truncate text-white">{profile?.name}</p>
                 <div className="flex items-center gap-1 mt-0.5">
-                  <ShieldCheck className="w-3 h-3 text-premium-warning" />
-                  <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-premium-warning via-amber-200 to-premium-warning animate-pulse">
+                  <ShieldCheck className="w-3 h-3 text-amber-400" />
+                  <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 animate-pulse">
                     Premium Member
                   </p>
                 </div>
@@ -314,8 +318,8 @@ function ClientPortalContent() {
               <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
             )}
           </div>
-          <div className={`flex-1 mt-4 border-t border-slate-200/20 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-            <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-premium-danger/10 rounded-xl text-premium-text/60 hover:text-premium-danger transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`}>
+          <div className={`flex-1 mt-4 border-t border-blue-800/50 dark:border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
+            <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-red-500/10 rounded-xl text-white/60 hover:text-red-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`}>
               {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
               <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
             </button>

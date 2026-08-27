@@ -820,6 +820,181 @@ export const downloadInvoice = async (req: Request, res: Response) => {
 
 import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
 import querystring from 'querystring';
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
+
+export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Response) => {
+  const { planId, couponCode } = req.body;
+  try {
+    const client = await prisma.client.findUnique({
+      where: { userId: req.user!.id },
+      include: { profile: true }
+    });
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+    
+    const tenantId = req.user!.tenantId!;
+    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    
+    if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret) {
+      return res.status(400).json({ success: false, message: 'Razorpay credentials not configured for this tenant' });
+    }
+
+    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+
+    let finalPrice = plan.price;
+    let appliedCouponId = null;
+
+    if (couponCode) {
+      const coupon = await prisma.coupon.findFirst({ where: { code: couponCode, tenantId } });
+      if (coupon && coupon.status === 'ACTIVE') {
+        if (coupon.discountType === 'FLAT') {
+          finalPrice = Math.max(0, finalPrice - coupon.discountValue);
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          let discount = (finalPrice * coupon.discountValue) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discount > coupon.maxDiscountValue) {
+            discount = coupon.maxDiscountValue;
+          }
+          finalPrice = Math.max(0, finalPrice - discount);
+        }
+        appliedCouponId = coupon.id;
+      }
+    }
+    
+    if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
+      finalPrice = finalPrice * 1.18;
+    }
+
+    const amountInPaise = Math.round(finalPrice * 100);
+    const receiptId = 'RCPT_' + Math.floor(10000 + Math.random() * 90000);
+
+    const razorpay = new Razorpay({
+      key_id: tenantObj.razorpayKeyId,
+      key_secret: tenantObj.razorpayKeySecret
+    });
+
+    const orderOptions = {
+      amount: amountInPaise,
+      currency: 'INR',
+      receipt: receiptId,
+      notes: {
+        clientId: client.id,
+        planId: plan.id,
+        couponId: appliedCouponId || '',
+        tenantId: tenantId
+      }
+    };
+
+    const order = await razorpay.orders.create(orderOptions);
+
+    return res.status(200).json({
+      success: true,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: tenantObj.razorpayKeyId
+    });
+
+  } catch (error: any) {
+    console.error('Razorpay Initiate Error:', error);
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Response) => {
+  const { razorpay_payment_id, razorpay_order_id, razorpay_signature, planId, couponCode } = req.body;
+  try {
+    const client = await prisma.client.findUnique({
+      where: { userId: req.user!.id }
+    });
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+    
+    const tenantId = req.user!.tenantId!;
+    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenantObj || !tenantObj.razorpayKeySecret) {
+      return res.status(400).json({ success: false, message: 'Razorpay configuration error' });
+    }
+
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSignature = crypto.createHmac('sha256', tenantObj.razorpayKeySecret).update(body.toString()).digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ success: false, message: 'Invalid payment signature' });
+    }
+
+    // Signature matches, process the payment
+    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+
+    let discountAmount = 0;
+    let appliedCouponId = null;
+
+    if (couponCode) {
+      const coupon = await prisma.coupon.findFirst({ where: { code: couponCode, tenantId } });
+      if (coupon && coupon.status === 'ACTIVE') {
+        if (coupon.discountType === 'FLAT') {
+          discountAmount = coupon.discountValue;
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          discountAmount = (plan.price * coupon.discountValue) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
+            discountAmount = coupon.maxDiscountValue;
+          }
+        }
+        if (discountAmount > plan.price) discountAmount = plan.price;
+        appliedCouponId = coupon.id;
+
+        await prisma.coupon.update({
+          where: { id: coupon.id },
+          data: { usedCount: { increment: 1 } }
+        });
+      }
+    }
+
+    // Calculate actual amount paid based on Razorpay logic (or default from plan for simplicity)
+    let finalPrice = plan.price - discountAmount;
+    if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
+      finalPrice = finalPrice * 1.18;
+    }
+
+    await prisma.payment.create({
+      data: {
+        tenantId,
+        clientId: client.id,
+        planId,
+        amount: finalPrice,
+        couponId: appliedCouponId,
+        discountApplied: discountAmount,
+        paymentMode: 'ONLINE_RAZORPAY',
+        transactionRef: razorpay_payment_id,
+        status: 'SUCCESS'
+      }
+    });
+
+    const existingSub = await prisma.subscription.findFirst({
+      where: { clientId: client.id, planId, status: 'ACTIVE', endDate: { gt: new Date() } },
+      orderBy: { endDate: 'desc' }
+    });
+
+    let startDate = new Date();
+    if (existingSub) startDate = new Date(existingSub.endDate);
+    const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+
+    await prisma.subscription.create({
+      data: { clientId: client.id, planId, startDate, endDate, status: 'ACTIVE' }
+    });
+
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { status: 'ACTIVE' }
+    });
+
+    return res.status(200).json({ success: true, message: 'Payment verified successfully' });
+
+  } catch (error: any) {
+    console.error('Razorpay Verify Error:', error);
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
 
 export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Response) => {
   const { planId, couponCode } = req.body;

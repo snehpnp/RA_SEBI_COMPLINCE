@@ -36,18 +36,44 @@ export const getGlobalBranding = async (req: Request, res: Response) => {
 
 export const updateGlobalBranding = async (req: Request, res: Response) => {
   try {
-    const { appName, logoUrl, faviconUrl } = req.body;
-    
+    const { appName } = req.body;
+
     // Auth middleware should guarantee this is a SUPER_ADMIN
     const user = (req as any).user;
     if (!user || user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
+    // Read existing branding to preserve fields not being updated
+    let existingData: any = { appName: 'RAGCP', logoUrl: '/logo-light.png', faviconUrl: '/favicon.ico' };
+    const existing = await prisma.systemSetting.findUnique({ where: { key: BRANDING_KEY } });
+    if (existing) {
+      try { existingData = JSON.parse(existing.value); } catch {}
+    }
+
+    // Handle file uploads via multer (req.files is an object or array)
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+
+    let logoUrl = existingData.logoUrl;
+    let faviconUrl = existingData.faviconUrl;
+
+    if (files?.logo?.[0]) {
+      // Build a URL path relative to server root (multer saves to /uploads/branding/)
+      logoUrl = '/uploads/branding/' + files.logo[0].filename;
+    } else if (req.body.logoUrl) {
+      logoUrl = req.body.logoUrl;
+    }
+
+    if (files?.favicon?.[0]) {
+      faviconUrl = '/uploads/branding/' + files.favicon[0].filename;
+    } else if (req.body.faviconUrl) {
+      faviconUrl = req.body.faviconUrl;
+    }
+
     const brandingData = {
-      appName: appName || 'RAGCP',
-      logoUrl: logoUrl || '/logo-light.png',
-      faviconUrl: faviconUrl || '/favicon.ico'
+      appName: appName || existingData.appName || 'RAGCP',
+      logoUrl,
+      faviconUrl
     };
 
     const setting = await prisma.systemSetting.upsert({

@@ -248,12 +248,12 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               </div>
             </div>
 
-            <div className="mt-6 pt-6 border-t border-premium-border">
+            {/* <div className="mt-6 pt-6 border-t border-premium-border">
               <p className="text-xs text-premium-text/50 mb-3">Need to update your documents?</p>
               <button className="flex items-center gap-2 text-sm text-premium-primary hover:underline">
                 <UploadCloud className="w-4 h-4" /> Request Re-upload
               </button>
-            </div>
+            </div> */}
           </div>
         </div>
 
@@ -261,7 +261,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 flex flex-col relative overflow-hidden">
           {/* Subtle glow background */}
           <div className="absolute bottom-[-10%] right-[-10%] w-40 h-40 bg-premium-primary/10 rounded-full blur-[50px] pointer-events-none" />
-          
+
           <h3 className="text-lg font-bold mb-6 flex items-center gap-2 relative z-10">
             <PenTool className="w-5 h-5 text-premium-primary" /> Legal Agreement
           </h3>
@@ -270,11 +270,11 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
             <div className="space-y-6 relative">
               {/* Vertical line */}
               <div className="absolute left-[11px] top-4 bottom-4 w-0.5 bg-premium-border" />
-              
+
               {/* Step 1: KYC Verification */}
               <div className="flex items-start gap-4 relative z-10 group">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : status === 'KYC_PENDING' ? 'bg-premium-warning text-premium-bg animate-pulse ring-4 ring-premium-warning/20' : 'bg-premium-cards border border-premium-border'}`}>
-                   {(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? <Check className="w-3 h-3" /> : (status === 'KYC_PENDING' ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
+                  {(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? <Check className="w-3 h-3" /> : (status === 'KYC_PENDING' ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
                 </div>
                 <div>
                   <p className={`text-sm font-bold ${(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'text-premium-success' : 'text-premium-text'}`}>KYC Verification</p>
@@ -285,15 +285,15 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               {/* Step 2: Agreement Signature */}
               <div className="flex items-start gap-4 relative z-10 group">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${latestAgreement ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : (status === 'AGREEMENT_PENDING' ? 'bg-premium-primary text-white animate-pulse ring-4 ring-premium-primary/20' : 'bg-premium-cards border border-premium-border')}`}>
-                   {latestAgreement ? <Check className="w-3 h-3" /> : (status === 'AGREEMENT_PENDING' ? <PenTool className="w-3 h-3" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
+                  {latestAgreement ? <Check className="w-3 h-3" /> : (status === 'AGREEMENT_PENDING' ? <PenTool className="w-3 h-3" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
                 </div>
                 <div className="flex-1">
                   <p className={`text-sm font-bold ${latestAgreement ? 'text-premium-success' : 'text-premium-text'}`}>Advisory Agreement</p>
                   {latestAgreement ? (
                     <div className="text-xs text-premium-text/60 mt-2 space-y-1.5 bg-premium-cards p-3 rounded-xl border border-premium-border shadow-sm">
-                       <p className="flex justify-between items-center"><span className="text-premium-text/40">Status:</span> <span className="text-premium-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Signed & Sealed</span></p>
-                       <p className="flex justify-between items-center"><span className="text-premium-text/40">Date:</span> <span>{new Date(latestAgreement.signedAt).toLocaleDateString()}</span></p>
-                       {latestAgreement.ipAddress && <p className="flex justify-between items-center"><span className="text-premium-text/40">IP Addr:</span> <span>{latestAgreement.ipAddress}</span></p>}
+                      <p className="flex justify-between items-center"><span className="text-premium-text/40">Status:</span> <span className="text-premium-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Signed & Sealed</span></p>
+                      <p className="flex justify-between items-center"><span className="text-premium-text/40">Date:</span> <span>{new Date(latestAgreement.signedAt).toLocaleDateString()}</span></p>
+                      {latestAgreement.ipAddress && <p className="flex justify-between items-center"><span className="text-premium-text/40">IP Addr:</span> <span>{latestAgreement.ipAddress}</span></p>}
                     </div>
                   ) : (
                     <p className="text-xs text-premium-text/60 mt-0.5">{status === 'AGREEMENT_PENDING' ? 'Awaiting your eSign via Digio' : 'Locked (Requires KYC)'}</p>

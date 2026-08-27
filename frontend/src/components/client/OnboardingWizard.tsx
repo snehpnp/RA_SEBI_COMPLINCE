@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ShieldCheck, User, FileText, CheckCircle2, AlertTriangle, 
+import {
+  ShieldCheck, User, FileText, CheckCircle2, AlertTriangle,
   ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag
 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
+import { useBranding } from '../../contexts/BrandingContext';
 
 interface OnboardingWizardProps {
   profile: any;
@@ -14,6 +15,7 @@ interface OnboardingWizardProps {
 export default function OnboardingWizard({ profile, onComplete }: OnboardingWizardProps) {
   const [loading, setLoading] = useState(false);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
+  const { appName, logoUrl } = useBranding();
   const currentUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {};
 
 
@@ -37,13 +39,36 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   ];
 
   const getInitialStep = () => {
-    // If they already paid but haven't done KYC, jump straight to KYC
-    if ((profile?.status === 'ACTIVE' || profile?.status === 'PAYMENT_PENDING') && profile?.kycStatus !== 'VERIFIED') {
-      const kycIndex = STEPS.findIndex(s => s.id === 'kyc');
-      if (kycIndex !== -1) return kycIndex;
+    if (!profile) return 0;
+    const status = profile.status;
+    
+    // Resume logic based on profile status
+    if (status === 'ACTIVE') {
+      if (profile.kycStatus !== 'VERIFIED' && profile.kycStatus !== 'FAILED') {
+        const idx = STEPS.findIndex(s => s.id === 'kyc');
+        return idx !== -1 ? idx : 2;
+      }
+      return STEPS.length - 1; // Show last step if fully active
     }
-    // Always start at Welcome (step 0) so the user can review and edit their details
-    return 0;
+
+    if (status === 'PAYMENT_PENDING') {
+      const idx = STEPS.findIndex(s => s.id === 'subscription');
+      return idx !== -1 ? idx : 4;
+    }
+
+    if (status === 'AGREEMENT_PENDING') {
+      const idx = STEPS.findIndex(s => s.id === 'agreement');
+      return idx !== -1 ? idx : 3;
+    }
+
+    if (status === 'KYC_PENDING' || status === 'KYC_FAILED') {
+      const idx = STEPS.findIndex(s => s.id === 'kyc');
+      return idx !== -1 ? idx : 2;
+    }
+
+    // Default to Welcome (step 0) or Profile (step 1) for PENDING_ONBOARDING
+    const profIdx = STEPS.findIndex(s => s.id === 'profile');
+    return profIdx !== -1 ? profIdx : 1;
   };
 
   const [currentStep, setCurrentStep] = useState(getInitialStep());
@@ -60,10 +85,11 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const [pan, setPan] = useState(profile?.pan || '');
   const [aadhaar, setAadhaar] = useState(profile?.aadhaar || '');
   const [kraStatus, setKraStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>(
-    profile?.status === 'KYC_FAILED' ? 'failed' : 
-    (profile?.status === 'AGREEMENT_PENDING' || profile?.status === 'PAYMENT_PENDING' || profile?.status === 'ACTIVE') ? 'success' : 'idle'
+    profile?.status === 'KYC_FAILED' ? 'failed' :
+      (profile?.status === 'AGREEMENT_PENDING' || profile?.status === 'PAYMENT_PENDING' || profile?.status === 'ACTIVE' || profile?.kycStatus === 'VERIFIED') ? 'success' : 'idle'
   );
-  
+
+
   // Step Agreement
   const [agreementSigned, setAgreementSigned] = useState(!!profile?.agreementSigned);
 
@@ -91,7 +117,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     }
     return content;
   }, [profile, formData, pan, aadhaar]);
-  
+
   useEffect(() => {
     // Fetch plans
     api.getPlans().then(res => {
@@ -149,7 +175,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     setKraStatus('loading');
     try {
       const res = await api.verifyKRA({ pan, aadhaar });
-      
+
       if (res.success && res.data?.kycStatus === 'COMPLETED') {
         setKraStatus('success');
       } else {
@@ -177,7 +203,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     setLoading(true);
     try {
       const res = await api.initiateDigioAgreement();
-      
+
       if (res.success && res.data && res.data.id) {
         const options = {
           environment: 'production',
@@ -227,36 +253,107 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     }
   };
 
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const handleSelectPlan = async (planId: string) => {
     setLoading(true);
     try {
-      const res = await api.initiateCCAvenuePayment({
-        planId,
-        couponCode: appliedCoupon ? appliedCoupon.code : undefined
-      });
-      
-      if (res.success && res.url) {
-        // Create dynamic form and submit to CCAvenue
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = res.url;
-        
-        const encRequestInput = document.createElement('input');
-        encRequestInput.type = 'hidden';
-        encRequestInput.name = 'encRequest';
-        encRequestInput.value = res.encRequest;
-        form.appendChild(encRequestInput);
+      const activeGateway = profile?.user?.tenant?.activePaymentGateway || 'CCAVENUE';
 
-        const accessCodeInput = document.createElement('input');
-        accessCodeInput.type = 'hidden';
-        accessCodeInput.name = 'access_code';
-        accessCodeInput.value = res.accessCode;
-        form.appendChild(accessCodeInput);
+      if (activeGateway === 'RAZORPAY') {
+        const res = await api.initiateRazorpayPayment({
+          planId,
+          couponCode: appliedCoupon ? appliedCoupon.code : undefined
+        });
 
-        document.body.appendChild(form);
-        form.submit();
+        if (res.success && res.orderId) {
+          const isLoaded = await loadRazorpayScript();
+          if (!isLoaded) throw new Error('Razorpay SDK failed to load');
+
+          const options = {
+            key: res.keyId,
+            amount: res.amount,
+            currency: res.currency,
+            name: profile?.user?.tenant?.companyName || 'Premium Advisory',
+            description: 'Subscription Payment',
+            order_id: res.orderId,
+            handler: async function (response: any) {
+              try {
+                const verifyRes = await api.verifyRazorpayPayment({
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_signature: response.razorpay_signature,
+                  planId,
+                  couponCode: appliedCoupon ? appliedCoupon.code : undefined
+                });
+                if (verifyRes.success) {
+                  toast.success('Payment successful!');
+                  window.location.href = '/client?payment=success';
+                } else {
+                  throw new Error(verifyRes.message || 'Payment verification failed');
+                }
+              } catch (err: any) {
+                toast.error(err.message || 'Verification failed');
+                window.location.href = '/client?payment=failed';
+              }
+            },
+            prefill: {
+              name: profile?.name || '',
+              email: profile?.email || '',
+              contact: profile?.phone || profile?.mobile || ''
+            },
+            theme: {
+              color: profile?.user?.tenant?.themeColor || '#4F46E5'
+            }
+          };
+
+          const rzp = new (window as any).Razorpay(options);
+          rzp.on('payment.failed', function (response: any) {
+            toast.error(response.error.description || 'Payment failed');
+          });
+          rzp.open();
+          setLoading(false);
+        } else {
+          throw new Error(res.message || 'Failed to initiate Razorpay payment');
+        }
+
       } else {
-        throw new Error(res.message || 'Failed to initiate payment');
+        // Fallback to CCAvenue
+        const res = await api.initiateCCAvenuePayment({
+          planId,
+          couponCode: appliedCoupon ? appliedCoupon.code : undefined
+        });
+
+        if (res.success && res.url) {
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = res.url;
+
+          const encRequestInput = document.createElement('input');
+          encRequestInput.type = 'hidden';
+          encRequestInput.name = 'encRequest';
+          encRequestInput.value = res.encRequest;
+          form.appendChild(encRequestInput);
+
+          const accessCodeInput = document.createElement('input');
+          accessCodeInput.type = 'hidden';
+          accessCodeInput.name = 'access_code';
+          accessCodeInput.value = res.accessCode;
+          form.appendChild(accessCodeInput);
+
+          document.body.appendChild(form);
+          form.submit();
+        } else {
+          throw new Error(res.message || 'Failed to initiate payment');
+        }
       }
     } catch (err: any) {
       toast.error(err.message || 'Failed to select plan');
@@ -295,7 +392,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
             <p className="text-premium-text/60 text-sm mb-6">
               Please verify your basic contact information. This ensures seamless communication and regulatory compliance.
             </p>
-            
+
             <div className="bg-premium-primary/5 border border-premium-primary/20 rounded-xl p-4 mb-8 flex gap-3 items-start">
               <AlertTriangle className="w-5 h-5 text-premium-primary shrink-0 mt-0.5" />
               <div className="text-sm text-premium-text/80">
@@ -310,31 +407,31 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
                   <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Full Name</label>
                   <div className="relative">
                     <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors" />
-                    <input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} autoComplete="off" className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your full name" />
+                    <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} autoComplete="off" className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your full name" />
                   </div>
                 </div>
                 <div className="group">
                   <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Email Address</label>
                   <div className="relative">
                     <div className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors flex items-center justify-center">@</div>
-                    <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your email address" />
+                    <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your email address" />
                   </div>
                 </div>
               </div>
-              
+
               <div className="group">
                 <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Phone Number</label>
                 <div className="relative">
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors flex items-center justify-center">📞</div>
-                  <input type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your mobile number" />
+                  <input type="tel" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your mobile number" />
                 </div>
               </div>
-              
+
               <div className="group">
                 <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Complete Address</label>
                 <div className="relative">
                   <div className="absolute left-4 top-4 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors flex items-center justify-center">📍</div>
-                  <textarea value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none min-h-[100px] resize-none" placeholder="Enter your full residential address" />
+                  <textarea value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none min-h-[100px] resize-none" placeholder="Enter your full residential address" />
                 </div>
               </div>
             </div>
@@ -353,7 +450,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
             <h2 className="text-2xl font-bold mb-2">Identity Verification</h2>
             <p className="text-premium-text/60 text-sm mb-8">As per SEBI guidelines, KYC verification is mandatory.</p>
-            
+
             <div className="space-y-6 flex-1">
               <div className="space-y-5">
                 <div>
@@ -400,9 +497,9 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
                   <h3 className="text-xl font-bold text-premium-success mb-2">Agreement Signed</h3>
                 </div>
               ) : (
-                <div className="bg-premium-bg border border-premium-border rounded-2xl p-6 h-full flex flex-col relative overflow-hidden">
+                <div className="bg-white/20 dark:bg-black/20 backdrop-blur-lg border border-white/30 dark:border-white/10 shadow-xl rounded-2xl p-6 h-full flex flex-col relative overflow-hidden">
                   <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><FileText className="w-5 h-5 text-premium-primary" /> Advisory Agreement</h3>
-                  <div className="flex-1 overflow-y-auto pr-2 text-xs text-premium-text/70 space-y-4 mb-6 bg-premium-cards p-4 rounded-xl max-h-[200px] [&_p]:mb-3 [&_br]:block [&_br]:content-[''] [&_br]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-premium-text [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-premium-text [&_strong]:font-bold [&_strong]:text-premium-text [&_ul]:list-disc [&_ul]:ml-4 [&_ol]:list-decimal [&_ol]:ml-4">
+                  <div className="flex-1 overflow-y-auto pr-2 text-xs text-premium-text/70 space-y-4 mb-6 bg-white/40 dark:bg-black/40 backdrop-blur-sm border border-white/30 dark:border-white/5 p-4 rounded-xl max-h-[200px] custom-scrollbar [&_p]:mb-3 [&_br]:block [&_br]:content-[''] [&_br]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-premium-text [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-premium-text [&_strong]:font-bold [&_strong]:text-premium-text [&_ul]:list-disc [&_ul]:ml-4 [&_ol]:list-decimal [&_ol]:ml-4">
                     <div dangerouslySetInnerHTML={{ __html: agreementHTML }} />
                   </div>
                   <button onClick={handleSignAgreement} disabled={loading} className="w-full py-4 bg-[#1B42E0] hover:bg-[#1535B5] text-white rounded-xl font-bold flex items-center justify-center gap-2">
@@ -422,7 +519,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
             <h2 className="text-2xl font-bold mb-2">Choose Your Plan</h2>
             <p className="text-premium-text/60 text-sm mb-6">Select a research plan.</p>
-            
+
             <div className="mb-6 flex gap-2">
               <div className="relative flex-1">
                 <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/50" />
@@ -435,7 +532,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
                 Coupon Applied: {appliedCoupon.discountType === 'PERCENTAGE' ? `${appliedCoupon.discountValue}% off` : `₹${appliedCoupon.discountValue} off`}
               </p>
             )}
-            
+
             <div className="flex-1 overflow-y-auto pr-2 space-y-4 max-h-[250px]">
               {availablePlans.map((plan) => {
                 let finalPrice = plan.amount || plan.price;
@@ -446,9 +543,9 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
                     finalPrice = Math.max(0, finalPrice - appliedCoupon.discountValue);
                   }
                 }
-                
+
                 return (
-                  <div key={plan.id || plan._id} className="bg-premium-bg border border-premium-border rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div key={plan.id || plan._id} className="bg-white/20 dark:bg-black/20 backdrop-blur-lg border border-white/30 dark:border-white/10 hover:border-premium-primary/50 hover:bg-white/30 dark:hover:bg-black/30 transition-all duration-300 rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
                     <div className="flex-1">
                       <h3 className="text-lg font-bold">{plan.name}</h3>
                       <div className="flex items-baseline gap-1 mb-2">
@@ -478,8 +575,8 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     <div className="min-h-screen bg-premium-bg text-premium-text flex flex-col items-center justify-center p-4 relative font-sans">
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-premium-primary/10 blur-[120px]" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-premium-success/10 blur-[120px]" />
-      
-      <button 
+
+      <button
         onClick={onComplete}
         className="absolute top-8 left-8 flex items-center space-x-2 text-premium-text/60 hover:text-premium-primary font-medium transition-colors z-20 bg-premium-cards/50 px-4 py-2 rounded-xl border border-premium-border backdrop-blur-sm"
       >
@@ -490,26 +587,28 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
       <div className="w-full max-w-4xl bg-premium-cards border border-premium-border rounded-3xl shadow-2xl relative z-10 flex flex-col md:flex-row min-h-[600px]">
         <div className="w-full md:w-1/3 bg-premium-bg/50 border-r border-premium-border p-8 hidden md:flex flex-col">
           <div className="flex items-center space-x-3 mb-10">
-            {currentUser?.tenantLogo ? (
+            {logoUrl && logoUrl !== '/logo-light.png' ? (
+              <img src={logoUrl} alt={appName || 'Logo'} className="max-h-10 max-w-[150px] object-contain" />
+            ) : currentUser?.tenantLogo ? (
               <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className="max-h-10 max-w-[150px] object-contain" />
             ) : (
               <>
                 <ShieldCheck className="w-6 h-6 text-premium-primary" />
-                <span className="text-xl font-bold tracking-wider">{currentUser?.tenantName || 'RAGCP'}</span>
+                <span className="text-xl font-bold tracking-wider">{appName || currentUser?.tenantName || 'RAGCP'}</span>
               </>
             )}
           </div>
-          
+
           <div className="flex-1 relative mt-4">
             {/* Background Line */}
             <div className="absolute left-[15px] top-2 bottom-8 w-0.5 bg-premium-border/50" />
-            
+
             {/* Animated Progress Line */}
-            <div 
-              className="absolute left-[15px] top-2 w-0.5 bg-gradient-to-b from-premium-primary to-premium-success transition-all duration-700 ease-in-out shadow-[0_0_10px_var(--tw-colors-premium-primary)]" 
+            <div
+              className="absolute left-[15px] top-2 w-0.5 bg-gradient-to-b from-premium-primary to-premium-success transition-all duration-700 ease-in-out shadow-[0_0_10px_var(--tw-colors-premium-primary)]"
               style={{ height: `${(currentStep / (STEPS.length - 1)) * 100}%` }}
             />
-            
+
             <div className="space-y-8 relative z-10">
               {STEPS.map((step, idx) => {
                 const isPast = idx < currentStep;

@@ -30,10 +30,22 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const res = await api.get('/system-settings/branding');
       if (res.data.success && res.data.data) {
+
+        // Resolve URLs: paths starting with /uploads/ need the backend base URL
+        const BACKEND = process.env.NODE_ENV === 'production'
+          ? 'https://compliance.pnpuniverse.in/backend'
+          : 'http://localhost:5000';
+
+        const resolveUrl = (url: string, fallback: string) => {
+          if (!url) return fallback;
+          if (url.startsWith('/uploads/')) return BACKEND + url;
+          return url;
+        };
+
         const newBranding = {
           appName: res.data.data.appName || defaultBranding.appName,
-          logoUrl: res.data.data.logoUrl || defaultBranding.logoUrl,
-          faviconUrl: res.data.data.faviconUrl || defaultBranding.faviconUrl,
+          logoUrl: resolveUrl(res.data.data.logoUrl, defaultBranding.logoUrl),
+          faviconUrl: resolveUrl(res.data.data.faviconUrl, defaultBranding.faviconUrl),
         };
         setBranding(newBranding);
         

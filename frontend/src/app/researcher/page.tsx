@@ -86,6 +86,14 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'Access to main statistics',
   },
   {
+    tab: 'clients',
+    label: 'Client Management',
+    icon: 'ClipboardList',
+    accessKey: 'ACCESS_CLIENTS',
+    moduleLabel: 'Client Management Module',
+    moduleDesc: 'Control access to client profiles and registration details',
+  },
+  {
     tab: 'research',
     label: 'Signals & Analysis',
     icon: 'Activity',
@@ -101,14 +109,7 @@ const NAV_CONFIG: NavModule[] = [
     moduleLabel: 'Research Reports',
     moduleDesc: 'Manage and upload PDF research reports',
   },
-  {
-    tab: 'clients',
-    label: 'Client Management',
-    icon: 'ClipboardList',
-    accessKey: 'ACCESS_CLIENTS',
-    moduleLabel: 'Client Management Module',
-    moduleDesc: 'Control access to client profiles and registration details',
-  },
+
   {
     tab: 'settings',
     label: 'Personal Setting',
@@ -1199,6 +1200,7 @@ function AdminDashboardContent() {
             };
             const perm = permMap[tab];
             if (!perm) return true;
+            console.log("syncedUser.permissions", syncedUser.permissions)
             return syncedUser.permissions?.includes(perm) || false;
           };
 
@@ -2473,8 +2475,8 @@ function AdminDashboardContent() {
           }
         }}
         className={`p-3.5 rounded-xl border transition flex items-start space-x-3 cursor-pointer ${isChecked
-            ? 'bg-primary-500/5 border-primary-500/20'
-            : 'bg-slate-100 dark:bg-slate-950/20 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'
+          ? 'bg-primary-500/5 border-primary-500/20'
+          : 'bg-slate-100 dark:bg-slate-950/20 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'
           } ${effectivelyDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
       >
         <input
@@ -2567,15 +2569,15 @@ function AdminDashboardContent() {
           {isMobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
         </button>
 
-        {/* Premium Sidebar */}
-        <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-premium-cards border-r border-premium-border transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
+        {/* Premium Blue Sidebar - matching super-admin design */}
+        <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
           } ${!isMobileMenuOpen && isSidebarCollapsed ? 'lg:w-20' : 'lg:w-72'}`}>
 
           {/* Brand */}
-          <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
+          <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
               {user?.tenantLogo ? (
-                <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
+                <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
               ) : (
                 <>
                   <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
@@ -2586,7 +2588,7 @@ function AdminDashboardContent() {
             {!isSidebarCollapsed && (
               <button
                 onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors shrink-0"
+                className="hidden lg:flex items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors shrink-0"
               >
                 <Menu className="w-5 h-5" />
               </button>
@@ -2594,7 +2596,7 @@ function AdminDashboardContent() {
             {isSidebarCollapsed && (
               <button
                 onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-                className="hidden lg:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/5 text-premium-text/50 hover:text-premium-text transition-colors"
+                className="hidden lg:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
               >
                 <Menu className="w-5 h-5" />
               </button>
@@ -2616,11 +2618,11 @@ function AdminDashboardContent() {
                         if (isSidebarCollapsed) setIsSidebarCollapsed(false);
                         setIsPagesExpanded(!isPagesExpanded);
                       }}
-                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-premium-text/70 hover:bg-premium-bg hover:text-premium-text group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                       title={isSidebarCollapsed ? mod.label : undefined}
                     >
                       <div className="flex items-center gap-4 min-w-0">
-                        <Icon className="w-5 h-5 text-premium-text/50 group-hover:text-premium-text/80 shrink-0" />
+                        <Icon className="w-5 h-5 text-blue-200 dark:text-white/50 group-hover:text-white shrink-0" />
                         {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
                       </div>
                       {!isSidebarCollapsed && (
@@ -2640,8 +2642,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                                ? 'bg-premium-primary/10 text-premium-primary font-medium'
-                                : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                                ? 'bg-white/20 text-white font-medium'
+                                : 'text-blue-200 hover:text-white hover:bg-white/10'
                               }`}
                           >
                             {page.title}
@@ -2650,7 +2652,7 @@ function AdminDashboardContent() {
                         {!isStaff && (
                           <button
                             onClick={() => setActiveTab('customPages_new')}
-                            className="w-full text-left px-3 py-2 text-xs rounded-lg transition font-medium text-emerald-600 hover:text-emerald-500 hover:bg-emerald-500/10 mt-2"
+                            className="w-full text-left px-3 py-2 text-xs rounded-lg transition font-medium text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 mt-2"
                           >
                             + Add New Page
                           </button>
@@ -2670,15 +2672,15 @@ function AdminDashboardContent() {
                     setIsMobileMenuOpen(false);
                   }}
                   className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                      ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                      : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                    ? 'bg-white/20 text-white font-semibold shadow-inner'
+                    : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
                     } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                   title={isSidebarCollapsed ? mod.label : undefined}
                 >
-                  <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                  <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
                   {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
                   {!isSidebarCollapsed && isActive && (
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
                   )}
                 </button>
               );
@@ -2688,49 +2690,43 @@ function AdminDashboardContent() {
               <button
                 onClick={() => { setActiveTab('legalView'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${activeTab === 'legalView'
-                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                  ? 'bg-white/20 text-white font-semibold shadow-inner'
+                  : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                 title={isSidebarCollapsed ? "Legal & Disclosures" : undefined}
               >
-                <FileText className={`w-5 h-5 transition-colors shrink-0 ${activeTab === 'legalView' ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
+                <FileText className={`w-5 h-5 transition-colors shrink-0 ${activeTab === 'legalView' ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
                 {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">Legal & Disclosures</span>}
                 {!isSidebarCollapsed && activeTab === 'legalView' && (
-                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
                 )}
               </button>
             )}
           </div>
 
           {/* User Footer */}
-          <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-            {/* Subtle background glow */}
-            <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
-
+          <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
+            <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
             <div
               onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-
-              {/* Shimmer effect inside the card */}
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
+              className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
+              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
 
               <div className="relative shrink-0">
-                {/* Pulsing ring around avatar */}
-                <div className="absolute inset-0 rounded-full border-2 border-premium-primary/50 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-premium-primary to-indigo-600 flex items-center justify-center font-bold text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-primary)] relative z-10">
+                <div className="absolute inset-0 rounded-full border-2 border-white/30 animate-ping opacity-75" />
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(99,102,241,0.6)] relative z-10">
                   {user?.firstName ? user.firstName.charAt(0).toUpperCase() : 'A'}
                 </div>
-                {/* Online indicator */}
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-blue-900 rounded-full z-20" />
               </div>
 
               {!isSidebarCollapsed && (
                 <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-premium-text">{user?.firstName || 'Admin'}</p>
+                  <p className="font-bold text-sm truncate text-white">{user?.firstName || 'Staff'}</p>
                   <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-premium-primary" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-premium-primary via-indigo-200 to-premium-primary animate-pulse">
-                      {user?.role || 'Staff'}
+                    <ShieldCheck className="w-3 h-3 text-blue-300" />
+                    <p className="text-[10px] font-bold tracking-wider uppercase text-blue-200">
+                      {user?.role || 'RESEARCHER'}
                     </p>
                   </div>
                 </div>
@@ -2740,8 +2736,8 @@ function AdminDashboardContent() {
                 <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
               )}
             </div>
-            <div className={`flex-1 mt-4 border-t border-slate-200/20 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-premium-danger/10 rounded-xl text-premium-text/60 hover:text-premium-danger transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
+            <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
+              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
                 {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
                 <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
               </button>
@@ -2930,44 +2926,68 @@ function AdminDashboardContent() {
            ==================================================== */}
               {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
                 <div className="space-y-8">
-                  {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
+                  {/* UNIFIED PAGE HEADER — shown on all tabs */}
                   {(() => {
-                    const currentNav = NAV_CONFIG.find(n =>
-                      n.tab === activeTab ||
-                      (activeTab.startsWith('customPages_') && n.tab === 'customPages')
-                    );
+                    // Tabs that have their own header / don't need one
+                    const tabsWithOwnHeader = ['research', 'dashboard'];
+                    if (tabsWithOwnHeader.includes(activeTab)) return null;
 
-                    if (!currentNav || activeTab === 'dashboard') return null;
+                    // Build label + description for every possible tab
+                    const tabMeta: Record<string, { title: string; desc: string }> = {
+                      'research-reports': { title: 'Research Reports', desc: 'Manage and upload PDF research reports for clients' },
+                      clients: { title: 'Client Management', desc: 'View, add, and manage client profiles and subscriptions' },
+                      settings: { title: 'Settings', desc: 'Configure organization, integrations, billing and security settings' },
+                      profile: { title: 'My Profile', desc: 'View and update your personal profile and password' },
+                      legalView: { title: 'Legal & Disclosures', desc: 'View legal pages and regulatory disclosures' },
+                      compliance: { title: 'Compliance Center', desc: 'Track compliance checklists, alerts and penalties' },
+                      plans: { title: 'Plan Management', desc: 'Manage subscription categories and plans' },
+                      checklist: { title: 'Compliance Checklist', desc: 'Track and complete regulatory compliance tasks' },
+                      activeClientSummary: { title: 'Active Client Summary', desc: 'View active client subscription metrics' },
+                      complaintDataView: { title: 'Complaints', desc: 'Review and manage client complaints' },
+                      signature_settings: { title: 'Signature Settings', desc: 'Manage your research analyst co-signature' },
+                    };
 
-                    const tabsMissingHeader = [
-                      'checklist',
-                      'compliance',
-                      'plans',
-                      'signature_settings',
-                      'activeClientSummary',
-                      'complaintDataView',
-                      'legalView'
-                    ];
+                    // Determine title/desc
+                    let title = '';
+                    let desc = '';
 
-                    if (!tabsMissingHeader.includes(activeTab) && !activeTab.startsWith('customPages_')) {
-                      return null;
+                    if (activeTab.startsWith('customPages_')) {
+                      const slug = activeTab.replace('customPages_', '');
+                      const page = adminPagesList?.find((p: any) => p.slug === slug);
+                      title = page?.title || 'Custom Page';
+                      desc = 'Custom content page';
+                    } else {
+                      const meta = tabMeta[activeTab];
+                      if (meta) {
+                        title = meta.title;
+                        desc = meta.desc;
+                      } else {
+                        // fallback to NAV_CONFIG
+                        const navItem = NAV_CONFIG.find(n => n.tab === activeTab);
+                        title = navItem?.label || activeTab;
+                        desc = navItem?.moduleDesc || '';
+                      }
                     }
 
+                    if (!title) return null;
+
                     return (
-                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-2">
+                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-5 mb-6">
                         <div>
                           <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {activeTab.startsWith('customPages_')
-                              ? adminPagesList?.find((p: any) => p.slug === activeTab.split('_')[1])?.title || 'Custom Page'
-                              : currentNav.label}
+                            {title}
                           </h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                            {currentNav.moduleDesc || 'Manage and view details for this section.'}
-                          </p>
+                          {desc && (
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                              {desc}
+                            </p>
+                          )}
                         </div>
                       </div>
                     );
                   })()}
+
+
 
                   {/* PROFILE TAB */}
                   {activeTab === 'profile' && (
@@ -5207,8 +5227,8 @@ function AdminDashboardContent() {
                                     {pageData.length > 0 ? pageData.map((item: any) => (
                                       <div key={item.id} className="p-4 bg-white dark:bg-slate-900/40 border border-slate-300 dark:border-white/5 rounded-xl flex items-start gap-4 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                         <div className={`p-2 rounded-lg mt-1 shrink-0 ${item.type === 'ALERT_RESOLVED' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                                            item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
-                                              'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                          item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
+                                            'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                           }`}>
                                           {item.type === 'ALERT_RESOLVED' && <AlertTriangle className="h-4 w-4" />}
                                           {item.type === 'PENALTY_PAID' && <FileText className="h-4 w-4" />}
@@ -5622,21 +5642,22 @@ function AdminDashboardContent() {
                             {(paginatedClients: any) => (
                               <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/5 overflow-hidden">
                                 <div className="overflow-x-auto">
-                                  <table className="w-full text-left border-collapse min-w-[900px]">
-                                    <thead className="bg-slate-100 dark:bg-white/5 border-b border-slate-400 dark:border-white/10 text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                                  <table className="w-full text-left border-collapse min-w-[960px]">
+                                    <thead className="bg-slate-800 dark:bg-slate-900 border-b-2 border-blue-700 dark:border-blue-900 text-[10px] uppercase tracking-widest text-slate-300 dark:text-slate-400">
                                       <tr>
-                                        <th className="py-4 px-5 font-semibold">Client Name</th>
-                                        <th className="py-4 px-5 font-semibold">PAN / Aadhaar</th>
-                                        <th className="py-4 px-5 font-semibold">Location</th>
-                                        <th className="py-4 px-5 font-semibold">Registered On</th>
-                                        <th className="py-4 px-4 font-semibold">Status</th>
-                                        <th className="py-4 px-4 font-semibold">Added By / Source</th>
-                                        <th className="py-4 px-5 font-semibold">Esign/KRA</th>
-                                        <th className="py-4 px-5 text-right font-semibold">Actions</th>
+                                        <th className="py-3.5 px-4 font-bold text-slate-400 w-10">#</th>
+                                        <th className="py-3.5 px-5 font-bold">Client Name</th>
+                                        <th className="py-3.5 px-5 font-bold">PAN / Aadhaar</th>
+                                        <th className="py-3.5 px-5 font-bold">Location</th>
+                                        <th className="py-3.5 px-5 font-bold">Registered On</th>
+                                        <th className="py-3.5 px-4 font-bold">Status</th>
+                                        <th className="py-3.5 px-4 font-bold">Added By / Source</th>
+                                        <th className="py-3.5 px-5 font-bold">Esign / KRA</th>
+                                        <th className="py-3.5 px-5 text-right font-bold">Actions</th>
                                       </tr>
                                     </thead>
-                                    <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
-                                      {paginatedClients.map((cl: any) => {
+                                    <tbody className="text-xs divide-y divide-slate-200 dark:divide-white/5 text-slate-700 dark:text-slate-300">
+                                      {paginatedClients.map((cl: any, idx: number) => {
                                         const activeSub = cl.subscriptions?.find((s: any) => s.status === 'ACTIVE');
                                         const isDeleted = cl.user?.deletedAt !== null && cl.user?.deletedAt !== undefined;
 
@@ -5648,7 +5669,11 @@ function AdminDashboardContent() {
                                         const displayAadhaar = cl.aadhaar?.replace(deleteSuffix, '') || cl.aadhaar;
 
                                         return (
-                                          <tr key={cl.id} className={`hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition border-b border-slate-300 dark:border-white/5 ${isDeleted ? 'opacity-60 bg-rose-50 dark:bg-rose-950/10' : ''}`}>
+                                          <tr key={cl.id} className={`hover:bg-blue-50 dark:hover:bg-white/[0.04] transition-colors group ${isDeleted ? 'opacity-60 bg-rose-50 dark:bg-rose-950/10' : 'bg-white dark:bg-transparent'}`}>
+                                            {/* S.No */}
+                                            <td className="py-3.5 px-4">
+                                              <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">{idx + 1}</span>
+                                            </td>
                                             <td className="py-4 px-5">
                                               <div className="font-bold text-slate-900 dark:text-white">{displayName}</div>
                                               <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">{displayEmail}</div>
@@ -5702,10 +5727,10 @@ function AdminDashboardContent() {
                                               <div className="flex flex-col gap-1.5 items-start">
                                                 {/* KRA Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                                    : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                      : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
+                                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                                                  : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
+                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                    : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
                                                   }`}>
                                                   KRA: {
                                                     cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
@@ -5717,8 +5742,8 @@ function AdminDashboardContent() {
                                                 </span>
                                                 {/* eSign Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
-                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                                                   }`}>
                                                   eSign: {cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
                                                 </span>
@@ -6944,8 +6969,8 @@ function AdminDashboardContent() {
                                               <p className="text-xs text-slate-500 mt-1">To: {log.recipient} • {new Date(log.createdAt).toLocaleString()}</p>
                                             </div>
                                             <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${log.status === 'SENT' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                                                log.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                              log.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                                               }`}>
                                               {log.status}
                                             </span>

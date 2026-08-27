@@ -495,6 +495,20 @@ class ApiClient {
     });
   }
 
+  async initiateRazorpayPayment(payload: { planId: string, couponCode?: string }) {
+    return this.request('/payment/razorpay/initiate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async verifyRazorpayPayment(payload: { razorpay_payment_id: string, razorpay_order_id: string, razorpay_signature: string, planId: string, couponCode?: string }) {
+    return this.request('/payment/razorpay/verify', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   // Research Analyst Methods
   async refreshToken(refreshTokenStr: string) {
     return this.request('/auth/refresh', {

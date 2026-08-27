@@ -34,6 +34,7 @@
     "pdfjs-dist": "^6.1.200",
     "pdfkit": "^0.19.1",
     "postman-to-openapi": "^1.7.3",
+    "razorpay": "^2.9.8",
     "swagger-autogen": "^2.23.7",
     "swagger-ui-express": "^5.0.1",
     "tesseract.js": "^7.0.0",

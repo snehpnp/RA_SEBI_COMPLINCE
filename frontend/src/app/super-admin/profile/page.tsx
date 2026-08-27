@@ -4,8 +4,10 @@ import { User, Mail, Phone, Loader2 } from 'lucide-react';
 import api from '../../../services/api';
 import ChangePasswordBlock from '../../../components/ChangePasswordBlock';
 import { toast } from 'react-hot-toast';
+import { useBranding } from '../../../contexts/BrandingContext';
 
 export default function SuperAdminProfilePage() {
+  const { refreshBranding, logoUrl: currentLogoUrl, faviconUrl: currentFaviconUrl } = useBranding();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -21,6 +23,8 @@ export default function SuperAdminProfilePage() {
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [faviconFile, setFaviconFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [faviconPreview, setFaviconPreview] = useState<string | null>(null);
 
   const fetchProfile = async () => {
     try {
@@ -77,9 +81,12 @@ export default function SuperAdminProfilePage() {
       });
 
       if (res.data.success) {
-        toast.success('Global branding updated successfully! Please refresh the page to see changes globally.');
+        toast.success('Global branding updated! Sidebar logo updated instantly.');
         setLogoFile(null);
         setFaviconFile(null);
+        setLogoPreview(null);
+        setFaviconPreview(null);
+        await refreshBranding(); // ← sidebar logo turant update karega
       } else {
         toast.error(res.data.message || 'Branding update failed');
       }
@@ -112,7 +119,7 @@ export default function SuperAdminProfilePage() {
                   type="text"
                   value={formData.firstName}
                   onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   required
                 />
               </div>
@@ -128,7 +135,7 @@ export default function SuperAdminProfilePage() {
                   type="text"
                   value={formData.lastName}
                   onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   required
                 />
               </div>
@@ -159,7 +166,7 @@ export default function SuperAdminProfilePage() {
                   type="text"
                   value={formData.mobile}
                   onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
-                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   required
                 />
               </div>
@@ -200,10 +207,37 @@ export default function SuperAdminProfilePage() {
               <input
                 type="file"
                 accept="image/*"
-                onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setLogoFile(file);
+                  if (file) {
+                    const url = URL.createObjectURL(file);
+                    setLogoPreview(url);
+                  } else {
+                    setLogoPreview(null);
+                  }
+                }}
                 className="w-full text-gray-900 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-400"
               />
-              <p className="text-xs text-gray-500 mt-1">Leave empty to keep existing logo</p>
+              {logoPreview ? (
+                <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                  <img src={logoPreview} alt="Logo Preview" className="h-10 w-auto object-contain rounded" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{logoFile?.name}</p>
+                    <p className="text-[10px] text-gray-400">{logoFile ? (logoFile.size / 1024).toFixed(1) + ' KB' : ''}</p>
+                  </div>
+                </div>
+              ) : currentLogoUrl ? (
+                <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg">
+                  <img src={currentLogoUrl} alt="Current Logo" className="h-10 w-auto object-contain rounded" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Current Logo</p>
+                    <p className="text-[10px] text-gray-500">Leave empty to keep existing logo</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">Leave empty to keep existing logo</p>
+              )}
             </div>
 
             <div>
@@ -211,10 +245,37 @@ export default function SuperAdminProfilePage() {
               <input
                 type="file"
                 accept="image/*,.ico"
-                onChange={(e) => setFaviconFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setFaviconFile(file);
+                  if (file) {
+                    const url = URL.createObjectURL(file);
+                    setFaviconPreview(url);
+                  } else {
+                    setFaviconPreview(null);
+                  }
+                }}
                 className="w-full text-gray-900 dark:text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900/30 dark:file:text-indigo-400"
               />
-              <p className="text-xs text-gray-500 mt-1">Leave empty to keep existing favicon</p>
+              {faviconPreview ? (
+                <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                  <img src={faviconPreview} alt="Favicon Preview" className="h-8 w-8 object-contain rounded" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">{faviconFile?.name}</p>
+                    <p className="text-[10px] text-gray-400">{faviconFile ? (faviconFile.size / 1024).toFixed(1) + ' KB' : ''}</p>
+                  </div>
+                </div>
+              ) : currentFaviconUrl ? (
+                <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg">
+                  <img src={currentFaviconUrl} alt="Current Favicon" className="h-8 w-8 object-contain rounded" />
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Current Favicon</p>
+                    <p className="text-[10px] text-gray-500">Leave empty to keep existing favicon</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 mt-1">Leave empty to keep existing favicon</p>
+              )}
             </div>
           </div>
           
