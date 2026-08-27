@@ -387,6 +387,7 @@ function AdminDashboardContent() {
   const [editRoleDesc, setEditRoleDesc] = useState('');
   const [editRoleId, setEditRoleId] = useState('');
   const [editRoleModalLoading, setEditRoleModalLoading] = useState(false);
+  const [permissionSearchQuery, setPermissionSearchQuery] = useState('');
 
   const hasPermission = (permCode: string) => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
@@ -2708,9 +2709,9 @@ function AdminDashboardContent() {
           <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
               {user?.tenantLogo ? (
-                <img src={user.tenantLogo} alt={user?.tenantName || appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
+                <img src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${api.getBaseUrl()}${user.tenantLogo}`} alt={user?.tenantName || appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
               ) : appLogo ? (
-                <img src={appLogo} alt={appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
+                <img src={appLogo.startsWith('http') ? appLogo : `${api.getBaseUrl()}${appLogo}`} alt={appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
               ) : (
                 <>
                   <img src="/logo-light.png" alt={appName} className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
@@ -2908,7 +2909,7 @@ function AdminDashboardContent() {
               {/* ====================================================
             PROFILE COMPLETENESS WIZARD (Only for ADMIN, if completeness < 80%)
            ==================================================== */}
-              {!isProfileComplete && user.role === 'ADMIN' && !user?.isImpersonated && (
+              {!isProfileComplete && ['ADMIN', 'RESEARCHER'].includes(user.role) && !user?.isImpersonated && (
                 <div className="max-w-3xl mx-auto space-y-8 mt-6">
                   <div className="p-6 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 rounded-2xl text-xs space-y-2">
                     <h3 className="font-bold text-sm">Action Required: Profile Wizard Completeness is below 80%</h3>
@@ -8027,9 +8028,61 @@ function AdminDashboardContent() {
                                 </div>
                               </div>
 
+                              {/* Module Permissions Toolbar */}
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <div>
+                                  <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">Module & Action Permissions</h4>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">Define what sections and actions this role can access.</p>
+                                </div>
+                                
+                                <div className="flex flex-col sm:flex-row items-center gap-3">
+                                  {/* Search Input */}
+                                  <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                                    <input 
+                                      type="text" 
+                                      placeholder="Search modules..." 
+                                      value={permissionSearchQuery}
+                                      onChange={e => setPermissionSearchQuery(e.target.value)}
+                                      className="pl-9 pr-4 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs w-full sm:w-48 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                    />
+                                  </div>
+
+                                  {!['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name) && (
+                                    <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        const allPerms: string[] = [];
+                                        NAV_CONFIG.forEach(mod => {
+                                          allPerms.push(mod.accessKey);
+                                          if (mod.subPermissions) mod.subPermissions.forEach(sp => allPerms.push(sp.code));
+                                        });
+                                        setSelectedRole({ ...selectedRole, permissions: [...new Set(allPerms)] });
+                                      }}
+                                      className="px-3 py-1.5 text-[11px] font-bold bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-500/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-500/20 transition flex items-center"
+                                    >
+                                      <CheckSquare className="w-3.5 h-3.5 mr-1" /> Select All
+                                    </button>
+                                    <button
+                                      onClick={() => setSelectedRole({ ...selectedRole, permissions: [] })}
+                                      className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center"
+                                    >
+                                      <X className="w-3.5 h-3.5 mr-1" /> Unselect All
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
                               {/* AUTO-GENERATED from NAV_CONFIG — add new modules in NAV_CONFIG at the top of this file */}
-                              <div className="space-y-4">
-                                {NAV_CONFIG.map(mod => {
+                              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                                {NAV_CONFIG.filter(mod => {
+                                  if (!permissionSearchQuery) return true;
+                                  const q = permissionSearchQuery.toLowerCase();
+                                  return mod.moduleLabel.toLowerCase().includes(q) || 
+                                         mod.moduleDesc.toLowerCase().includes(q) || 
+                                         (mod.subPermissions && mod.subPermissions.some(sp => sp.label.toLowerCase().includes(q) || sp.desc.toLowerCase().includes(q)));
+                                }).map(mod => {
                                   const hasSub = mod.subPermissions && mod.subPermissions.length > 0;
                                   return (
                                     <div key={mod.tab} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 transition-all hover:border-slate-300 dark:hover:border-slate-700">
@@ -8069,11 +8122,11 @@ function AdminDashboardContent() {
                               </div>
 
                               {!['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name) && (
-                                <div className="pt-4 border-t border-slate-300 dark:border-white/5 flex justify-end">
+                                <div className="pt-6 border-t border-slate-200 dark:border-slate-800/60 flex justify-end">
                                   <button
                                     onClick={handleSavePermissions}
                                     disabled={savingPermissions}
-                                    className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-xs transition flex items-center disabled:opacity-50"
+                                    className="px-6 py-2.5 bg-primary-600 hover:bg-primary-500 rounded-xl font-medium text-white text-xs transition flex items-center disabled:opacity-50"
                                   >
                                     {savingPermissions ? (
                                       <>
@@ -8713,8 +8766,8 @@ function AdminDashboardContent() {
                   </button>
                 </div>
               </form>
-           
-          </div>
+
+            </div>
 
           </div>
         )}
