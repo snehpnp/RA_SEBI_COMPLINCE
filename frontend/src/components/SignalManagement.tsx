@@ -1,4 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import DataTable from 'react-data-table-component';
+
+const tableCustomStyles = {
+  table: {
+    style: {
+      backgroundColor: 'transparent',
+    },
+  },
+  headRow: {
+    style: {
+      backgroundColor: 'rgba(241, 245, 249, 0.5)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      minHeight: '44px',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px',
+      fontWeight: '700',
+      textTransform: 'uppercase' as any,
+      letterSpacing: '0.05em',
+      color: 'rgb(71, 85, 105)',
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+  rows: {
+    style: {
+      fontSize: '13px',
+      fontWeight: '500',
+      color: 'rgb(51, 65, 85)',
+      backgroundColor: 'transparent',
+      minHeight: '52px',
+      borderBottomColor: 'rgba(203, 213, 225, 0.4)',
+      '&:hover': {
+        backgroundColor: 'rgba(248, 250, 252, 0.5)',
+      },
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+};
 import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff } from 'lucide-react';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
@@ -441,51 +487,181 @@ export default function SignalManagement({
     }
   });
 
-  return (
-    <div className={`text-slate-900 dark:text-white min-h-screen bg-white dark:bg-[#0f1523] pb-10 ${showMobilePreview ? 'lg:flex' : ''}`}>
-      <div className={`flex-1 min-w-0`}>
-        {/* Header Bar */}
-        <div className="bg-white dark:bg-[#0B101E]/80 backdrop-blur-lg px-6 py-5 flex items-center justify-between border-b border-slate-300 dark:border-white/5 mb-6 shadow-xl sticky top-0 z-20">
-          <h1 className="text-lg font-bold flex items-center space-x-2">
-            {view === 'ADD' ? (
-              <>
-                <ArrowLeft className="h-5 w-5 cursor-pointer hover:text-primary-600 dark:text-primary-400" onClick={() => setView('TABLE')} />
-                <span>| Add Signal</span>
-              </>
-            ) : (
-              <>
-                <span className="text-primary-600 dark:text-primary-400">⌂</span>
-                <span>| {isViewOnly ? (signalStatusFilter === 'OPEN' ? 'Open Signals' : 'Closed Signals') : 'Open Signal'}</span>
-              </>
-            )}
-          </h1>
-          <div className="flex items-center gap-2">
-            {showMobilePreview && view !== 'ADD' && (
-              <button
-                onClick={() => setIsMobileVisible(prev => !prev)}
-                title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-slate-900 dark:border-white'
-                    : 'text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/20 hover:bg-slate-100 dark:hover:bg-white/10'
-                  }`}
-              >
-                {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
-                <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
-              </button>
-            )}
-            {view === 'ADD' && (
-              <div className="flex space-x-4">
-                <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
-                  <ArrowLeft className="h-4 w-4" /> <span>Back</span>
-                </button>
-                <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
-                  <Bell className="h-4 w-4" /> <span>Alert</span>
-                </button>
+  const signalColumns = useMemo(() => {
+    const cols: any[] = [
+      {
+        name: 'S.No',
+        width: '70px',
+        selector: (row: any, index?: number) => index !== undefined ? index + 1 : 0,
+        cell: (row: any, index?: number) => (
+          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+            {index !== undefined ? index + 1 : ''}
+          </span>
+        ),
+      },
+      {
+        name: 'Segment',
+        width: '130px',
+        selector: (row: any) => row.segment,
+        cell: (row: any) => (
+          <div className="flex items-center space-x-2">
+            <span className="bg-slate-100 dark:bg-white/5 px-2 py-1 rounded-md text-xs border border-slate-400 dark:border-white/10 whitespace-nowrap">{row.segment}</span>
+            {row.closeStatus === 'Avoid Signal' && (
+              <div className="flex items-center space-x-1 whitespace-nowrap">
+                <span className="text-red-600 dark:text-red-500 font-bold text-xs">(Avoid)</span>
+                <Eye className="w-4 h-4 text-yellow-600 dark:text-yellow-500 cursor-pointer hover:text-yellow-600 dark:text-yellow-400" onClick={() => setAvoidRemarkModal(row.closeRemark)} />
               </div>
             )}
           </div>
-          {/* Header content ends here */}
+        ),
+      },
+      {
+        name: 'Symbol',
+        minWidth: '150px',
+        selector: (row: any) => row.stock?.symbol,
+        cell: (row: any) => (
+          <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap">
+            {row.stock?.symbol}
+            {row.strikePrice && <span className="ml-2 text-xs font-semibold text-slate-500">{row.strikePrice} {row.optionType || ''}</span>}
+          </span>
+        ),
+      },
+      {
+        name: 'Plan',
+        minWidth: '140px',
+        selector: (row: any) => row.planName,
+        cell: (row: any) => <span className="text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.planName}</span>
+      },
+      {
+        name: 'Entry Type',
+        width: '100px',
+        selector: (row: any) => row.callType,
+        cell: (row: any) => (
+          <span className={`px-2 py-1 rounded-md text-[10px] font-bold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
+            {row.callType}
+          </span>
+        )
+      },
+      {
+        name: 'Entry Price',
+        width: '110px',
+        selector: (row: any) => row.entryPrice,
+        cell: (row: any) => <span className="font-semibold text-lime-700 dark:text-[#d4f23b] whitespace-nowrap">₹ {row.entryPrice}</span>
+      }
+    ];
+
+    if (signalStatusFilter === 'CLOSED') {
+      cols.push({
+        name: 'Exit Price',
+        width: '110px',
+        selector: (row: any) => row.exitPrice,
+        cell: (row: any) => <span className="font-semibold text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.exitPrice ? `₹ ${row.exitPrice}` : 'N/A'}</span>
+      });
+    }
+
+    cols.push({
+      name: 'Entry Date',
+      minWidth: '160px',
+      selector: (row: any) => row.createdAt,
+      cell: (row: any) => <span className="text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{new Date(row.createdAt).toLocaleString()}</span>
+    });
+
+    if (signalStatusFilter === 'CLOSED') {
+      cols.push({
+        name: 'Exit Date',
+        minWidth: '160px',
+        selector: (row: any) => row.closedAt,
+        cell: (row: any) => <span className="text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{row.closedAt ? new Date(row.closedAt).toLocaleString() : 'N/A'}</span>
+      });
+    }
+
+    if (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') {
+      cols.push({
+        name: 'Researcher',
+        minWidth: '140px',
+        selector: (row: any) => row.createdByName,
+        cell: (row: any) => <span className="whitespace-nowrap text-xs font-semibold text-slate-700 dark:text-slate-300">{row.createdByName || 'Unknown'}</span>
+      });
+    }
+
+    cols.push({
+      name: 'Action',
+      width: '180px',
+      right: true,
+      cell: (row: any) => (
+        <div className="flex items-center justify-end space-x-2">
+          <button onClick={() => setViewSignalDetails(row)} className="p-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-lg transition-all duration-300" title="View Details">
+            <Eye className="w-4 h-4" />
+          </button>
+          {row.status === 'OPEN' && !isViewOnly && (
+            <button onClick={() => { setAlertTrade(row); setShowAlertModal(true); }} className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-lg transition-all duration-300" title="Send Alert">
+              <Bell className="w-4 h-4" />
+            </button>
+          )}
+          {row.status === 'OPEN' && !isViewOnly && (
+            <button onClick={() => {
+              setCloseSignalModal(row);
+              setCloseStatus('Fully Closed');
+              setCloseExitPrice('');
+              setCloseRemark('');
+              setCloseTargets({ t1: false, t2: false, t3: false, close: false });
+            }} className="p-1.5 bg-red-500/10 hover:bg-red-500/30 hover:shadow-[0_0_10px_rgba(239,68,68,0.4)] text-red-600 dark:text-red-400 rounded-lg transition-all duration-300" title="Close Signal">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          {!row.reportUrl && !isViewOnly && (
+            <button onClick={() => {
+              setReportOptionsModal(row);
+            }} className="p-1.5 bg-green-500/10 hover:bg-green-500/30 text-green-600 dark:text-green-400 rounded-lg transition-all duration-300" title="Report Options">
+              <FileUp className="w-4 h-4" />
+            </button>
+          )}
+          {row.reportUrl && (
+            <>
+              <button
+                onClick={() => handleSafeDownload(row.reportUrl)}
+                className="p-1.5 bg-blue-500/10 hover:bg-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg transition-all duration-300 inline-flex"
+                title="Download Report"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+              {!isViewOnly && (
+                <button onClick={() => {
+                  setReportOptionsModal(row);
+                }} className="p-1.5 ml-1 bg-orange-500/10 hover:bg-orange-500/30 text-orange-600 dark:text-orange-400 rounded-lg transition-all duration-300 inline-flex" title="Edit Report">
+                  <Edit className="w-4 h-4" />
+                </button>
+              )}
+            </>
+          )}
         </div>
+      )
+    });
+
+    return cols;
+  }, [signalStatusFilter, user, isViewOnly]);
+
+  return (
+    <div className={`text-slate-900 dark:text-white min-h-screen bg-white dark:bg-[#0f1523] pb-10 ${showMobilePreview ? 'lg:flex' : ''}`}>
+      <div className={`flex-1 min-w-0`}>
+        {view === 'ADD' && (
+        <div className="bg-white dark:bg-[#0B101E]/80 backdrop-blur-lg px-6 py-5 flex items-center justify-between border-b border-slate-300 dark:border-white/5 mb-6 shadow-xl sticky top-0 z-20">
+          <h1 className="text-lg font-bold flex items-center space-x-2">
+            <ArrowLeft className="h-5 w-5 cursor-pointer hover:text-primary-600 dark:text-primary-400" onClick={() => setView('TABLE')} />
+            <span>| Add Signal</span>
+          </h1>
+          <div className="flex items-center gap-2">
+            <div className="flex space-x-4">
+              <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
+                <ArrowLeft className="h-4 w-4" /> <span>Back</span>
+              </button>
+              <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
+                <Bell className="h-4 w-4" /> <span>Alert</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
         {view !== 'ADD' && (
           <div className="bg-white dark:bg-[#151c2c]/60 backdrop-blur-md p-6 rounded-2xl border border-slate-300 dark:border-white/5 shadow-2xl mx-6">
@@ -516,7 +692,21 @@ export default function SignalManagement({
 
             {/* Action Bar */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
-              <div className="relative w-full md:w-64">
+              {showMobilePreview && (
+              <button
+                onClick={() => setIsMobileVisible(prev => !prev)}
+                title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-slate-900 dark:border-white'
+                    : 'text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/20 hover:bg-slate-100 dark:hover:bg-white/10'
+                  }`}
+              >
+                {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
+              </button>
+            )}
+            
+            <div className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-600 dark:text-gray-400" />
                 <input
                   type="text"
@@ -570,38 +760,34 @@ export default function SignalManagement({
               return (
                 <>
                   {/* Filters Bar */}
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 mb-6">
                     <div>
-                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-gray-300">From date</label>
-                      <div className="relative">
-                        <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-2 text-sm" />
-                      </div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-slate-500 dark:text-slate-400">From date</label>
+                      <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full bg-slate-50 hover:bg-white dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm transition-all shadow-sm focus:ring-2 focus:ring-primary-500/20" />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-gray-300">To Date</label>
-                      <div className="relative">
-                        <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-2 text-sm" />
-                      </div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-slate-500 dark:text-slate-400">To Date</label>
+                      <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full bg-slate-50 hover:bg-white dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm transition-all shadow-sm focus:ring-2 focus:ring-primary-500/20" />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-gray-300">Select Service</label>
-                      <select value={selectedService} onChange={(e) => setSelectedService(e.target.value)} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-2 text-sm text-slate-900 dark:text-white">
-                        <option value="">Select Service</option>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-slate-500 dark:text-slate-400">Select Service</label>
+                      <select value={selectedService} onChange={(e) => setSelectedService(e.target.value)} className="w-full bg-slate-50 hover:bg-white dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white transition-all shadow-sm focus:ring-2 focus:ring-primary-500/20 appearance-none">
+                        <option value="">All Services</option>
                         {adminPlans.map(p => (
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1 text-slate-700 dark:text-gray-300">Select Stock</label>
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5 text-slate-500 dark:text-slate-400">Select Stock</label>
                       <div className="flex space-x-2">
-                        <select value={selectedStockId} onChange={(e) => setSelectedStockId(e.target.value)} className="flex-1 bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-2 text-sm text-slate-900 dark:text-white">
-                          <option value="">Select Stock</option>
+                        <select value={selectedStockId} onChange={(e) => setSelectedStockId(e.target.value)} className="flex-1 bg-slate-50 hover:bg-white dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white transition-all shadow-sm focus:ring-2 focus:ring-primary-500/20 appearance-none">
+                          <option value="">All Stocks</option>
                           {stocks.map(s => (
                             <option key={s.id} value={s.id}>{s.symbol}</option>
                           ))}
                         </select>
-                        <button onClick={handleResetFilters} className="p-2 bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5">
+                        <button onClick={handleResetFilters} title="Reset Filters" className="p-2.5 bg-slate-50 hover:bg-slate-200 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl dark:hover:bg-white/20 transition-all shadow-sm text-slate-600 dark:text-slate-300 flex-shrink-0">
                           <RefreshCcw className="h-4 w-4" />
                         </button>
                       </div>
@@ -613,132 +799,20 @@ export default function SignalManagement({
 
             {/* Table */}
             {(view === 'TABLE' || isViewOnly) && (
-              <PaginatedList data={filteredSignals} itemsPerPage={10}>
-                {(pageData) => (
-                  <div className="overflow-x-auto rounded border border-slate-400 dark:border-white/10 mb-4">
-                    <table className="w-full text-sm text-left">
-                      <thead className="text-xs text-slate-900 dark:text-white uppercase bg-slate-100 dark:bg-[#1A2235] border-b border-slate-400 dark:border-white/10">
-                        <tr>
-                          <th className="px-4 py-1 w-[1%] text-left whitespace-nowrap">S.No</th>
-                          <th className="px-4 py-1 w-[1%] text-left whitespace-nowrap">Segment</th>
-                          <th className="px-4 py-1 whitespace-nowrap">Symbol</th>
-                          <th className="px-3 py-1 whitespace-nowrap">Plan</th>
-                          <th className="px-3 py-1 whitespace-nowrap">Entry Type</th>
-                          <th className="px-3 py-1 whitespace-nowrap">Entry Price</th>
-                          {signalStatusFilter === 'CLOSED' && <th className="px-3 py-1 whitespace-nowrap">Exit Price</th>}
-                          <th className="px-3 py-1 whitespace-nowrap">Entry Date</th>
-                          {signalStatusFilter === 'CLOSED' && <th className="px-3 py-1 whitespace-nowrap">Exit Date</th>}
-                          {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && <th className="px-3 py-1 whitespace-nowrap">Researcher</th>}
-                          <th className="px-3 py-1 text-center whitespace-nowrap">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {loading ? (
-                          <tr><td colSpan={10} className="text-center py-8">Loading...</td></tr>
-                        ) : pageData.length === 0 ? (
-                          <tr>
-                            <td colSpan={10} className="text-center py-12 text-slate-500 dark:text-gray-400 bg-slate-100 dark:bg-white/5">
-                              No signals found matching your criteria.
-                            </td>
-                          </tr>
-                        ) : (
-                          pageData.map((s: any, idx: number) => (
-                            <tr key={s.id} className="border-b border-slate-300 dark:border-white/5 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 hover:shadow-lg transition-all duration-300">
-                              <td className="px-4 py-1 w-[1%] text-left font-medium text-slate-600 dark:text-gray-400">{idx + 1}</td>
-                              <td className="px-4 py-1 w-[1%] text-left">
-                                <div className="flex items-center space-x-2">
-                                  <span className="bg-slate-100 dark:bg-white/5 px-2 py-1 rounded-md text-xs border border-slate-400 dark:border-white/10">{s.segment}</span>
-                                  {s.closeStatus === 'Avoid Signal' && (
-                                    <div className="flex items-center space-x-1">
-                                      <span className="text-red-600 dark:text-red-500 font-bold text-xs">(Avoid)</span>
-                                      <Eye className="w-4 h-4 text-yellow-600 dark:text-yellow-500 cursor-pointer hover:text-yellow-600 dark:text-yellow-400" onClick={() => setAvoidRemarkModal(s.closeRemark)} />
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-4 py-1 font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap">
-                                {s.stock?.symbol}
-                                {s.strikePrice && <span className="ml-2 text-xs font-semibold text-slate-500">{s.strikePrice} {s.optionType || ''}</span>}
-                              </td>
-                              <td className="px-3 py-1 text-slate-700 dark:text-gray-300 whitespace-nowrap">{s.planName}</td>
-                              <td className="px-3 py-1">
-                                <span className={`px-2 py-1 rounded-md text-xs font-bold ${s.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
-                                  {s.callType}
-                                </span>
-                              </td>
-                              <td className="px-3 py-1 font-semibold text-lime-700 dark:text-[#d4f23b] whitespace-nowrap">₹ {s.entryPrice}</td>
-                              {signalStatusFilter === 'CLOSED' && (
-                                <td className="px-3 py-1 font-semibold text-slate-700 dark:text-gray-300 whitespace-nowrap">
-                                  {s.exitPrice ? `₹ ${s.exitPrice}` : 'N/A'}
-                                </td>
-                              )}
-                              <td className="px-3 py-1 text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{new Date(s.createdAt).toLocaleString()}</td>
-                              {signalStatusFilter === 'CLOSED' && (
-                                <td className="px-3 py-1 text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">
-                                  {s.closedAt ? new Date(s.closedAt).toLocaleString() : 'N/A'}
-                                </td>
-                              )}
-                              {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                                <td className="px-3 py-1 whitespace-nowrap text-xs font-semibold text-slate-700 dark:text-slate-300">
-                                  {s.createdByName || 'Unknown'}
-                                </td>
-                              )}
-                              <td className="px-3 py-1">
-                                <div className="flex items-center justify-center space-x-2">
-                                  <button onClick={() => setViewSignalDetails(s)} className="p-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-lg transition-all duration-300" title="View Details">
-                                    <Eye className="w-4 h-4" />
-                                  </button>
-                                  {s.status === 'OPEN' && !isViewOnly && (
-                                    <button onClick={() => { setAlertTrade(s); setShowAlertModal(true); }} className="p-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-lg transition-all duration-300" title="Send Alert">
-                                      <Bell className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                  {s.status === 'OPEN' && !isViewOnly && (
-                                    <button onClick={() => {
-                                      setCloseSignalModal(s);
-                                      setCloseStatus('Fully Closed');
-                                      setCloseExitPrice('');
-                                      setCloseRemark('');
-                                      setCloseTargets({ t1: false, t2: false, t3: false, close: false });
-                                    }} className="p-1 bg-red-500/10 hover:bg-red-500/30 hover:shadow-[0_0_10px_rgba(239,68,68,0.4)] text-red-600 dark:text-red-400 rounded-lg transition-all duration-300" title="Close Signal">
-                                      <X className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                  {!s.reportUrl && !isViewOnly && (
-                                    <button onClick={() => {
-                                      setReportOptionsModal(s);
-                                    }} className="p-1 bg-green-500/10 hover:bg-green-500/30 text-green-600 dark:text-green-400 rounded-lg transition-all duration-300" title="Report Options">
-                                      <FileUp className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                  {s.reportUrl && (
-                                    <>
-                                      <button
-                                        onClick={() => handleSafeDownload(s.reportUrl)}
-                                        className="p-1 bg-blue-500/10 hover:bg-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg transition-all duration-300 inline-flex"
-                                        title="Download Report"
-                                      >
-                                        <Download className="w-4 h-4" />
-                                      </button>
-                                      {!isViewOnly && (
-                                        <button onClick={() => {
-                                          setReportOptionsModal(s);
-                                        }} className="p-1 ml-1 bg-orange-500/10 hover:bg-orange-500/30 text-orange-600 dark:text-orange-400 rounded-lg transition-all duration-300 inline-flex" title="Edit Report">
-                                          <Edit className="w-4 h-4" />
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </PaginatedList>
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800/60 overflow-hidden w-full shadow-xl shadow-slate-200/20 dark:shadow-none bg-white dark:bg-[#0F172A]">
+                <div className="overflow-x-auto">
+                  <DataTable
+                    columns={signalColumns}
+                    data={filteredSignals}
+                    pagination
+                    paginationPerPage={10}
+                    highlightOnHover
+                    responsive
+                    customStyles={tableCustomStyles}
+                    noDataComponent={<div className="p-8 text-center text-slate-500 dark:text-slate-400 font-medium">No signals found matching your criteria.</div>}
+                  />
+                </div>
+              </div>
             )}
             {view === 'CARD' && !isViewOnly && (
               <div className="text-center py-10 text-slate-600 dark:text-gray-400">Card View Coming Soon</div>

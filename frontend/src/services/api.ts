@@ -868,10 +868,10 @@ class ApiClient {
     });
   }
 
-  async requestOtp(email: string) {
+  async requestOtp(email: string, tenantId?: string) {
     return this.request('/public/request-otp', {
       method: 'POST',
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, tenantId })
     });
   }
 
@@ -879,6 +879,12 @@ class ApiClient {
     return this.request('/public/verify-otp', {
       method: 'POST',
       body: JSON.stringify({ email, otp })
+    });
+  }
+  async testSmtpConnection(data: any) {
+    return this.request('/admin/test-smtp-connection', {
+      method: 'POST',
+      body: JSON.stringify(data)
     });
   }
 }

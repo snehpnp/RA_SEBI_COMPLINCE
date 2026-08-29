@@ -4,6 +4,52 @@ import AdminProfilePage from '../admin/profile/page';
 import StaffProfilePage from '../admin/staff-profile/page';
 import PAProfilePage from '../admin/pa-profile/page';
 import { useState, useEffect, useMemo, useRef } from 'react';
+import DataTable from 'react-data-table-component';
+
+const tableCustomStyles = {
+  table: {
+    style: {
+      backgroundColor: 'transparent',
+    },
+  },
+  headRow: {
+    style: {
+      backgroundColor: 'rgba(241, 245, 249, 0.5)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      minHeight: '44px',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px',
+      fontWeight: '700',
+      textTransform: 'uppercase' as any,
+      letterSpacing: '0.05em',
+      color: 'rgb(71, 85, 105)',
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+  rows: {
+    style: {
+      fontSize: '13px',
+      fontWeight: '500',
+      color: 'rgb(51, 65, 85)',
+      backgroundColor: 'transparent',
+      minHeight: '52px',
+      borderBottomColor: 'rgba(203, 213, 225, 0.4)',
+      '&:hover': {
+        backgroundColor: 'rgba(248, 250, 252, 0.5)',
+      },
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+};
 import AdminResourcesTab from '@/components/AdminResourcesTab';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
@@ -217,6 +263,7 @@ import CouponsManager from '../../components/CouponsManager';
 
 function AdminDashboardContent() {
   const [isDarkMode, setIsDarkMode] = useState(false);
+
   const [showPassword, setShowPassword] = useState(false);
 
   const router = useRouter();

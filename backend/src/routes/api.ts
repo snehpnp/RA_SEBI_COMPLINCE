@@ -24,7 +24,7 @@ import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
 import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
-import { getGlobalBranding, updateGlobalBranding } from '../controllers/systemSettingController';
+import { getGlobalBranding, updateGlobalBranding, testSmtpConnection } from '../controllers/systemSettingController';
 
 const router = Router();
 
@@ -263,6 +263,7 @@ router.put(
 router.get('/admin/email-templates', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), getEmailTemplates);
 router.put('/admin/email-templates/:type', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), updateEmailTemplate);
 router.post('/admin/test-smtp', authenticateJWT, requireRoles(['ADMIN']), testSmtp);
+router.post('/admin/test-smtp-connection', authenticateJWT, requireRoles(['ADMIN']), testSmtpConnection);
 
 // Bulk Exports
 router.get('/admin/exports/invoices', authenticateJWT, requirePermission('EXPORT_DATA'), exportInvoicesZip);

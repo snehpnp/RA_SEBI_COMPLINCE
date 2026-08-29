@@ -65,7 +65,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
     if (!email) return toast.error('Please enter an email address first.');
     setSendingOtp(true);
     try {
-      const res = await api.requestOtp(email);
+      const res = await api.requestOtp(email, tenantId);
       if (res.success) {
         setOtpSent(true);
         toast.success(res.message || 'OTP sent successfully!');

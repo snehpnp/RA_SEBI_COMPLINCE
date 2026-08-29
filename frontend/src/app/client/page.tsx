@@ -111,9 +111,16 @@ function ClientPortalContent() {
     { id: 'legal', label: 'Legal', icon: Scale },
   ];
 
-  const handleLogout = async (allDevices: boolean = false) => {
+  const handleLogout = async (allDevices = false) => {
+    setIsLogoutModalOpen(false);
     await api.logout(allDevices);
-    window.location.href = '/login';
+    router.push('/client/login');
+  };
+
+  const getFullUrl = (url?: string | null) => {
+    if (!url) return '#';
+    if (url.startsWith('http')) return url;
+    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
   };
 
   const renderContent = () => {
@@ -130,9 +137,22 @@ function ClientPortalContent() {
       case 'notifications': return <Notifications />;
       case 'profile': return <ProfileSettings />;
       case 'legal':
+        const legalPages = [...pages];
+        if (profile?.user?.tenant?.termsPdfUrl) {
+          legalPages.push({ id: 'termsPdf', title: 'Terms & Conditions', slug: 'terms-conditions', type: 'URL', externalUrl: getFullUrl(profile.user.tenant.termsPdfUrl) });
+        }
+        if (profile?.user?.tenant?.privacyPdfUrl) {
+          legalPages.push({ id: 'privacyPdf', title: 'Privacy Policy', slug: 'privacy-policy', type: 'URL', externalUrl: getFullUrl(profile.user.tenant.privacyPdfUrl) });
+        }
+        if (profile?.user?.tenant?.internalPolicyUrl) {
+          // Check if Internal Policy already exists in the API response to avoid duplicates
+          if (!legalPages.some(p => p.slug === 'internal-policy')) {
+            legalPages.push({ id: 'internalPolicyPdf', title: 'Internal Policy', slug: 'internal-policy', type: 'URL', externalUrl: getFullUrl(profile.user.tenant.internalPolicyUrl) });
+          }
+        }
         return (
           <Legal
-            pages={pages}
+            pages={legalPages}
             onReadDocument={(page: any) => {
               if (page.type === 'URL' && page.externalUrl) {
                 window.open(page.externalUrl, '_blank');
@@ -246,48 +266,25 @@ function ClientPortalContent() {
             )
           })}
 
-          {/* Dynamic Policies Section */}
-          {pages.length > 0 && (
-            <div className="pt-2">
-              <button
-                onClick={() => setPoliciesExpanded(!policiesExpanded)}
-                className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 text-white/70 hover:bg-white/5 hover:text-white group ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
-              >
-                <div className="flex items-center gap-4">
-                  <FileText className="w-5 h-5 text-white/50 group-hover:text-white/80 shrink-0" />
-                  {!isSidebarCollapsed && <span>Policies</span>}
-                </div>
-                {!isSidebarCollapsed && (
-                  <div className={`transition-transform duration-200 ${policiesExpanded ? 'rotate-90' : ''}`}>
-                    <ChevronRight className="w-4 h-4" />
-                  </div>
-                )}
-              </button>
-
-              {!isSidebarCollapsed && policiesExpanded && (
-                <div className="pl-12 pr-4 space-y-1 mt-1">
-                  {pages.map((page) => (
-                    <button
-                      key={page.id}
-                      onClick={() => {
-                        if (page.type === 'URL' && page.externalUrl) {
-                          window.open(page.externalUrl, '_blank');
-                        } else {
-                          setActiveTab(page.slug);
-                          setMobileMenuOpen(false);
-                        }
-                      }}
-                      className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === page.slug
-                        ? 'bg-white/10 text-white font-medium'
-                        : 'text-white/60 hover:text-white hover:bg-white/5'
-                        }`}
-                    >
-                      {page.title}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+          {profile?.user?.tenant?.termsPdfUrl && (
+            <a href={getFullUrl(profile.user.tenant.termsPdfUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}>
+              <FileText className="w-5 h-5 transition-colors shrink-0 text-white/50 group-hover:text-white/80" />
+              {!isSidebarCollapsed && <span>Terms & Conditions</span>}
+            </a>
+          )}
+          
+          {profile?.user?.tenant?.privacyPdfUrl && (
+            <a href={getFullUrl(profile.user.tenant.privacyPdfUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}>
+              <FileText className="w-5 h-5 transition-colors shrink-0 text-white/50 group-hover:text-white/80" />
+              {!isSidebarCollapsed && <span>Privacy Policy</span>}
+            </a>
+          )}
+          
+          {profile?.user?.tenant?.internalPolicyUrl && (
+            <a href={getFullUrl(profile.user.tenant.internalPolicyUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}>
+              <FileText className="w-5 h-5 transition-colors shrink-0 text-white/50 group-hover:text-white/80" />
+              {!isSidebarCollapsed && <span>Internal Policy</span>}
+            </a>
           )}
         </div>
 

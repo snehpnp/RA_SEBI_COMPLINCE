@@ -86,14 +86,14 @@ export const getAdminPages = async (req: AuthenticatedRequest, res: Response) =>
     const existingSlugs = new Set(pages.map(p => p.slug));
     const missingPages = mandatoryPagesTemplate.filter(p => !existingSlugs.has(p.slug));
 
-    if (missingPages.length > 0) {
-      await prisma.customPage.createMany({ data: missingPages as any });
-      
-      pages = await prisma.customPage.findMany({
-        where: { tenantId },
-        orderBy: { createdAt: 'asc' }
-      });
-    }
+    // if (missingPages.length > 0) {
+    //   await prisma.customPage.createMany({ data: missingPages as any });
+    //   
+    //   pages = await prisma.customPage.findMany({
+    //     where: { tenantId },
+    //     orderBy: { createdAt: 'asc' }
+    //   });
+    // }
 
     res.status(200).json({ success: true, data: pages });
   } catch (error: any) {
@@ -154,7 +154,6 @@ export const deletePage = async (req: AuthenticatedRequest, res: Response) => {
     if (!isValidObjectId(id)) throw new Error('Invalid Page ID format');
     const page = await prisma.customPage.findUnique({ where: { id } });
     if (!page || page.tenantId !== tenantId) throw new Error('Page not found');
-    if (page.isSystem) throw new Error('Cannot delete a system page');
 
     await prisma.customPage.delete({ where: { id } });
 

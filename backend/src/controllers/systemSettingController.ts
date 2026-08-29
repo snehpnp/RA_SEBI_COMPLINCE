@@ -108,3 +108,44 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+
+import nodemailer from 'nodemailer';
+
+export const testSmtpConnection = async (req: Request, res: Response) => {
+  try {
+    const { host, port, user, password, testEmail } = req.body;
+    
+    if (!host || !port || !user || !password || !testEmail) {
+      return res.status(400).json({ success: false, message: 'All SMTP details and Test Email are required.' });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port: parseInt(port),
+      secure: parseInt(port) === 465,
+      auth: {
+        user,
+        pass: password
+      }
+    });
+
+    const mailOptions = {
+      from: user,
+      to: testEmail,
+      subject: 'Test Email from RAGCP',
+      html: `<div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h2>SMTP Connection Successful! ??</h2>
+        <p>If you are reading this, your SMTP credentials for RAGCP are perfectly configured.</p>
+      </div>`
+    };
+
+    await transporter.verify();
+    await transporter.sendMail(mailOptions);
+    
+    return res.status(200).json({ success: true, message: 'Test email sent successfully! Please check your inbox.' });
+  } catch (error: any) {
+    console.error('SMTP Test Failed:', error);
+    return res.status(500).json({ success: false, message: 'SMTP Test Failed: ' + error.message });
+  }
+};

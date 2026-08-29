@@ -1,3 +1,5 @@
+import nodemailer from 'nodemailer';
+
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
 import prisma from '../config/db';
@@ -499,7 +501,61 @@ export const requestOtp = async (req: Request, res: Response) => {
     // Since we don't have SMTP configured for all users by default in the global environment,
     // we'll simulate it by returning it in the console for development if needed, 
     // or actually send it if possible. The user hasn't provided SMTP creds, so let's use a mock or standard response.
-    console.log(`OTP for ${email} is: ${otp}`);
+        console.log(`OTP for ${email} is: ${otp}`);
+
+    try {
+      let smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+      let smtpPort = parseInt(process.env.SMTP_PORT || '587');
+      let smtpSecure = process.env.SMTP_SECURE === 'true';
+      let smtpUser = process.env.SMTP_USER;
+      let smtpPassword = process.env.SMTP_PASSWORD;
+      let smtpFrom = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@ragcp.com';
+
+      const { tenantId } = req.body;
+      if (tenantId) {
+        const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+        if (tenant && tenant.smtpHost && tenant.smtpUser && tenant.smtpPassword) {
+          smtpHost = tenant.smtpHost;
+          smtpPort = tenant.smtpPort || 587;
+          smtpSecure = smtpPort === 465;
+          smtpUser = tenant.smtpUser;
+          smtpPassword = tenant.smtpPassword;
+          smtpFrom = tenant.smtpFrom || tenant.companyName || smtpUser;
+        }
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        auth: {
+          user: smtpUser,
+          pass: smtpPassword
+        }
+      });
+
+      const mailOptions = {
+        from: smtpFrom,
+        to: email,
+        subject: 'Your OTP for RAGCP Client Registration',
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 10px;">
+            <h2 style="color: #1e293b;">Verify Your Email Address</h2>
+            <p style="color: #475569; font-size: 16px;">You have requested to create a client account. Please use the following One-Time Password (OTP) to complete your registration:</p>
+            <div style="background-color: #f8fafc; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
+              <span style="font-size: 24px; font-weight: bold; letter-spacing: 5px; color: #2563eb;">${otp}</span>
+            </div>
+            <p style="color: #475569; font-size: 14px;">This OTP is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+          </div>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
+      console.log('OTP Email sent successfully via SMTP!');
+    } catch (emailErr) {
+      console.error('Failed to send OTP email:', emailErr);
+    }
+
 
     // Actually let's just use nodemailer if there's a global config, but usually there isn't.
     // For now, we'll return a success message.

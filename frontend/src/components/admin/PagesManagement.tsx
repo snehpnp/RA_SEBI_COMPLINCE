@@ -72,15 +72,12 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
     }
   }, [pageSlug, pages]);
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const confirmed = await confirm('Are you sure you want to save these changes?', 'Confirm Save');
-    if (!confirmed) return;
+  const savePageData = async (dataToSave: any) => {
     setSaving(true);
     try {
       const res = await api.request('/admin/pages', {
         method: 'POST',
-        body: JSON.stringify(formData)
+        body: JSON.stringify(dataToSave)
       });
       if (res.success) {
         toast.success('Page saved successfully!');
@@ -95,13 +92,21 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
     }
   };
 
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const confirmed = await confirm('Are you sure you want to save these changes?', 'Confirm Save');
+    if (!confirmed) return;
+    await savePageData(formData);
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this page?')) return;
     try {
       const res = await api.request(`/admin/pages/${id}`, { method: 'DELETE' });
       if (res.success) {
         toast.success('Page deleted successfully');
-        fetchPages();
+        window.location.hash = '#customPages_new';
+        window.location.reload();
       } else {
         toast(res.message);
       }
@@ -178,7 +183,7 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
             <p className="text-slate-500 text-sm mt-1">Configure your policy or custom page.</p>
           </div>
           <div className="mt-4 md:mt-0 flex items-center space-x-3">
-            {formData.id && !formData.isSystem && (
+            {formData.id && (
               <button 
                 type="button"
                 onClick={() => handleDelete(formData.id!)}
@@ -195,7 +200,11 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                 type="button"
                 onClick={async () => {
                   const confirmed = await confirm('Are you sure you want to set this page as Active?', 'Confirm Action');
-                  if (confirmed) setFormData({ ...formData, status: 'ACTIVE' });
+                  if (confirmed) {
+                    const newData = { ...formData, status: 'ACTIVE' };
+                    setFormData(newData);
+                    await savePageData(newData);
+                  }
                 }}
                 className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center space-x-1.5 transition ${ formData.status === 'ACTIVE' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300' }`}
               >
@@ -206,7 +215,11 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                 type="button"
                 onClick={async () => {
                   const confirmed = await confirm('Are you sure you want to set this page as Inactive?', 'Confirm Action');
-                  if (confirmed) setFormData({ ...formData, status: 'INACTIVE' });
+                  if (confirmed) {
+                    const newData = { ...formData, status: 'INACTIVE' };
+                    setFormData(newData);
+                    await savePageData(newData);
+                  }
                 }}
                 className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center space-x-1.5 transition ${ formData.status === 'INACTIVE' ? 'bg-white dark:bg-slate-700 text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300' }`}
               >
@@ -242,7 +255,7 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                     slug: (!formData.id || !formData.isSystem) ? title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : formData.slug 
                   });
                 }}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
                 placeholder="e.g. Refund Policy"
               />
             </div>
@@ -284,13 +297,34 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                 required
                 value={formData.externalUrl || ''}
                 onChange={(e) => setFormData({ ...formData, externalUrl: e.target.value })}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-primary-500 outline-none"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none"
                 placeholder="https://example.com/document.pdf"
               />
             </div>
           ) : (
             <div>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Page Content *</label>
+              <style>{`
+                .dark .ck-editor__editable {
+                  background-color: #1e293b !important;
+                  color: #f8fafc !important;
+                  border-color: #334155 !important;
+                }
+                .dark .ck.ck-toolbar {
+                  background-color: #0f172a !important;
+                  border-color: #334155 !important;
+                }
+                .dark .ck.ck-button {
+                  color: #cbd5e1 !important;
+                }
+                .dark .ck.ck-button:hover {
+                  background-color: #334155 !important;
+                }
+                .dark .ck.ck-button.ck-on {
+                  background-color: #475569 !important;
+                  color: #fff !important;
+                }
+              `}</style>
               <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden [&_.ck-editor\_\_editable]:min-h-[300px]">
                 <CKEditor
                   editor={ClassicEditor as any}

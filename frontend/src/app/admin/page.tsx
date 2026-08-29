@@ -31,6 +31,7 @@ import DataTable from 'react-data-table-component';
 import dynamic from 'next/dynamic';
 import { generatePeriodicReport } from '@/utils/generatePeriodicReport';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, Cell, XAxis, YAxis, Tooltip } from 'recharts';
+import axios from 'axios';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -428,6 +429,12 @@ function AdminDashboardContent() {
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
+
+  useEffect(() => {
+    if (activeTab && activeTab.startsWith('customPages')) {
+      setIsPagesExpanded(true);
+    }
+  }, [activeTab]);
   const [roles, setRoles] = useState<any[]>([]);
   const [selectedRole, setSelectedRole] = useState<any | null>(null);
   const rolesScrollRef = useRef<HTMLDivElement>(null);
@@ -913,12 +920,16 @@ function AdminDashboardContent() {
   const [internalPolicyPdf, setInternalPolicyPdf] = useState(null);
   const [logoFile, setLogoFile] = useState<any>(null);
   const [privacyPdf, setPrivacyPdf] = useState(null);
+  const [termsPdfUrl, setTermsPdfUrl] = useState('');
+  const [privacyPdfUrl, setPrivacyPdfUrl] = useState('');
 
   // SMTP Settings
   const [smtpHost, setSmtpHost] = useState('');
   const [smtpPort, setSmtpPort] = useState('');
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPassword, setSmtpPassword] = useState('');
+  const [testSmtpEmail, setTestSmtpEmail] = useState('');
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
 
 
   // Periodic Report Settings
@@ -1141,6 +1152,8 @@ function AdminDashboardContent() {
               if (t.mobile) setOrgMobile(t.mobile);
               if (t.gst) setOrgGst(t.gst);
               if (t.internalPolicyUrl) setPolicyUrl(t.internalPolicyUrl);
+              if (t.termsPdfUrl) setTermsPdfUrl(t.termsPdfUrl);
+              if (t.privacyPdfUrl) setPrivacyPdfUrl(t.privacyPdfUrl);
               if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
@@ -1636,6 +1649,33 @@ function AdminDashboardContent() {
     }
   };
 
+
+  const handleTestSmtp = async () => {
+    if (!smtpHost || !smtpPort || !smtpUser || !smtpPassword || !testSmtpEmail) {
+      toast.error('Please fill all SMTP details and the Test Email Address');
+      return;
+    }
+    setIsTestingSmtp(true);
+    try {
+      const data = await api.testSmtpConnection({
+        host: smtpHost,
+        port: smtpPort,
+        user: smtpUser,
+        password: smtpPassword,
+        testEmail: testSmtpEmail
+      });
+      if (data.success) {
+        toast.success(data.message || 'Test email sent successfully!');
+      } else {
+        toast.error(data.message || 'Failed to send test email');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Error connecting to SMTP server');
+    } finally {
+      setIsTestingSmtp(false);
+    }
+  };
+
   const handleSaveSettings = async () => {
     try {
       const formData = new FormData();
@@ -1696,24 +1736,7 @@ function AdminDashboardContent() {
     } catch (err: any) { toast(err.message); }
   };
 
-  const handleTestSmtp = async () => {
-    try {
-      const email = prompt('Enter email address to send test email to:');
-      if (!email) return;
 
-      const data = await api.request('/admin/smtp-test', {
-        method: 'POST',
-        body: JSON.stringify({ toEmail: email })
-      });
-      if (data.success) {
-        toast(data.message);
-      } else {
-        toast.error('Test Failed: ' + data.message);
-      }
-    } catch (err: any) {
-      toast.error('Error testing SMTP: ' + err.message);
-    }
-  };
 
   const handleAdminChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2760,7 +2783,7 @@ function AdminDashboardContent() {
     },
     {
       name: 'Staff Member',
-      minWidth: '200px',
+      minWidth: '100px',
       selector: (row: any) => row.name,
       cell: (row: any) => {
         const isDeleted = row.user?.deletedAt !== null;
@@ -2830,7 +2853,7 @@ function AdminDashboardContent() {
     },
     {
       name: 'Actions',
-      width: '180px',
+      width: '260px',
       right: true,
       cell: (row: any) => {
         const isDeleted = row.user?.deletedAt !== null;
@@ -2839,7 +2862,7 @@ function AdminDashboardContent() {
             <button
               onClick={() => setSelectedStaff(row)}
               title="View Details"
-              className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+              className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center flex-shrink-0"
             >
               <Eye className="h-3.5 w-3.5" />
             </button>
@@ -2848,21 +2871,21 @@ function AdminDashboardContent() {
                 <button
                   onClick={() => startEditStaff(row)}
                   title="Edit Profile"
-                  className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center"
+                  className="p-1.5 rounded-lg border border-primary-500/10 bg-primary-500/5 hover:bg-primary-500/10 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:text-primary-300 transition inline-flex items-center flex-shrink-0"
                 >
                   <Edit2 className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => handleToggleStaffStatus(row.id)}
                   title={row.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition ${row.status === 'ACTIVE' ? 'border border-amber-500/20 text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10' : 'border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition whitespace-nowrap flex-shrink-0 ${row.status === 'ACTIVE' ? 'border border-amber-500/20 text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10' : 'border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10'}`}
                 >
                   {row.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
                 </button>
                 <button
                   onClick={() => handleDeleteStaff(row.id)}
                   title="Delete Staff"
-                  className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center"
+                  className="p-1.5 rounded-lg border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 transition inline-flex items-center flex-shrink-0"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -3289,6 +3312,16 @@ function AdminDashboardContent() {
   ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks]);
 
   const clientColumns = useMemo(() => [
+    {
+      name: 'S.No',
+      width: '70px',
+      selector: (row: any, index?: number) => index !== undefined ? index + 1 : 0,
+      cell: (row: any, index?: number) => (
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
+          {index !== undefined ? index + 1 : ''}
+        </span>
+      ),
+    },
     {
       name: 'Client Name',
       minWidth: '200px',
@@ -7333,19 +7366,19 @@ function AdminDashboardContent() {
                   )}
 
                   {/* ====================================================
-                PLAN MANAGEMENT TAB
-               ==================================================== */}
+                   PLAN MANAGEMENT TAB
+                    ==================================================== */}
 
                   {/* ====================================================
-          SIGNAL MANAGEMENT TAB
-         ==================================================== */}
+                    SIGNAL MANAGEMENT TAB
+                      ==================================================== */}
                   {activeTab === 'research' && hasPermission('ACCESS_RESEARCH') && (
                     <SignalManagement adminPlans={adminPlans} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
                   )}
 
                   {/* ====================================================
-          RESEARCH REPORTS TAB
-         ==================================================== */}
+                    RESEARCH REPORTS TAB
+                    ==================================================== */}
                   {activeTab === 'research-reports' && hasPermission('ACCESS_RESEARCH') && (
                     <AdminResearchReports />
                   )}
@@ -7607,16 +7640,31 @@ function AdminDashboardContent() {
                               <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Terms & Conditions PDF</label>
                                 <input type="file" accept="application/pdf" onChange={e => setTermsPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
+                                {termsPdfUrl && (
+                                  <a href={getFullUrl(termsPdfUrl)} target="_blank" rel="noreferrer" className="text-xs text-primary-600 hover:underline mt-2 block">
+                                    View Current Terms PDF
+                                  </a>
+                                )}
                                 <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
                               </div>
                               <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Privacy Policy PDF</label>
                                 <input type="file" accept="application/pdf" onChange={e => setPrivacyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
+                                {privacyPdfUrl && (
+                                  <a href={getFullUrl(privacyPdfUrl)} target="_blank" rel="noreferrer" className="text-xs text-primary-600 hover:underline mt-2 block">
+                                    View Current Privacy PDF
+                                  </a>
+                                )}
                                 <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
                               </div>
                               <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5 md:col-span-2">
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Internal Policy PDF</label>
                                 <input type="file" accept="application/pdf" onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
+                                {policyUrl && (
+                                  <a href={getFullUrl(policyUrl)} target="_blank" rel="noreferrer" className="text-xs text-primary-600 hover:underline mt-2 block">
+                                    View Current Internal Policy PDF
+                                  </a>
+                                )}
                                 <p className="text-xs text-slate-500 mt-2">Written internal policies & controls for SEBI compliance. Not visible to clients.</p>
                               </div>
                             </div>
@@ -7862,9 +7910,35 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Username (Email)</label>
                                   <input type="email" value={smtpUser} onChange={e => setSmtpUser(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. you@gmail.com" />
                                 </div>
+
                                 <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Password (App Password)</label>
                                   <input type="password" value={smtpPassword} onChange={e => setSmtpPassword(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Enter password to update" />
+                                </div>
+                              </div>
+
+                              <div className="border-t border-slate-200 dark:border-slate-800 my-6"></div>
+
+                              <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                                <h4 className="text-sm font-bold text-slate-800 dark:text-white mb-2">Test SMTP Connection</h4>
+                                <p className="text-xs text-slate-500 mb-4">Send a test email to verify your SMTP credentials before saving.</p>
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                  <input
+                                    type="email"
+                                    value={testSmtpEmail}
+                                    onChange={e => setTestSmtpEmail(e.target.value)}
+                                    className="flex-1 bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs"
+                                    placeholder="Enter your email address to receive test"
+                                  />
+                                  <button
+                                    onClick={handleTestSmtp}
+                                    disabled={isTestingSmtp}
+                                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-xs font-bold rounded-xl transition-colors disabled:opacity-50 whitespace-nowrap"
+                                  >
+                                    {isTestingSmtp ? (
+                                      <span className="flex items-center gap-2"><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Testing...</span>
+                                    ) : 'Send Test Email'}
+                                  </button>
                                 </div>
                               </div>
                             </div>
