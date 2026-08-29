@@ -3940,7 +3940,7 @@ function AdminDashboardContent() {
                         {(!isStaff || hasPermission('ACCESS_STAFF')) && (
                           <div className="p-6 rounded-2xl border border-slate-400 dark:border-white/10 glassmorphism flex justify-between items-start">
                             <div>
-                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Staff Directory</span>
+                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide">Staff Directory1</span>
                               <p className="text-3xl font-extrabold mt-1">{dashboardStats.staffCount}</p>
                             </div>
                             <div className="p-2 bg-primary-500/10 border border-primary-500/20 rounded-xl text-primary-600 dark:text-primary-400">
@@ -4399,7 +4399,7 @@ function AdminDashboardContent() {
                     <div className="space-y-6">
                       {/* Header with "+ Register Staff" button */}
                       <div className="flex justify-between items-center pb-2 border-b border-slate-300 dark:border-white/5">
-                        <h3 className="font-bold text-lg text-slate-800 dark:text-slate-200">Staff Directory</h3>
+                        <h3 className="font-bold text-lg text-slate-800 dark:text-slate-200">Staff Directory2</h3>
                         <div className="flex gap-3">
                           {(!isStaff || hasPermission('EXPORT_DATA')) && (
                             <button
@@ -7147,7 +7147,7 @@ function AdminDashboardContent() {
                                             }
                                           }
                                         ]}
-                                        data={Object.entries(calculateSegmentExpiries(selectedClient.subscriptions || [])).map(([name, date]) => ({name, date}))}
+                                        data={Object.entries(calculateSegmentExpiries(selectedClient.subscriptions || [])).map(([name, date]) => ({ name, date }))}
                                         theme={isDarkMode ? 'dark' : 'default'}
                                       />
                                     </div>
@@ -8219,14 +8219,14 @@ function AdminDashboardContent() {
                                   <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">Module & Action Permissions</h4>
                                   <p className="text-[10px] text-slate-500 mt-0.5">Define what sections and actions this role can access.</p>
                                 </div>
-                                
+
                                 <div className="flex flex-col sm:flex-row items-center gap-3">
                                   {/* Search Input */}
                                   <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                                    <input 
-                                      type="text" 
-                                      placeholder="Search modules..." 
+                                    <input
+                                      type="text"
+                                      placeholder="Search modules..."
                                       value={permissionSearchQuery}
                                       onChange={e => setPermissionSearchQuery(e.target.value)}
                                       className="pl-9 pr-4 py-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs w-full sm:w-48 focus:outline-none focus:ring-1 focus:ring-primary-500"
@@ -8235,38 +8235,38 @@ function AdminDashboardContent() {
 
                                   {!['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name) && (
                                     <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => {
-                                        const allPerms: string[] = [];
-                                        NAV_CONFIG.forEach(mod => {
-                                          allPerms.push(mod.accessKey);
-                                          if (mod.subPermissions) mod.subPermissions.forEach(sp => allPerms.push(sp.code));
-                                        });
-                                        setSelectedRole({ ...selectedRole, permissions: [...new Set(allPerms)] });
-                                      }}
-                                      className="px-3 py-1.5 text-[11px] font-bold bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-500/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-500/20 transition flex items-center"
-                                    >
-                                      <CheckSquare className="w-3.5 h-3.5 mr-1" /> Select All
-                                    </button>
-                                    <button
-                                      onClick={() => setSelectedRole({ ...selectedRole, permissions: [] })}
-                                      className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center"
-                                    >
-                                      <X className="w-3.5 h-3.5 mr-1" /> Unselect All
-                                    </button>
-                                  </div>
-                                )}
+                                      <button
+                                        onClick={() => {
+                                          const allPerms: string[] = [];
+                                          NAV_CONFIG.forEach(mod => {
+                                            allPerms.push(mod.accessKey);
+                                            if (mod.subPermissions) mod.subPermissions.forEach(sp => allPerms.push(sp.code));
+                                          });
+                                          setSelectedRole({ ...selectedRole, permissions: [...new Set(allPerms)] });
+                                        }}
+                                        className="px-3 py-1.5 text-[11px] font-bold bg-primary-50 dark:bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-500/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-500/20 transition flex items-center"
+                                      >
+                                        <CheckSquare className="w-3.5 h-3.5 mr-1" /> Select All
+                                      </button>
+                                      <button
+                                        onClick={() => setSelectedRole({ ...selectedRole, permissions: [] })}
+                                        className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition flex items-center"
+                                      >
+                                        <X className="w-3.5 h-3.5 mr-1" /> Unselect All
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
 
                               {/* AUTO-GENERATED from NAV_CONFIG — add new modules in NAV_CONFIG at the top of this file */}
                               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                                 {NAV_CONFIG.filter(mod => {
                                   if (!permissionSearchQuery) return true;
                                   const q = permissionSearchQuery.toLowerCase();
-                                  return mod.moduleLabel.toLowerCase().includes(q) || 
-                                         mod.moduleDesc.toLowerCase().includes(q) || 
-                                         (mod.subPermissions && mod.subPermissions.some(sp => sp.label.toLowerCase().includes(q) || sp.desc.toLowerCase().includes(q)));
+                                  return mod.moduleLabel.toLowerCase().includes(q) ||
+                                    mod.moduleDesc.toLowerCase().includes(q) ||
+                                    (mod.subPermissions && mod.subPermissions.some(sp => sp.label.toLowerCase().includes(q) || sp.desc.toLowerCase().includes(q)));
                                 }).map(mod => {
                                   const hasSub = mod.subPermissions && mod.subPermissions.length > 0;
                                   return (

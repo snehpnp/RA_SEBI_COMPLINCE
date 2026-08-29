@@ -965,7 +965,7 @@ function SuperAdminDashboardContent() {
                       <input type="text" required value={companyName} onFocus={(e) => {
                         if (!sebiCertificate) {
                           e.target.blur();
-                          triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                          setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                         }
                       }} onChange={e => setCompanyName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="Beta Advisors Pvt Ltd" />
                     )}
@@ -975,7 +975,7 @@ function SuperAdminDashboardContent() {
                     <select value={companyType} onFocus={(e) => {
                       if (!sebiCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                        setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setCompanyType(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors h-[42px]">
                       <option value="INDIVIDUAL">Individual</option>
@@ -991,7 +991,7 @@ function SuperAdminDashboardContent() {
                     <select value={raType} onFocus={(e) => {
                       if (!sebiCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                        setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setRaType(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors h-[42px]">
                       <option value="FULL_TIME">Full Time RA</option>
@@ -1003,7 +1003,7 @@ function SuperAdminDashboardContent() {
                     <input type="text" required value={ownerName} onFocus={(e) => {
                       if (!sebiCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                        setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setOwnerName(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="John Doe" />
                   </div>
@@ -1018,7 +1018,7 @@ function SuperAdminDashboardContent() {
                         <input type="text" required value={sebiRegistration} onFocus={(e) => {
                           if (!sebiCertificate) {
                             e.target.blur();
-                            triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                            setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                           }
                         }} onChange={e => setSebiRegistration(e.target.value.toUpperCase())} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('SEBI Registration') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 transition-colors uppercase font-mono`}
                           placeholder="INZ000000000"
@@ -1033,7 +1033,7 @@ function SuperAdminDashboardContent() {
                       <input type="email" required value={email} onFocus={(e) => {
                         if (!sebiCertificate) {
                           e.target.blur();
-                          triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                          setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                         }
                       }} onChange={e => setEmail(e.target.value)} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('Email') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
                         placeholder="name@company.com" />
@@ -1046,7 +1046,7 @@ function SuperAdminDashboardContent() {
                       <input type="text" required value={mobile} onFocus={(e) => {
                         if (!sebiCertificate) {
                           e.target.blur();
-                          triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                          setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                         }
                       }} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('Mobile') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
                         placeholder="9876543210" />
@@ -1071,7 +1071,7 @@ function SuperAdminDashboardContent() {
                       <input type="text" value={gst} onFocus={(e) => {
                         if (!sebiCertificate) {
                           e.target.blur();
-                          triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                          setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                         }
                       }} onChange={e => setGst(e.target.value.toUpperCase())} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('GST') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
                         placeholder="Optional" />
@@ -1083,7 +1083,7 @@ function SuperAdminDashboardContent() {
                     <input type="url" value={website} onFocus={(e) => {
                       if (!sebiCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                        setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setWebsite(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="https://..." />
                   </div>
@@ -1092,7 +1092,7 @@ function SuperAdminDashboardContent() {
                     <input type="text" value={bseEnrollment} onFocus={(e) => {
                       if (!sebiCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                        setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setBseEnrollment(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="Optional" />
                   </div>
@@ -1106,7 +1106,7 @@ function SuperAdminDashboardContent() {
                       <input type="date" required value={certificateValidity} onFocus={(e) => {
                         if (!sebiCertificate) {
                           e.target.blur();
-                          triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                          setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                         }
                       }} onChange={e => setCertificateValidity(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
                     )}
@@ -1116,7 +1116,7 @@ function SuperAdminDashboardContent() {
                     <input type="date" required value={nismValidity} onFocus={(e) => {
                       if (!nismCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the NISM Certificate PDF first to extract and auto-fill NISM Validity.');
+                        setFormError('Please upload the NISM Certificate PDF first to extract and auto-fill NISM Validity.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setNismValidity(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
                   </div>
@@ -1125,7 +1125,7 @@ function SuperAdminDashboardContent() {
                     <input type="number" required value={depositAmount} onFocus={(e) => {
                       if (!sebiCertificate) {
                         e.target.blur();
-                        triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                        setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                       }
                     }} onChange={e => setDepositAmount(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" />
                   </div>
@@ -1139,7 +1139,7 @@ function SuperAdminDashboardContent() {
                       <input type="text" required value={address} onFocus={(e) => {
                         if (!sebiCertificate) {
                           e.target.blur();
-                          triggerAlert('Please upload the SEBI Certificate PDF first to extract and auto-fill details.');
+                          setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                         }
                       }} onChange={e => setAddress(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="BKC Commercial Towers..." />
                     )}
@@ -1598,21 +1598,48 @@ function SuperAdminDashboardContent() {
 
         {/* Global Custom Alert Modal */}
         {globalAlert && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
-            <div className={`border shadow-2xl rounded-2xl p-6 max-w-sm w-full animate-in zoom-in-95 duration-200 relative overflow-hidden ${globalAlert.isError ? 'bg-white dark:bg-slate-900 border-rose-500/30 shadow-rose-500/10' : 'bg-white dark:bg-slate-900 border-indigo-500/30 shadow-indigo-500/10'}`}>
-              <div className={`absolute top-0 left-0 w-1.5 h-full ${globalAlert.isError ? 'bg-rose-500' : 'bg-indigo-500'}`}></div>
-              <div className="flex items-start gap-4 pl-2">
-                <div className={`p-2 rounded-xl mt-0.5 ${globalAlert.isError ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400'}`}>
-                  {globalAlert.isError ? <AlertTriangle className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />}
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-xl animate-in fade-in duration-300">
+            <div className={`border rounded-3xl p-8 max-w-sm w-full shadow-2xl relative overflow-hidden transform transition-all animate-in zoom-in-90 duration-300 ${
+              globalAlert.isError 
+                ? 'bg-white dark:bg-slate-900 border-rose-500/30 shadow-[0_0_40px_-10px_rgba(225,29,72,0.3)]' 
+                : 'bg-white dark:bg-slate-900 border-indigo-500/30 shadow-[0_0_40px_-10px_rgba(99,102,241,0.3)]'
+            }`}>
+              {/* Animated subtle background glow */}
+              <div className={`absolute -top-24 -right-24 w-48 h-48 rounded-full blur-3xl opacity-20 pointer-events-none animate-pulse ${
+                globalAlert.isError ? 'bg-rose-500' : 'bg-indigo-500'
+              }`} />
+              
+              <div className="relative z-10 flex flex-col items-center text-center">
+                <div className={`p-4 rounded-2xl mb-5 shadow-inner relative ${
+                  globalAlert.isError ? 'bg-rose-50 dark:bg-rose-500/10' : 'bg-indigo-50 dark:bg-indigo-500/10'
+                }`}>
+                  <div className={`absolute inset-0 rounded-2xl border ${
+                    globalAlert.isError ? 'border-rose-500/20' : 'border-indigo-500/20'
+                  }`} />
+                  {globalAlert.isError ? (
+                    <AlertTriangle className="h-8 w-8 text-rose-600 dark:text-rose-400 animate-[bounce_2s_infinite]" />
+                  ) : (
+                    <CheckCircle2 className="h-8 w-8 text-indigo-600 dark:text-indigo-400 animate-[bounce_2s_infinite]" />
+                  )}
                 </div>
-                <div className="flex-1">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">{globalAlert.isError ? 'Error / Notice' : 'Notification'}</h3>
-                  <p className="text-[13px] text-slate-700 dark:text-slate-300 whitespace-pre-line leading-relaxed">{globalAlert.message}</p>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end">
-                <button onClick={() => setGlobalAlert(null)} className={`px-5 py-2 text-xs font-bold text-white rounded-xl transition ${globalAlert.isError ? 'bg-rose-600 hover:bg-rose-500' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
-                  Okay
+                
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                  {globalAlert.isError ? 'Action Required' : 'Notice'}
+                </h3>
+                
+                <p className="text-[13px] text-slate-600 dark:text-slate-300 whitespace-pre-line leading-relaxed mb-8 px-2">
+                  {globalAlert.message}
+                </p>
+                
+                <button 
+                  onClick={() => setGlobalAlert(null)} 
+                  className={`w-full py-3 px-6 font-bold text-white rounded-xl transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] shadow-lg ${
+                    globalAlert.isError 
+                      ? 'bg-gradient-to-r from-rose-600 to-rose-500 hover:shadow-rose-500/25' 
+                      : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:shadow-indigo-500/25'
+                  }`}
+                >
+                  Got it, thanks!
                 </button>
               </div>
             </div>

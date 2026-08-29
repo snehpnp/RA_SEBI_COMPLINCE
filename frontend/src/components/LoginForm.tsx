@@ -275,15 +275,22 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
 
       {/* ── Loading Overlay Modal ── */}
       {loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-blue-600/10 border border-blue-500/30 flex items-center justify-center mb-6">
-              <ShieldCheck className="w-8 h-8 text-blue-400 animate-pulse" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl transition-all duration-500">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-8 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 text-center transform scale-100 opacity-100 transition-all duration-300">
+            <div className="relative w-24 h-24 mb-6">
+              {/* Outer rotating dashed ring */}
+              <div className="absolute inset-0 rounded-full border-4 border-dashed border-blue-500/30 dark:border-blue-500/20 animate-[spin_4s_linear_infinite]" />
+              {/* Inner rotating ring */}
+              <div className="absolute inset-2 rounded-full border-4 border-transparent border-t-blue-600 dark:border-t-blue-400 animate-[spin_2s_linear_infinite]" />
+              {/* Center icon */}
+              <div className="absolute inset-0 flex items-center justify-center rounded-full bg-blue-50 dark:bg-blue-900/20 m-4 shadow-inner">
+                <ShieldCheck className="w-10 h-10 text-blue-600 dark:text-blue-400 animate-pulse" />
+              </div>
             </div>
-            <h3 className="text-base font-bold text-white mb-2">Secure Login in Progress</h3>
-            <p className="text-xs text-blue-400 font-medium mb-6 h-6">{loadingMessages[loadingTextIndex]}</p>
-            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-              <div className="bg-blue-500 h-full rounded-full animate-[progress_6s_ease-in-out_infinite]" />
+            <h3 className="text-lg font-extrabold text-slate-900 dark:text-white mb-2 tracking-tight">Secure Login in Progress</h3>
+            <p className="text-xs text-slate-500 dark:text-blue-400 font-medium mb-6 h-6 transition-all duration-300">{loadingMessages[loadingTextIndex]}</p>
+            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden relative shadow-inner">
+              <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-indigo-600 dark:from-blue-400 dark:to-indigo-500 h-full rounded-full animate-[progress_6s_ease-in-out_infinite]" />
             </div>
           </div>
         </div>
