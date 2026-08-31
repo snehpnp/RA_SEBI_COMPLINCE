@@ -1177,7 +1177,7 @@ function AdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login');
+        router.push('/admin/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);

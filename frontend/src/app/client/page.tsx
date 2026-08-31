@@ -44,9 +44,14 @@ function ClientPortalContent() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const userStr = localStorage.getItem('user');
+      if (!userStr) {
+        router.push('/login?error=expired');
+        return;
+      }
       localStorage.setItem('clientActiveTab', activeTab);
     }
-  }, [activeTab]);
+  }, [activeTab, router]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);

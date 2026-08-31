@@ -4,6 +4,43 @@ import { useState, useEffect } from 'react';
 import { Receipt, Download, CreditCard, Clock, Search, ExternalLink, Loader2 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
+import DataTable from 'react-data-table-component';
+
+const tableCustomStyles = {
+  table: { style: { backgroundColor: 'transparent', color: 'inherit' } },
+  headRow: {
+    style: {
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+      minHeight: '44px',
+      color: 'inherit',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px', fontWeight: '800', textTransform: 'uppercase',
+      color: 'inherit', paddingLeft: '16px', paddingRight: '16px',
+      opacity: 0.7,
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px', paddingRight: '16px',
+      fontSize: '12px', color: 'inherit',
+    },
+  },
+  rows: {
+    style: {
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+      color: 'inherit',
+      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
+    },
+  },
+  pagination: {
+    style: { backgroundColor: 'transparent', borderTopColor: 'rgba(255, 255, 255, 0.1)', color: 'inherit' },
+  },
+};
 
 export default function PaymentCenter({ profile }: { profile?: any }) {
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -21,6 +58,131 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
       setDownloadingId(null);
     }
   };
+
+  const [isDarkMode, setIsDarkMode] = useState(true);
+
+  const columns = [
+    {
+      name: 'Transaction',
+      cell: (txn: any) => (
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-premium-bg flex items-center justify-center shrink-0">
+            <CreditCard className="w-4 h-4 text-premium-text/60" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm">{txn.transactionRef || txn.receiptNo || txn.id || txn._id || 'TXN-UNKNOWN'}</p>
+            <p className="text-xs text-premium-text/50">{txn.paymentMode || txn.method || 'Online'}</p>
+          </div>
+        </div>
+      ),
+      sortable: true,
+      minWidth: '200px',
+    },
+    {
+      name: 'Billed To',
+      cell: (txn: any) => (
+        <div>
+          <p className="font-semibold text-sm text-premium-text">{profile?.name || txn.clientName || 'User'}</p>
+          <p className="text-xs text-premium-text/50">{profile?.email || 'N/A'}</p>
+        </div>
+      ),
+      sortable: true,
+      minWidth: '150px',
+    },
+    {
+      name: 'Date & Time',
+      cell: (txn: any) => (
+        <div>
+          <p className="text-sm">{new Date(txn.createdAt || Date.now()).toLocaleDateString()}</p>
+          <p className="text-xs text-premium-text/50">{new Date(txn.createdAt || Date.now()).toLocaleTimeString()}</p>
+        </div>
+      ),
+      sortable: true,
+      sortFunction: (a: any, b: any) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
+      minWidth: '130px',
+    },
+    {
+      name: 'Plan',
+      cell: (txn: any) => <span className="text-sm font-medium">{typeof txn.plan === 'object' ? txn.plan?.name : 'Premium Plan'}</span>,
+      sortable: true,
+    },
+    {
+      name: 'Amount',
+      cell: (txn: any) => {
+        const basePrice = txn.plan?.price || txn.amount || 0;
+        const discount = txn.discountAmount || txn.discountApplied || 0;
+        const taxableAmount = basePrice - discount;
+        let gst = 0;
+        const totalAmount = txn.amount || txn.amountPaid || 0;
+        if (totalAmount > taxableAmount) {
+          gst = totalAmount - taxableAmount;
+        }
+        
+        return (
+          <div className="flex flex-col gap-0.5 w-full min-w-[120px]">
+            {totalAmount !== basePrice && (
+              <>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
+                  <span>Base:</span> <span>₹{basePrice.toFixed(2)}</span>
+                </div>
+                {discount > 0 && (
+                  <div className="text-[10px] text-emerald-500 flex justify-between gap-4">
+                    <span>Discount {txn.coupon?.code && `(${txn.coupon.code})`}:</span> <span>-₹{discount.toFixed(2)}</span>
+                  </div>
+                )}
+                {gst > 0 && (
+                  <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
+                    <span>GST (18%):</span> <span>₹{gst.toFixed(2)}</span>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="font-bold text-sm flex justify-between gap-4 mt-1 border-t border-premium-border/50 pt-1">
+              <span>Total:</span> <span className="text-premium-primary">₹{totalAmount.toFixed(2)}</span>
+            </div>
+          </div>
+        );
+      },
+      sortable: true,
+      minWidth: '160px',
+    },
+    {
+      name: 'Status',
+      cell: (txn: any) => (
+        txn.status === 'successful' || txn.status === 'SUCCESS' ? (
+          <span className="px-2.5 py-1 bg-premium-success/20 text-premium-success rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
+            Success
+          </span>
+        ) : (
+          <span className="px-2.5 py-1 bg-premium-danger/20 text-premium-danger rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
+            {txn.status || 'Failed'}
+          </span>
+        )
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Invoice',
+      cell: (txn: any) => (
+        txn.status === 'successful' || txn.status === 'SUCCESS' ? (
+          <button 
+            onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
+            disabled={downloadingId === (txn.id || txn._id)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-primary/10 hover:bg-premium-primary/20 text-premium-primary rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 
+            {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'GST Invoice'}
+          </button>
+        ) : (
+          <button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
+            N/A
+          </button>
+        )
+      ),
+      right: true,
+      minWidth: '140px',
+    },
+  ];
 
   useEffect(() => {
     const fetchPayments = async () => {
@@ -67,124 +229,29 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
       </div>
 
       <div className="bg-premium-cards border border-premium-border rounded-3xl overflow-hidden flex-1">
-        <div className="overflow-x-auto hidden md:block">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-premium-border bg-premium-bg/50">
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans">Transaction</th>
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans">Billed To</th>
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans">Date & Time</th>
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans">Plan</th>
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans">Amount</th>
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans">Status</th>
-                <th className="p-4 text-xs font-semibold text-premium-text/60 uppercase tracking-wider font-sans text-right">Invoice</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-premium-border">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="p-12 text-center">
-                    <Loader2 className="w-8 h-8 text-premium-primary animate-spin mx-auto mb-4" />
-                    <p className="text-sm text-premium-text/60">Loading payment history...</p>
-                  </td>
-                </tr>
-              ) : transactions.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="p-12 text-center text-premium-text/40">
-                    No transactions found.
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((txn, index) => (
-                <tr key={txn.id || txn._id || index} className="hover:bg-premium-bg/50 transition-colors">
-                  <td className="p-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-premium-bg flex items-center justify-center">
-                        <CreditCard className="w-4 h-4 text-premium-text/60" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">{txn.transactionRef || txn.receiptNo || txn.id || txn._id || 'TXN-UNKNOWN'}</p>
-                        <p className="text-xs text-premium-text/50">{txn.paymentMode || txn.method || 'Online'}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-4">
-                    <p className="font-semibold text-sm text-premium-text">{profile?.name || txn.clientName || 'User'}</p>
-                    <p className="text-xs text-premium-text/50">{profile?.email || 'N/A'}</p>
-                  </td>
-                  <td className="p-4">
-                    <p className="text-sm">{new Date(txn.createdAt || Date.now()).toLocaleDateString()}</p>
-                    <p className="text-xs text-premium-text/50">{new Date(txn.createdAt || Date.now()).toLocaleTimeString()}</p>
-                  </td>
-                  <td className="p-4 text-sm font-medium">{typeof txn.plan === 'object' ? txn.plan?.name : 'Premium Plan'}</td>
-                  <td className="p-4">
-                    {(() => {
-                      const basePrice = txn.plan?.price || txn.amount || 0;
-                      const discount = txn.discountAmount || txn.discountApplied || 0;
-                      const taxableAmount = basePrice - discount;
-                      let gst = 0;
-                      const totalAmount = txn.amount || txn.amountPaid || 0;
-                      if (totalAmount > taxableAmount) {
-                        gst = totalAmount - taxableAmount;
-                      }
-                      
-                      return (
-                        <div className="flex flex-col gap-0.5">
-                          {totalAmount !== basePrice && (
-                            <>
-                              <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
-                                <span>Base:</span> <span>₹{basePrice.toFixed(2)}</span>
-                              </div>
-                              {discount > 0 && (
-                                <div className="text-[10px] text-emerald-500 flex justify-between gap-4">
-                                  <span>Discount {txn.coupon?.code && `(${txn.coupon.code})`}:</span> <span>-₹{discount.toFixed(2)}</span>
-                                </div>
-                              )}
-                              {gst > 0 && (
-                                <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
-                                  <span>GST (18%):</span> <span>₹{gst.toFixed(2)}</span>
-                                </div>
-                              )}
-                            </>
-                          )}
-                          <div className="font-bold text-sm flex justify-between gap-4 mt-1 border-t border-premium-border/50 pt-1">
-                            <span>Total:</span> <span className="text-premium-primary">₹{totalAmount.toFixed(2)}</span>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="p-4">
-                    {txn.status === 'successful' || txn.status === 'SUCCESS' ? (
-                      <span className="px-2.5 py-1 bg-premium-success/20 text-premium-success rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
-                        Success
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-1 bg-premium-danger/20 text-premium-danger rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
-                        {txn.status || 'Failed'}
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-4 text-right">
-                    {txn.status === 'successful' || txn.status === 'SUCCESS' ? (
-                      <button 
-                        onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
-                        disabled={downloadingId === (txn.id || txn._id)}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-primary/10 hover:bg-premium-primary/20 text-premium-primary rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
-                      >
-                        {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 
-                        {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'GST Invoice'}
-                      </button>
-                    ) : (
-                      <button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
-                        N/A
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )))}
-            </tbody>
-          </table>
+        <div className="hidden md:block">
+          <DataTable
+            columns={columns}
+            data={transactions}
+            pagination
+            paginationPerPage={10}
+            highlightOnHover
+            responsive
+            customStyles={tableCustomStyles}
+            theme={isDarkMode ? 'dark' : 'default'}
+            progressPending={loading}
+            progressComponent={
+              <div className="p-12 text-center">
+                <Loader2 className="w-8 h-8 text-premium-primary animate-spin mx-auto mb-4" />
+                <p className="text-sm text-premium-text/60">Loading payment history...</p>
+              </div>
+            }
+            noDataComponent={
+              <div className="p-12 text-center text-premium-text/40">
+                No transactions found.
+              </div>
+            }
+          />
         </div>
         
         {/* Mobile View */}

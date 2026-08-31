@@ -9,23 +9,7 @@ export default function NotFound() {
   const router = useRouter();
 
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      try {
-        const user = JSON.parse(userStr);
-        if (user.role === 'SUPER_ADMIN') {
-          router.replace('/super-admin');
-        } else if (user.role === 'CLIENT') {
-          router.replace('/client');
-        } else {
-          router.replace('/admin');
-        }
-      } catch (e) {
-        router.replace('/login');
-      }
-    } else {
-      router.replace('/login');
-    }
+    router.replace('/login');
   }, [router]);
 
   return (

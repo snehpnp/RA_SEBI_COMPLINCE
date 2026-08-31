@@ -3,6 +3,55 @@
 import { useState, useEffect } from 'react';
 import { FileText, Download, Loader2 } from 'lucide-react';
 import api from '../../services/api';
+import DataTable from 'react-data-table-component';
+
+const tableCustomStyles = {
+  table: {
+    style: {
+      backgroundColor: 'transparent',
+    },
+  },
+  headRow: {
+    style: {
+      backgroundColor: 'rgba(241, 245, 249, 0.5)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      minHeight: '44px',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px',
+      fontWeight: '800',
+      textTransform: 'uppercase',
+      color: '#475569',
+      paddingLeft: '16px',
+      paddingRight: '16px',
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px',
+      paddingRight: '16px',
+      fontSize: '12px',
+      color: '#334155',
+    },
+  },
+  rows: {
+    style: {
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      '&:hover': {
+        backgroundColor: 'rgba(241, 245, 249, 0.8)',
+      },
+    },
+  },
+  pagination: {
+    style: {
+      backgroundColor: 'transparent',
+      borderTopColor: 'rgba(203, 213, 225, 0.5)',
+    },
+  },
+};
 
 export default function AdminResearchReports() {
   const [activeCategory, setActiveCategory] = useState<'all' | 'cash' | 'future' | 'option'>('all');
@@ -10,6 +59,17 @@ export default function AdminResearchReports() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [signals, setSignals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Check for dark mode to pass to DataTable theme
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  useEffect(() => {
+    setIsDarkMode(document.documentElement.classList.contains('dark'));
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   const renderDate = (dateString: string | null) => {
     if (!dateString) return <span className="text-slate-400">-</span>;
@@ -21,6 +81,73 @@ export default function AdminResearchReports() {
       </div>
     );
   };
+
+  const columns = [
+    {
+      name: 'Entry Date',
+      cell: (row: any) => renderDate(row.createdAt),
+      sortable: true,
+      sortFunction: (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    },
+    {
+      name: 'Exit Date',
+      cell: (row: any) => renderDate(row.closedAt),
+      sortable: true,
+      sortFunction: (a: any, b: any) => new Date(a.closedAt || 0).getTime() - new Date(b.closedAt || 0).getTime(),
+    },
+    {
+      name: 'Report Date',
+      cell: (row: any) => renderDate(row.updatedAt),
+      sortable: true,
+      sortFunction: (a: any, b: any) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(),
+    },
+    {
+      name: 'Trade Name',
+      cell: (row: any) => (
+        <span className="font-bold tracking-wide text-slate-900 dark:text-white">
+          {row.stock?.symbol}
+          {row.segment === 'OPTION' && row.strikePrice && ` ${row.strikePrice}`}
+          {row.segment === 'OPTION' && row.optionType && ` ${row.optionType}`}
+        </span>
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Status',
+      cell: (row: any) => (
+        <span className={`px-2 py-1 rounded-md text-xs font-bold ${row.status === 'OPEN' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-500 border border-amber-200 dark:border-amber-500/20' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500 border border-emerald-200 dark:border-emerald-500/20'}`}>
+          {row.status}
+        </span>
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Segment',
+      cell: (row: any) => (
+        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md text-xs border border-slate-200 dark:border-slate-700">{row.segment}</span>
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Plan Name',
+      cell: (row: any) => <span className="text-slate-700 dark:text-slate-300 font-medium">{row.planName || '-'}</span>,
+      sortable: true,
+    },
+    {
+      name: 'Researcher Name',
+      cell: (row: any) => <span className="text-slate-600 dark:text-slate-400">{row.createdByName || '-'}</span>,
+      sortable: true,
+    },
+    {
+      name: 'Action',
+      cell: (row: any) => (
+        <a href={api.getDownloadUrl(row.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-500/10 dark:hover:bg-blue-600 dark:text-blue-400 dark:hover:text-white rounded-lg text-xs font-bold transition-all duration-300">
+          <Download className="w-4 h-4" /> Download
+        </a>
+      ),
+      center: true,
+    },
+  ];
 
   const categories = [
     { id: 'all', label: 'All Reports' },
@@ -114,63 +241,21 @@ export default function AdminResearchReports() {
           <p className="text-slate-500">No research reports found in this category.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-500 dark:text-slate-400 uppercase bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800">
-              <tr>
-                <th className="px-6 py-4">Entry Date</th>
-                <th className="px-6 py-4">Exit Date</th>
-                <th className="px-6 py-4">Report Date</th>
-                <th className="px-6 py-4">Trade Name</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Segment</th>
-                <th className="px-6 py-4">Plan Name</th>
-                <th className="px-6 py-4">Researcher Name</th>
-                <th className="px-6 py-4 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSignals.map((signal) => (
-                <tr key={signal.id} className="border-b border-slate-100 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap text-slate-600 dark:text-slate-300">{renderDate(signal.createdAt)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-slate-600 dark:text-slate-300">{renderDate(signal.closedAt)}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-slate-600 dark:text-slate-300">{renderDate(signal.updatedAt)}</td>
-                  
-                  <td className="px-6 py-4 font-bold tracking-wide text-slate-900 dark:text-white">
-                    {signal.stock?.symbol}
-                    {signal.segment === 'OPTION' && signal.strikePrice && ` ${signal.strikePrice}`}
-                    {signal.segment === 'OPTION' && signal.optionType && ` ${signal.optionType}`}
-                  </td>
-                  
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-md text-xs font-bold ${signal.status === 'OPEN' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-500 border border-amber-200 dark:border-amber-500/20' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500 border border-emerald-200 dark:border-emerald-500/20'}`}>
-                      {signal.status}
-                    </span>
-                  </td>
-                  
-                  <td className="px-6 py-4">
-                    <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md text-xs border border-slate-200 dark:border-slate-700">{signal.segment}</span>
-                  </td>
-                  
-                  <td className="px-6 py-4 text-slate-700 dark:text-slate-300 font-medium">
-                    {signal.planName || '-'}
-                  </td>
-                  
-                  <td className="px-6 py-4 text-slate-600 dark:text-slate-400">
-                    {signal.createdByName || '-'}
-                  </td>
-                  
-                  <td className="px-6 py-4 text-center">
-                    <a href={api.getDownloadUrl(signal.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-500/10 dark:hover:bg-blue-600 dark:text-blue-400 dark:hover:text-white rounded-lg text-xs font-bold transition-all duration-300">
-                      <Download className="w-4 h-4" /> Download
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm glassmorphism">
+          <DataTable
+            columns={columns}
+            data={filteredSignals}
+            pagination
+            paginationPerPage={10}
+            highlightOnHover
+            responsive
+            customStyles={tableCustomStyles}
+            theme={isDarkMode ? 'dark' : 'default'}
+            noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No research reports found in this category.</div>}
+          />
         </div>
       )}
     </div>
   );
 }
+

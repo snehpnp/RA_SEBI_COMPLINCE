@@ -17,8 +17,10 @@
   RewriteCond %{DOCUMENT_ROOT}/$1.html -f
   RewriteRule ^(.*)$ $1.html [L]
 
-  # 4. Agar upar kuch na mile, toh 404/index par bhej dein
+  # 4. Agar file ya folder nahi milta, toh server seedha /login par redirect kar dega
+  ErrorDocument 404 https://compliance.pnpuniverse.in/login
+  
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule . /index.html [L]
+  RewriteRule ^(.*)$ /login [R=301,L]
 </IfModule>

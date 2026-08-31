@@ -3,6 +3,43 @@
 import { useState, useEffect } from 'react';
 import { FileText, Download, Loader2 } from 'lucide-react';
 import api from '../../services/api';
+import DataTable from 'react-data-table-component';
+
+const tableCustomStyles = {
+  table: { style: { backgroundColor: 'transparent', color: 'inherit' } },
+  headRow: {
+    style: {
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+      minHeight: '44px',
+      color: 'inherit',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px', fontWeight: '800', textTransform: 'uppercase',
+      color: 'inherit', paddingLeft: '16px', paddingRight: '16px',
+      opacity: 0.7,
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px', paddingRight: '16px',
+      fontSize: '12px', color: 'inherit',
+    },
+  },
+  rows: {
+    style: {
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+      color: 'inherit',
+      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
+    },
+  },
+  pagination: {
+    style: { backgroundColor: 'transparent', borderTopColor: 'rgba(255, 255, 255, 0.1)', color: 'inherit' },
+  },
+};
 
 export default function ResearchReports() {
   const [activeCategory, setActiveCategory] = useState<'all' | 'cash' | 'future' | 'option'>('all');
@@ -10,6 +47,9 @@ export default function ResearchReports() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [signals, setSignals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Use a fixed dark theme for the client portal data tables since the portal has a dark glassmorphism theme
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   const renderDate = (dateString: string | null) => {
     if (!dateString) return <span className="text-premium-text/40">-</span>;
@@ -21,6 +61,51 @@ export default function ResearchReports() {
       </div>
     );
   };
+
+  const columns = [
+    {
+      name: 'Date',
+      cell: (row: any) => renderDate(row.createdAt),
+      sortable: true,
+      sortFunction: (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    },
+    {
+      name: 'Trade Name',
+      cell: (row: any) => (
+        <span className="font-bold tracking-wide">
+          {row.stock?.symbol}
+          {row.segment === 'OPTION' && row.strikePrice && ` ${row.strikePrice}`}
+          {row.segment === 'OPTION' && row.optionType && ` ${row.optionType}`}
+        </span>
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Status',
+      cell: (row: any) => (
+        <span className={`px-2 py-1 rounded-md text-xs font-bold ${row.status === 'OPEN' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-500/10 text-green-500 border border-green-500/20'}`}>
+          {row.status}
+        </span>
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Segment',
+      cell: (row: any) => (
+        <span className="bg-premium-bg px-2 py-1 rounded-md text-xs border border-premium-border">{row.segment}</span>
+      ),
+      sortable: true,
+    },
+    {
+      name: 'Action',
+      cell: (row: any) => (
+        <a href={api.getDownloadUrl(row.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-premium-primary/10 hover:bg-premium-primary text-premium-primary hover:text-white rounded-lg text-xs font-bold transition-all duration-300">
+          <Download className="w-4 h-4" /> Download
+        </a>
+      ),
+      center: true,
+    },
+  ];
 
   const categories = [
     { id: 'all', label: 'All Reports' },
@@ -110,43 +195,18 @@ export default function ResearchReports() {
           <p className="text-premium-text/60">No research reports found in this category.</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-premium-border">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-premium-text/70 uppercase bg-premium-cards border-b border-premium-border">
-              <tr>
-                <th className="px-6 py-4">Date</th>
-                <th className="px-6 py-4">Trade Name</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Segment</th>
-                <th className="px-6 py-4 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSignals.map((signal) => (
-                <tr key={signal.id} className="border-b border-premium-border/50 hover:bg-premium-cards transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap text-premium-text/80">{renderDate(signal.createdAt)}</td>
-                  <td className="px-6 py-4 font-bold tracking-wide">
-                    {signal.stock?.symbol}
-                    {signal.segment === 'OPTION' && signal.strikePrice && ` ${signal.strikePrice}`}
-                    {signal.segment === 'OPTION' && signal.optionType && ` ${signal.optionType}`}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-md text-xs font-bold ${signal.status === 'OPEN' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-green-500/10 text-green-500 border border-green-500/20'}`}>
-                      {signal.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="bg-premium-bg px-2 py-1 rounded-md text-xs border border-premium-border">{signal.segment}</span>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    <a href={api.getDownloadUrl(signal.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-premium-primary/10 hover:bg-premium-primary text-premium-primary hover:text-white rounded-lg text-xs font-bold transition-all duration-300">
-                      <Download className="w-4 h-4" /> Download
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="overflow-x-auto rounded-2xl border border-premium-border bg-premium-cards/30">
+          <DataTable
+            columns={columns}
+            data={filteredSignals}
+            pagination
+            paginationPerPage={10}
+            highlightOnHover
+            responsive
+            customStyles={tableCustomStyles}
+            theme={isDarkMode ? 'dark' : 'default'}
+            noDataComponent={<div className="p-8 text-center text-premium-text/60">No research reports found in this category.</div>}
+          />
         </div>
       )}
     </div>

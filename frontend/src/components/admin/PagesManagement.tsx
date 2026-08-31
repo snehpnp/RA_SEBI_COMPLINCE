@@ -81,7 +81,12 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
       });
       if (res.success) {
         toast.success('Page saved successfully!');
-        fetchPages();
+        // The user requested to reload the GET API / update UI upon save/inactive toggle
+        const newSlug = res.data?.slug || dataToSave.slug;
+        if (newSlug) {
+          window.location.hash = `#customPages_${newSlug}`;
+        }
+        window.location.reload();
       } else {
         toast(res.message);
       }

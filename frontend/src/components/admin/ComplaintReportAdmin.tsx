@@ -3,6 +3,40 @@ import { useState, useEffect } from 'react';
 import { Save, Loader2, History, X, Eye, Calendar, CheckCircle, Download } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
+import DataTable from 'react-data-table-component';
+
+const tableCustomStyles = {
+  table: { style: { backgroundColor: 'transparent' } },
+  headRow: {
+    style: {
+      backgroundColor: 'rgba(241, 245, 249, 0.5)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      minHeight: '44px',
+    },
+  },
+  headCells: {
+    style: {
+      fontSize: '10px', fontWeight: '800', textTransform: 'uppercase',
+      color: '#475569', paddingLeft: '16px', paddingRight: '16px',
+    },
+  },
+  cells: {
+    style: {
+      paddingLeft: '16px', paddingRight: '16px',
+      fontSize: '12px', color: '#334155',
+    },
+  },
+  rows: {
+    style: {
+      backgroundColor: 'transparent',
+      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      '&:hover': { backgroundColor: 'rgba(241, 245, 249, 0.8)' },
+    },
+  },
+  pagination: {
+    style: { backgroundColor: 'transparent', borderTopColor: 'rgba(203, 213, 225, 0.5)' },
+  },
+};
 
 interface ReportData {
   investorPendingLastMonth: number;
@@ -42,6 +76,14 @@ export default function ComplaintReportAdmin() {
 
   // History State
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
+  useEffect(() => {
+    setIsDarkMode(document.documentElement.classList.contains('dark'));
+    const observer = new MutationObserver(() => setIsDarkMode(document.documentElement.classList.contains('dark')));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
@@ -222,6 +264,133 @@ export default function ComplaintReportAdmin() {
     </td>
   );
 
+  const historyColumns = [
+    {
+      name: 'Month / Year',
+      cell: (item: any) => {
+        const isCurrent = item.month === month && item.year === year;
+        return (
+          <div className="font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+            <span>{months[item.month - 1]} {item.year}</span>
+            {isCurrent && (
+              <span className="px-2 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold rounded-full border border-emerald-500/20">
+                Current
+              </span>
+            )}
+          </div>
+        );
+      },
+      sortable: true,
+      sortFunction: (a: any, b: any) => {
+        const dateA = new Date(a.year, a.month - 1);
+        const dateB = new Date(b.year, b.month - 1);
+        return dateA.getTime() - dateB.getTime();
+      }
+    },
+    {
+      name: 'Total Received',
+      cell: (item: any) => {
+        const d = item.data || {};
+        return <span className="font-semibold text-slate-700 dark:text-slate-300">{(d.investorReceived || 0) + (d.sebiReceived || 0) + (d.otherReceived || 0)}</span>;
+      },
+      center: true,
+    },
+    {
+      name: 'Total Resolved',
+      cell: (item: any) => {
+        const d = item.data || {};
+        return <span className="font-semibold text-emerald-600 dark:text-emerald-400">{(d.investorResolved || 0) + (d.sebiResolved || 0) + (d.otherResolved || 0)}</span>;
+      },
+      center: true,
+    },
+    {
+      name: 'Total Pending',
+      cell: (item: any) => {
+        const d = item.data || {};
+        return <span className="font-semibold text-amber-600 dark:text-amber-400">{(d.investorPendingTotal || 0) + (d.sebiPendingTotal || 0) + (d.otherPendingTotal || 0)}</span>;
+      },
+      center: true,
+    },
+    {
+      name: 'Saved Date',
+      cell: (item: any) => (
+        <span className="text-xs text-slate-500">
+          {new Date(item.updatedAt).toLocaleDateString()} {new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      ),
+      sortable: true,
+      center: true,
+    },
+    {
+      name: 'Action',
+      cell: (item: any) => (
+        <button
+          onClick={() => {
+            setMonth(item.month);
+            setYear(item.year);
+            setData(item.data);
+            setIsHistoryOpen(false);
+          }}
+          className="px-3 py-1.5 bg-primary-500/10 hover:bg-primary-500/20 text-primary-600 dark:text-primary-400 font-bold text-xs rounded-lg transition inline-flex items-center space-x-1"
+        >
+          <Eye className="w-3.5 h-3.5 mr-1" /> View / Edit
+        </button>
+      ),
+      right: true,
+    }
+  ];
+
+  const mainTableColumns = [
+    {
+      name: 'Sr. No.',
+      selector: (row: any) => row.id,
+      width: '80px',
+      center: true,
+    },
+    {
+      name: 'Received from',
+      selector: (row: any) => row.source,
+      width: '200px',
+    },
+    {
+      name: 'Pending last month',
+      cell: (row: any) => row.isTotal ? <span className="font-bold">{data.investorPendingLastMonth + data.sebiPendingLastMonth + data.otherPendingLastMonth}</span> : <InputCell field={row.fields[0]} />,
+      center: true,
+    },
+    {
+      name: 'Received',
+      cell: (row: any) => row.isTotal ? <span className="font-bold">{data.investorReceived + data.sebiReceived + data.otherReceived}</span> : <InputCell field={row.fields[1]} />,
+      center: true,
+    },
+    {
+      name: 'Resolved',
+      cell: (row: any) => row.isTotal ? <span className="font-bold">{data.investorResolved + data.sebiResolved + data.otherResolved}</span> : <InputCell field={row.fields[2]} />,
+      center: true,
+    },
+    {
+      name: 'Total Pending',
+      cell: (row: any) => row.isTotal ? <span className="font-bold">{data.investorPendingTotal + data.sebiPendingTotal + data.otherPendingTotal}</span> : <InputCell field={row.fields[3]} />,
+      center: true,
+    },
+    {
+      name: 'Pending (3m)',
+      cell: (row: any) => row.isTotal ? <span className="font-bold">{data.investorPending3Months + data.sebiPending3Months + data.otherPending3Months}</span> : <InputCell field={row.fields[4]} />,
+      center: true,
+    },
+    {
+      name: 'Avg Days',
+      cell: (row: any) => row.isTotal ? <span className="font-bold">{Math.round((data.investorAvgResolutionTime + data.sebiAvgResolutionTime + data.otherAvgResolutionTime) / 3)}</span> : <InputCell field={row.fields[5]} />,
+      center: true,
+    },
+  ];
+
+  const mainTableData = [
+    { id: '1.', source: 'Directly from Investors', fields: ['investorPendingLastMonth', 'investorReceived', 'investorResolved', 'investorPendingTotal', 'investorPending3Months', 'investorAvgResolutionTime'] },
+    { id: '2.', source: 'SEBI (SCORES)', fields: ['sebiPendingLastMonth', 'sebiReceived', 'sebiResolved', 'sebiPendingTotal', 'sebiPending3Months', 'sebiAvgResolutionTime'] },
+    { id: '3.', source: 'Other Sources (If any)', fields: ['otherPendingLastMonth', 'otherReceived', 'otherResolved', 'otherPendingTotal', 'otherPending3Months', 'otherAvgResolutionTime'] },
+    { id: '', source: 'Grand Total', isTotal: true },
+  ];
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
@@ -259,69 +428,14 @@ export default function ComplaintReportAdmin() {
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden overflow-x-auto">
-        <table className="w-full text-left text-sm whitespace-nowrap">
-          <thead className="bg-[#1272a2] text-white">
-            <tr>
-              <th className="p-4 font-bold border border-white/20 text-center">Sr. No.</th>
-              <th className="p-4 font-bold border border-white/20">Received from</th>
-              <th className="p-4 font-bold border border-white/20 text-center">Pending at the end of last month</th>
-              <th className="p-4 font-bold border border-white/20 text-center">Received</th>
-              <th className="p-4 font-bold border border-white/20 text-center">Resolved</th>
-              <th className="p-4 font-bold border border-white/20 text-center">Total Pending</th>
-              <th className="p-4 font-bold border border-white/20 text-center">Pending complaints (3 months)</th>
-              <th className="p-4 font-bold border border-white/20 text-center">Average Resolution time (in days)</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-            {loading ? (
-              <tr><td colSpan={8} className="p-8 text-center text-slate-500">Loading data...</td></tr>
-            ) : (
-              <>
-                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                  <td className="p-4 text-center font-medium border border-slate-200 dark:border-slate-700">1.</td>
-                  <td className="p-4 font-medium border border-slate-200 dark:border-slate-700">Directly from Investors</td>
-                  <InputCell field="investorPendingLastMonth" />
-                  <InputCell field="investorReceived" />
-                  <InputCell field="investorResolved" />
-                  <InputCell field="investorPendingTotal" />
-                  <InputCell field="investorPending3Months" />
-                  <InputCell field="investorAvgResolutionTime" />
-                </tr>
-                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                  <td className="p-4 text-center font-medium border border-slate-200 dark:border-slate-700">2.</td>
-                  <td className="p-4 font-medium border border-slate-200 dark:border-slate-700">SEBI (SCORES)</td>
-                  <InputCell field="sebiPendingLastMonth" />
-                  <InputCell field="sebiReceived" />
-                  <InputCell field="sebiResolved" />
-                  <InputCell field="sebiPendingTotal" />
-                  <InputCell field="sebiPending3Months" />
-                  <InputCell field="sebiAvgResolutionTime" />
-                </tr>
-                <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                  <td className="p-4 text-center font-medium border border-slate-200 dark:border-slate-700">3.</td>
-                  <td className="p-4 font-medium border border-slate-200 dark:border-slate-700">Other Sources (If any)</td>
-                  <InputCell field="otherPendingLastMonth" />
-                  <InputCell field="otherReceived" />
-                  <InputCell field="otherResolved" />
-                  <InputCell field="otherPendingTotal" />
-                  <InputCell field="otherPending3Months" />
-                  <InputCell field="otherAvgResolutionTime" />
-                </tr>
-                <tr className="bg-slate-50 dark:bg-slate-800/80 font-bold">
-                  <td colSpan={2} className="p-4 text-right border border-slate-200 dark:border-slate-700">Grand Total</td>
-                  <td className="p-4 text-center border border-slate-200 dark:border-slate-700">{data.investorPendingLastMonth + data.sebiPendingLastMonth + data.otherPendingLastMonth}</td>
-                  <td className="p-4 text-center border border-slate-200 dark:border-slate-700">{data.investorReceived + data.sebiReceived + data.otherReceived}</td>
-                  <td className="p-4 text-center border border-slate-200 dark:border-slate-700">{data.investorResolved + data.sebiResolved + data.otherResolved}</td>
-                  <td className="p-4 text-center border border-slate-200 dark:border-slate-700">{data.investorPendingTotal + data.sebiPendingTotal + data.otherPendingTotal}</td>
-                  <td className="p-4 text-center border border-slate-200 dark:border-slate-700">{data.investorPending3Months + data.sebiPending3Months + data.otherPending3Months}</td>
-                  <td className="p-4 text-center border border-slate-200 dark:border-slate-700">
-                    {Math.round((data.investorAvgResolutionTime + data.sebiAvgResolutionTime + data.otherAvgResolutionTime) / 3)}
-                  </td>
-                </tr>
-              </>
-            )}
-          </tbody>
-        </table>
+        <DataTable
+          columns={mainTableColumns}
+          data={mainTableData}
+          customStyles={tableCustomStyles}
+          theme={isDarkMode ? 'dark' : 'default'}
+          progressPending={loading}
+          progressComponent={<div className="p-8 text-center text-slate-500">Loading data...</div>}
+        />
       </div>
 
       <div className="mt-8 flex justify-end">
@@ -368,59 +482,16 @@ export default function ComplaintReportAdmin() {
                   No previous monthly complaint reports found.
                 </div>
               ) : (
-                <table className="w-full text-left text-sm whitespace-nowrap">
-                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                    <tr>
-                      <th className="p-3.5 font-bold rounded-l-xl">Month / Year</th>
-                      <th className="p-3.5 font-bold text-center">Total Received</th>
-                      <th className="p-3.5 font-bold text-center">Total Resolved</th>
-                      <th className="p-3.5 font-bold text-center">Total Pending</th>
-                      <th className="p-3.5 font-bold text-center">Saved Date</th>
-                      <th className="p-3.5 font-bold text-right rounded-r-xl">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {historyList.map((item) => {
-                      const d = item.data || {};
-                      const totRec = (d.investorReceived || 0) + (d.sebiReceived || 0) + (d.otherReceived || 0);
-                      const totRes = (d.investorResolved || 0) + (d.sebiResolved || 0) + (d.otherResolved || 0);
-                      const totPend = (d.investorPendingTotal || 0) + (d.sebiPendingTotal || 0) + (d.otherPendingTotal || 0);
-                      const isCurrent = item.month === month && item.year === year;
-
-                      return (
-                        <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
-                          <td className="p-3.5 font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-                            <span>{months[item.month - 1]} {item.year}</span>
-                            {isCurrent && (
-                              <span className="px-2 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold rounded-full border border-emerald-500/20">
-                                Current
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3.5 text-center font-semibold text-slate-700 dark:text-slate-300">{totRec}</td>
-                          <td className="p-3.5 text-center font-semibold text-emerald-600 dark:text-emerald-400">{totRes}</td>
-                          <td className="p-3.5 text-center font-semibold text-amber-600 dark:text-amber-400">{totPend}</td>
-                          <td className="p-3.5 text-center text-xs text-slate-500">
-                            {new Date(item.updatedAt).toLocaleDateString()} {new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                          <td className="p-3.5 text-right">
-                            <button
-                              onClick={() => {
-                                setMonth(item.month);
-                                setYear(item.year);
-                                setData(item.data);
-                                setIsHistoryOpen(false);
-                              }}
-                              className="px-3 py-1.5 bg-primary-500/10 hover:bg-primary-500/20 text-primary-600 dark:text-primary-400 font-bold text-xs rounded-lg transition inline-flex items-center space-x-1"
-                            >
-                              <Eye className="w-3.5 h-3.5 mr-1" /> View / Edit
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <DataTable
+                  columns={historyColumns}
+                  data={historyList}
+                  pagination
+                  paginationPerPage={5}
+                  highlightOnHover
+                  responsive
+                  customStyles={tableCustomStyles}
+                  theme={isDarkMode ? 'dark' : 'default'}
+                />
               )}
             </div>
 

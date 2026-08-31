@@ -245,7 +245,7 @@ function SuperAdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/login');
+        router.push('/login?error=expired');
         return;
       }
       const parsedUser = JSON.parse(userStr);
