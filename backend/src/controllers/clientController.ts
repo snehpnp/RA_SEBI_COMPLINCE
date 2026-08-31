@@ -5,6 +5,7 @@ import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { sendWelcomeEmail } from '../services/emailService';
+import { createKycRequest } from '../services/digioService';
 
 export const registerClient = async (req: Request, res: Response) => {
   const {
@@ -186,6 +187,41 @@ export const registerClient = async (req: Request, res: Response) => {
       success: true,
       message: 'Client registered successfully.',
       data: result.client
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const client = await prisma.client.findFirst({ where: { userId: req.user!.id } });
+    
+    if (!client) {
+      return res.status(404).json({ success: false, message: 'Client not found.' });
+    }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId! } });
+    if (!tenant?.digioClientId || !tenant?.digioClientSecret || !tenant?.digioKycTemplateName) {
+      return res.status(400).json({ success: false, message: 'Digio KYC is not configured for this tenant.' });
+    }
+
+    const customerIdentifier = client.email; // Digio uses email or mobile as identifier
+    const customerName = client.name || 'Client';
+
+    const digioResponse = await createKycRequest(
+      tenant.digioClientId,
+      tenant.digioClientSecret,
+      tenant.digioKycTemplateName,
+      customerIdentifier,
+      customerName
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Digio KYC request initiated',
+      data: digioResponse
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });

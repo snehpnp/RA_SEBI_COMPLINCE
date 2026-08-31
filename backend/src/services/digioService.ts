@@ -10,12 +10,14 @@ const getDigioAuthHeader = (clientId: string, clientSecret: string) => {
 
 export const createKycRequest = async (clientId: string, clientSecret: string, kycTemplateName: string, customerIdentifier: string, customerName: string) => {
   try {
-    const response = await axios.post(`${DIGIO_BASE_URL}/client/kyc/v2/request`, {
+    const payload = {
       customer_identifier: customerIdentifier,
       customer_name: customerName,
       template_name: kycTemplateName,
       notify_customer: false
-    }, {
+    };
+    console.log("Digio KYC Payload:", payload);
+    const response = await axios.post(`${DIGIO_BASE_URL}/client/kyc/v2/request`, payload, {
       headers: {
         'Authorization': getDigioAuthHeader(clientId, clientSecret),
         'Content-Type': 'application/json'

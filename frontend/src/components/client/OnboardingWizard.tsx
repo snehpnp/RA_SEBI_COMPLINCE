@@ -174,15 +174,43 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const handleVerifyKRA = async () => {
     setKraStatus('loading');
     try {
-      const res = await api.verifyKRA({ pan, aadhaar });
+      const res = await api.initiateDigioKyc();
 
-      if (res.success && res.data?.kycStatus === 'COMPLETED') {
-        setKraStatus('success');
+      if (res.success && res.data && res.data.id) {
+        const options = {
+          environment: 'production',
+          callback: async function (response: any) {
+            if (response.hasOwnProperty('error_code')) {
+              toast.error("Digio KYC Failed or Cancelled");
+              setKraStatus('failed');
+            } else {
+              // Now save PAN/Aadhaar to our DB
+              const verifyRes = await api.verifyKRA({ pan, aadhaar });
+              if (verifyRes.success) {
+                setKraStatus('success');
+                toast.success('Demat Account / KYC Verified!');
+              } else {
+                toast.error(verifyRes.message || 'Failed to update KRA status');
+                setKraStatus('failed');
+              }
+            }
+          },
+          logo: 'https://digio.in/images/logo.png',
+          theme: {
+            primaryColor: '#1B42E0',
+            secondaryColor: '#000000'
+          }
+        };
+        const digio = new (window as any).Digio(options);
+        digio.init();
+        digio.submit(res.data.id, formData.email || pan);
       } else {
+        toast.error(res.message || 'Failed to initiate Digio request');
         setKraStatus('failed');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      toast.error('Failed to connect to Digio. Please ensure credentials are correct.');
       setKraStatus('failed');
     }
   };
@@ -438,7 +466,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
 
             <div className="flex gap-4 mt-8 pt-6 border-t border-premium-border/50">
               <button onClick={handleBack} className="px-6 py-3.5 bg-premium-bg border border-premium-border hover:border-premium-text/30 rounded-xl font-bold transition-colors">Back</button>
-              <button onClick={handleUpdateProfile} disabled={loading || !formData.name || !formData.email || !formData.phone || !formData.address} className="flex-1 bg-gradient-to-r from-premium-primary to-premium-primary/80 hover:from-premium-primary/90 hover:to-premium-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-[0_0_15px_var(--tw-colors-premium-primary)] hover:shadow-[0_0_25px_var(--tw-colors-premium-primary)] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
+              <button onClick={handleUpdateProfile} disabled={loading || !formData.name || !formData.email || !formData.phone || !formData.address} className="flex-1 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Save & Continue'}
                 {!loading && <ChevronRight className="w-5 h-5" />}
               </button>
@@ -475,7 +503,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
             <div className="flex gap-4 mt-8 pt-6 border-t border-premium-border/50">
               <button onClick={handleBack} className="px-6 py-3.5 bg-premium-bg border border-premium-border hover:border-premium-text/30 rounded-xl font-bold transition-colors">Back</button>
               {(kraStatus === 'success' || kraStatus === 'failed') ? (
-                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-gradient-to-r from-premium-primary to-premium-primary/80 hover:from-premium-primary/90 hover:to-premium-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-[0_0_15px_var(--tw-colors-premium-primary)] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
+                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Continue to eSign <ChevronRight className="w-5 h-5" /></>}
                 </button>
               ) : (
@@ -584,13 +612,13 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
         <span className="text-sm">Back to Dashboard</span>
       </button>
 
-      <div className="w-full max-w-4xl bg-premium-cards border border-premium-border rounded-3xl shadow-2xl relative z-10 flex flex-col md:flex-row min-h-[600px]">
-        <div className="w-full md:w-1/3 bg-premium-bg/50 border-r border-premium-border p-8 hidden md:flex flex-col">
-          <div className="flex items-center space-x-3 mb-10">
+      <div className="w-full max-w-4xl bg-white/20 dark:bg-black/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] relative z-10 flex flex-col md:flex-row min-h-[600px] overflow-hidden">
+        <div className="w-full md:w-1/3 bg-white/30 dark:bg-black/50 border-r border-white/40 dark:border-white/10 p-8 hidden md:flex flex-col backdrop-blur-xl">
+          <div className="flex items-center space-x-3 mb-10 w-full">
             {logoUrl && logoUrl !== '/logo-light.png' ? (
-              <img src={logoUrl} alt={appName || 'Logo'} className="max-h-10 max-w-[150px] object-contain" />
+              <img src={logoUrl} alt={appName || 'Logo'} className="max-h-12 w-auto object-contain" />
             ) : currentUser?.tenantLogo ? (
-              <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className="max-h-10 max-w-[150px] object-contain" />
+              <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className="max-h-12 w-auto object-contain" />
             ) : (
               <>
                 <ShieldCheck className="w-6 h-6 text-premium-primary" />

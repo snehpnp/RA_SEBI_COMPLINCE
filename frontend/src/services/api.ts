@@ -440,6 +440,8 @@ class ApiClient {
     });
   }
 
+
+
   async acceptConsent(payload: any) {
     return this.request('/client/consent', {
       method: 'POST',
@@ -818,7 +820,7 @@ class ApiClient {
 
   // Digio Dynamic KYC and eSign
   async initiateDigioKyc() {
-    return this.request('/client/kyc/initiate', { method: 'POST' });
+    return this.request('/client/kyc/initiate-digio', { method: 'POST' });
   }
 
   async initiateDigioAgreement() {
