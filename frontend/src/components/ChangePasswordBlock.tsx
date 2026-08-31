@@ -32,7 +32,7 @@ export default function ChangePasswordBlock() {
     try {
       setLoading(true);
       const res = await api.post('/auth/change-password', {
-        oldPassword: currentPassword,
+        currentPassword: currentPassword,
         newPassword
       });
       if (res.data.success) {

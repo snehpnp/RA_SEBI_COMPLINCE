@@ -246,6 +246,7 @@ model Client {
   name        String
   email       String
   mobile      String
+  dob         DateTime?
   pan         String  @unique
   aadhaar     String  @unique
   category    String  @default("INDIVIDUAL") // INDIVIDUAL, NON_INDIVIDUAL

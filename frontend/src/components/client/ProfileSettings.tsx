@@ -33,7 +33,7 @@ export default function ProfileSettings() {
           email: user.email || '',
           mobile: user.mobile || user.phone || '',
           dob: formatDate(user.dob),
-          address: user.address || ''
+          address: user.profile?.addressLine1 || ''
         });
       }
     } catch (err) {

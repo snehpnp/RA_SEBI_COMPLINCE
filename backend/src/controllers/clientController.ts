@@ -702,7 +702,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
 
 export const updateClientProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { pan, aadhaar, name, email, phone, address } = req.body;
+    const { pan, aadhaar, name, email, mobile, dob, address } = req.body;
     const userId = req.user!.id;
 
     const client = await prisma.client.findFirst({ where: { userId } });
@@ -719,18 +719,19 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
           ...(aadhaar !== undefined && { aadhaar }),
           ...(name && { name }),
           ...(email && { email }),
-          ...(phone && { mobile: phone })
+          ...(mobile && { mobile }),
+          ...(dob && { dob: new Date(dob) })
         }
       });
 
       // Update User table if basic info changed
-      if (name || email || phone) {
+      if (name || email || mobile) {
         await tx.user.update({
           where: { id: userId },
           data: {
             ...(name && { firstName: name.split(' ')[0], lastName: name.split(' ').slice(1).join(' ') || 'Client' }),
             ...(email && { email }),
-            ...(phone && { mobile: phone })
+            ...(mobile && { mobile })
           }
         });
       }
