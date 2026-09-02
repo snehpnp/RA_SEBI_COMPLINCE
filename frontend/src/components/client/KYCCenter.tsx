@@ -37,9 +37,48 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
   // ── Status helpers ──────────────────────────────────────────────────────────
   const status: string = profile?.status || 'PENDING_ONBOARDING';
 
+  // Check if agreement is actually signed/active
+  const isAgreementSigned = profile?.agreements?.some(
+    (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
+  ) ?? false;
+
+  // KRA is verified when status is past KYC stages
+  const isKraVerified =
+    status !== 'PENDING_ONBOARDING' &&
+    status !== 'KYC_PENDING' &&
+    status !== 'KYC_FAILED';
+
   const getStatusBanner = () => {
+    // Fully verified: KRA done + agreement signed
+    if (status === 'ACTIVE' && isAgreementSigned) {
+      return {
+        border: 'border-premium-success/30',
+        glow: 'bg-premium-success/5',
+        iconBg: 'bg-premium-success/20',
+        Icon: ShieldCheck,
+        iconColor: 'text-premium-success',
+        title: 'Fully Verified',
+        titleColor: 'text-premium-success',
+        desc: 'Your KYC and onboarding are complete. You have full access to all premium features and research services.',
+        showDownload: true,
+      };
+    }
+    // ACTIVE but agreement not yet signed
+    if (status === 'ACTIVE' && !isAgreementSigned) {
+      return {
+        border: 'border-premium-warning/30',
+        glow: 'bg-premium-warning/5',
+        iconBg: 'bg-premium-warning/20',
+        Icon: AlertCircle,
+        iconColor: 'text-premium-warning',
+        title: 'Agreement Pending',
+        titleColor: 'text-premium-warning',
+        desc: 'KYC verified. Please sign the Research Analyst Advisory Agreement to complete your onboarding.',
+        showDownload: false,
+      };
+    }
     switch (status) {
-      case 'ACTIVE':
+      case 'ACTIVE': // fallback (already handled above)
         return {
           border: 'border-premium-success/30',
           glow: 'bg-premium-success/5',
@@ -48,7 +87,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
           iconColor: 'text-premium-success',
           title: 'Fully Verified',
           titleColor: 'text-premium-success',
-          desc: 'Your KYC and onboarding are complete. You have full access to all premium features and research services.',
+          desc: 'Your KYC and onboarding are complete.',
           showDownload: true,
         };
       case 'KYC_FAILED':
@@ -209,10 +248,10 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   </div>
                   <div>
                     <p className="font-semibold text-sm">PAN Card</p>
-                    {profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED' ? (
-                      <p className="text-xs text-premium-success">KRA: Verified</p>
-                    ) : profile?.kycStatus === 'MANUAL_REVIEW_REQUIRED' || profile?.kycStatus === 'FAILED' ? (
+                    {profile?.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? (
                       <p className="text-xs text-premium-warning">KRA: Failed</p>
+                    ) : isKraVerified ? (
+                      <p className="text-xs text-premium-success">KRA: Verified</p>
                     ) : (
                       <p className="text-xs text-premium-text/50">KRA: Pending</p>
                     )}
@@ -233,10 +272,12 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   </div>
                   <div>
                     <p className="font-semibold text-sm">Aadhaar Card</p>
-                    {(latestAgreement || status === 'ACTIVE' || status === 'PAYMENT_PENDING') ? (
+                    {isAgreementSigned ? (
                       <p className="text-xs text-premium-success">Verified via Digio</p>
+                    ) : isKraVerified ? (
+                      <p className="text-xs text-premium-warning">eSign Pending</p>
                     ) : (
-                      <p className="text-xs text-premium-warning">Pending eSign</p>
+                      <p className="text-xs text-premium-text/50">Pending eSign</p>
                     )}
                   </div>
                 </div>
@@ -284,19 +325,21 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
 
               {/* Step 2: Agreement Signature */}
               <div className="flex items-start gap-4 relative z-10 group">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${latestAgreement ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : (status === 'AGREEMENT_PENDING' ? 'bg-premium-primary text-white animate-pulse ring-4 ring-premium-primary/20' : 'bg-premium-cards border border-premium-border')}`}>
-                  {latestAgreement ? <Check className="w-3 h-3" /> : (status === 'AGREEMENT_PENDING' ? <PenTool className="w-3 h-3" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${isAgreementSigned ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : (isKraVerified ? 'bg-premium-primary text-white animate-pulse ring-4 ring-premium-primary/20' : 'bg-premium-cards border border-premium-border')}`}>
+                  {isAgreementSigned ? <Check className="w-3 h-3" /> : (isKraVerified ? <PenTool className="w-3 h-3" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
                 </div>
                 <div className="flex-1">
-                  <p className={`text-sm font-bold ${latestAgreement ? 'text-premium-success' : 'text-premium-text'}`}>Advisory Agreement</p>
-                  {latestAgreement ? (
+                  <p className={`text-sm font-bold ${isAgreementSigned ? 'text-premium-success' : 'text-premium-text'}`}>Advisory Agreement</p>
+                  {isAgreementSigned && latestAgreement ? (
                     <div className="text-xs text-premium-text/60 mt-2 space-y-1.5 bg-premium-cards p-3 rounded-xl border border-premium-border shadow-sm">
                       <p className="flex justify-between items-center"><span className="text-premium-text/40">Status:</span> <span className="text-premium-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Signed & Sealed</span></p>
                       <p className="flex justify-between items-center"><span className="text-premium-text/40">Date:</span> <span>{new Date(latestAgreement.signedAt).toLocaleDateString()}</span></p>
                       {latestAgreement.ipAddress && <p className="flex justify-between items-center"><span className="text-premium-text/40">IP Addr:</span> <span>{latestAgreement.ipAddress}</span></p>}
                     </div>
+                  ) : isKraVerified ? (
+                    <p className="text-xs text-premium-warning mt-0.5">Pending your signature</p>
                   ) : (
-                    <p className="text-xs text-premium-text/60 mt-0.5">{status === 'AGREEMENT_PENDING' ? 'Awaiting your eSign via Digio' : 'Locked (Requires KYC)'}</p>
+                    <p className="text-xs text-premium-text/60 mt-0.5">Locked (Requires KYC)</p>
                   )}
                 </div>
               </div>

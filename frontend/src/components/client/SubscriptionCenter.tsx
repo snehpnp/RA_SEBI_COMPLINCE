@@ -11,13 +11,14 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
   const [loading, setLoading] = useState(true);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [gstType, setGstType] = useState<string>('INCLUSIVE');
-  
+
   const isFullyOnboarded = profile?.status === 'PAYMENT_PENDING' || profile?.status === 'ACTIVE';
   const [checkoutPlan, setCheckoutPlan] = useState<any>(null);
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  
 
   const handleApplyCoupon = async () => {
     if (!couponCode) return;
@@ -50,12 +51,12 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
 
   const handleConfirmPurchase = async () => {
     if (!checkoutPlan) return;
-    
+
     // Check KYC First setting
     const kycFirst = profile?.user?.tenant?.kycFirst !== false; // Default true
     const isKycDone = profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED' || profile?.status === 'ACTIVE' || profile?.status === 'PAYMENT_PENDING' || profile?.status === 'AGREEMENT_PENDING';
     const isAgreementDone = !!profile?.agreementSigned || profile?.status === 'ACTIVE' || profile?.status === 'PAYMENT_PENDING';
-    
+
     if (kycFirst && (!isKycDone || !isAgreementDone)) {
       toast('Please complete your Identity KYC and Legal Agreement before making a payment.');
       setCheckoutPlan(null);
@@ -104,6 +105,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                   planId: checkoutPlan.id || checkoutPlan._id,
                   couponCode: appliedCoupon ? appliedCoupon.code : undefined
                 });
+              
                 if (verifyRes.success) {
                   toast.success('Payment successful!');
                   window.location.href = '/client?payment=success';
@@ -138,13 +140,13 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
           planId: checkoutPlan.id || checkoutPlan._id,
           couponCode: appliedCoupon ? appliedCoupon.code : undefined
         });
-        
+
         if (res.success && res.url) {
           // Create dynamic form and submit to CCAvenue
           const form = document.createElement('form');
           form.method = 'POST';
           form.action = res.url;
-          
+
           const encRequestInput = document.createElement('input');
           encRequestInput.type = 'hidden';
           encRequestInput.name = 'encRequest';
@@ -206,14 +208,14 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
       </div>
 
       <div className="flex bg-premium-cards border border-premium-border p-1 rounded-xl w-max">
-        <button 
-          onClick={() => setActiveTab('active')} 
+        <button
+          onClick={() => setActiveTab('active')}
           className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'active' ? 'bg-premium-primary text-white shadow-md' : 'text-premium-text/60 hover:text-premium-text'}`}
         >
           My Plans
         </button>
-        <button 
-          onClick={() => setActiveTab('browse')} 
+        <button
+          onClick={() => setActiveTab('browse')}
           className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'browse' ? 'bg-premium-primary text-white shadow-md' : 'text-premium-text/60 hover:text-premium-text'}`}
         >
           Browse Plans
@@ -259,7 +261,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                       <p className="text-xs text-premium-text/50">/{sub.billingCycle || sub.plan?.durationMonths + ' Months' || 'term'}</p>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-premium-bg/50 border border-premium-border/50 p-4 rounded-xl mb-5">
                     <div>
                       <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Start Date</p>
@@ -330,7 +332,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                         Most Popular
                       </div>
                     )}
-                    
+
                     <div className="flex justify-between items-start mb-4">
                       <div className={`w-12 h-12 rounded-2xl ${bg} flex items-center justify-center`}>
                         <Icon className={`w-6 h-6 ${color}`} />
@@ -341,9 +343,9 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                         </span>
                       )}
                     </div>
-                    
+
                     <h3 className="text-xl font-bold mb-1">{plan.name}</h3>
-                    
+
                     <div className="flex items-baseline gap-1 mt-4 mb-2">
                       <span className="text-4xl font-bold">₹{plan.amount || plan.price}</span>
                       <span className="text-premium-text/60 font-medium">
@@ -351,13 +353,13 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                       </span>
                     </div>
                     <p className="text-[10px] text-premium-text/40 uppercase tracking-widest mb-6">18% GST ({gstType === 'EXCLUSIVE' ? 'Exclusive' : 'Inclusive'})</p>
-                    
+
                     {plan.description && (
                       <div className="mb-6 p-4 bg-premium-bg/50 border border-premium-border/50 rounded-2xl">
                         <div className="text-sm text-premium-text/80 leading-relaxed prose prose-sm dark:prose-invert" dangerouslySetInnerHTML={{ __html: plan.description }} />
                       </div>
                     )}
-                    
+
                     <div className="space-y-4 mb-8 flex-1">
                       <h4 className="text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-3">Included Segments</h4>
                       <div className="flex flex-wrap gap-2">
@@ -373,7 +375,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                         )}
                       </div>
                     </div>
-                    
+
                     <button onClick={() => {
                       if (isFullyOnboarded) {
                         setCheckoutPlan(plan);
@@ -382,11 +384,10 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                       } else {
                         onTriggerOnboarding && onTriggerOnboarding();
                       }
-                    }} className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
-                      isPopular 
-                      ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90' 
+                    }} className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${isPopular
+                      ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90'
                       : 'bg-premium-primary hover:bg-premium-primary/90 text-white'
-                    }`}>
+                      }`}>
                       Select Plan <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
@@ -416,27 +417,27 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                   <>
                     <h2 className="text-2xl font-bold mb-2">Confirm Purchase</h2>
                     <p className="text-premium-text/60 text-sm mb-6">You are subscribing to the {checkoutPlan.name} plan.</p>
-                    
+
                     <div className="mb-6 flex gap-2">
 
-                    <div className="flex gap-2">
-                      <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} placeholder="Have a coupon?" className="flex-1 bg-premium-bg border border-premium-border rounded-xl px-4 py-2.5 text-sm uppercase" />
-                      <button onClick={handleApplyCoupon} disabled={loading || !couponCode} className="px-4 py-2.5 bg-premium-bg border border-premium-border hover:border-premium-primary rounded-xl text-sm font-bold transition-all">Apply</button>
-                    </div>
-                    {availableCoupons.length > 0 && !appliedCoupon && (
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {availableCoupons.filter(c => {
-                           if (c.planId && c.planId !== checkoutPlan.id && c.planId !== checkoutPlan._id) return false;
-                           if (c.categoryId && c.categoryId !== checkoutPlan.categoryId) return false;
-                           return true;
-                        }).map(c => (
-                          <button key={c.id} onClick={() => { setCouponCode(c.code); }} className="text-[10px] px-2 py-1 rounded-full bg-premium-primary/10 text-premium-primary border border-premium-primary/20 hover:bg-premium-primary/20 transition-all font-bold tracking-wider">
-                            USE {c.code}
-                          </button>
-                        ))}
+                      <div className="flex gap-2">
+                        <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} placeholder="Have a coupon?" className="flex-1 bg-premium-bg border border-premium-border rounded-xl px-4 py-2.5 text-sm uppercase" />
+                        <button onClick={handleApplyCoupon} disabled={loading || !couponCode} className="px-4 py-2.5 bg-premium-bg border border-premium-border hover:border-premium-primary rounded-xl text-sm font-bold transition-all">Apply</button>
                       </div>
-                    )}
-  
+                      {availableCoupons.length > 0 && !appliedCoupon && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {availableCoupons.filter(c => {
+                            if (c.planId && c.planId !== checkoutPlan.id && c.planId !== checkoutPlan._id) return false;
+                            if (c.categoryId && c.categoryId !== checkoutPlan.categoryId) return false;
+                            return true;
+                          }).map(c => (
+                            <button key={c.id} onClick={() => { setCouponCode(c.code); }} className="text-[10px] px-2 py-1 rounded-full bg-premium-primary/10 text-premium-primary border border-premium-primary/20 hover:bg-premium-primary/20 transition-all font-bold tracking-wider">
+                              USE {c.code}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                     </div>
                     {appliedCoupon && (
                       <p className="text-emerald-500 text-sm mb-4">

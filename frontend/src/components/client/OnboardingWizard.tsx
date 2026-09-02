@@ -41,7 +41,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const getInitialStep = () => {
     if (!profile) return 0;
     const status = profile.status;
-    
+
     // Resume logic based on profile status
     if (status === 'ACTIVE') {
       if (profile.kycStatus !== 'VERIFIED' && profile.kycStatus !== 'FAILED') {
@@ -86,7 +86,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const [aadhaar, setAadhaar] = useState(profile?.aadhaar || '');
   const [kraStatus, setKraStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>(
     profile?.status === 'KYC_FAILED' ? 'failed' :
-      (profile?.status === 'AGREEMENT_PENDING' || profile?.status === 'PAYMENT_PENDING' || profile?.status === 'ACTIVE' || profile?.kycStatus === 'VERIFIED') ? 'success' : 'idle'
+      ((profile?.status === 'AGREEMENT_PENDING' || profile?.status === 'PAYMENT_PENDING' || (profile?.status === 'ACTIVE' && !!profile?.agreementSigned) || profile?.kycStatus === 'VERIFIED') && profile?.pan) ? 'success' : 'idle'
   );
 
 
@@ -413,7 +413,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
               <div className="w-10 h-10 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
                 <User className="w-5 h-5 text-premium-primary" />
               </div>
-              <h2 className="text-2xl md:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
+              <h2 className="text-2xl md:text-3xl font-bold text-premium-text">
                 Complete Your Profile
               </h2>
             </div>
@@ -474,17 +474,27 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           </div>
         );
       case 'kyc':
+      case 'kyc':
         return (
           <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <h2 className="text-2xl font-bold mb-2">Identity Verification</h2>
-            <p className="text-premium-text/60 text-sm mb-8">As per SEBI guidelines, KYC verification is mandatory.</p>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
+                <ShieldCheck className="w-5 h-5 text-premium-primary" />
+              </div>
+              <h2 className="text-2xl md:text-3xl font-bold text-premium-text">
+                Identity Verification
+              </h2>
+            </div>
+            <p className="text-premium-text/60 text-sm mb-8">
+              As per SEBI guidelines, KYC verification is mandatory.
+            </p>
 
             <div className="space-y-6 flex-1">
               <div className="space-y-5">
                 <div>
-                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5">PAN Number</label>
-                  <div className="flex gap-3">
-                    <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-premium-bg/50 border border-premium-border rounded-xl px-4 py-3.5 focus:border-premium-primary focus:outline-none uppercase text-sm tracking-wider font-mono" maxLength={10} placeholder="ABCDE1234F" />
+                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">PAN Number</label>
+                  <div className="flex gap-3 group">
+                    <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-premium-bg/50 border border-premium-border rounded-xl px-4 py-3.5 focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none uppercase text-sm tracking-wider font-mono" maxLength={10} placeholder="ABCDE1234F" />
                     <button onClick={handleVerifyKRA} disabled={kraStatus === 'loading' || pan.length !== 10} className="px-5 bg-premium-cards border border-premium-border hover:border-premium-primary text-sm font-bold rounded-xl transition-colors flex items-center justify-center min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed">
                       {kraStatus === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Check KRA'}
                     </button>
@@ -493,9 +503,9 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
                   {kraStatus === 'failed' && <p className="text-xs text-premium-warning mt-2 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> KRA check failed (You can still proceed)</p>}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 mt-2">Aadhaar Number (For Digio eSign)</label>
-                  <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-premium-bg/50 border border-premium-border rounded-xl px-4 py-3.5 focus:border-premium-primary focus:outline-none text-sm tracking-widest font-mono" maxLength={14} placeholder="1234 5678 9012" />
+                <div className="group pt-2">
+                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Aadhaar Number (For Digio eSign)</label>
+                  <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-premium-bg/50 border border-premium-border rounded-xl px-4 py-3.5 focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none text-sm tracking-widest font-mono" maxLength={14} placeholder="1111 1111 1111" />
                 </div>
               </div>
             </div>
@@ -503,7 +513,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
             <div className="flex gap-4 mt-8 pt-6 border-t border-premium-border/50">
               <button onClick={handleBack} className="px-6 py-3.5 bg-premium-bg border border-premium-border hover:border-premium-text/30 rounded-xl font-bold transition-colors">Back</button>
               {(kraStatus === 'success' || kraStatus === 'failed') ? (
-                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
+                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Continue to eSign <ChevronRight className="w-5 h-5" /></>}
                 </button>
               ) : (
@@ -614,18 +624,7 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
 
       <div className="w-full max-w-4xl bg-white/20 dark:bg-black/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] relative z-10 flex flex-col md:flex-row min-h-[600px] overflow-hidden">
         <div className="w-full md:w-1/3 bg-white/30 dark:bg-black/50 border-r border-white/40 dark:border-white/10 p-8 hidden md:flex flex-col backdrop-blur-xl">
-          <div className="flex items-center space-x-3 mb-10 w-full">
-            {logoUrl && logoUrl !== '/logo-light.png' ? (
-              <img src={logoUrl} alt={appName || 'Logo'} className="max-h-12 w-auto object-contain" />
-            ) : currentUser?.tenantLogo ? (
-              <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className="max-h-12 w-auto object-contain" />
-            ) : (
-              <>
-                <ShieldCheck className="w-6 h-6 text-premium-primary" />
-                <span className="text-xl font-bold tracking-wider">{appName || currentUser?.tenantName || 'RAGCP'}</span>
-              </>
-            )}
-          </div>
+
 
           <div className="flex-1 relative mt-4">
             {/* Background Line */}

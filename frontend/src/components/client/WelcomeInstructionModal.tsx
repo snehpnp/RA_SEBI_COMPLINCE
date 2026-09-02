@@ -135,7 +135,7 @@ export default function WelcomeInstructionModal({ profile, onClose, onStart }: {
             </button>
             <button 
               onClick={handleStart}
-              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-premium-primary to-premium-primary/80 hover:from-premium-primary/90 hover:to-premium-primary text-white font-bold shadow-[0_0_15px_var(--tw-colors-premium-primary)] hover:shadow-[0_0_25px_var(--tw-colors-premium-primary)] transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-3 px-4 rounded-xl bg-premium-primary hover:bg-premium-primary/90 text-white font-bold shadow-lg hover:shadow-xl dark:shadow-[0_0_15px_var(--tw-colors-premium-primary)] dark:hover:shadow-[0_0_25px_var(--tw-colors-premium-primary)] transition-all flex items-center justify-center gap-2"
             >
               Complete Setup <ChevronRight className="w-5 h-5" />
             </button>
