@@ -7353,20 +7353,30 @@ function AdminDashboardContent() {
                           <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold">Category Management</h2>
                             {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                              <button onClick={() => setIsCategoryModalOpen(true)} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-sm flex items-center space-x-2">
+                              <button onClick={() => setIsCategoryModalOpen(true)} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm flex items-center space-x-2">
                                 <Plus className="h-4 w-4" /> <span>Create Category</span>
                               </button>
                             )}
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {categories.map(cat => (
-                              <div key={cat.id} className={`p-6 rounded-2xl border ${cat.status === 'ACTIVE' ? 'bg-white dark:bg-slate-900/50 border-slate-400 dark:border-white/10' : 'bg-red-900/10 border-red-500/20'}`}>
+                              <div key={cat.id} className={`relative p-6 rounded-2xl border transition-all duration-300 hover:shadow-lg ${cat.status === 'ACTIVE' ? 'bg-white dark:bg-[#0F172A] border-slate-200 dark:border-slate-800 shadow-sm' : 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-500/20'} overflow-hidden group`}>
+                                {cat.status === 'ACTIVE' && (
+                                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-primary-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                )}
                                 <div className="flex justify-between items-start mb-4">
-                                  <h3 className="text-lg font-bold">{cat.name}</h3>
-                                  <span className={`px-2 py-1 text-[10px] font-bold rounded-md ${cat.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>{cat.status}</span>
+                                  <h3 className="text-xl font-bold text-slate-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">{cat.name}</h3>
+                                  <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${cat.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400'}`}>{cat.status}</span>
                                 </div>
-                                <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">Segments: {cat.segments}</p>
-                                <button onClick={() => handleToggleCategoryStatus(cat.id)} className="w-full py-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-bold hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700">Toggle Status</button>
+                                <div className="mb-6">
+                                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Segments</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {(cat.segments || '').split(',').map((seg: string, idx: number) => (
+                                      <span key={idx} className="px-2 py-1 bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-[10px] rounded-md font-bold border border-slate-200 dark:border-slate-700">{seg.trim()}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <button onClick={() => handleToggleCategoryStatus(cat.id)} className="w-full py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-400 dark:hover:border-slate-600 shadow-sm transition-all">Toggle Status</button>
                               </div>
                             ))}
                           </div>
@@ -7418,53 +7428,72 @@ function AdminDashboardContent() {
                             }).map(plan => {
                               const isDeleted = plan.deletedAt !== null && plan.deletedAt !== undefined;
                               return (
-                                <div key={plan.id} className={`p-6 rounded-2xl border ${isDeleted ? 'opacity-60 bg-slate-100 dark:bg-slate-950/40 border-rose-500/20' : plan.status === 'ACTIVE' ? 'bg-white dark:bg-slate-900/50 border-slate-400 dark:border-white/10' : 'bg-red-900/10 border-red-500/20'} flex flex-col`}>
-                                  <div className="flex justify-between items-start mb-2">
-                                    <div>
-                                      <span className="text-[10px] font-bold text-primary-600 dark:text-primary-400 tracking-wider mb-1 block">{plan.category?.name || 'UNCATEGORIZED'}</span>
-                                      <h3 className="text-xl font-bold tracking-tight">{plan.name}</h3>
+                                <div key={plan.id} className={`relative p-6 rounded-2xl border transition-all duration-300 hover:shadow-xl ${isDeleted ? 'opacity-70 bg-slate-50 dark:bg-slate-900/40 border-rose-200 dark:border-rose-500/20' : plan.status === 'ACTIVE' ? 'bg-white dark:bg-[#0F172A] border-slate-200 dark:border-slate-800 shadow-sm hover:border-primary-300 dark:hover:border-primary-500/50' : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 opacity-80'} flex flex-col group overflow-hidden`}>
+                                  {plan.status === 'ACTIVE' && !isDeleted && (
+                                    <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#E1F13D] to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                  )}
+                                  
+                                  <div className="flex justify-between items-start mb-4">
+                                    <div className="pr-4">
+                                      <span className="inline-block px-2 py-1 rounded-md bg-primary-50 dark:bg-primary-900/20 text-[10px] font-bold text-primary-700 dark:text-primary-400 tracking-wider mb-2">{plan.category?.name || 'UNCATEGORIZED'}</span>
+                                      <h3 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">{plan.name}</h3>
                                     </div>
-                                    <div className="text-right">
-                                      <div className="text-2xl font-bold">₹{plan.price.toLocaleString()}</div>
-                                      <span className="text-[9px] text-slate-500 dark:text-slate-500 block mt-0.5">
-                                        {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exclusive)' : '18% GST (Inclusive)'}
+                                    <div className="text-right shrink-0">
+                                      <div className="text-2xl font-black text-slate-900 dark:text-white">₹{plan.price.toLocaleString()}</div>
+                                      <span className="text-[9px] text-slate-500 dark:text-slate-400 font-medium block mt-0.5">
+                                        {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exc)' : '18% GST (Inc)'}
                                       </span>
                                     </div>
                                   </div>
+                                  
                                   <div className="flex items-center space-x-2 mb-4">
-                                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${isDeleted ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>
+                                    <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${isDeleted ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                                       {isDeleted ? 'DELETED' : plan.status}
                                     </span>
                                   </div>
-                                  <div className="text-xs text-slate-600 dark:text-slate-400 mb-4 flex-grow" dangerouslySetInnerHTML={{ __html: plan.description }} />
-                                  <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300 mb-6 bg-black/20 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                    <div className="flex justify-between"><span>Duration</span> <strong className="text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong></div>
-                                    <div className="flex justify-between"><span>Segments</span> <strong className="text-emerald-600 dark:text-emerald-400">{plan.researchSegments}</strong></div>
+                                  
+                                  <div className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: plan.description }} />
+                                  
+                                  <div className="space-y-3 mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</span> 
+                                      <strong className="text-sm text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong>
+                                    </div>
+                                    <div className="h-px w-full bg-slate-200 dark:bg-slate-700/50"></div>
+                                    <div className="flex justify-between items-start">
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium pt-0.5">Segments</span> 
+                                      <div className="flex flex-wrap justify-end gap-1 ml-4">
+                                        {(plan.researchSegments || '').split(',').map((seg: string, idx: number) => (
+                                          <span key={idx} className="text-[10px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 rounded text-emerald-700 dark:text-emerald-400 font-bold">{seg.trim()}</span>
+                                        ))}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div className="flex space-x-2 mt-auto">
+                                  
+                                  <div className="flex space-x-3 mt-auto pt-2">
                                     {!isDeleted ? (
                                       <>
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
-                                            <Edit2 className="h-3 w-3" /> <span>Edit</span>
+                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
+                                            <Edit2 className="h-3.5 w-3.5" /> <span>Edit</span>
                                           </button>
                                         )}
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                          <button onClick={() => handleTogglePlanStatus(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                          <button onClick={() => handleTogglePlanStatus(plan.id)} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
                                             <span>Toggle</span>
                                           </button>
                                         )}
                                         {(!isStaff || hasPermission('DELETE_PLANS')) && (
-                                          <button onClick={() => handleDeletePlan(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-rose-950/20 hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:text-rose-300 rounded-xl text-xs font-bold transition border border-rose-500/20">
-                                            <Trash2 className="h-3 w-3" /> <span>Delete</span>
+                                          <button onClick={() => handleDeletePlan(plan.id)} className="flex-none flex items-center justify-center p-2.5 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 rounded-xl transition-all border border-rose-200 dark:border-rose-500/20" title="Delete Plan">
+                                            <Trash2 className="h-4 w-4" />
                                           </button>
                                         )}
                                       </>
                                     ) : (
                                       <>
                                         {(!isStaff || hasPermission('DELETE_PLANS')) && (
-                                          <button onClick={() => handleRestorePlan(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-emerald-950/20 hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-bold transition border border-emerald-500/20">
-                                            <RotateCcw className="h-3 w-3" /> <span>Restore</span>
+                                          <button onClick={() => handleRestorePlan(plan.id)} className="flex-1 flex items-center justify-center space-x-2 py-2.5 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 rounded-xl text-sm font-bold transition border border-emerald-200 dark:border-emerald-500/20">
+                                            <RotateCcw className="h-4 w-4" /> <span>Restore Plan</span>
                                           </button>
                                         )}
                                       </>

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import api from '../../services/api';
+import DataTable from 'react-data-table-component';
 
 interface CustomPageViewProps {
   page: any;
@@ -47,78 +48,71 @@ export default function CustomPageView({ page }: CustomPageViewProps) {
             
             {loading ? (
               <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin text-premium-primary" /></div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm whitespace-nowrap border-collapse">
-                  <thead className="bg-[#1272a2] text-white">
-                    <tr>
-                      <th className="p-4 font-bold border border-white/20 text-center">Sr. No.</th>
-                      <th className="p-4 font-bold border border-white/20">Received from</th>
-                      <th className="p-4 font-bold border border-white/20 text-center">Pending at the end of last month</th>
-                      <th className="p-4 font-bold border border-white/20 text-center">Received</th>
-                      <th className="p-4 font-bold border border-white/20 text-center">Resolved</th>
-                      <th className="p-4 font-bold border border-white/20 text-center">Total Pending</th>
-                      <th className="p-4 font-bold border border-white/20 text-center">Pending complaints (3 months)</th>
-                      <th className="p-4 font-bold border border-white/20 text-center">Average Resolution time (in days)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-premium-border">
-                    {(() => {
-                      const d = complaintData || {
-                        investorPendingLastMonth: 0, investorReceived: 0, investorResolved: 0, investorPendingTotal: 0, investorPending3Months: 0, investorAvgResolutionTime: 0,
-                        sebiPendingLastMonth: 0, sebiReceived: 0, sebiResolved: 0, sebiPendingTotal: 0, sebiPending3Months: 0, sebiAvgResolutionTime: 0,
-                        otherPendingLastMonth: 0, otherReceived: 0, otherResolved: 0, otherPendingTotal: 0, otherPending3Months: 0, otherAvgResolutionTime: 0
-                      };
-                      return (
-                        <>
-                          <tr className="hover:bg-premium-bg/50 transition">
-                            <td className="p-4 text-center font-medium border border-premium-border">1.</td>
-                            <td className="p-4 font-medium border border-premium-border">Directly from Investors</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorPendingLastMonth}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorReceived}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorResolved}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorPendingTotal}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorPending3Months}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorAvgResolutionTime}</td>
-                          </tr>
-                          <tr className="hover:bg-premium-bg/50 transition">
-                            <td className="p-4 text-center font-medium border border-premium-border">2.</td>
-                            <td className="p-4 font-medium border border-premium-border">SEBI (SCORES)</td>
-                            <td className="p-4 text-center border border-premium-border">{d.sebiPendingLastMonth}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.sebiReceived}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.sebiResolved}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.sebiPendingTotal}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.sebiPending3Months}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.sebiAvgResolutionTime}</td>
-                          </tr>
-                          <tr className="hover:bg-premium-bg/50 transition">
-                            <td className="p-4 text-center font-medium border border-premium-border">3.</td>
-                            <td className="p-4 font-medium border border-premium-border">Other Sources (If any)</td>
-                            <td className="p-4 text-center border border-premium-border">{d.otherPendingLastMonth}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.otherReceived}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.otherResolved}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.otherPendingTotal}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.otherPending3Months}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.otherAvgResolutionTime}</td>
-                          </tr>
-                          <tr className="bg-premium-bg/80 font-bold">
-                            <td colSpan={2} className="p-4 text-right border border-premium-border">Grand Total</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorPendingLastMonth + d.sebiPendingLastMonth + d.otherPendingLastMonth}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorReceived + d.sebiReceived + d.otherReceived}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorResolved + d.sebiResolved + d.otherResolved}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorPendingTotal + d.sebiPendingTotal + d.otherPendingTotal}</td>
-                            <td className="p-4 text-center border border-premium-border">{d.investorPending3Months + d.sebiPending3Months + d.otherPending3Months}</td>
-                            <td className="p-4 text-center border border-premium-border">
-                              {Math.round((d.investorAvgResolutionTime + d.sebiAvgResolutionTime + d.otherAvgResolutionTime) / 3)}
-                            </td>
-                          </tr>
-                        </>
-                      );
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            ) : (() => {
+                  const d = complaintData || {
+                    investorPendingLastMonth: 0, investorReceived: 0, investorResolved: 0, investorPendingTotal: 0, investorPending3Months: 0, investorAvgResolutionTime: 0,
+                    sebiPendingLastMonth: 0, sebiReceived: 0, sebiResolved: 0, sebiPendingTotal: 0, sebiPending3Months: 0, sebiAvgResolutionTime: 0,
+                    otherPendingLastMonth: 0, otherReceived: 0, otherResolved: 0, otherPendingTotal: 0, otherPending3Months: 0, otherAvgResolutionTime: 0
+                  };
+
+                  const columns = [
+                    { name: 'Sr. No.', selector: (row: any) => row.srNo, width: '80px', center: true },
+                    { name: 'Received from', selector: (row: any) => row.source, wrap: true },
+                    { name: 'Pending at the end of last month', selector: (row: any) => row.pendingLastMonth, center: true, wrap: true },
+                    { name: 'Received', selector: (row: any) => row.received, center: true },
+                    { name: 'Resolved', selector: (row: any) => row.resolved, center: true },
+                    { name: 'Total Pending', selector: (row: any) => row.totalPending, center: true },
+                    { name: 'Pending complaints (3 months)', selector: (row: any) => row.pending3Months, center: true, wrap: true },
+                    { name: 'Average Resolution time (in days)', selector: (row: any) => row.avgResolutionTime, center: true, wrap: true },
+                  ];
+
+                  const data = [
+                    {
+                      srNo: '1.', source: 'Directly from Investors',
+                      pendingLastMonth: d.investorPendingLastMonth, received: d.investorReceived, resolved: d.investorResolved,
+                      totalPending: d.investorPendingTotal, pending3Months: d.investorPending3Months, avgResolutionTime: d.investorAvgResolutionTime
+                    },
+                    {
+                      srNo: '2.', source: 'SEBI (SCORES)',
+                      pendingLastMonth: d.sebiPendingLastMonth, received: d.sebiReceived, resolved: d.sebiResolved,
+                      totalPending: d.sebiPendingTotal, pending3Months: d.sebiPending3Months, avgResolutionTime: d.sebiAvgResolutionTime
+                    },
+                    {
+                      srNo: '3.', source: 'Other Sources (If any)',
+                      pendingLastMonth: d.otherPendingLastMonth, received: d.otherReceived, resolved: d.otherResolved,
+                      totalPending: d.otherPendingTotal, pending3Months: d.otherPending3Months, avgResolutionTime: d.otherAvgResolutionTime
+                    },
+                    {
+                      srNo: '', source: <span className="font-bold">Grand Total</span>,
+                      pendingLastMonth: <span className="font-bold">{d.investorPendingLastMonth + d.sebiPendingLastMonth + d.otherPendingLastMonth}</span>,
+                      received: <span className="font-bold">{d.investorReceived + d.sebiReceived + d.otherReceived}</span>,
+                      resolved: <span className="font-bold">{d.investorResolved + d.sebiResolved + d.otherResolved}</span>,
+                      totalPending: <span className="font-bold">{d.investorPendingTotal + d.sebiPendingTotal + d.otherPendingTotal}</span>,
+                      pending3Months: <span className="font-bold">{d.investorPending3Months + d.sebiPending3Months + d.otherPending3Months}</span>,
+                      avgResolutionTime: <span className="font-bold">{Math.round((d.investorAvgResolutionTime + d.sebiAvgResolutionTime + d.otherAvgResolutionTime) / 3)}</span>
+                    }
+                  ];
+
+                  const customStyles = {
+                    table: { style: { backgroundColor: 'transparent' } },
+                    headRow: { style: { backgroundColor: '#1272a2', color: 'white', minHeight: '50px' } },
+                    headCells: { style: { fontSize: '12px', fontWeight: 'bold' } },
+                    cells: { style: { padding: '12px', fontSize: '13px' } },
+                  };
+
+                  return (
+                    <div className="border border-premium-border rounded-xl overflow-hidden">
+                      <DataTable
+                        columns={columns}
+                        data={data}
+                        customStyles={customStyles}
+                        striped
+                        highlightOnHover
+                        noDataComponent={<div className="p-4 text-slate-500">No data available</div>}
+                      />
+                    </div>
+                  );
+                })()}
           </div>
         </div>
       </div>
