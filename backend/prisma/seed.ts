@@ -157,6 +157,30 @@ async function main() {
   });
 
   console.log(`✅ Super Admin created: ${superAdminEmail}`);
+
+  // Create Admin User
+  console.log('Seeding default Admin...');
+  const adminEmail = 'admin@gmail.com';
+  const adminPassword = '123456';
+  const adminPasswordHash = await bcrypt.hash(adminPassword, salt);
+
+  await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      passwordHash: adminPasswordHash
+    },
+    create: {
+      email: adminEmail,
+      firstName: 'System',
+      lastName: 'Admin',
+      mobile: '9999999998',
+      passwordHash: adminPasswordHash,
+      roleId: roleMap['ADMIN'],
+      status: 'ACTIVE'
+    }
+  });
+
+  console.log(`✅ Admin created: ${adminEmail}`);
   console.log('Database Seeding Completed Successfully. Ready for fresh deployment!');
 }
 
