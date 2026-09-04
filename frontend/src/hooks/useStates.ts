@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { base_api_url } from '../utils/config';
 
 export interface State {
   id: string;
@@ -13,9 +14,7 @@ export function useStates() {
   useEffect(() => {
     const fetchStates = async () => {
       try {
-        const baseUrl = (process.env.NODE_ENV as string) === 'production' 
-          ? 'https://compliance.pnpuniverse.in/backend/api/v1' 
-          : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1') + '';
+        const baseUrl = base_api_url;
         
         const response = await fetch(`${baseUrl}/locations/states`);
         const data = await response.json();

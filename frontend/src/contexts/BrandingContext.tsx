@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
+import { base_ra_url } from '../utils/config';
 
 interface BrandingContextType {
   appName: string;
@@ -34,9 +35,7 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (res.data.success && res.data.data) {
 
         // Resolve URLs: paths starting with /uploads/ need the backend base URL
-        const BACKEND = process.env.NODE_ENV === 'production'
-          ? 'https://compliance.pnpuniverse.in/backend'
-          : 'http://localhost:5000';
+        const BACKEND = base_ra_url;
 
         const resolveUrl = (url: string, fallback: string) => {
           if (!url) return fallback;

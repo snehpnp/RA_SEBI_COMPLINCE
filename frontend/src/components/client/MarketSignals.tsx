@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Target, TrendingUp, AlertCircle, Clock, CheckCircle2, XCircle, FileText, Download, Loader2, Bell } from 'lucide-react';
 import api from '../../services/api';
+import { base_ra_url } from '../../utils/config';
 
 export default function MarketSignals() {
   const [activeTab, setActiveTab] = useState<'active' | 'closed'>('active');
@@ -159,7 +160,7 @@ export default function MarketSignals() {
               </button>
               {signal.reportUrl && (
                  <a 
-                   href={`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${signal.reportUrl}`} 
+                   href={`${base_ra_url}${signal.reportUrl}`}
                    target="_blank" 
                    rel="noreferrer"
                    onClick={(e) => e.stopPropagation()}

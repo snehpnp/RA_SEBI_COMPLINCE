@@ -1,10 +1,7 @@
+import { base_api_url } from '../utils/config';
+
 const getApiBaseUrl = () => {
-  if (typeof window !== 'undefined' && window.location.hostname.includes('pnpuniverse.in')) {
-    return 'https://compliance.pnpuniverse.in/backend/api/v1';
-  }
-  return (process.env.NODE_ENV as string) === 'production' 
-    ? 'https://compliance.pnpuniverse.in/backend/api/v1' 
-    : 'http://localhost:5000/api/v1';
+  return base_api_url;
 };
 
 const API_BASE_URL = getApiBaseUrl();

@@ -25,6 +25,7 @@ import { X, Download, Upload, Loader2, Save } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import toast from 'react-hot-toast';
+import { base_api_url, base_ra_url } from '../utils/config';
 
 interface ReportPreviewModalProps {
   signal: any;
@@ -81,7 +82,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
       const formData = new FormData();
       formData.append('report', pdfBlob, fileName);
       
-      const res = await fetch(`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1')}/signals/${signal.id}/report`, {
+      const res = await fetch(`${base_api_url}/signals/${signal.id}/report`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -237,7 +238,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
             <div className="flex justify-between items-start mb-4">
               <div className="w-32 h-12 bg-black flex items-center justify-center rounded">
                  {user?.tenant?.logoUrl ? (
-                    <img src={user.tenant.logoUrl.startsWith('http') ? user.tenant.logoUrl : `${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${user.tenant.logoUrl}`} alt="Logo" className="max-h-10 max-w-[100px] object-contain" />
+                    <img src={user.tenant.logoUrl.startsWith('http') ? user.tenant.logoUrl : `${base_ra_url}${user.tenant.logoUrl}`} alt="Logo" className="max-h-10 max-w-[100px] object-contain" />
                  ) : (
                     <span className="text-white font-bold text-sm px-2 text-center">{user?.tenant?.name || 'StockBox'}</span>
                  )}
@@ -320,7 +321,7 @@ Disclaimer- "Registration granted by SEBI and certification from NISM in no way 
                <div className="mt-4 flex justify-end">
                   <div className="text-center w-40">
                      {user?.tenant?.coSignatureUrl ? (
-                        <img crossOrigin="anonymous" src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000')}${user.tenant.coSignatureUrl}`} alt="Signature" className="h-12 object-contain mx-auto mb-1" />
+                        <img crossOrigin="anonymous" src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${base_ra_url}${user.tenant.coSignatureUrl}`} alt="Signature" className="h-12 object-contain mx-auto mb-1" />
                      ) : (
                         <div className="h-12"></div>
                      )}

@@ -2533,7 +2533,7 @@ function AdminDashboardContent() {
   const handleBulkExport = async (type: string, isZip: boolean) => {
     try {
       setExportLoading(type);
-      const API_URL = (process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : api.getBaseUrl() + '/api/v1';
+      const API_URL = api.getBaseUrl() + '/api/v1';
       let url = `${API_URL}/admin/exports/${type}`;
       if (exportRange === 'date' && exportStartDate && exportEndDate) {
         url += `?range=date&startDate=${exportStartDate}&endDate=${exportEndDate}`;

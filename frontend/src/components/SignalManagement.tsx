@@ -46,6 +46,7 @@ const tableCustomStyles = {
   },
 };
 import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff } from 'lucide-react';
+import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
 
@@ -132,7 +133,7 @@ export default function SignalManagement({
   const [isMobileVisible, setIsMobileVisible] = useState(false);
 
   // Smart download helper — checks if file exists before downloading
-  const BASE_URL = ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000');
+  const BASE_URL = base_ra_url;
   const handleSafeDownload = async (reportUrl: string) => {
     const downloadPath = `${BASE_URL}/api/v1/download?path=${encodeURIComponent(reportUrl)}`;
     try {
@@ -174,7 +175,7 @@ export default function SignalManagement({
     try {
       const formData = new FormData();
       formData.append('coSignature', file);
-      const res = await fetch(((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1') + '/admin/signature', {
+      const res = await fetch(`${base_api_url}/admin/signature`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
@@ -289,7 +290,7 @@ export default function SignalManagement({
     try {
       const formData = new FormData();
       formData.append('report', file);
-      const res = await fetch(`${((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend/api/v1' : ((process.env.NODE_ENV as string) === 'production' ? 'https://compliance.pnpuniverse.in/backend' : 'http://localhost:5000') + '/api/v1')}/signals/${signal.id}/report`, {
+      const res = await fetch(`${base_api_url}/signals/${signal.id}/report`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
