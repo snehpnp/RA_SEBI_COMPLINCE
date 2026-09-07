@@ -80,13 +80,14 @@ const getAdminPages = async (req, res) => {
         ];
         const existingSlugs = new Set(pages.map(p => p.slug));
         const missingPages = mandatoryPagesTemplate.filter(p => !existingSlugs.has(p.slug));
-        if (missingPages.length > 0) {
-            await db_1.default.customPage.createMany({ data: missingPages });
-            pages = await db_1.default.customPage.findMany({
-                where: { tenantId },
-                orderBy: { createdAt: 'asc' }
-            });
-        }
+        // if (missingPages.length > 0) {
+        //   await prisma.customPage.createMany({ data: missingPages as any });
+        //   
+        //   pages = await prisma.customPage.findMany({
+        //     where: { tenantId },
+        //     orderBy: { createdAt: 'asc' }
+        //   });
+        // }
         res.status(200).json({ success: true, data: pages });
     }
     catch (error) {
@@ -150,8 +151,6 @@ const deletePage = async (req, res) => {
         const page = await db_1.default.customPage.findUnique({ where: { id } });
         if (!page || page.tenantId !== tenantId)
             throw new Error('Page not found');
-        if (page.isSystem)
-            throw new Error('Cannot delete a system page');
         await db_1.default.customPage.delete({ where: { id } });
         res.status(200).json({ success: true, message: 'Page deleted successfully' });
     }

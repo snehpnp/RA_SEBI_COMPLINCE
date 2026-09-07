@@ -248,7 +248,7 @@ function AdminDashboardContent() {
     return 'dashboard';
   });
   const activeTabRef = useRef<string>(activeTab);
-  useEffect(() => { 
+  useEffect(() => {
     activeTabRef.current = activeTab;
     if (typeof window !== 'undefined') {
       localStorage.setItem('researcherActiveTab', activeTab);
@@ -2649,8 +2649,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                                ? 'bg-white/20 text-white font-medium'
-                                : 'text-blue-200 hover:text-white hover:bg-white/10'
+                              ? 'bg-white/20 text-white font-medium'
+                              : 'text-blue-200 hover:text-white hover:bg-white/10'
                               }`}
                           >
                             {page.title}

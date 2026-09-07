@@ -7432,7 +7432,7 @@ function AdminDashboardContent() {
                                   {plan.status === 'ACTIVE' && !isDeleted && (
                                     <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#E1F13D] to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                                   )}
-                                  
+
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="pr-4">
                                       <span className="inline-block px-2 py-1 rounded-md bg-primary-50 dark:bg-primary-900/20 text-[10px] font-bold text-primary-700 dark:text-primary-400 tracking-wider mb-2">{plan.category?.name || 'UNCATEGORIZED'}</span>
@@ -7445,23 +7445,23 @@ function AdminDashboardContent() {
                                       </span>
                                     </div>
                                   </div>
-                                  
+
                                   <div className="flex items-center space-x-2 mb-4">
                                     <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${isDeleted ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                                       {isDeleted ? 'DELETED' : plan.status}
                                     </span>
                                   </div>
-                                  
+
                                   <div className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: plan.description }} />
-                                  
+
                                   <div className="space-y-3 mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700/50">
                                     <div className="flex justify-between items-center">
-                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</span> 
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</span>
                                       <strong className="text-sm text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong>
                                     </div>
                                     <div className="h-px w-full bg-slate-200 dark:bg-slate-700/50"></div>
                                     <div className="flex justify-between items-start">
-                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium pt-0.5">Segments</span> 
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium pt-0.5">Segments</span>
                                       <div className="flex flex-wrap justify-end gap-1 ml-4">
                                         {(plan.researchSegments || '').split(',').map((seg: string, idx: number) => (
                                           <span key={idx} className="text-[10px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 rounded text-emerald-700 dark:text-emerald-400 font-bold">{seg.trim()}</span>
@@ -7469,7 +7469,7 @@ function AdminDashboardContent() {
                                       </div>
                                     </div>
                                   </div>
-                                  
+
                                   <div className="flex space-x-3 mt-auto pt-2">
                                     {!isDeleted ? (
                                       <>

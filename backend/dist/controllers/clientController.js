@@ -1,22 +1,22 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function (o, m, k, k2) {
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
     if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: function () { return m[k]; } };
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
     Object.defineProperty(o, k2, desc);
-}) : (function (o, m, k, k2) {
+}) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
 }));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function (o, v) {
+}) : function(o, v) {
     o["default"] = v;
 });
 var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function (o) {
+    var ownKeys = function(o) {
         ownKeys = Object.getOwnPropertyNames || function (o) {
             var ar = [];
             for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
@@ -36,11 +36,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.registerClient = void 0;
+exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const auditService_1 = require("../services/auditService");
 const emailService_1 = require("../services/emailService");
+const digioService_1 = require("../services/digioService");
 const registerClient = async (req, res) => {
     const { tenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode } = req.body;
     if (!tenantId || !name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
@@ -195,6 +196,31 @@ const registerClient = async (req, res) => {
     }
 };
 exports.registerClient = registerClient;
+const initiateDigioKyc = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const client = await db_1.default.client.findFirst({ where: { userId: req.user.id } });
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client not found.' });
+        }
+        const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
+        if (!tenant?.digioClientId || !tenant?.digioClientSecret || !tenant?.digioKycTemplateName) {
+            return res.status(400).json({ success: false, message: 'Digio KYC is not configured for this tenant.' });
+        }
+        const customerIdentifier = client.email; // Digio uses email or mobile as identifier
+        const customerName = client.name || 'Client';
+        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName, customerIdentifier, customerName);
+        return res.status(200).json({
+            success: true,
+            message: 'Digio KYC request initiated',
+            data: digioResponse
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, errors: [error.message] });
+    }
+};
+exports.initiateDigioKyc = initiateDigioKyc;
 const verifyKRA = async (req, res) => {
     const { pan, aadhaar, statusInput } = req.body; // statusInput: 'SUCCESS' or 'FAIL' to simulate KRA result
     const tenantId = req.user.tenantId;
@@ -668,7 +694,7 @@ const getClientProfile = async (req, res) => {
 exports.getClientProfile = getClientProfile;
 const updateClientProfile = async (req, res) => {
     try {
-        const { pan, aadhaar, name, email, phone, address } = req.body;
+        const { pan, aadhaar, name, email, mobile, dob, address } = req.body;
         const userId = req.user.id;
         const client = await db_1.default.client.findFirst({ where: { userId } });
         if (!client) {
@@ -683,17 +709,18 @@ const updateClientProfile = async (req, res) => {
                     ...(aadhaar !== undefined && { aadhaar }),
                     ...(name && { name }),
                     ...(email && { email }),
-                    ...(phone && { mobile: phone })
+                    ...(mobile && { mobile }),
+                    ...(dob && { dob: new Date(dob) })
                 }
             });
             // Update User table if basic info changed
-            if (name || email || phone) {
+            if (name || email || mobile) {
                 await tx.user.update({
                     where: { id: userId },
                     data: {
                         ...(name && { firstName: name.split(' ')[0], lastName: name.split(' ').slice(1).join(' ') || 'Client' }),
                         ...(email && { email }),
-                        ...(phone && { mobile: phone })
+                        ...(mobile && { mobile })
                     }
                 });
             }
@@ -853,7 +880,6 @@ const initiateRazorpayPayment = async (req, res) => {
 };
 exports.initiateRazorpayPayment = initiateRazorpayPayment;
 const verifyRazorpayPayment = async (req, res) => {
-   
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature, planId, couponCode } = req.body;
     try {
         const client = await db_1.default.client.findUnique({
@@ -916,8 +942,6 @@ const verifyRazorpayPayment = async (req, res) => {
                 status: 'SUCCESS'
             }
         });
-
-
         const existingSub = await db_1.default.subscription.findFirst({
             where: { clientId: client.id, planId, status: 'ACTIVE', endDate: { gt: new Date() } },
             orderBy: { endDate: 'desc' }
@@ -934,7 +958,6 @@ const verifyRazorpayPayment = async (req, res) => {
             data: { status: 'ACTIVE' }
         });
         return res.status(200).json({ success: true, message: 'Payment verified successfully' });
-
     }
     catch (error) {
         console.error('Razorpay Verify Error:', error);

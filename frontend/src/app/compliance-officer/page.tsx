@@ -294,7 +294,7 @@ function AdminDashboardContent() {
     return 'dashboard';
   });
   const activeTabRef = useRef<string>(activeTab);
-  useEffect(() => { 
+  useEffect(() => {
     activeTabRef.current = activeTab;
     if (typeof window !== 'undefined') {
       localStorage.setItem('complianceOfficerActiveTab', activeTab);
@@ -2530,8 +2530,8 @@ function AdminDashboardContent() {
           }
         }}
         className={`p-3.5 rounded-xl border transition flex items-start space-x-3 cursor-pointer ${isChecked
-            ? 'bg-primary-500/5 border-primary-500/20'
-            : 'bg-slate-100 dark:bg-slate-950/20 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'
+          ? 'bg-primary-500/5 border-primary-500/20'
+          : 'bg-slate-100 dark:bg-slate-950/20 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'
           } ${effectivelyDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
       >
         <input
@@ -2697,8 +2697,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                                ? 'bg-premium-primary/10 text-premium-primary font-medium'
-                                : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                              ? 'bg-premium-primary/10 text-premium-primary font-medium'
+                              : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
                               }`}
                           >
                             {page.title}
@@ -2727,8 +2727,8 @@ function AdminDashboardContent() {
                     setIsMobileMenuOpen(false);
                   }}
                   className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                      ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                      : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
+                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
                     } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                   title={isSidebarCollapsed ? mod.label : undefined}
                 >
@@ -2745,8 +2745,8 @@ function AdminDashboardContent() {
               <button
                 onClick={() => { setActiveTab('legalView'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${activeTab === 'legalView'
-                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                  ? 'bg-premium-primary/10 text-premium-primary font-semibold'
+                  : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                 title={isSidebarCollapsed ? "Legal & Disclosures" : undefined}
               >
@@ -5264,8 +5264,8 @@ function AdminDashboardContent() {
                                     {pageData.length > 0 ? pageData.map((item: any) => (
                                       <div key={item.id} className="p-4 bg-white dark:bg-slate-900/40 border border-slate-300 dark:border-white/5 rounded-xl flex items-start gap-4 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                         <div className={`p-2 rounded-lg mt-1 shrink-0 ${item.type === 'ALERT_RESOLVED' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                                            item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
-                                              'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                          item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
+                                            'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                           }`}>
                                           {item.type === 'ALERT_RESOLVED' && <AlertTriangle className="h-4 w-4" />}
                                           {item.type === 'PENALTY_PAID' && <FileText className="h-4 w-4" />}
@@ -5759,10 +5759,10 @@ function AdminDashboardContent() {
                                               <div className="flex flex-col gap-1.5 items-start">
                                                 {/* KRA Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                                    : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                      : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
+                                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                                                  : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
+                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                    : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
                                                   }`}>
                                                   KRA: {
                                                     cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
@@ -5774,8 +5774,8 @@ function AdminDashboardContent() {
                                                 </span>
                                                 {/* eSign Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
-                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                                                   }`}>
                                                   eSign: {cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
                                                 </span>
@@ -7001,8 +7001,8 @@ function AdminDashboardContent() {
                                               <p className="text-xs text-slate-500 mt-1">To: {log.recipient} • {new Date(log.createdAt).toLocaleString()}</p>
                                             </div>
                                             <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${log.status === 'SENT' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                                                log.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                              log.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                                               }`}>
                                               {log.status}
                                             </span>

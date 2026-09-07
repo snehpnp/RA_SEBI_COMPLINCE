@@ -18,8 +18,9 @@ const initiateKyc = async (req, res) => {
         }
         // Usually Digio uses the PAN or Phone/Email as identifier. 
         // For Digilocker KYC, customer_identifier is usually email or phone.
-        const identifier = req.user.email;
-        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName || 'DIGILOCKER_KYC', identifier, `${client.user.firstName} ${client.user.lastName}`);
+        const identifier = client.email || req.user.email;
+        const customerName = client.name || `${client.user.firstName} ${client.user.lastName}`.trim() || 'Client';
+        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName || 'DIGILOCKER_KYC', identifier, customerName);
         res.json({
             success: true,
             data: digioResponse

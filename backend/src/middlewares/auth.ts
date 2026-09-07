@@ -77,15 +77,15 @@ export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: 
               return res.status(403).json({
                 success: false,
                 message: 'Your organization account has been deleted.',
-                errors: ['User inactive or suspended']
+                errors: ['User inactive or suspended', 'Tenant deleted']
               });
             }
 
-            if (tenantStatus === 'SUSPENDED' && user.role.name !== 'CLIENT') {
+            if (tenantStatus === 'SUSPENDED') {
               return res.status(403).json({
                 success: false,
                 message: 'Your organization account is suspended. Please contact super admin.',
-                errors: ['User inactive or suspended']
+                errors: ['User inactive or suspended', 'Tenant suspended']
               });
             }
           }

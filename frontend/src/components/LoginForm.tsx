@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, Handshake, CheckCircle2, Shield } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, Handshake, CheckCircle2, Shield, ShieldAlert, AlertTriangle } from 'lucide-react';
 import api from '../services/api';
 import { useBranding } from '@/contexts/BrandingContext';
 
@@ -21,6 +21,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
   const [inactivePopup, setInactivePopup] = useState(false);
+  const [suspendedPopup, setSuspendedPopup] = useState(false);
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [tenantName, setTenantName] = useState('RAGCP');
   const [tenantLogo, setTenantLogo] = useState<string | null>(null);
@@ -46,7 +47,9 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
 
   useEffect(() => {
     const errorParam = searchParams.get('error');
-    if (errorParam === 'inactive') {
+    if (errorParam === 'suspended') {
+      setSuspendedPopup(true);
+    } else if (errorParam === 'inactive') {
       setInactivePopup(true);
     } else if (errorParam === 'expired') {
       setError('Session expired. Please log in again.');
@@ -292,6 +295,30 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
             <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden relative shadow-inner">
               <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-indigo-600 dark:from-blue-400 dark:to-indigo-500 h-full rounded-full animate-[progress_6s_ease-in-out_infinite]" />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Suspended Organization Popup ── */}
+      {suspendedPopup && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl border border-rose-500/30 overflow-hidden shadow-2xl text-center p-6 sm:p-8">
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-500 flex items-center justify-center mx-auto mb-4">
+              <ShieldAlert className="w-9 h-9 text-rose-600 dark:text-rose-500" />
+            </div>
+            <h3 className="text-xl font-extrabold text-slate-900 dark:text-white mb-2 tracking-tight">Company Panel Suspended</h3>
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed mb-6">
+              This organization&apos;s portal has been temporarily <strong>suspended by Super Admin</strong>. Access to all administrative tools, staff accounts, and client services is currently blocked.
+            </p>
+            <div className="bg-rose-50 dark:bg-rose-500/5 border border-rose-200 dark:border-rose-500/10 rounded-xl p-3 mb-6 text-xs text-rose-700 dark:text-rose-400 font-medium">
+              Please contact Super Admin Compliance Support to reactivate your entity.
+            </div>
+            <button
+              onClick={() => setSuspendedPopup(false)}
+              className="w-full py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs sm:text-sm transition-colors shadow-lg shadow-rose-500/20"
+            >
+              Acknowledge & Dismiss
+            </button>
           </div>
         </div>
       )}

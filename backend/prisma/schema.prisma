@@ -79,12 +79,20 @@ model Tenant {
   privacyPdfUrl       String?
   reportDisclaimer    String?
 
+  // Domain, Database & Custom Portal Configuration
+  panelName           String?
+  domainUrl           String?
+  mongoDbUrl          String?
+  dbName              String?
+  tenantApiKey        String?
+
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   deletedAt           DateTime?
 
   // Relations
   users                  User[]
+  adminPermissions       AdminPermission[]
   categories             PlanCategory[]
   plans                  Plan[]
   researchReports        ResearchReport[]
@@ -785,4 +793,25 @@ model SystemSetting {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.ObjectId
 }
+
+model AdminPermission {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId     String   @db.ObjectId
+  module       String   // CLIENTS, RESEARCH_REPORTS, SIGNALS, COMPLIANCE, BILLING, KYC, COUPONS, CUSTOM_PAGES, AI_FEATURES, EXPORT_DATA
+  canView      Boolean  @default(true)
+  canCreate    Boolean  @default(true)
+  canEdit      Boolean  @default(true)
+  canDelete    Boolean  @default(true)
+  canExport    Boolean  @default(true)
+  isEnabled    Boolean  @default(true)
+  customLimits String?  // JSON string
+  updatedBy    String?  @db.ObjectId
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, module])
+}
+
 

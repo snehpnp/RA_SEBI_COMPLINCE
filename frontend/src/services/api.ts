@@ -39,7 +39,7 @@ class ApiClient {
 
   async request(endpoint: string, options: RequestInit = {}) {
     const headers = this.getHeaders((options.headers as Record<string, string>) || {});
-    
+
     // Check if body is FormData (e.g. file upload), then let browser set boundary header
     const isFormData = options.body instanceof FormData;
     if (isFormData && headers instanceof Object) {
@@ -55,32 +55,43 @@ class ApiClient {
     if (response.status === 401 || response.status === 403) {
       const clone = response.clone();
       const data = await clone.json().catch(() => ({}));
-      
-      const isAuthError = response.status === 401 || 
-        (response.status === 403 && (data.errors?.includes('User inactive or suspended') || data.errors?.includes('User inactive')));
+
+      const isAuthError = response.status === 401 ||
+        (response.status === 403 && (
+          data.errors?.includes('User inactive or suspended') ||
+          data.errors?.includes('User inactive') ||
+          data.errors?.includes('Tenant suspended') ||
+          data.errors?.includes('User suspended') ||
+          (data.message && data.message.toLowerCase().includes('suspended'))
+        ));
 
       if (isAuthError && !endpoint.includes('/auth/login')) {
         if (typeof window !== 'undefined') {
-          if ((window as any).__isRedirecting) return new Promise(() => {});
+          if ((window as any).__isRedirecting) return new Promise(() => { });
           (window as any).__isRedirecting = true;
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
           localStorage.removeItem('user');
           localStorage.removeItem('tenantId');
-          
+
           let loginPath = '/admin/login';
           const currentPath = window.location.pathname;
           if (currentPath.startsWith('/client')) {
             loginPath = '/client-login';
           }
-          
-          if (response.status === 403) {
+
+          const isSuspended = (data.errors && (data.errors.includes('Tenant suspended') || data.errors.includes('User suspended'))) ||
+            (data.message && data.message.toLowerCase().includes('suspended'));
+
+          if (isSuspended) {
+            window.location.href = `${loginPath}?error=suspended`;
+          } else if (response.status === 403) {
             window.location.href = `${loginPath}?error=inactive`;
           } else {
             window.location.href = `${loginPath}?error=expired`;
           }
         }
-        return new Promise(() => {}); // Never resolve to prevent multiple alerts from component catch blocks
+        return new Promise(() => { }); // Never resolve to prevent multiple alerts from component catch blocks
       }
     }
 
@@ -178,6 +189,10 @@ class ApiClient {
     return this.request(`/super-admin/tenants/${id}/documents`);
   }
 
+  async getTenantClients(id: string) {
+    return this.request(`/super-admin/tenants/${id}/clients`);
+  }
+
   async createTenant(formData: FormData) {
     return this.request('/super-admin/tenants', {
       method: 'POST',
@@ -196,6 +211,19 @@ class ApiClient {
     return this.request(`/super-admin/tenants/${id}/status`, {
       method: 'POST',
       body: JSON.stringify({ status })
+    });
+  }
+
+  async provisionTenantDb(id: string) {
+    return this.request(`/super-admin/tenants/${id}/provision-db`, {
+      method: 'POST'
+    });
+  }
+
+  async syncTenantApi(id: string, targetUrl?: string) {
+    return this.request(`/super-admin/tenants/${id}/sync-api`, {
+      method: 'POST',
+      body: JSON.stringify({ targetUrl })
     });
   }
 
@@ -255,7 +283,7 @@ class ApiClient {
       const { nismFile, ...restData } = data;
       formData.append('data', JSON.stringify(restData));
       formData.append('nismFile', nismFile);
-      
+
       return this.request('/admin/profile-wizard', {
         method: 'POST',
         body: formData

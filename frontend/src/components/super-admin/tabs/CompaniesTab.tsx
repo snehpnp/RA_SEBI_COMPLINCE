@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, Plus, Download, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, Key, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, Download, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, Key, ChevronLeft, ChevronRight, Users, Globe } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
 interface CompaniesTabProps {
@@ -14,6 +14,7 @@ interface CompaniesTabProps {
   setCurrentPageCompanies: (val: number | ((prev: number) => number)) => void;
   openViewModal: (id: string) => void;
   openEditModal: (id: string) => void;
+  openClientsModal?: (comp: any) => void;
   openConfirmModal: (action: string, id: string) => void;
   handleImpersonate: (id: string) => void;
   setIsAddCompanyModalOpen: (val: boolean) => void;
@@ -24,7 +25,7 @@ interface CompaniesTabProps {
 
 export default function CompaniesTab({
   companies, filteredCompanies, searchQuery, setSearchQuery, itemsPerPage, setItemsPerPage,
-  currentPageCompanies, setCurrentPageCompanies, openViewModal, openEditModal,
+  currentPageCompanies, setCurrentPageCompanies, openViewModal, openEditModal, openClientsModal,
   openConfirmModal, handleImpersonate, setIsAddCompanyModalOpen, setFormSuccess,
   setFormError, setNewCreds
 }: CompaniesTabProps) {
@@ -77,7 +78,7 @@ export default function CompaniesTab({
           </button>
         </div>
       </div>
-      
+
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-white/10 overflow-hidden shadow-sm">
         <Table>
           <TableHeader>
@@ -98,8 +99,23 @@ export default function CompaniesTab({
                   {(currentPageCompanies - 1) * itemsPerPage + index + 1}
                 </TableCell>
                 <TableCell>
-                  <span className="font-bold text-slate-900 dark:text-white block">{comp.companyName}</span>
-                  <span className="text-xs text-slate-500">{comp.email}</span>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => openClientsModal && openClientsModal(comp)}
+                      className="font-bold text-slate-900 dark:text-white hover:text-primary-600 dark:hover:text-primary-400 text-left transition-colors"
+                      title="Click to view company clients"
+                    >
+                      {comp.companyName}
+                    </button>
+                    {(comp.domainUrl || comp.website) && (
+                      <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-primary-500/10 text-primary-600 dark:text-primary-400 border border-primary-500/20" title={comp.domainUrl || comp.website}>
+                        <Globe className="h-2.5 w-2.5" />
+                        <span className="max-w-[100px] truncate">{(comp.domainUrl || comp.website).replace(/^https?:\/\//, '')}</span>
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-500 block">{comp.email}</span>
                 </TableCell>
                 <TableCell className="font-mono text-slate-600 dark:text-slate-400 text-xs">{comp.sebiRegistration}</TableCell>
                 <TableCell>
@@ -117,7 +133,8 @@ export default function CompaniesTab({
                 <TableCell className="text-right space-x-2">
                   {comp.status !== 'DELETED' ? (
                     <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => openViewModal(comp.id)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all" title="View"><Eye className="h-[18px] w-[18px]" /></button>
+                      <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
+                      <button onClick={() => openViewModal(comp.id)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all" title="View Details"><Eye className="h-[18px] w-[18px]" /></button>
                       <button onClick={() => openEditModal(comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Edit"><Edit className="h-[18px] w-[18px]" /></button>
                       {comp.status === 'ACTIVE' ? (
                         <button onClick={() => openConfirmModal('SUSPEND', comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Suspend"><Power className="h-[18px] w-[18px]" /></button>
@@ -129,6 +146,7 @@ export default function CompaniesTab({
                     </div>
                   ) : (
                     <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
                       <button onClick={() => openConfirmModal('RESTORE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Restore"><RotateCcw className="h-[18px] w-[18px]" /></button>
                       <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
                       <button onClick={() => openConfirmModal('PERMANENT_DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Permanent Delete"><Trash2 className="h-[18px] w-[18px] text-rose-500" /></button>

@@ -17,6 +17,7 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const api_1 = __importDefault(require("./routes/api"));
 const db_1 = __importDefault(require("./config/db"));
 const cronService_1 = require("./services/cronService");
+const third_party_api_1 = require("./third-party-api");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
 // Security Middlewares
@@ -33,6 +34,8 @@ app.use(express_1.default.urlencoded({ extended: true }));
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../../uploads')));
 // Routes mapping
 app.use('/api/v1', api_1.default);
+app.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
+app.get('/clients', third_party_api_1.getThirdPartyClients);
 // Health check endpoint
 app.get('/health', async (req, res) => {
     try {

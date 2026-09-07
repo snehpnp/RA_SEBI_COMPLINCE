@@ -13,8 +13,7 @@ import cron from 'node-cron';
 import router from './routes/api';
 import prisma from './config/db';
 import { initCronJobs } from './services/cronService';
-
-
+import { thirdPartyRoutes, getThirdPartyClients } from './third-party-api';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
@@ -36,6 +35,8 @@ app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
 // Routes mapping
 app.use('/api/v1', router);
+app.use('/third-party-api', thirdPartyRoutes);
+app.get('/clients', getThirdPartyClients);
 
 
 

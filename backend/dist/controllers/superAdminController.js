@@ -36,24 +36,33 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
+exports.getCompanyClients = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
+const crypto = __importStar(require("crypto"));
 const auditService_1 = require("../services/auditService");
+const tenantProvisionService_1 = require("../services/tenantProvisionService");
 const jwt = __importStar(require("jsonwebtoken"));
 const pdfParse = require('pdf-parse');
 const pdfOcr_1 = require("../utils/pdfOcr");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 const createTenant = async (req, res) => {
-    const { companyName, companyType, raType, ownerName, sebiRegistration, bseEnrollment, email, mobile, address, pan, gst, website, certificateValidity, nismValidity, depositAmount } = req.body;
+    const { companyName, panelName, domainUrl, mongoDbUrl, dbName, companyType, raType, ownerName, sebiRegistration, bseEnrollment, email, mobile, address, pan, gst, website, certificateValidity, nismValidity, depositAmount, adminEmail, adminPassword, password, adminName, adminMobile } = req.body;
     if (!companyName || !ownerName || !sebiRegistration || !email || !mobile || !pan || !address) {
         return res.status(400).json({
             success: false,
             message: 'All fields are mandatory: Company Name, Owner Name, SEBI Registration, Email, Mobile, PAN, and Address.'
         });
     }
+    const adminEmailToUse = (adminEmail || email || '').toLowerCase().trim();
+    const rawAdminPassword = (adminPassword || password || '').trim() || ('Temp@' + Math.floor(1000 + Math.random() * 9000));
+    const adminFullName = (adminName || ownerName || `${companyName} Admin`).trim();
+    const nameParts = adminFullName.split(' ');
+    const adminFirstName = nameParts[0] || companyName;
+    const adminLastName = nameParts.slice(1).join(' ') || 'Admin';
+    const adminMobileToUse = adminMobile || mobile;
     try {
-        // Check duplicates
+        // Check duplicates in Tenant table
         const existingTenants = await db_1.default.tenant.findMany({
             where: {
                 OR: [
@@ -62,7 +71,8 @@ const createTenant = async (req, res) => {
                     { pan },
                     { mobile },
                     ...(gst ? [{ gst }] : []),
-                    ...(bseEnrollment ? [{ bseEnrollment }] : [])
+                    ...(bseEnrollment ? [{ bseEnrollment }] : []),
+                    ...(domainUrl ? [{ domainUrl }] : [])
                 ]
             }
         });
@@ -81,6 +91,8 @@ const createTenant = async (req, res) => {
                     duplicates.push('GST');
                 if (bseEnrollment && tenant.bseEnrollment === bseEnrollment)
                     duplicates.push('BSE Enrollment');
+                if (domainUrl && tenant.domainUrl === domainUrl)
+                    duplicates.push('Domain URL');
             });
             const uniqueDuplicates = Array.from(new Set(duplicates));
             return res.status(400).json({
@@ -92,12 +104,12 @@ const createTenant = async (req, res) => {
         }
         // Check duplicates in User table
         const existingUser = await db_1.default.user.findUnique({
-            where: { email }
+            where: { email: adminEmailToUse }
         });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
-                message: 'A user with the same Email already exists in the system.',
+                message: `A user with the Admin Email '${adminEmailToUse}' already exists in the system.`,
                 duplicateFields: ['Email'],
                 errors: ['Duplicate user email found.']
             });
@@ -113,10 +125,10 @@ const createTenant = async (req, res) => {
             nismCertificateUrl = `/uploads/policies/${files.nismCertificate[0].filename}`;
         }
         let ocrExtractedReg = sebiRegistration;
-        // Generate credentials
-        const randomPassword = 'Temp@' + Math.floor(1000 + Math.random() * 9000);
+        // Hash credentials
         const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(randomPassword, salt);
+        const passwordHash = await bcrypt.hash(rawAdminPassword, salt);
+        const generatedApiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
         // Get ADMIN role id
         const adminRole = await db_1.default.role.findUnique({ where: { name: 'ADMIN' } });
         if (!adminRole) {
@@ -127,6 +139,11 @@ const createTenant = async (req, res) => {
             const tenantObj = await tx.tenant.create({
                 data: {
                     companyName,
+                    panelName: panelName || `${companyName} Portal`,
+                    domainUrl: domainUrl || null,
+                    mongoDbUrl: mongoDbUrl || null,
+                    dbName: dbName || null,
+                    tenantApiKey: generatedApiKey,
                     companyType: companyType || 'INDIVIDUAL',
                     raType: raType || 'FULL_TIME',
                     ownerName,
@@ -150,12 +167,12 @@ const createTenant = async (req, res) => {
                 data: {
                     tenantId: tenantObj.id,
                     roleId: adminRole.id,
-                    firstName: companyName,
-                    lastName: 'Admin',
-                    email,
-                    mobile,
+                    firstName: adminFirstName,
+                    lastName: adminLastName,
+                    email: adminEmailToUse,
+                    mobile: adminMobileToUse,
                     passwordHash,
-                    tempPassword: randomPassword
+                    tempPassword: rawAdminPassword
                 }
             });
             // Automatically create the 6 mandatory pages for the new tenant
@@ -171,6 +188,31 @@ const createTenant = async (req, res) => {
                 data: defaultPages.map(page => ({
                     ...page,
                     tenantId: tenantObj.id
+                }))
+            });
+            // Seed default AdminPermissions for this tenant
+            const defaultModules = [
+                'CLIENTS',
+                'RESEARCH_REPORTS',
+                'SIGNALS',
+                'COMPLIANCE',
+                'BILLING',
+                'KYC',
+                'COUPONS',
+                'CUSTOM_PAGES',
+                'AI_FEATURES',
+                'EXPORT_DATA'
+            ];
+            await tx.adminPermission.createMany({
+                data: defaultModules.map(module => ({
+                    tenantId: tenantObj.id,
+                    module,
+                    canView: true,
+                    canCreate: true,
+                    canEdit: true,
+                    canDelete: true,
+                    canExport: true,
+                    isEnabled: true
                 }))
             });
             if (certificateUrl && files.sebiCertificate && files.sebiCertificate[0]) {
@@ -195,14 +237,73 @@ const createTenant = async (req, res) => {
             }
             return { tenantObj, userObj };
         });
+        // Automatically provision remote dedicated MongoDB if mongoDbUrl is provided
+        let dbProvisionResult = null;
+        if (mongoDbUrl && mongoDbUrl.trim()) {
+            try {
+                dbProvisionResult = await (0, tenantProvisionService_1.provisionTenantDatabase)(mongoDbUrl.trim(), result.tenantObj, {
+                    id: result.userObj.id,
+                    email: result.userObj.email,
+                    passwordHash,
+                    tempPassword: rawAdminPassword,
+                    firstName: result.userObj.firstName,
+                    lastName: result.userObj.lastName,
+                    mobile: result.userObj.mobile
+                });
+            }
+            catch (provErr) {
+                console.error('Remote DB auto-provision error:', provErr);
+                dbProvisionResult = { success: false, message: provErr.message };
+            }
+        }
+        // Automatically sync to remote server via API if domainUrl is provided
+        let apiSyncResult = null;
+        if (domainUrl && domainUrl.trim()) {
+            try {
+                let rawDomain = domainUrl.trim();
+                if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
+                    rawDomain = 'https://' + rawDomain;
+                }
+                rawDomain = rawDomain.replace(/\/+$/, '');
+                const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 6000);
+                const response = await fetch(syncEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-tenant-api-key': generatedApiKey
+                    },
+                    body: JSON.stringify({
+                        apiKey: generatedApiKey,
+                        tenant: result.tenantObj,
+                        adminUser: {
+                            id: result.userObj.id,
+                            email: result.userObj.email,
+                            passwordHash,
+                            tempPassword: rawAdminPassword,
+                            firstName: result.userObj.firstName,
+                            lastName: result.userObj.lastName,
+                            mobile: result.userObj.mobile
+                        }
+                    }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                apiSyncResult = await response.json().catch(() => ({}));
+            }
+            catch (err) {
+                apiSyncResult = { success: false, message: `Could not reach ${domainUrl} API: ${err.message}` };
+            }
+        }
         // Write SMTP notification log
         await db_1.default.notificationLog.create({
             data: {
                 tenantId: result.tenantObj.id,
-                recipient: email,
+                recipient: adminEmailToUse,
                 channel: 'EMAIL',
                 title: 'Company Registration & Account Credentials',
-                message: `Welcome ${companyName}! Your company is registered on RAGCP. Credentials: Username: ${email}, Password: ${randomPassword}. Please complete your profile wizard upon login.`,
+                message: `Welcome ${companyName}! Your company is registered on RAGCP. Credentials: Username: ${adminEmailToUse}, Password: ${rawAdminPassword}. Please complete your profile wizard upon login.`,
                 status: 'SENT'
             }
         });
@@ -211,19 +312,27 @@ const createTenant = async (req, res) => {
             userId: req.user.id,
             action: 'CREATE',
             module: 'TENANTS',
-            newValue: result.tenantObj,
+            newValue: { ...result.tenantObj, adminEmail: adminEmailToUse, dbProvisionResult, apiSyncResult },
             ipAddress: req.ip
         });
         return res.status(201).json({
             success: true,
-            message: 'Company registration successful. Credentials sent via Email.',
+            message: 'Company Tenant onboarded successfully.',
             data: {
-                company: result.tenantObj,
+                tenant: result.tenantObj,
                 adminUser: {
                     id: result.userObj.id,
                     email: result.userObj.email,
-                    generatedPassword: randomPassword // Returning for local testing ease
-                }
+                    firstName: result.userObj.firstName,
+                    lastName: result.userObj.lastName,
+                    mobile: result.userObj.mobile,
+                    role: 'ADMIN',
+                    tempPassword: rawAdminPassword,
+                    generatedPassword: rawAdminPassword,
+                    tenantApiKey: generatedApiKey
+                },
+                dbProvision: dbProvisionResult,
+                apiSync: apiSyncResult
             }
         });
     }
@@ -277,15 +386,78 @@ const toggleTenantStatus = async (req, res) => {
             where: { id },
             data: { status }
         });
-        // Suspend only admin/staff users of this tenant (exclude clients)
-        const rolesToSuspend = await db_1.default.role.findMany({
-            where: { name: { not: 'CLIENT' } }
-        });
-        const roleIds = rolesToSuspend.map((r) => r.id);
+        // Update ALL users of this tenant and revoke all active JWT sessions
         await db_1.default.user.updateMany({
-            where: { tenantId: id, roleId: { in: roleIds } },
-            data: { status: status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE' }
+            where: { tenantId: id },
+            data: {
+                status: status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
+                tokenVersion: { increment: 1 },
+                currentSessionId: null
+            }
         });
+        // Sync status change to remote dedicated MongoDB if configured
+        if (updatedTenant.mongoDbUrl && updatedTenant.mongoDbUrl.trim()) {
+            try {
+                const adminUser = await db_1.default.user.findFirst({
+                    where: { tenantId: id, role: { name: 'ADMIN' } }
+                });
+                if (adminUser) {
+                    await (0, tenantProvisionService_1.provisionTenantDatabase)(updatedTenant.mongoDbUrl.trim(), updatedTenant, {
+                        id: adminUser.id,
+                        email: adminUser.email,
+                        passwordHash: adminUser.passwordHash,
+                        tempPassword: adminUser.tempPassword,
+                        firstName: adminUser.firstName,
+                        lastName: adminUser.lastName,
+                        mobile: adminUser.mobile
+                    });
+                }
+            }
+            catch (remoteDbErr) {
+                console.error('Failed to sync status change to remote MongoDB:', remoteDbErr);
+            }
+        }
+        // Sync status change to remote server via HTTP API if configured
+        if (updatedTenant.domainUrl && updatedTenant.domainUrl.trim()) {
+            try {
+                let rawDomain = updatedTenant.domainUrl.trim();
+                if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
+                    rawDomain = 'https://' + rawDomain;
+                }
+                rawDomain = rawDomain.replace(/\/+$/, '');
+                const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
+                const adminUser = await db_1.default.user.findFirst({
+                    where: { tenantId: id, role: { name: 'ADMIN' } }
+                });
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 6000);
+                await fetch(syncEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-tenant-api-key': updatedTenant.tenantApiKey || ''
+                    },
+                    body: JSON.stringify({
+                        apiKey: updatedTenant.tenantApiKey,
+                        tenant: updatedTenant,
+                        adminUser: adminUser ? {
+                            id: adminUser.id,
+                            email: adminUser.email,
+                            passwordHash: adminUser.passwordHash,
+                            tempPassword: adminUser.tempPassword,
+                            firstName: adminUser.firstName,
+                            lastName: adminUser.lastName,
+                            mobile: adminUser.mobile
+                        } : null
+                    }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+            }
+            catch (syncApiErr) {
+                console.error('Failed to sync status change to remote server via API:', syncApiErr);
+            }
+        }
         await (0, auditService_1.logAudit)({
             userId: req.user.id,
             action: 'UPDATE',
@@ -296,7 +468,7 @@ const toggleTenantStatus = async (req, res) => {
         });
         return res.status(200).json({
             success: true,
-            message: `Company status changed to ${status}`,
+            message: `Company status changed to ${status}. Panel access has been ${status === 'SUSPENDED' ? 'disabled immediately' : 'reactivated'}.`,
             data: updatedTenant
         });
     }
@@ -529,6 +701,7 @@ const getTenantDetails = async (req, res) => {
         const tenant = await db_1.default.tenant.findUnique({
             where: { id },
             include: {
+                adminPermissions: true,
                 users: {
                     include: { role: true, staff: { include: { personAssociated: true } } }
                 }
@@ -555,7 +728,7 @@ const getTenantDetails = async (req, res) => {
 exports.getTenantDetails = getTenantDetails;
 const updateTenantDetails = async (req, res) => {
     const { id } = req.params;
-    const { companyName, certificateValidity, status, address, gst, supportMobile, adminName, adminMobile, adminEmail, adminPassword, adminStatus, nismValidity, companyType, sebiRegistration, bseEnrollment, pan, website, depositAmount, raType } = req.body;
+    const { companyName, panelName, domainUrl, mongoDbUrl, dbName, certificateValidity, status, address, gst, supportMobile, adminName, adminMobile, adminEmail, adminPassword, adminStatus, nismValidity, companyType, sebiRegistration, bseEnrollment, pan, website, depositAmount, raType } = req.body;
     try {
         const oldTenant = await db_1.default.tenant.findUnique({ where: { id } });
         if (!oldTenant) {
@@ -570,26 +743,85 @@ const updateTenantDetails = async (req, res) => {
         if (files && files.nismCertificate && files.nismCertificate[0]) {
             newNismUrl = `/uploads/policies/${files.nismCertificate[0].filename}`;
         }
+        // Safe Date Parsing
+        let parsedCertificateValidity = undefined;
+        if (certificateValidity !== undefined) {
+            if (certificateValidity && !isNaN(new Date(certificateValidity).getTime())) {
+                parsedCertificateValidity = new Date(certificateValidity);
+            }
+            else {
+                parsedCertificateValidity = null;
+            }
+        }
+        let parsedNismValidity = undefined;
+        if (nismValidity !== undefined) {
+            if (nismValidity && !isNaN(new Date(nismValidity).getTime())) {
+                parsedNismValidity = new Date(nismValidity);
+            }
+            else {
+                parsedNismValidity = null;
+            }
+        }
+        // Safe Deposit Amount Parsing
+        let parsedDepositAmount = undefined;
+        if (depositAmount !== undefined && depositAmount !== null && depositAmount !== '') {
+            const parsed = parseFloat(depositAmount);
+            if (!isNaN(parsed)) {
+                parsedDepositAmount = parsed;
+            }
+        }
+        // Build update payload
+        const tenantUpdateData = {};
+        if (companyName !== undefined && companyName !== '')
+            tenantUpdateData.companyName = String(companyName).trim();
+        if (panelName !== undefined)
+            tenantUpdateData.panelName = String(panelName).trim() || null;
+        if (domainUrl !== undefined)
+            tenantUpdateData.domainUrl = String(domainUrl).trim() || null;
+        if (mongoDbUrl !== undefined)
+            tenantUpdateData.mongoDbUrl = String(mongoDbUrl).trim() || null;
+        if (dbName !== undefined)
+            tenantUpdateData.dbName = String(dbName).trim() || null;
+        if (companyType !== undefined && companyType !== '')
+            tenantUpdateData.companyType = companyType;
+        if (raType !== undefined && raType !== '')
+            tenantUpdateData.raType = raType;
+        if (sebiRegistration !== undefined && sebiRegistration !== '')
+            tenantUpdateData.sebiRegistration = String(sebiRegistration).trim().toUpperCase();
+        if (bseEnrollment !== undefined)
+            tenantUpdateData.bseEnrollment = String(bseEnrollment).trim().toUpperCase() || null;
+        if (pan !== undefined && pan !== '')
+            tenantUpdateData.pan = String(pan).trim().toUpperCase();
+        if (website !== undefined)
+            tenantUpdateData.website = String(website).trim() || null;
+        if (address !== undefined && address !== '')
+            tenantUpdateData.address = String(address).trim();
+        if (gst !== undefined)
+            tenantUpdateData.gst = String(gst).trim().toUpperCase() || null;
+        if (status !== undefined && status !== '')
+            tenantUpdateData.status = status;
+        const incomingMobile = supportMobile || req.body.tenantMobile || req.body.mobile;
+        if (incomingMobile !== undefined && incomingMobile !== '') {
+            tenantUpdateData.mobile = String(incomingMobile).trim();
+        }
+        if (parsedCertificateValidity !== undefined) {
+            tenantUpdateData.certificateValidity = parsedCertificateValidity;
+        }
+        if (parsedNismValidity !== undefined) {
+            tenantUpdateData.nismValidity = parsedNismValidity;
+        }
+        if (parsedDepositAmount !== undefined) {
+            tenantUpdateData.depositAmount = parsedDepositAmount;
+        }
+        if (newSebiUrl) {
+            tenantUpdateData.certificateUrl = newSebiUrl;
+        }
+        if (newNismUrl) {
+            tenantUpdateData.nismCertificateUrl = newNismUrl;
+        }
         const updatedTenant = await db_1.default.tenant.update({
             where: { id },
-            data: {
-                companyName,
-                certificateValidity: certificateValidity ? new Date(certificateValidity) : null,
-                status,
-                address,
-                gst,
-                mobile: supportMobile || req.body.tenantMobile,
-                nismValidity: nismValidity ? new Date(nismValidity) : null,
-                companyType,
-                sebiRegistration,
-                bseEnrollment,
-                pan,
-                website,
-                depositAmount: depositAmount ? parseFloat(depositAmount) : undefined,
-                certificateUrl: newSebiUrl,
-                nismCertificateUrl: newNismUrl,
-                raType: raType || undefined
-            }
+            data: tenantUpdateData
         });
         if (files && files.sebiCertificate && files.sebiCertificate[0] && newSebiUrl) {
             await db_1.default.tenantDocumentHistory.create({
@@ -611,46 +843,144 @@ const updateTenantDetails = async (req, res) => {
                 }
             });
         }
-        const adminUser = await db_1.default.user.findFirst({
+        // Ensure tenantApiKey exists
+        let apiKey = updatedTenant.tenantApiKey;
+        if (!apiKey) {
+            apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
+            await db_1.default.tenant.update({
+                where: { id: updatedTenant.id },
+                data: { tenantApiKey: apiKey }
+            });
+            updatedTenant.tenantApiKey = apiKey;
+        }
+        // Admin user update
+        let adminUser = await db_1.default.user.findFirst({
             where: { tenantId: id, role: { name: 'ADMIN' } }
         });
-        if (adminUser) {
-            const parts = (adminName || '').split(' ');
-            const firstName = parts[0] || '';
-            const lastName = parts.slice(1).join(' ') || '';
-            const updateData = {
-                firstName: firstName || adminUser.firstName,
-                lastName: lastName || adminUser.lastName,
-                mobile: adminMobile || adminUser.mobile,
-                email: adminEmail || adminUser.email,
-                status: adminStatus || adminUser.status
-            };
-            if (adminPassword) {
-                const salt = await bcrypt.genSalt(10);
-                updateData.passwordHash = await bcrypt.hash(adminPassword, salt);
-            }
-            await db_1.default.user.update({
-                where: { id: adminUser.id },
-                data: updateData
+        if (!adminUser) {
+            adminUser = await db_1.default.user.findFirst({
+                where: { tenantId: id }
             });
         }
-        // Write audit log
-        await (0, auditService_1.logAudit)({
-            userId: req.user.id,
-            action: 'UPDATE',
-            module: 'TENANTS',
-            oldValue: oldTenant,
-            newValue: updatedTenant,
-            ipAddress: req.ip
-        });
+        if (adminUser) {
+            const updateData = {};
+            if (adminName !== undefined && String(adminName).trim() !== '') {
+                const parts = String(adminName).trim().split(' ');
+                updateData.firstName = parts[0] || adminUser.firstName;
+                updateData.lastName = parts.slice(1).join(' ') || '';
+            }
+            if (adminMobile !== undefined && String(adminMobile).trim() !== '') {
+                updateData.mobile = String(adminMobile).trim();
+            }
+            if (adminEmail !== undefined && String(adminEmail).trim() !== '') {
+                const newEmail = String(adminEmail).toLowerCase().trim();
+                if (newEmail !== adminUser.email) {
+                    const existingUser = await db_1.default.user.findUnique({ where: { email: newEmail } });
+                    if (existingUser && existingUser.id !== adminUser.id) {
+                        return res.status(400).json({
+                            success: false,
+                            message: `Admin email '${newEmail}' is already registered to another user.`
+                        });
+                    }
+                    updateData.email = newEmail;
+                }
+            }
+            if (adminStatus !== undefined && String(adminStatus).trim() !== '') {
+                updateData.status = String(adminStatus).trim();
+            }
+            if (adminPassword && typeof adminPassword === 'string' && adminPassword.trim().length > 0) {
+                const salt = await bcrypt.genSalt(10);
+                updateData.passwordHash = await bcrypt.hash(adminPassword.trim(), salt);
+                updateData.tempPassword = adminPassword.trim();
+            }
+            if (Object.keys(updateData).length > 0) {
+                const updatedAdmin = await db_1.default.user.update({
+                    where: { id: adminUser.id },
+                    data: updateData
+                });
+                adminUser = updatedAdmin;
+            }
+        }
+        // Auto-sync to dedicated MongoDB in background with short timeout
+        if (updatedTenant.mongoDbUrl && updatedTenant.mongoDbUrl.trim()) {
+            try {
+                const mongoUrl = updatedTenant.mongoDbUrl.trim();
+                const syncPromise = (0, tenantProvisionService_1.provisionTenantDatabase)(mongoUrl, updatedTenant, {
+                    id: adminUser?.id,
+                    email: adminUser?.email || updatedTenant.email,
+                    passwordHash: adminUser?.passwordHash || '',
+                    tempPassword: adminUser?.tempPassword || adminPassword || null,
+                    firstName: adminUser?.firstName || updatedTenant.companyName,
+                    lastName: adminUser?.lastName || 'Admin',
+                    mobile: adminUser?.mobile || updatedTenant.mobile,
+                    status: adminUser?.status || (updatedTenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
+                });
+                const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ success: false, message: 'Dedicated MongoDB sync timed out.' }), 3500));
+                await Promise.race([syncPromise, timeoutPromise]);
+            }
+            catch (syncErr) {
+                console.warn('Dedicated MongoDB sync warning during edit:', syncErr?.message || syncErr);
+            }
+        }
+        // Auto-sync to remote HTTP API if domainUrl configured with short timeout
+        if (updatedTenant.domainUrl && updatedTenant.domainUrl.trim()) {
+            try {
+                let rawDomain = updatedTenant.domainUrl.trim();
+                if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
+                    rawDomain = 'https://' + rawDomain;
+                }
+                rawDomain = rawDomain.replace(/\/+$/, '');
+                const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3500);
+                await fetch(syncEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-tenant-api-key': apiKey
+                    },
+                    body: JSON.stringify({
+                        apiKey,
+                        tenant: updatedTenant,
+                        adminUser: {
+                            id: adminUser?.id,
+                            email: adminUser?.email || updatedTenant.email,
+                            passwordHash: adminUser?.passwordHash || '',
+                            tempPassword: adminUser?.tempPassword || adminPassword || null,
+                            firstName: adminUser?.firstName || updatedTenant.companyName,
+                            lastName: adminUser?.lastName || 'Admin',
+                            mobile: adminUser?.mobile || updatedTenant.mobile,
+                            status: adminUser?.status || (updatedTenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
+                        }
+                    }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+            }
+            catch (syncApiErr) {
+                console.warn('Remote API sync warning during edit:', syncApiErr?.message || syncApiErr);
+            }
+        }
+        // Write audit log safely
+        if (req.user && req.user.id) {
+            await (0, auditService_1.logAudit)({
+                userId: req.user.id,
+                action: 'UPDATE',
+                module: 'TENANTS',
+                oldValue: oldTenant,
+                newValue: updatedTenant,
+                ipAddress: req.ip
+            }).catch(err => console.error('Audit log failed:', err));
+        }
         return res.status(200).json({
             success: true,
-            message: 'Company and Admin details updated successfully',
+            message: 'Company and Admin details updated in database successfully.',
             data: updatedTenant
         });
     }
     catch (error) {
-        return res.status(500).json({ success: false, errors: [error.message] });
+        console.error('Error updating tenant details:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to update tenant details', errors: [error.message] });
     }
 };
 exports.updateTenantDetails = updateTenantDetails;
@@ -907,3 +1237,338 @@ const updateComplianceRule = async (req, res) => {
     }
 };
 exports.updateComplianceRule = updateComplianceRule;
+const provisionTenantDb = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant company not found' });
+        }
+        if (!tenant.mongoDbUrl || !tenant.mongoDbUrl.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'No MongoDB Connection URL configured for this company. Please set MongoDB Connection URL first in Edit Company.'
+            });
+        }
+        const adminUser = await db_1.default.user.findFirst({
+            where: { tenantId: id, role: { name: 'ADMIN' } }
+        });
+        if (!adminUser) {
+            return res.status(404).json({ success: false, message: 'No Admin user found for this company.' });
+        }
+        const result = await (0, tenantProvisionService_1.provisionTenantDatabase)(tenant.mongoDbUrl.trim(), tenant, {
+            id: adminUser.id,
+            email: adminUser.email,
+            passwordHash: adminUser.passwordHash,
+            tempPassword: adminUser.tempPassword,
+            firstName: adminUser.firstName,
+            lastName: adminUser.lastName,
+            mobile: adminUser.mobile,
+            status: adminUser.status || (tenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
+        });
+        if (!result.success) {
+            return res.status(500).json({
+                success: false,
+                message: result.message,
+                error: result.error
+            });
+        }
+        await (0, auditService_1.logAudit)({
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'TENANTS',
+            newValue: { ...tenant, dbProvisionedAt: new Date() },
+            ipAddress: req.ip
+        });
+        return res.status(200).json({
+            success: true,
+            message: result.message,
+            data: result
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to provision tenant database: ' + error.message,
+            errors: [error.message]
+        });
+    }
+};
+exports.provisionTenantDb = provisionTenantDb;
+const syncTenantApi = async (req, res) => {
+    const { id } = req.params;
+    const { targetUrl } = req.body;
+    try {
+        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant company not found' });
+        }
+        const targetDomain = (targetUrl || tenant.domainUrl || '').trim();
+        if (!targetDomain) {
+            return res.status(400).json({
+                success: false,
+                message: 'No Domain URL configured or provided for this company. Please configure Domain URL first.'
+            });
+        }
+        const adminUser = await db_1.default.user.findFirst({
+            where: { tenantId: id, role: { name: 'ADMIN' } }
+        });
+        if (!adminUser) {
+            return res.status(404).json({ success: false, message: 'No Admin user found for this company.' });
+        }
+        let apiKey = tenant.tenantApiKey;
+        if (!apiKey) {
+            apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
+            await db_1.default.tenant.update({
+                where: { id: tenant.id },
+                data: { tenantApiKey: apiKey }
+            });
+        }
+        let rawDomain = targetDomain;
+        if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
+            rawDomain = 'https://' + rawDomain;
+        }
+        rawDomain = rawDomain.replace(/\/+$/, '');
+        const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const payload = {
+            apiKey,
+            tenant: {
+                ...tenant,
+                tenantApiKey: apiKey
+            },
+            adminUser: {
+                id: adminUser.id,
+                email: adminUser.email,
+                passwordHash: adminUser.passwordHash,
+                tempPassword: adminUser.tempPassword,
+                firstName: adminUser.firstName,
+                lastName: adminUser.lastName,
+                mobile: adminUser.mobile,
+                status: adminUser.status || (tenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
+            }
+        };
+        const response = await fetch(syncEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-api-key': apiKey
+            },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        const responseData = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            return res.status(response.status || 500).json({
+                success: false,
+                message: responseData.message || `Remote server responded with error code ${response.status}`,
+                error: responseData
+            });
+        }
+        await (0, auditService_1.logAudit)({
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'TENANTS',
+            newValue: { ...tenant, apiSyncedAt: new Date(), targetDomain },
+            ipAddress: req.ip
+        });
+        return res.status(200).json({
+            success: true,
+            message: responseData.message || `Successfully synced tenant and Admin user to ${targetDomain} via API!`,
+            data: responseData
+        });
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: `Failed to sync via API: ${error.message}`,
+            errors: [error.message]
+        });
+    }
+};
+exports.syncTenantApi = syncTenantApi;
+/**
+ * Dynamic Company Clients Endpoint for Super Admin.
+ * Concatenates the company's domainUrl to fetch 3rd party clients from the company's own software,
+ * with fast fallback to local platform DB if unreachable or domain not configured.
+ * GET /api/v1/super-admin/tenants/:id/clients
+ */
+const getCompanyClients = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant company not found' });
+        }
+        const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
+        // 1. Try remote domain API if domainUrl is configured
+        if (rawDomain) {
+            let targetOrigin = rawDomain;
+            if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
+                targetOrigin = 'https://' + targetOrigin;
+            }
+            try {
+                const parsed = new URL(targetOrigin);
+                targetOrigin = parsed.origin;
+            }
+            catch (e) {
+                targetOrigin = targetOrigin.replace(/\/+$/, '');
+            }
+            const candidateEndpoints = [
+                `${targetOrigin}/backend/api/v1/third-party-api/clients`,
+                `${targetOrigin}/backend/api/v1/third-party-api/${tenant.id}/clients`,
+                `${targetOrigin}/backend/api/v1/clients`,
+                `${targetOrigin}/backend/third-party-api/clients`,
+                `${targetOrigin}/backend/clients`,
+                `${targetOrigin}/api/v1/third-party-api/clients`,
+                `${targetOrigin}/api/v1/third-party-api/${tenant.id}/clients`,
+                `${targetOrigin}/third-party-api/clients`,
+                `${targetOrigin}/api/v1/clients`,
+                `${targetOrigin}/clients`
+            ];
+            for (const endpoint of candidateEndpoints) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 6000);
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        'x-tenant-id': tenant.id
+                    };
+                    if (tenant.tenantApiKey) {
+                        headers['x-tenant-api-key'] = tenant.tenantApiKey;
+                    }
+                    const remoteRes = await fetch(endpoint, {
+                        method: 'GET',
+                        headers,
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    if (remoteRes.ok) {
+                        const remoteData = await remoteRes.json().catch(() => null);
+                        if (remoteData && (Array.isArray(remoteData.data) || Array.isArray(remoteData))) {
+                            const clientsArray = Array.isArray(remoteData.data) ? remoteData.data : remoteData;
+                            return res.status(200).json({
+                                success: true,
+                                source: 'REMOTE_DOMAIN_API',
+                                domainUrl: targetOrigin,
+                                endpointUsed: endpoint,
+                                company: {
+                                    id: tenant.id,
+                                    companyName: tenant.companyName,
+                                    sebiRegistration: tenant.sebiRegistration,
+                                    domainUrl: tenant.domainUrl,
+                                    website: tenant.website
+                                },
+                                count: clientsArray.length,
+                                data: clientsArray
+                            });
+                        }
+                    }
+                }
+                catch (remoteErr) {
+                    // Continue to next candidate or fallback to local DB
+                }
+            }
+        }
+        // 2. Fallback to Local Platform Database
+        const localClients = await db_1.default.client.findMany({
+            where: {
+                user: { tenantId: tenant.id }
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        email: true,
+                        mobile: true,
+                        firstName: true,
+                        lastName: true,
+                        status: true,
+                        createdAt: true,
+                        lastLogin: true
+                    }
+                },
+                profile: true,
+                subscriptions: {
+                    include: {
+                        plan: {
+                            select: {
+                                id: true,
+                                name: true,
+                                price: true,
+                                durationMonths: true,
+                                researchSegments: true
+                            }
+                        }
+                    },
+                    orderBy: { createdAt: 'desc' }
+                },
+                agreements: {
+                    select: {
+                        id: true,
+                        status: true,
+                        signedAt: true,
+                        agreementUrl: true
+                    }
+                },
+                documents: {
+                    select: {
+                        id: true,
+                        docType: true,
+                        status: true,
+                        fileName: true,
+                        uploadedAt: true
+                    }
+                }
+            },
+            orderBy: {
+                user: { createdAt: 'desc' }
+            }
+        });
+        const sanitizedClients = localClients.map(c => ({
+            id: c.id,
+            userId: c.userId,
+            name: c.name || `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim(),
+            email: c.email || c.user?.email,
+            mobile: c.mobile || c.user?.mobile,
+            pan: c.pan,
+            aadhaar: c.aadhaar,
+            category: c.category,
+            occupation: c.occupation,
+            status: c.status || c.user?.status,
+            riskProfile: c.profile?.riskProfile || 'MODERATE',
+            city: c.profile?.city || null,
+            state: c.profile?.state || null,
+            joinedAt: c.user?.createdAt,
+            activeSubscription: c.subscriptions?.[0] || null,
+            subscriptionsCount: c.subscriptions?.length || 0,
+            agreementsCount: c.agreements?.length || 0,
+            documentsCount: c.documents?.length || 0
+        }));
+        return res.status(200).json({
+            success: true,
+            source: 'LOCAL_DATABASE',
+            domainUrl: rawDomain || null,
+            company: {
+                id: tenant.id,
+                companyName: tenant.companyName,
+                sebiRegistration: tenant.sebiRegistration,
+                domainUrl: tenant.domainUrl,
+                website: tenant.website
+            },
+            count: sanitizedClients.length,
+            data: sanitizedClients
+        });
+    }
+    catch (error) {
+        console.error('Error fetching company clients:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch company clients: ' + error.message,
+            errors: [error.message]
+        });
+    }
+};
+exports.getCompanyClients = getCompanyClients;

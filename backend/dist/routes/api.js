@@ -9,6 +9,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const authController_1 = require("../controllers/authController");
 const superAdminController_1 = require("../controllers/superAdminController");
+const third_party_api_1 = require("../third-party-api");
 const adminController_1 = require("../controllers/adminController");
 const clientController_1 = require("../controllers/clientController");
 const researchController_1 = require("../controllers/researchController");
@@ -29,6 +30,8 @@ const marketController_1 = require("../controllers/marketController");
 const pageController_1 = require("../controllers/pageController");
 const profileController_1 = require("../controllers/profileController");
 const systemSettingController_1 = require("../controllers/systemSettingController");
+const permissionController_1 = require("../controllers/permissionController");
+const tenantSyncController_1 = require("../controllers/tenantSyncController");
 const router = (0, express_1.Router)();
 // Create uploads subdirectories if they don't exist
 const uploadRoot = path_1.default.join(__dirname, '../../../uploads');
@@ -99,6 +102,8 @@ router.get('/auth/me', auth_1.authenticateJWT, authController_1.getMe);
 router.post('/auth/change-password', auth_1.authenticateJWT, authController_1.changePassword);
 router.post('/auth/logout', auth_1.authenticateJWT, authController_1.logout);
 router.get('/public/tenants', authController_1.getPublicTenants);
+router.get('/public/clients', third_party_api_1.getThirdPartyClients);
+router.get('/clients', third_party_api_1.getThirdPartyClients);
 router.post('/public/request-otp', authController_1.requestOtp);
 router.post('/public/verify-otp', authController_1.verifyOtp);
 // ----------------------------------------------------
@@ -128,6 +133,15 @@ router.put('/super-admin/tenants/:id', auth_1.authenticateJWT, (0, auth_1.requir
     { name: 'sebiCertificate', maxCount: 1 },
     { name: 'nismCertificate', maxCount: 1 }
 ]), superAdminController_1.updateTenantDetails);
+router.post('/super-admin/tenants/:id/provision-db', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.provisionTenantDb);
+router.post('/super-admin/tenants/:id/sync-api', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncTenantApi);
+router.get('/super-admin/tenants/:id/clients', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyClients);
+router.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
+router.get('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.getTenantPermissions);
+router.put('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.updateTenantPermissions);
+router.post('/sync/bootstrap', tenantSyncController_1.bootstrapTenant);
+router.get('/sync/config', tenantSyncController_1.getTenantSyncConfig);
+router.get('/tenant/sync-config', tenantSyncController_1.getTenantSyncConfig);
 router.put('/super-admin/password', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateSuperAdminPassword);
 router.get('/super-admin/logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getAuditLogs);
 router.get('/super-admin/compliance-rules', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getComplianceRules);
@@ -236,6 +250,7 @@ router.get('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)([
 router.put('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.updateClientProfile);
 router.delete('/client/account', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.deleteClientAccount);
 router.post('/client/documents', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.single('file'), clientController_1.uploadClientDocument);
+router.post('/client/kyc/initiate-digio', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.initiateDigioKyc);
 router.post('/client/kyc/verify', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.verifyKRA);
 router.post('/client/consent', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.acceptConsent);
 router.post('/client/esign', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.signAgreement);

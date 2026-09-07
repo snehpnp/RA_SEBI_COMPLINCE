@@ -56,12 +56,29 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
+    if (user.tenant) {
+      if (user.tenant.status === 'DELETED' || user.tenant.deletedAt) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your company workspace has been removed. Please contact super admin.',
+          errors: ['Tenant deleted', 'User inactive or suspended']
+        });
+      }
+      if (user.tenant.status === 'SUSPENDED' && user.role.name !== 'SUPER_ADMIN') {
+        return res.status(403).json({
+          success: false,
+          message: 'This company portal has been suspended by Super Admin. Access is disabled.',
+          errors: ['Tenant suspended', 'User inactive or suspended']
+        });
+      }
+    }
+
     if (user.status === 'SUSPENDED') {
       const suspendMsg = user.role.name === 'ADMIN' ? 'Your account is suspended. Please contact super admin.' : 'Your account is suspended. Please contact admin.';
       return res.status(403).json({
         success: false,
         message: suspendMsg,
-        errors: ['User suspended']
+        errors: ['User suspended', 'User inactive or suspended']
       });
     }
 
@@ -363,6 +380,14 @@ export const getMe = async (req: AuthenticatedRequest, res: Response) => {
 
     if (!user || user.deletedAt) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role.name !== 'SUPER_ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your organization account is suspended. Please contact super admin.',
+        errors: ['User inactive or suspended', 'Tenant suspended']
+      });
     }
 
     const permissions = user.role.permissions.map(rp => rp.permission.code);
