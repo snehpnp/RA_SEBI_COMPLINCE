@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getComplaintReportHistory = exports.saveComplaintReport = exports.getComplaintReport = exports.deletePage = exports.savePage = exports.getAdminPages = exports.getPageBySlug = exports.getActivePages = void 0;
 const db_1 = __importDefault(require("../config/db"));
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const isValidObjectId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
 // ----------------------------------------------------
 // CUSTOM PAGES (POLICIES)
@@ -80,14 +81,6 @@ const getAdminPages = async (req, res) => {
         ];
         const existingSlugs = new Set(pages.map(p => p.slug));
         const missingPages = mandatoryPagesTemplate.filter(p => !existingSlugs.has(p.slug));
-        // if (missingPages.length > 0) {
-        //   await prisma.customPage.createMany({ data: missingPages as any });
-        //   
-        //   pages = await prisma.customPage.findMany({
-        //     where: { tenantId },
-        //     orderBy: { createdAt: 'asc' }
-        //   });
-        // }
         res.status(200).json({ success: true, data: pages });
     }
     catch (error) {
@@ -133,6 +126,8 @@ const savePage = async (req, res) => {
                 }
             });
         }
+        // Automatically sync updated page to tenant's domain DB
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PAGE_UPDATE' }).catch(e => console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message));
         res.status(200).json({ success: true, message: 'Page saved successfully', data: page });
     }
     catch (error) {
@@ -152,6 +147,8 @@ const deletePage = async (req, res) => {
         if (!page || page.tenantId !== tenantId)
             throw new Error('Page not found');
         await db_1.default.customPage.delete({ where: { id } });
+        // Automatically sync deletion to tenant's domain DB
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PAGE_DELETE' }).catch(e => console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message));
         res.status(200).json({ success: true, message: 'Page deleted successfully' });
     }
     catch (error) {

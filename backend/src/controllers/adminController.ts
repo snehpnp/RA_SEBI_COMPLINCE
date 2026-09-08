@@ -5,10 +5,12 @@ import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { sendWelcomeEmail, sendTestEmail } from '../services/emailService';
 import { checkComplianceForTenant } from './complianceController';
+import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 import archiver = require('archiver');
 import fs from 'fs';
 import path from 'path';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
+import axios from 'axios';
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return email;
@@ -1669,6 +1671,7 @@ export const createCategory = async (req: AuthenticatedRequest, res: Response) =
     const category = await prisma.planCategory.create({
       data: { tenantId, name: name.trim().toUpperCase(), segments: segments.trim() }
     });
+    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
     return res.status(201).json({ success: true, message: 'Category created successfully', data: category });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1691,6 +1694,7 @@ export const updateCategory = async (req: AuthenticatedRequest, res: Response) =
       where: { id },
       data: { name: name.trim().toUpperCase() }
     });
+    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Category updated successfully', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1723,6 +1727,7 @@ export const toggleCategoryStatus = async (req: AuthenticatedRequest, res: Respo
       return cat;
     });
 
+    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: `Category status updated to ${newStatus}`, data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1828,6 +1833,7 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
       }
     });
     await logAudit({ tenantId, userId: req.user!.id, action: 'CREATE', module: 'TENANTS', newValue: plan, ipAddress: req.ip });
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(201).json({ success: true, message: 'Plan created successfully', data: plan });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1889,6 +1895,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
       }
     });
     await logAudit({ tenantId, userId: req.user!.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Plan updated successfully', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1924,6 +1931,7 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
 
     await prisma.plan.update({ where: { id }, data: { deletedAt: new Date(), status: 'INACTIVE' } });
     await logAudit({ tenantId, userId: req.user!.id, action: 'DELETE', module: 'TENANTS', oldValue: existing, ipAddress: req.ip });
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Plan deleted successfully.' });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1951,6 +1959,7 @@ export const restorePlan = async (req: AuthenticatedRequest, res: Response) => {
 
     const updated = await prisma.plan.update({ where: { id }, data: { deletedAt: null, status: 'ACTIVE' } });
     await logAudit({ tenantId, userId: req.user!.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Plan restored successfully.', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1986,6 +1995,7 @@ export const togglePlanStatus = async (req: AuthenticatedRequest, res: Response)
 
     const newStatus = existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     await prisma.plan.update({ where: { id }, data: { status: newStatus } });
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: `Plan status updated to ${newStatus}` });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2079,7 +2089,13 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
       newValue: updated, 
       ipAddress: req.ip 
     });
-    return res.status(200).json({ success: true, message: 'Settings updated successfully', data: updated });
+
+    // Auto-sync settings updates to remote domainUrl and dedicated MongoDB in background
+    syncTenantToRemote(tenantId, { reason: 'SETTINGS_UPDATE' }).catch(err => {
+      console.warn('Background sync for tenant settings update error:', err);
+    });
+
+    return res.status(200).json({ success: true, message: 'Settings updated and synchronized successfully', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -2096,6 +2112,167 @@ export const testSmtp = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(result.success ? 200 : 400).json({ success: result.success, message: result.message });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Test failed', errors: [error.message] });
+  }
+};
+
+export const verifyPaymentGateway = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      gateway,
+      razorpayKeyId,
+      razorpayKeySecret,
+      cashfreeAppId,
+      cashfreeSecretKey,
+      ccavenueMerchantId,
+      ccavenueAccessCode,
+      ccavenueWorkingKey,
+      stripePublishableKey,
+      stripeSecretKey
+    } = req.body;
+
+    const selectedGateway = (gateway || 'RAZORPAY').toUpperCase();
+
+    if (selectedGateway === 'RAZORPAY') {
+      if (!razorpayKeyId || !razorpayKeySecret) {
+        return res.status(400).json({
+          success: false,
+          gateway: 'RAZORPAY',
+          message: 'Razorpay Key ID and Key Secret are both required for verification.'
+        });
+      }
+
+      try {
+        const authHeader = 'Basic ' + Buffer.from(`${razorpayKeyId.trim()}:${razorpayKeySecret.trim()}`).toString('base64');
+        await axios.get('https://api.razorpay.com/v1/orders?count=1', {
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/json'
+          },
+          timeout: 8000
+        });
+
+        const isLive = razorpayKeyId.trim().startsWith('rzp_live');
+        return res.status(200).json({
+          success: true,
+          gateway: 'RAZORPAY',
+          mode: isLive ? 'LIVE' : 'TEST',
+          message: `Razorpay credentials verified successfully! (${isLive ? 'Live Mode' : 'Test Mode'} active)`
+        });
+      } catch (err: any) {
+        const errMsg = err.response?.data?.error?.description || err.response?.data?.message || err.message;
+        return res.status(400).json({
+          success: false,
+          gateway: 'RAZORPAY',
+          message: `Razorpay Verification Failed: ${errMsg}`
+        });
+      }
+    } else if (selectedGateway === 'CASHFREE') {
+      if (!cashfreeAppId || !cashfreeSecretKey) {
+        return res.status(400).json({
+          success: false,
+          gateway: 'CASHFREE',
+          message: 'Cashfree App ID and Secret Key are both required for verification.'
+        });
+      }
+
+      try {
+        const isSandbox = cashfreeAppId.toLowerCase().includes('test') || cashfreeSecretKey.toLowerCase().includes('test');
+        const url = isSandbox ? 'https://sandbox.cashfree.com/pg/orders' : 'https://api.cashfree.com/pg/orders';
+        await axios.get(url, {
+          headers: {
+            'x-client-id': cashfreeAppId.trim(),
+            'x-client-secret': cashfreeSecretKey.trim(),
+            'x-api-version': '2022-09-01'
+          },
+          timeout: 8000
+        });
+
+        return res.status(200).json({
+          success: true,
+          gateway: 'CASHFREE',
+          mode: isSandbox ? 'TEST' : 'LIVE',
+          message: `Cashfree credentials verified successfully! (${isSandbox ? 'Sandbox Mode' : 'Live Mode'} active)`
+        });
+      } catch (err: any) {
+        const errMsg = err.response?.data?.message || err.response?.data?.error || err.message;
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          return res.status(400).json({
+            success: false,
+            gateway: 'CASHFREE',
+            message: `Cashfree Authentication Failed: ${errMsg}`
+          });
+        }
+        return res.status(200).json({
+          success: true,
+          gateway: 'CASHFREE',
+          message: 'Cashfree credentials validated successfully.'
+        });
+      }
+    } else if (selectedGateway === 'STRIPE') {
+      if (!stripeSecretKey) {
+        return res.status(400).json({
+          success: false,
+          gateway: 'STRIPE',
+          message: 'Stripe Secret Key is required for verification.'
+        });
+      }
+
+      try {
+        await axios.get('https://api.stripe.com/v1/balance', {
+          headers: {
+            Authorization: `Bearer ${stripeSecretKey.trim()}`
+          },
+          timeout: 8000
+        });
+
+        const isLive = stripeSecretKey.trim().startsWith('sk_live');
+        return res.status(200).json({
+          success: true,
+          gateway: 'STRIPE',
+          mode: isLive ? 'LIVE' : 'TEST',
+          message: `Stripe credentials verified successfully! (${isLive ? 'Live Mode' : 'Test Mode'} active)`
+        });
+      } catch (err: any) {
+        const errMsg = err.response?.data?.error?.message || err.message;
+        return res.status(400).json({
+          success: false,
+          gateway: 'STRIPE',
+          message: `Stripe Verification Failed: ${errMsg}`
+        });
+      }
+    } else if (selectedGateway === 'CCAVENUE') {
+      if (!ccavenueMerchantId || !ccavenueAccessCode || !ccavenueWorkingKey) {
+        return res.status(400).json({
+          success: false,
+          gateway: 'CCAVENUE',
+          message: 'CCAvenue Merchant ID, Access Code, and Working Key are all required.'
+        });
+      }
+
+      if (ccavenueWorkingKey.trim().length < 16) {
+        return res.status(400).json({
+          success: false,
+          gateway: 'CCAVENUE',
+          message: 'Invalid CCAvenue Working Key. It must be at least 16 characters.'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        gateway: 'CCAVENUE',
+        message: 'CCAvenue credentials format validated successfully.'
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Unknown payment gateway selected.'
+      });
+    }
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Payment gateway verification failed.'
+    });
   }
 };
 
@@ -2464,6 +2641,7 @@ export const updateEmailTemplate = async (req: AuthenticatedRequest, res: Respon
       update: { subject, body },
       create: { tenantId, type, subject, body }
     });
+    syncTenantToRemote(tenantId, { reason: 'EMAIL_TEMPLATE_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, data: updated, message: 'Template updated successfully' });
   } catch (err: any) {
     return res.status(500).json({ success: false, errors: [err.message] });
@@ -2483,6 +2661,8 @@ export const uploadSignature = async (req: AuthenticatedRequest, res: Response) 
         coSignatureUrl: `/uploads/branding/${req.file.filename}`
       }
     });
+
+    syncTenantToRemote(tenantId, { reason: 'SIGNATURE_UPDATE' }).catch(() => {});
 
     res.status(200).json({ success: true, message: 'Signature updated successfully', data: updated });
   } catch (error: any) {

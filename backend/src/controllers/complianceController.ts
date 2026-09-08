@@ -4,6 +4,7 @@ import { calculateNextDueDate, getCompliancePeriod } from '../utils/complianceDa
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { calculateCompleteness } from './adminController';
+import { syncTenantToRemote, syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 
 export const checkComplianceForTenant = async (tenantId: string) => {
 
@@ -796,6 +797,7 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
       const queryTenant = req.query.tenantId as string;
       if (queryTenant) {
         const alertsCreated = await checkComplianceForTenant(queryTenant);
+        syncTenantToRemote(queryTenant, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
         return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
       } else {
         const tenants = await prisma.tenant.findMany({ where: { deletedAt: null } });
@@ -804,6 +806,7 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
           const alerts = await checkComplianceForTenant(t.id);
           totalAlerts += alerts.length;
         }
+        syncAllTenantsToRemote({ reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
         return res.status(200).json({ success: true, message: 'Compliance verification completed for all companies.', alertsGenerated: totalAlerts });
       }
     }
@@ -813,6 +816,7 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
     }
 
     const alertsCreated = await checkComplianceForTenant(tenantId);
+    syncTenantToRemote(tenantId, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -976,6 +980,8 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
         console.error('Failed to write alert history:', historyErr.message);
       }
     }
+
+    syncTenantToRemote(alert.tenantId, { reason: 'ALERT_RESOLVED' }).catch(() => {});
 
     return res.status(200).json({ success: true, message: 'Alert resolved successfully.', data: result });
   } catch (error: any) {
@@ -1161,6 +1167,8 @@ export const updateAuditStatus = async (req: AuthenticatedRequest, res: Response
       });
     }
 
+    syncTenantToRemote(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => {});
+
     return res.status(200).json({ success: true, message: 'Compliance task resolved.', data: audit });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1294,6 +1302,8 @@ export const resolvePenalty = async (req: AuthenticatedRequest, res: Response) =
       }
     });
     
+    syncTenantToRemote(penalty.tenantId, { reason: 'PENALTY_RESOLVED' }).catch(() => {});
+
     return res.status(200).json({ success: true, message: 'Penalty resolved successfully.', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });

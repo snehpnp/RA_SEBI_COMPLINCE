@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import nodemailer from 'nodemailer';
+import { syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 
 const prisma = new PrismaClient();
 
@@ -98,9 +100,14 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
       }
     });
 
+    // Auto-sync global branding updates across all company domains in background
+    syncAllTenantsToRemote({ reason: 'BRANDING_UPDATE' }).catch(err => {
+      console.warn('Background sync for global branding update error:', err);
+    });
+
     res.status(200).json({
       success: true,
-      message: 'Global branding updated successfully',
+      message: 'Global branding updated and propagated across companies successfully',
       data: JSON.parse(setting.value)
     });
   } catch (error: any) {
@@ -108,9 +115,6 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
-
-import nodemailer from 'nodemailer';
 
 export const testSmtpConnection = async (req: Request, res: Response) => {
   try {
@@ -135,7 +139,7 @@ export const testSmtpConnection = async (req: Request, res: Response) => {
       to: testEmail,
       subject: 'Test Email from RAGCP',
       html: `<div style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2>SMTP Connection Successful! ??</h2>
+        <h2>SMTP Connection Successful!</h2>
         <p>If you are reading this, your SMTP credentials for RAGCP are perfectly configured.</p>
       </div>`
     };

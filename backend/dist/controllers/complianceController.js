@@ -8,6 +8,7 @@ const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
 const adminController_1 = require("./adminController");
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const checkComplianceForTenant = async (tenantId) => {
     const tenant = await db_1.default.tenant.findUnique({
         where: { id: tenantId },
@@ -753,6 +754,7 @@ const runComplianceCheck = async (req, res) => {
             const queryTenant = req.query.tenantId;
             if (queryTenant) {
                 const alertsCreated = await (0, exports.checkComplianceForTenant)(queryTenant);
+                (0, tenantSyncDispatcher_1.syncTenantToRemote)(queryTenant, { reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
                 return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
             }
             else {
@@ -762,6 +764,7 @@ const runComplianceCheck = async (req, res) => {
                     const alerts = await (0, exports.checkComplianceForTenant)(t.id);
                     totalAlerts += alerts.length;
                 }
+                (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
                 return res.status(200).json({ success: true, message: 'Compliance verification completed for all companies.', alertsGenerated: totalAlerts });
             }
         }
@@ -769,6 +772,7 @@ const runComplianceCheck = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid tenant context' });
         }
         const alertsCreated = await (0, exports.checkComplianceForTenant)(tenantId);
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
     }
     catch (error) {
@@ -933,6 +937,7 @@ const closeAlert = async (req, res) => {
                 console.error('Failed to write alert history:', historyErr.message);
             }
         }
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(alert.tenantId, { reason: 'ALERT_RESOLVED' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Alert resolved successfully.', data: result });
     }
     catch (error) {
@@ -1104,6 +1109,7 @@ const updateAuditStatus = async (req, res) => {
                 }
             });
         }
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Compliance task resolved.', data: audit });
     }
     catch (error) {
@@ -1229,6 +1235,7 @@ const resolvePenalty = async (req, res) => {
                 proofUrl
             }
         });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(penalty.tenantId, { reason: 'PENALTY_RESOLVED' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Penalty resolved successfully.', data: updated });
     }
     catch (error) {

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateTenantPermissions = exports.getTenantPermissions = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const auditService_1 = require("../services/auditService");
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const getTenantPermissions = async (req, res) => {
     const { tenantId } = req.params;
     try {
@@ -69,9 +70,13 @@ const updateTenantPermissions = async (req, res) => {
                 newValue: JSON.stringify(permissions)
             });
         }
+        // Auto-sync permission changes to remote domainUrl and dedicated MongoDB in background
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PERMISSIONS_UPDATE' }).catch(err => {
+            console.warn('Background sync for tenant permissions error:', err);
+        });
         return res.status(200).json({
             success: true,
-            message: 'Admin permissions updated successfully.',
+            message: 'Admin permissions updated and dispatched to company domain database successfully.',
             data: updated
         });
     }

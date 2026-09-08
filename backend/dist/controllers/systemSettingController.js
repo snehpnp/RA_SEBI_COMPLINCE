@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.testSmtpConnection = exports.updateGlobalBranding = exports.getGlobalBranding = void 0;
 const client_1 = require("@prisma/client");
+const nodemailer_1 = __importDefault(require("nodemailer"));
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const prisma = new client_1.PrismaClient();
 const BRANDING_KEY = 'GLOBAL_BRANDING';
 const getGlobalBranding = async (req, res) => {
@@ -95,9 +97,13 @@ const updateGlobalBranding = async (req, res) => {
                 updatedById: user.id
             }
         });
+        // Auto-sync global branding updates across all company domains in background
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'BRANDING_UPDATE' }).catch(err => {
+            console.warn('Background sync for global branding update error:', err);
+        });
         res.status(200).json({
             success: true,
-            message: 'Global branding updated successfully',
+            message: 'Global branding updated and propagated across companies successfully',
             data: JSON.parse(setting.value)
         });
     }
@@ -107,7 +113,6 @@ const updateGlobalBranding = async (req, res) => {
     }
 };
 exports.updateGlobalBranding = updateGlobalBranding;
-const nodemailer_1 = __importDefault(require("nodemailer"));
 const testSmtpConnection = async (req, res) => {
     try {
         const { host, port, user, password, testEmail } = req.body;
@@ -128,7 +133,7 @@ const testSmtpConnection = async (req, res) => {
             to: testEmail,
             subject: 'Test Email from RAGCP',
             html: `<div style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2>SMTP Connection Successful! ??</h2>
+        <h2>SMTP Connection Successful!</h2>
         <p>If you are reading this, your SMTP credentials for RAGCP are perfectly configured.</p>
       </div>`
         };

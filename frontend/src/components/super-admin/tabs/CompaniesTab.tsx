@@ -19,6 +19,7 @@ interface CompaniesTabProps {
   openConfirmModal: (action: string, id: string) => void;
   handleImpersonate: (id: string) => void;
   handleManualSyncApi?: (tenantId: string, targetUrl?: string) => void;
+  handleSyncAllCompanies?: () => void;
   setIsAddCompanyModalOpen: (val: boolean) => void;
   setFormSuccess: (val: any) => void;
   setFormError: (val: any) => void;
@@ -28,7 +29,7 @@ interface CompaniesTabProps {
 export default function CompaniesTab({
   companies, filteredCompanies, searchQuery, setSearchQuery, itemsPerPage, setItemsPerPage,
   currentPageCompanies, setCurrentPageCompanies, openViewModal, openEditModal, openClientsModal, openStaffModal,
-  openConfirmModal, handleImpersonate, handleManualSyncApi, setIsAddCompanyModalOpen, setFormSuccess,
+  openConfirmModal, handleImpersonate, handleManualSyncApi, handleSyncAllCompanies, setIsAddCompanyModalOpen, setFormSuccess,
   setFormError, setNewCreds
 }: CompaniesTabProps) {
   return (
@@ -46,6 +47,18 @@ export default function CompaniesTab({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {handleSyncAllCompanies && (
+            <button
+              type="button"
+              onClick={handleSyncAllCompanies}
+              className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-sm font-bold rounded-xl transition-all flex items-center justify-center space-x-2 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5"
+              title="Broadcast & sync all dynamic settings, permissions and collections to all active tenant domain databases"
+            >
+              <RefreshCw className="h-4 w-4" />
+              <span>Sync All Domains</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -135,9 +148,13 @@ export default function CompaniesTab({
                   <TableCell className="text-right space-x-2">
                     {comp.status !== 'DELETED' ? (
                       <div className="flex items-center justify-end gap-1.5">
-                        {comp.domainUrl && (
-                          <button onClick={() => handleManualSyncApi && handleManualSyncApi(comp.id, comp.domainUrl)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title={`Sync Admin & Company to Domain DB (${comp.domainUrl})`}><RefreshCw className="h-[18px] w-[18px]" /></button>
-                        )}
+                        <button
+                          onClick={() => handleManualSyncApi && handleManualSyncApi(comp.id, comp.domainUrl)}
+                          className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all"
+                          title={`Sync Dedicated MongoDB & Domain API (${comp.companyName})`}
+                        >
+                          <RefreshCw className="h-[18px] w-[18px]" />
+                        </button>
                         <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
                         <button onClick={() => openStaffModal && openStaffModal(comp)} className="p-2 text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-500/10 rounded-lg transition-all" title="View Staff & Team (Domain API)"><UserCheck className="h-[18px] w-[18px]" /></button>
                         <button onClick={() => openViewModal(comp.id)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all" title="View Details"><Eye className="h-[18px] w-[18px]" /></button>
@@ -152,9 +169,13 @@ export default function CompaniesTab({
                       </div>
                     ) : (
                       <div className="flex items-center justify-end gap-1.5">
-                        {comp.domainUrl && (
-                          <button onClick={() => handleManualSyncApi && handleManualSyncApi(comp.id, comp.domainUrl)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title={`Sync Admin & Company to Domain DB (${comp.domainUrl})`}><RefreshCw className="h-[18px] w-[18px]" /></button>
-                        )}
+                        <button
+                          onClick={() => handleManualSyncApi && handleManualSyncApi(comp.id, comp.domainUrl)}
+                          className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all"
+                          title={`Sync Dedicated MongoDB & Domain API (${comp.companyName})`}
+                        >
+                          <RefreshCw className="h-[18px] w-[18px]" />
+                        </button>
                         <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
                         <button onClick={() => openStaffModal && openStaffModal(comp)} className="p-2 text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-500/10 rounded-lg transition-all" title="View Staff & Team (Domain API)"><UserCheck className="h-[18px] w-[18px]" /></button>
                         <button onClick={() => openConfirmModal('RESTORE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Restore"><RotateCcw className="h-[18px] w-[18px]" /></button>

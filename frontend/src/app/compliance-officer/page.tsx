@@ -823,6 +823,8 @@ function AdminDashboardContent() {
   const [ccavenueWorkingKey, setCcavenueWorkingKey] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [verifyingGateway, setVerifyingGateway] = useState(false);
+  const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
@@ -1565,6 +1567,49 @@ function AdminDashboardContent() {
       }
       else { toast(data.message); }
     } catch (err: any) { toast(err.message); }
+  };
+
+  const handleVerifyPaymentGateway = async () => {
+    setVerifyingGateway(true);
+    setGatewayVerifyResult(null);
+    try {
+      const res: any = await api.verifyPaymentGateway({
+        gateway: activePaymentGateway,
+        razorpayKeyId,
+        razorpayKeySecret,
+        cashfreeAppId,
+        cashfreeSecretKey,
+        ccavenueMerchantId,
+        ccavenueAccessCode,
+        ccavenueWorkingKey,
+        stripePublishableKey,
+        stripeSecretKey
+      });
+
+      if (res.success) {
+        setGatewayVerifyResult({
+          success: true,
+          message: res.message || 'Payment Gateway Verified Successfully!',
+          mode: res.mode
+        });
+        toast.success(res.message || 'Payment Gateway connection verified!');
+      } else {
+        setGatewayVerifyResult({
+          success: false,
+          message: res.message || 'Payment Gateway Verification Failed.'
+        });
+        toast.error(res.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify payment gateway connection.';
+      setGatewayVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingGateway(false);
+    }
   };
 
   const handleTestSmtp = async () => {
@@ -7288,23 +7333,62 @@ function AdminDashboardContent() {
                                 <p className="text-[11px] text-slate-500 mb-2">
                                   Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
                                 </p>
-                                <textarea
-                                  value={agreementContent}
-                                  onChange={e => setAgreementContent(e.target.value)}
-                                  rows={6}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={agreementContent}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setAgreementContent(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={agreementContent}
+                                      onChange={e => setAgreementContent(e.target.value)}
+                                      rows={6}
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
+                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={welcomeEmailText}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setWelcomeEmailText(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={reportDisclaimer}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setReportDisclaimer(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -7499,6 +7583,48 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Gateway Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {gatewayVerifyResult ? (
+                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                        {gatewayVerifyResult.mode && (
+                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                            Status: {gatewayVerifyResult.mode} MODE
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyPaymentGateway}
+                                  disabled={verifyingGateway}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingGateway ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Verifying Credentials...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      <span>Verify Gateway Connection</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -7739,7 +7865,7 @@ function AdminDashboardContent() {
                             )}
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-2 max-h-[480px] overflow-y-auto custom-scrollbar pr-1.5">
                             {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
                               const isSelected = selectedRole?.id === r.id;
                               const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);

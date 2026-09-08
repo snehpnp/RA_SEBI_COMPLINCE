@@ -141,6 +141,12 @@ router.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
 router.get('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.getTenantPermissions);
 router.put('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.updateTenantPermissions);
 router.post('/sync/bootstrap', tenantSyncController_1.bootstrapTenant);
+router.post('/sync/update', tenantSyncController_1.bootstrapTenant);
+router.post('/sync/tenant', tenantSyncController_1.bootstrapTenant);
+router.post('/super-admin/test-mongo-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.testMongoConnection);
+router.post('/super-admin/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/tenants/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/verify-domain', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.verifyDomainUrl);
 router.get('/sync/config', tenantSyncController_1.getTenantSyncConfig);
 router.get('/tenant/sync-config', tenantSyncController_1.getTenantSyncConfig);
 router.put('/super-admin/password', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateSuperAdminPassword);
@@ -148,6 +154,8 @@ router.get('/super-admin/logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)
 router.get('/super-admin/compliance-rules', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getComplianceRules);
 router.put('/super-admin/compliance-rules/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateComplianceRule);
 router.get('/super-admin/telemetry', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
+router.get('/super-admin/dashboard', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
+router.get('/super-admin/dashboard-stats', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
 // ----------------------------------------------------
 // SYSTEM SETTINGS (GLOBAL BRANDING)
 // ----------------------------------------------------
@@ -169,6 +177,7 @@ router.get('/admin/email-templates', auth_1.authenticateJWT, (0, auth_1.requireR
 router.put('/admin/email-templates/:type', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.updateEmailTemplate);
 router.post('/admin/test-smtp', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), adminController_1.testSmtp);
 router.post('/admin/test-smtp-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), systemSettingController_1.testSmtpConnection);
+router.post('/admin/verify-payment-gateway', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), adminController_1.verifyPaymentGateway);
 // Bulk Exports
 router.get('/admin/exports/invoices', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EXPORT_DATA'), adminController_1.exportInvoicesZip);
 router.get('/admin/exports/agreements', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EXPORT_DATA'), adminController_1.exportAgreementsZip);

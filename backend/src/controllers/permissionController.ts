@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
+import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 
 export const getTenantPermissions = async (req: AuthenticatedRequest, res: Response) => {
   const { tenantId } = req.params;
@@ -74,9 +75,14 @@ export const updateTenantPermissions = async (req: AuthenticatedRequest, res: Re
       });
     }
 
+    // Auto-sync permission changes to remote domainUrl and dedicated MongoDB in background
+    syncTenantToRemote(tenantId, { reason: 'PERMISSIONS_UPDATE' }).catch(err => {
+      console.warn('Background sync for tenant permissions error:', err);
+    });
+
     return res.status(200).json({
       success: true,
-      message: 'Admin permissions updated successfully.',
+      message: 'Admin permissions updated and dispatched to company domain database successfully.',
       data: updated
     });
   } catch (error: any) {

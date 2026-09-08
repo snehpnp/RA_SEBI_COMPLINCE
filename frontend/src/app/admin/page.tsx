@@ -956,6 +956,8 @@ function AdminDashboardContent() {
   const [ccavenueWorkingKey, setCcavenueWorkingKey] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [verifyingGateway, setVerifyingGateway] = useState(false);
+  const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
@@ -1693,6 +1695,49 @@ function AdminDashboardContent() {
       }
       else { toast(data.message); }
     } catch (err: any) { toast(err.message); }
+  };
+
+  const handleVerifyPaymentGateway = async () => {
+    setVerifyingGateway(true);
+    setGatewayVerifyResult(null);
+    try {
+      const res: any = await api.verifyPaymentGateway({
+        gateway: activePaymentGateway,
+        razorpayKeyId,
+        razorpayKeySecret,
+        cashfreeAppId,
+        cashfreeSecretKey,
+        ccavenueMerchantId,
+        ccavenueAccessCode,
+        ccavenueWorkingKey,
+        stripePublishableKey,
+        stripeSecretKey
+      });
+
+      if (res.success) {
+        setGatewayVerifyResult({
+          success: true,
+          message: res.message || 'Payment Gateway Verified Successfully!',
+          mode: res.mode
+        });
+        toast.success(res.message || 'Payment Gateway connection verified!');
+      } else {
+        setGatewayVerifyResult({
+          success: false,
+          message: res.message || 'Payment Gateway Verification Failed.'
+        });
+        toast.error(res.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify payment gateway connection.';
+      setGatewayVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingGateway(false);
+    }
   };
 
 
@@ -7503,19 +7548,7 @@ function AdminDashboardContent() {
                               </div>
                             </div>
 
-                            <div className="border-t border-slate-400 dark:border-white/10 pt-6">
-                              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">Signal Management Options</h3>
-                              <div className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800/50 rounded-xl">
-                                <div>
-                                  <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">Show Mobile Preview</h4>
-                                  <p className="text-xs text-slate-500 mt-1">Enable live mobile app preview panel when managing signals.</p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                  <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
-                                </label>
-                              </div>
-                            </div>
+                        
 
                             <div className="border-t border-slate-400 dark:border-white/10 pt-6">
                               <div className="flex justify-between items-center border-b border-slate-200 dark:border-white/10 pb-2 mb-4">
@@ -7608,23 +7641,62 @@ function AdminDashboardContent() {
                                 <p className="text-[11px] text-slate-500 mb-2">
                                   Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
                                 </p>
-                                <textarea
-                                  value={agreementContent}
-                                  onChange={e => setAgreementContent(e.target.value)}
-                                  rows={6}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={agreementContent}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setAgreementContent(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={agreementContent}
+                                      onChange={e => setAgreementContent(e.target.value)}
+                                      rows={6}
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
+                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={welcomeEmailText}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setWelcomeEmailText(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={reportDisclaimer}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setReportDisclaimer(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -7819,6 +7891,48 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Gateway Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {gatewayVerifyResult ? (
+                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                        {gatewayVerifyResult.mode && (
+                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                            Status: {gatewayVerifyResult.mode} MODE
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyPaymentGateway}
+                                  disabled={verifyingGateway}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingGateway ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Verifying Credentials...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      <span>Verify Gateway Connection</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -7965,68 +8079,58 @@ function AdminDashboardContent() {
                         )}
                       </div>
 
-                      <div className="space-y-6">
-                        {/* Horizontal Roles List (Carousel) */}
-                        <div className="bg-white dark:bg-[#0F172A] p-3 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-sm flex items-center relative group">
-                          {/* Carousel Prev Button */}
-                          <button
-                            onClick={() => {
-                              if (rolesScrollRef.current) {
-                                rolesScrollRef.current.scrollBy({ left: -300, behavior: 'smooth' });
-                              }
-                            }}
-                            className="absolute left-2 z-10 p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-600 dark:text-slate-400 hover:text-primary-600 transition opacity-0 group-hover:opacity-100 hidden md:block"
-                          >
-                            <ChevronLeft className="h-5 w-5" />
-                          </button>
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                        {/* Roles List Sidebar (Left Column) */}
+                        <div className="lg:col-span-4 xl:col-span-3 space-y-4 lg:sticky lg:top-6">
+                          <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-3">
+                            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800/60">
+                              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Available Roles</h3>
+                              <span className="text-[10px] font-mono font-bold bg-primary-500/10 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-full">
+                                {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).length} Roles
+                              </span>
+                            </div>
 
-                          <div
-                            ref={rolesScrollRef}
-                            className="flex gap-3 px-2 md:px-10 pb-1 pt-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth w-full"
-                          >
-                            {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
-                              const isSelected = selectedRole?.id === r.id;
-                              const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
-                              return (
-                                <button
-                                  key={r.id}
-                                  onClick={() => setSelectedRole(r)}
-                                  className={`shrink-0 text-left px-4 py-3 rounded-xl border transition-all duration-200 flex flex-col w-[200px] ${isSelected ? 'bg-primary-50/50 dark:bg-primary-900/10 border-primary-500/50 ring-1 ring-primary-500/20 shadow-sm' : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 hover:border-primary-500/30 hover:bg-white dark:hover:bg-slate-800/50'}`}
-                                >
-                                  <span className="font-bold text-xs text-slate-900 dark:text-slate-100 tracking-wide font-mono uppercase truncate w-full mb-2">
-                                    {r.name.replace(/_/g, ' ')}
-                                  </span>
-                                  <div className="flex items-center justify-between w-full">
-                                    <div className="flex items-center text-[10px] text-slate-500 dark:text-slate-500 font-mono">
-                                      <ShieldCheck className="h-3 w-3 mr-1 text-slate-600 dark:text-slate-400" />
-                                      <span>{r.permissions?.length || 0} perms</span>
+                            <div className="space-y-2.5 max-h-[480px] overflow-y-auto custom-scrollbar pr-1.5">
+                              {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
+                                const isSelected = selectedRole?.id === r.id;
+                                const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
+                                return (
+                                  <button
+                                    key={r.id}
+                                    onClick={() => setSelectedRole(r)}
+                                    className={`w-full text-left p-3.5 rounded-xl border transition-all duration-200 flex flex-col ${
+                                      isSelected
+                                        ? 'bg-primary-50/80 dark:bg-primary-950/40 border-primary-500 ring-1 ring-primary-500/40 shadow-md shadow-primary-500/10'
+                                        : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 hover:border-primary-500/40 hover:bg-white dark:hover:bg-slate-800/60'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between w-full mb-1.5">
+                                      <span className={`font-bold text-xs tracking-wide font-mono uppercase truncate ${isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-slate-900 dark:text-slate-100'}`}>
+                                        {r.name.replace(/_/g, ' ')}
+                                      </span>
+                                      {isSystemRole ? (
+                                        <span className="text-[9px] bg-slate-500/10 border border-slate-500/20 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded font-mono shrink-0">System</span>
+                                      ) : (
+                                        <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">Custom</span>
+                                      )}
                                     </div>
-                                    {isSystemRole ? (
-                                      <span className="text-[9px] bg-slate-500/10 border border-slate-500/20 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded font-mono shrink-0">System</span>
-                                    ) : (
-                                      <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">Custom</span>
-                                    )}
-                                  </div>
-                                </button>
-                              );
-                            })}
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mb-2">{r.description || 'Access controls and dashboard view'}</p>
+                                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                                      <div className="flex items-center">
+                                        <ShieldCheck className={`h-3.5 w-3.5 mr-1.5 ${isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}`} />
+                                        <span>{r.permissions?.length || 0} perms</span>
+                                      </div>
+                                      <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isSelected ? 'text-primary-600 dark:text-primary-400 translate-x-0.5' : 'text-slate-300 dark:text-slate-600'}`} />
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-
-                          {/* Carousel Next Button */}
-                          <button
-                            onClick={() => {
-                              if (rolesScrollRef.current) {
-                                rolesScrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
-                              }
-                            }}
-                            className="absolute right-2 z-10 p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-600 dark:text-slate-400 hover:text-primary-600 transition opacity-0 group-hover:opacity-100 hidden md:block"
-                          >
-                            <ChevronRight className="h-5 w-5" />
-                          </button>
                         </div>
 
-                        {/* Permissions Configuration (Full Width Below) */}
-                        <div className="w-full space-y-6">
+                        {/* Permissions Configuration (Right Column) */}
+                        <div className="lg:col-span-8 xl:col-span-9 space-y-6">
                           {!selectedRole ? (
                             <div className="bg-white dark:bg-[#0F172A] p-12 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none text-center flex flex-col items-center justify-center space-y-4">
                               <ShieldCheck className="h-16 w-16 text-slate-400 dark:text-slate-600 animate-pulse" />

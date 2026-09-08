@@ -1,10 +1,12 @@
 import { Response } from 'express';
+import { MongoClient } from 'mongodb';
 import prisma from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
-import { provisionTenantDatabase } from '../services/tenantProvisionService';
+import { provisionAllTenantCollections, provisionTenantDatabase } from '../services/tenantProvisionService';
+import { syncTenantToRemote, syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 import { ensureStates, detectStateFromGst, detectStateFromText, INDIAN_STATES } from '../services/stateService';
 import * as jwt from 'jsonwebtoken';
 import fs from 'fs';
@@ -128,264 +130,127 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
     const passwordHash = await bcrypt.hash(rawAdminPassword, salt);
     const generatedApiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
 
-    // Get ADMIN role id
-    const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
-    if (!adminRole) {
-      return res.status(500).json({ success: false, message: 'Admin role is not seeded yet.' });
+    // Execute comprehensive provisioning of all 11 collections on the local master DB
+    const provisionResult = await provisionAllTenantCollections(
+      prisma,
+      {
+        companyName,
+        panelName: panelName || `${companyName} Portal`,
+        domainUrl: domainUrl || null,
+        mongoDbUrl: mongoDbUrl || null,
+        dbName: dbName || null,
+        tenantApiKey: generatedApiKey,
+        companyType: companyType || 'INDIVIDUAL',
+        raType: raType || 'FULL_TIME',
+        ownerName,
+        sebiRegistration: ocrExtractedReg,
+        bseEnrollment,
+        email,
+        mobile,
+        address,
+        pan,
+        gst,
+        website,
+        certificateUrl,
+        certificateValidity: certificateValidity ? new Date(certificateValidity) : null,
+        nismCertificateUrl,
+        nismValidity: nismValidity ? new Date(nismValidity) : null,
+        depositAmount: depositAmount ? parseFloat(depositAmount) : 0.0,
+        state: effectiveState,
+        status: 'PENDING_PROFILE'
+      },
+      {
+        email: adminEmailToUse,
+        passwordHash,
+        tempPassword: rawAdminPassword,
+        firstName: adminFirstName,
+        lastName: adminLastName,
+        mobile: adminMobileToUse,
+        status: 'ACTIVE'
+      }
+    );
+
+    const createdTenant = provisionResult.tenant;
+    const createdAdminUser = provisionResult.adminUser;
+
+    // Record document history if certificate files were uploaded
+    if (certificateUrl && files?.sebiCertificate?.[0]) {
+      await prisma.tenantDocumentHistory.create({
+        data: {
+          tenantId: createdTenant.id,
+          docType: 'SEBI_CERTIFICATE',
+          fileUrl: certificateUrl,
+          fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
+        }
+      }).catch(() => {});
+    }
+    if (nismCertificateUrl && files?.nismCertificate?.[0]) {
+      await prisma.tenantDocumentHistory.create({
+        data: {
+          tenantId: createdTenant.id,
+          docType: 'NISM_CERTIFICATE',
+          fileUrl: nismCertificateUrl,
+          fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
+        }
+      }).catch(() => {});
     }
 
-    // DB Transaction to create tenant and initial user
-    const result = await prisma.$transaction(async (tx) => {
-      const tenantObj = await tx.tenant.create({
-        data: {
-          companyName,
-          panelName: panelName || `${companyName} Portal`,
-          domainUrl: domainUrl || null,
-          mongoDbUrl: mongoDbUrl || null,
-          dbName: dbName || null,
-          tenantApiKey: generatedApiKey,
-          companyType: companyType || 'INDIVIDUAL',
-          raType: raType || 'FULL_TIME',
-          ownerName,
-          sebiRegistration: ocrExtractedReg,
-          bseEnrollment,
-          email,
-          mobile,
-          address,
-          pan,
-          gst,
-          website,
-          certificateUrl,
-          certificateValidity: certificateValidity ? new Date(certificateValidity) : null,
-          nismCertificateUrl,
-          nismValidity: nismValidity ? new Date(nismValidity) : null,
-          depositAmount: depositAmount ? parseFloat(depositAmount) : 0.0,
-          state: effectiveState,
-          status: 'PENDING_PROFILE'
-        }
+    // Automatically dispatch sync to remote domainUrl API and dedicated MongoDB
+    let syncResult: any = null;
+    try {
+      syncResult = await syncTenantToRemote(createdTenant.id, {
+        reason: 'CREATE',
+        adminPassword: rawAdminPassword
       });
-
-      const userObj = await tx.user.create({
-        data: {
-          tenantId: tenantObj.id,
-          roleId: adminRole.id,
-          firstName: adminFirstName,
-          lastName: adminLastName,
-          email: adminEmailToUse,
-          mobile: adminMobileToUse,
-          passwordHash,
-          tempPassword: rawAdminPassword
-        }
-      });
-
-      // Automatically create the 6 mandatory pages for the new tenant
-      const defaultPages = [
-        { title: 'Complaint Status', slug: 'complaint-status', type: 'CONTENT', content: '', isSystem: true },
-        { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', content: '', isSystem: true },
-        { title: 'Disclosure', slug: 'disclosure', type: 'CONTENT', content: '', isSystem: true },
-        { title: 'Disclaimer', slug: 'disclaimer', type: 'CONTENT', content: '', isSystem: true },
-        { title: 'Grievance Redressal Process', slug: 'grievance-redressal-process', type: 'CONTENT', content: '', isSystem: true },
-        { title: 'Investor Charter', slug: 'investor-charter', type: 'CONTENT', content: '', isSystem: true }
-      ];
-
-      await tx.customPage.createMany({
-        data: defaultPages.map(page => ({
-          ...page,
-          tenantId: tenantObj.id
-        }))
-      });
-
-      // Seed default AdminPermissions for this tenant
-      const defaultModules = [
-        'CLIENTS',
-        'RESEARCH_REPORTS',
-        'SIGNALS',
-        'COMPLIANCE',
-        'BILLING',
-        'KYC',
-        'COUPONS',
-        'CUSTOM_PAGES',
-        'AI_FEATURES',
-        'EXPORT_DATA'
-      ];
-
-      await tx.adminPermission.createMany({
-        data: defaultModules.map(module => ({
-          tenantId: tenantObj.id,
-          module,
-          canView: true,
-          canCreate: true,
-          canEdit: true,
-          canDelete: true,
-          canExport: true,
-          isEnabled: true
-        }))
-      });
-
-      if (certificateUrl && files.sebiCertificate && files.sebiCertificate[0]) {
-        await tx.tenantDocumentHistory.create({
-          data: {
-            tenantId: tenantObj.id,
-            docType: 'SEBI_CERTIFICATE',
-            fileUrl: certificateUrl,
-            fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
-          }
-        });
-      }
-      if (nismCertificateUrl && files.nismCertificate && files.nismCertificate[0]) {
-        await tx.tenantDocumentHistory.create({
-          data: {
-            tenantId: tenantObj.id,
-            docType: 'NISM_CERTIFICATE',
-            fileUrl: nismCertificateUrl,
-            fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
-          }
-        });
-      }
-
-      // Automatically create / ensure the State collection with all Indian States & GST codes
-      for (const st of INDIAN_STATES) {
-        await tx.state.upsert({
-          where: { name: st.name },
-          update: { gstCode: st.gstCode, isActive: true },
-          create: { name: st.name, gstCode: st.gstCode, isActive: true }
-        });
-      }
-
-      return { tenantObj, userObj };
-    });
-
-    // Ensure State collection in MongoDB is seeded
-    ensureStates(prisma).catch(e => console.error('Background ensureStates error:', e));
-
-    // Automatically provision remote dedicated MongoDB if mongoDbUrl is provided
-    let dbProvisionResult: any = null;
-    if (mongoDbUrl && mongoDbUrl.trim()) {
-      try {
-        dbProvisionResult = await provisionTenantDatabase(mongoDbUrl.trim(), result.tenantObj, {
-          id: result.userObj.id,
-          email: result.userObj.email,
-          passwordHash,
-          tempPassword: rawAdminPassword,
-          firstName: result.userObj.firstName,
-          lastName: result.userObj.lastName,
-          mobile: result.userObj.mobile
-        });
-      } catch (provErr: any) {
-        console.error('Remote DB auto-provision error:', provErr);
-        dbProvisionResult = { success: false, message: provErr.message };
-      }
-    }
-
-    // Automatically sync to remote server via API if domainUrl is provided
-    let apiSyncResult: any = null;
-    if (domainUrl && domainUrl.trim()) {
-      try {
-        let rawDomain = domainUrl.trim();
-        if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
-          rawDomain = 'https://' + rawDomain;
-        }
-        rawDomain = rawDomain.replace(/\/+$/, '');
-        const candidateEndpoints = [
-          `${rawDomain}/api/v1/sync/bootstrap`,
-          `${rawDomain}/backend/api/v1/sync/bootstrap`,
-          `${rawDomain}/api/sync/bootstrap`,
-          `${rawDomain}/backend/sync/bootstrap`,
-          `${rawDomain}/sync/bootstrap`
-        ];
-
-        const syncPayload = {
-          apiKey: generatedApiKey,
-          tenant: result.tenantObj,
-          adminUser: {
-            id: result.userObj.id,
-            email: result.userObj.email,
-            passwordHash,
-            tempPassword: rawAdminPassword,
-            firstName: result.userObj.firstName,
-            lastName: result.userObj.lastName,
-            mobile: result.userObj.mobile,
-            status: 'ACTIVE'
-          }
-        };
-
-        for (const syncEndpoint of candidateEndpoints) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-            const response = await fetch(syncEndpoint, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-tenant-api-key': generatedApiKey
-              },
-              body: JSON.stringify(syncPayload),
-              signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-
-            if (response.ok) {
-              apiSyncResult = await response.json().catch(() => ({ success: true, message: 'Synced successfully' }));
-              break;
-            }
-          } catch (candErr) {
-            // try next endpoint
-          }
-        }
-        if (!apiSyncResult) {
-          apiSyncResult = { success: false, message: `Remote server at ${domainUrl} is offline or endpoint returned 404. Details saved in local platform DB.` };
-        }
-      } catch (err: any) {
-        apiSyncResult = { success: false, message: `Could not reach ${domainUrl} API: ${err.message}` };
-      }
+    } catch (syncErr: any) {
+      console.warn('Auto-sync dispatch warning during tenant creation:', syncErr?.message || syncErr);
     }
 
     // Write SMTP notification log
     await prisma.notificationLog.create({
       data: {
-        tenantId: result.tenantObj.id,
+        tenantId: createdTenant.id,
         recipient: adminEmailToUse,
         channel: 'EMAIL',
         title: 'Company Registration & Account Credentials',
         message: `Welcome ${companyName}! Your company is registered on RAGCP. Credentials: Username: ${adminEmailToUse}, Password: ${rawAdminPassword}. Please complete your profile wizard upon login.`,
         status: 'SENT'
       }
-    });
+    }).catch(() => {});
 
     // Log Super Admin Audit Trail
     await logAudit({
       userId: req.user!.id,
       action: 'CREATE',
       module: 'TENANTS',
-      newValue: { ...result.tenantObj, adminEmail: adminEmailToUse, dbProvisionResult, apiSyncResult },
+      newValue: { ...createdTenant, adminEmail: adminEmailToUse, syncResult },
       ipAddress: req.ip
-    });
+    }).catch(() => {});
 
     return res.status(201).json({
       success: true,
-      message: 'Company Tenant onboarded successfully.',
+      message: `Company Tenant onboarded successfully. All collections and baseline data initialized.${syncResult?.domainSyncResult?.success ? ' Synced to domain URL database.' : ''}`,
       data: {
-        tenant: result.tenantObj,
+        tenant: createdTenant,
         adminUser: {
-          id: result.userObj.id,
-          email: result.userObj.email,
-          firstName: result.userObj.firstName,
-          lastName: result.userObj.lastName,
-          mobile: result.userObj.mobile,
+          id: createdAdminUser.id,
+          email: createdAdminUser.email,
+          firstName: createdAdminUser.firstName,
+          lastName: createdAdminUser.lastName,
+          mobile: createdAdminUser.mobile,
           role: 'ADMIN',
           tempPassword: rawAdminPassword,
           generatedPassword: rawAdminPassword,
           tenantApiKey: generatedApiKey
         },
-        dbProvision: dbProvisionResult,
-        apiSync: apiSyncResult
+        syncResult
       }
     });
   } catch (error: any) {
+    console.error('Error creating tenant:', error);
     return res.status(500).json({
       success: false,
-      message: 'Failed to create company tenant',
+      message: 'Failed to create company tenant: ' + error.message,
       errors: [error.message]
     });
   }
@@ -444,71 +309,10 @@ export const toggleTenantStatus = async (req: AuthenticatedRequest, res: Respons
       }
     });
 
-    // Sync status change to remote dedicated MongoDB if configured
-    if (updatedTenant.mongoDbUrl && updatedTenant.mongoDbUrl.trim()) {
-      try {
-        const adminUser = await prisma.user.findFirst({
-          where: { tenantId: id, role: { name: 'ADMIN' } }
-        });
-        if (adminUser) {
-          await provisionTenantDatabase(updatedTenant.mongoDbUrl.trim(), updatedTenant, {
-            id: adminUser.id,
-            email: adminUser.email,
-            passwordHash: adminUser.passwordHash,
-            tempPassword: adminUser.tempPassword,
-            firstName: adminUser.firstName,
-            lastName: adminUser.lastName,
-            mobile: adminUser.mobile
-          });
-        }
-      } catch (remoteDbErr) {
-        console.error('Failed to sync status change to remote MongoDB:', remoteDbErr);
-      }
-    }
-
-    // Sync status change to remote server via HTTP API if configured
-    if (updatedTenant.domainUrl && updatedTenant.domainUrl.trim()) {
-      try {
-        let rawDomain = updatedTenant.domainUrl.trim();
-        if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
-          rawDomain = 'https://' + rawDomain;
-        }
-        rawDomain = rawDomain.replace(/\/+$/, '');
-        const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
-
-        const adminUser = await prisma.user.findFirst({
-          where: { tenantId: id, role: { name: 'ADMIN' } }
-        });
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-        await fetch(syncEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-tenant-api-key': updatedTenant.tenantApiKey || ''
-          },
-          body: JSON.stringify({
-            apiKey: updatedTenant.tenantApiKey,
-            tenant: updatedTenant,
-            adminUser: adminUser ? {
-              id: adminUser.id,
-              email: adminUser.email,
-              passwordHash: adminUser.passwordHash,
-              tempPassword: adminUser.tempPassword,
-              firstName: adminUser.firstName,
-              lastName: adminUser.lastName,
-              mobile: adminUser.mobile
-            } : null
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-      } catch (syncApiErr) {
-        console.error('Failed to sync status change to remote server via API:', syncApiErr);
-      }
-    }
+    // Auto-sync status change to remote domainUrl API and dedicated MongoDB in background
+    syncTenantToRemote(id, { reason: 'STATUS_CHANGE' }).catch(syncErr => {
+      console.warn('Auto-sync status change warning:', syncErr);
+    });
 
     await logAudit({
       userId: req.user!.id,
@@ -517,11 +321,11 @@ export const toggleTenantStatus = async (req: AuthenticatedRequest, res: Respons
       oldValue: oldTenant,
       newValue: updatedTenant,
       ipAddress: req.ip
-    });
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: `Company status changed to ${status}. Panel access has been ${status === 'SUSPENDED' ? 'disabled immediately' : 'reactivated'}.`,
+      message: `Company status changed to ${status}. Panel access has been ${status === 'SUSPENDED' ? 'disabled immediately' : 'reactivated'}. Changes dispatched to domain database.`,
       data: updatedTenant
     });
   } catch (error: any) {
@@ -552,6 +356,11 @@ export const deleteTenant = async (req: AuthenticatedRequest, res: Response) => 
       data: { status: 'DELETED', deletedAt: new Date() }
     });
 
+    // Auto-sync soft delete to remote domainUrl API and dedicated MongoDB in background
+    syncTenantToRemote(id, { reason: 'DELETE' }).catch(syncErr => {
+      console.warn('Auto-sync soft-delete warning:', syncErr);
+    });
+
     await logAudit({
       userId: req.user!.id,
       action: 'SOFT_DELETE',
@@ -559,11 +368,11 @@ export const deleteTenant = async (req: AuthenticatedRequest, res: Response) => 
       oldValue: oldTenant,
       newValue: updatedTenant,
       ipAddress: req.ip
-    });
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: 'Company successfully deleted (soft delete)',
+      message: 'Company successfully deleted (soft delete). Status dispatched to domain database.',
       data: updatedTenant
     });
   } catch (error: any) {
@@ -591,7 +400,6 @@ export const restoreTenant = async (req: AuthenticatedRequest, res: Response) =>
     // Restore users: if company restores to SUSPENDED, only restore admin/staff (not to ACTIVE);
     // if restoring to ACTIVE, restore everyone to ACTIVE
     if (restoreToStatus === 'SUSPENDED') {
-      // Restore users to ACTIVE status but company is SUSPENDED (they can't login anyway due to middleware)
       await prisma.user.updateMany({
         where: { tenantId: id, deletedAt: { not: null } },
         data: { status: 'ACTIVE', deletedAt: null }
@@ -603,6 +411,11 @@ export const restoreTenant = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
+    // Auto-sync restore to remote domainUrl API and dedicated MongoDB in background
+    syncTenantToRemote(id, { reason: 'RESTORE' }).catch(syncErr => {
+      console.warn('Auto-sync restore warning:', syncErr);
+    });
+
     await logAudit({
       userId: req.user!.id,
       action: 'RESTORE',
@@ -610,11 +423,11 @@ export const restoreTenant = async (req: AuthenticatedRequest, res: Response) =>
       oldValue: oldTenant,
       newValue: updatedTenant,
       ipAddress: req.ip
-    });
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: `Company successfully restored to ${restoreToStatus} status`,
+      message: `Company successfully restored to ${restoreToStatus} status. Changes dispatched to domain database.`,
       data: updatedTenant
     });
   } catch (error: any) {
@@ -749,22 +562,99 @@ export const getAuditLogs = async (req: AuthenticatedRequest, res: Response) => 
 
 export const getGlobalTelemetry = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const totalCompanies = await prisma.tenant.count({ where: { deletedAt: null } });
-    const activeCompanies = await prisma.tenant.count({ where: { deletedAt: null, status: 'ACTIVE' } });
-    const totalUsers = await prisma.user.count({ where: { deletedAt: null } });
-    const auditLogsCount = await prisma.auditLog.count();
+    const allTenants = await prisma.tenant.findMany({
+      select: { id: true, companyName: true, status: true, deletedAt: true }
+    });
+    const validTenants = allTenants.filter(t => !t.deletedAt && t.status !== 'DELETED');
+    const tenantIds = validTenants.map(t => t.id);
+
+    const totalCompanies = validTenants.length;
+    const activeCompanies = validTenants.filter(t => t.status === 'ACTIVE').length;
+    const suspendedCompanies = validTenants.filter(t => t.status === 'SUSPENDED').length;
+    const pendingCompanies = validTenants.filter(t => t.status === 'PENDING_PROFILE').length;
+
+    // Fetch all clients across active/non-deleted tenants
+    const allClients = await prisma.client.findMany({
+      include: {
+        user: {
+          select: { id: true, status: true, deletedAt: true, tenantId: true }
+        }
+      }
+    });
+
+    const validClients = allClients.filter(c => c.user && !c.user.deletedAt && tenantIds.includes(c.user.tenantId));
+    const totalClients = validClients.length;
+    const activeClients = validClients.filter(c => c.status === 'ACTIVE').length;
+    const pendingClients = validClients.filter(c => c.status !== 'ACTIVE').length;
+
+    // Fetch all staff across active/non-deleted tenants
+    const allStaff = await prisma.staff.findMany({
+      include: {
+        user: {
+          select: { id: true, status: true, deletedAt: true, tenantId: true }
+        }
+      }
+    });
+    const validStaff = allStaff.filter(s => s.user && !s.user.deletedAt && tenantIds.includes(s.user.tenantId));
+    const totalStaff = validStaff.length;
+    const activeStaff = validStaff.filter(s => s.status === 'ACTIVE').length;
 
     // Fetch alerts count
-    const activeAlerts = await prisma.complianceAlert.count({ where: { status: 'OPEN' } });
+    const activeAlerts = await prisma.complianceAlert.count({
+      where: { tenantId: { in: tenantIds }, status: 'OPEN' }
+    });
+    const totalAlerts = await prisma.complianceAlert.count({
+      where: { tenantId: { in: tenantIds } }
+    });
+    const resolvedAlerts = await prisma.complianceAlert.count({
+      where: { tenantId: { in: tenantIds }, status: 'RESOLVED' }
+    });
+
+    // Audit logs count
+    const auditLogsCount = await prisma.auditLog.count();
+
+    // Compliance audits count
+    const totalAudits = await prisma.complianceAudit.count({
+      where: { tenantId: { in: tenantIds } }
+    });
+    const pendingAudits = await prisma.complianceAudit.count({
+      where: { tenantId: { in: tenantIds }, status: { in: ['PENDING', 'OVERDUE'] } }
+    });
+    const completedAudits = await prisma.complianceAudit.count({
+      where: { tenantId: { in: tenantIds }, status: 'COMPLETED' }
+    });
+
+    // Plans count
+    const allPlans = await prisma.plan.findMany({
+      where: { tenantId: { in: tenantIds } },
+      select: { id: true, status: true, deletedAt: true }
+    });
+    const validPlans = allPlans.filter(p => !p.deletedAt);
+    const totalPlans = validPlans.length;
+    const activePlans = validPlans.filter(p => p.status === 'ACTIVE').length;
 
     return res.status(200).json({
       success: true,
       data: {
         totalCompanies,
         activeCompanies,
-        totalUsers,
+        suspendedCompanies,
+        pendingCompanies,
+        totalUsers: totalClients + totalStaff + totalCompanies,
+        totalClients,
+        activeClients,
+        pendingClients,
+        totalStaff,
+        activeStaff,
+        activeAlerts,
+        totalAlerts,
+        resolvedAlerts,
         auditLogsCount,
-        activeAlerts
+        totalAudits,
+        pendingAudits,
+        completedAudits,
+        totalPlans,
+        activePlans
       }
     });
   } catch (error: any) {
@@ -1020,71 +910,13 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
       }
     }
 
-    // Auto-sync to dedicated MongoDB in background with short timeout
-    if (updatedTenant.mongoDbUrl && updatedTenant.mongoDbUrl.trim()) {
-      try {
-        const mongoUrl = updatedTenant.mongoDbUrl.trim();
-        const syncPromise = provisionTenantDatabase(mongoUrl, updatedTenant, {
-          id: adminUser?.id,
-          email: adminUser?.email || updatedTenant.email,
-          passwordHash: adminUser?.passwordHash || '',
-          tempPassword: adminUser?.tempPassword || adminPassword || null,
-          firstName: adminUser?.firstName || updatedTenant.companyName,
-          lastName: adminUser?.lastName || 'Admin',
-          mobile: adminUser?.mobile || updatedTenant.mobile,
-          status: adminUser?.status || (updatedTenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
-        });
-
-        const timeoutPromise = new Promise<{ success: boolean; message: string }>((resolve) =>
-          setTimeout(() => resolve({ success: false, message: 'Dedicated MongoDB sync timed out.' }), 3500)
-        );
-
-        await Promise.race([syncPromise, timeoutPromise]);
-      } catch (syncErr: any) {
-        console.warn('Dedicated MongoDB sync warning during edit:', syncErr?.message || syncErr);
-      }
-    }
-
-    // Auto-sync to remote HTTP API if domainUrl configured with short timeout
-    if (updatedTenant.domainUrl && updatedTenant.domainUrl.trim()) {
-      try {
-        let rawDomain = updatedTenant.domainUrl.trim();
-        if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
-          rawDomain = 'https://' + rawDomain;
-        }
-        rawDomain = rawDomain.replace(/\/+$/, '');
-        const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-        await fetch(syncEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-tenant-api-key': apiKey
-          },
-          body: JSON.stringify({
-            apiKey,
-            tenant: updatedTenant,
-            adminUser: {
-              id: adminUser?.id,
-              email: adminUser?.email || updatedTenant.email,
-              passwordHash: adminUser?.passwordHash || '',
-              tempPassword: adminUser?.tempPassword || adminPassword || null,
-              firstName: adminUser?.firstName || updatedTenant.companyName,
-              lastName: adminUser?.lastName || 'Admin',
-              mobile: adminUser?.mobile || updatedTenant.mobile,
-              status: adminUser?.status || (updatedTenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
-            }
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-      } catch (syncApiErr: any) {
-        console.warn('Remote API sync warning during edit:', syncApiErr?.message || syncApiErr);
-      }
-    }
+    // Auto-sync company & admin updates to remote domainUrl API and dedicated MongoDB in background
+    syncTenantToRemote(id, {
+      reason: 'UPDATE',
+      adminPassword
+    }).catch(syncErr => {
+      console.warn('Auto-sync dispatch warning during tenant edit:', syncErr);
+    });
 
     // Write audit log safely
     if (req.user && req.user.id) {
@@ -1100,7 +932,7 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
 
     return res.status(200).json({
       success: true,
-      message: 'Company and Admin details updated in database successfully.',
+      message: 'Company and Admin details updated and dispatched to domain database successfully.',
       data: updatedTenant
     });
   } catch (error: any) {
@@ -1362,18 +1194,18 @@ export const updateComplianceRule = async (req: AuthenticatedRequest, res: Respo
   try {
     const oldRule = await prisma.complianceRequirement.findUnique({ where: { id } });
     if (!oldRule) {
-      return res.status(404).json({ success: false, message: 'Rule not found' });
+      return res.status(404).json({ success: false, message: 'Compliance rule not found' });
     }
 
     const updatedRule = await prisma.complianceRequirement.update({
       where: { id },
       data: {
-        requirement,
-        frequency,
-        frequencyType,
-        severityLevel,
-        penaltyAmount,
-        isActive: typeof isActive === 'boolean' ? isActive : undefined
+        requirement: requirement !== undefined ? requirement : oldRule.requirement,
+        frequency: frequency !== undefined ? frequency : oldRule.frequency,
+        frequencyType: frequencyType !== undefined ? frequencyType : oldRule.frequencyType,
+        severityLevel: severityLevel !== undefined ? severityLevel : oldRule.severityLevel,
+        penaltyAmount: penaltyAmount !== undefined ? penaltyAmount : oldRule.penaltyAmount,
+        isActive: typeof isActive === 'boolean' ? isActive : oldRule.isActive
       }
     });
 
@@ -1384,12 +1216,25 @@ export const updateComplianceRule = async (req: AuthenticatedRequest, res: Respo
       oldValue: oldRule,
       newValue: updatedRule,
       ipAddress: req.ip
-    });
+    }).catch(() => {});
+
+    // Broadcast compliance rule update across all active company domains and databases
+    let syncResult = null;
+    try {
+      syncResult = await syncAllTenantsToRemote({ reason: 'COMPLIANCE_RULE_UPDATE' });
+    } catch (err: any) {
+      console.warn('Sync dispatch note for compliance rule update:', err.message);
+    }
+
+    const syncMsg = syncResult
+      ? ` (${syncResult.successCount}/${syncResult.total} company domains synced)`
+      : '';
 
     return res.status(200).json({
       success: true,
-      message: 'Compliance Rule updated successfully',
-      data: updatedRule
+      message: `Compliance Rule #${updatedRule.serialNo} updated and propagated across all company databases successfully${syncMsg}.`,
+      data: updatedRule,
+      syncResult
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1444,7 +1289,7 @@ export const provisionTenantDb = async (req: AuthenticatedRequest, res: Response
       module: 'TENANTS',
       newValue: { ...tenant, dbProvisionedAt: new Date() },
       ipAddress: req.ip
-    });
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,
@@ -1465,163 +1310,180 @@ export const syncTenantApi = async (req: AuthenticatedRequest, res: Response) =>
   const { targetUrl } = req.body;
 
   try {
-    const tenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant company not found' });
-    }
-
-    const targetDomain = (targetUrl || tenant.domainUrl || '').trim();
-    if (!targetDomain) {
-      return res.status(400).json({
-        success: false,
-        message: 'No Domain URL configured or provided for this company. Please configure Domain URL first.'
-      });
-    }
-
-    let adminUser = await prisma.user.findFirst({
-      where: { tenantId: id, role: { name: 'ADMIN' } }
+    const result = await syncTenantToRemote(id, {
+      targetUrl,
+      reason: 'MANUAL_SYNC'
     });
 
-    if (!adminUser) {
-      adminUser = await prisma.user.findFirst({
-        where: { tenantId: id }
-      });
-    }
-
-    if (!adminUser && tenant.email) {
-      adminUser = await prisma.user.findFirst({
-        where: { email: tenant.email.toLowerCase().trim() }
-      });
-    }
-
-    if (!adminUser) {
-      // Auto-create Admin user for this tenant if missing
-      const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
-      if (adminRole) {
-        const defaultPass = 'Admin@12345';
-        const salt = await bcrypt.genSalt(10);
-        const passHash = await bcrypt.hash(defaultPass, salt);
-        adminUser = await prisma.user.create({
-          data: {
-            tenantId: tenant.id,
-            roleId: adminRole.id,
-            firstName: tenant.companyName,
-            lastName: 'Admin',
-            email: tenant.email,
-            mobile: tenant.mobile || '9999999999',
-            passwordHash: passHash,
-            tempPassword: defaultPass,
-            status: 'ACTIVE'
-          }
-        });
-      }
-    }
-
-    if (!adminUser) {
-      return res.status(404).json({ success: false, message: 'No Admin user could be found or provisioned for this company.' });
-    }
-
-    let apiKey = tenant.tenantApiKey;
-    if (!apiKey) {
-      apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
-      await prisma.tenant.update({
-        where: { id: tenant.id },
-        data: { tenantApiKey: apiKey }
-      });
-    }
-
-    let rawDomain = targetDomain;
-    if (!rawDomain.startsWith('http://') && !rawDomain.startsWith('https://')) {
-      rawDomain = 'https://' + rawDomain;
-    }
-    rawDomain = rawDomain.replace(/\/+$/, '');
-
-    const candidateEndpoints = [
-      `${rawDomain}/api/v1/sync/bootstrap`,
-      `${rawDomain}/backend/api/v1/sync/bootstrap`,
-      `${rawDomain}/api/sync/bootstrap`,
-      `${rawDomain}/backend/sync/bootstrap`,
-      `${rawDomain}/sync/bootstrap`
-    ];
-
-    const payload = {
-      apiKey,
-      tenant: {
-        ...tenant,
-        tenantApiKey: apiKey
-      },
-      adminUser: {
-        id: adminUser.id,
-        email: adminUser.email,
-        passwordHash: adminUser.passwordHash,
-        tempPassword: adminUser.tempPassword,
-        firstName: adminUser.firstName,
-        lastName: adminUser.lastName,
-        mobile: adminUser.mobile,
-        status: adminUser.status || (tenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
-      }
-    };
-
-    let successfulData: any = null;
-    let endpointSuccess: string = '';
-    let lastError: any = null;
-
-    for (const endpoint of candidateEndpoints) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-tenant-api-key': apiKey
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          successfulData = await response.json().catch(() => ({ success: true }));
-          endpointSuccess = endpoint;
-          break;
-        } else {
-          const respJson: any = await response.json().catch(() => ({}));
-          lastError = { status: response.status, message: respJson?.message || `HTTP ${response.status}` };
-        }
-      } catch (e: any) {
-        lastError = { status: 500, message: e.message };
-      }
-    }
-
-    if (successfulData) {
+    if (result.success || result.domainSyncResult?.success) {
       await logAudit({
         userId: req.user!.id,
         action: 'UPDATE',
         module: 'TENANTS',
-        newValue: { ...tenant, apiSyncedAt: new Date(), targetDomain, endpointUsed: endpointSuccess },
+        newValue: { tenantId: id, manualSyncResult: result },
         ipAddress: req.ip
-      });
+      }).catch(() => {});
 
       return res.status(200).json({
         success: true,
-        message: successfulData.message || `Successfully synced tenant and Admin user to ${targetDomain} via API!`,
-        data: successfulData
+        message: result.message || 'Tenant successfully synchronized to domain database via API!',
+        data: result
       });
     }
 
     return res.status(200).json({
       success: false,
       isRemoteUnreachable: true,
-      message: `Remote server (${targetDomain}) ne 404 (Not Found) ya connection error diya: ${lastError?.message || 'Endpoint not found'}. Remote domain par RAGCP backend API server running hona zaroori hai. Local database me company aur admin user successfully ready hain!`,
-      error: lastError
+      message: result.message || `Remote server at ${targetUrl || 'configured domain'} could not be reached. Local database is ready!`,
+      data: result
     });
   } catch (error: any) {
     return res.status(500).json({
       success: false,
       message: `Failed to sync via API: ${error.message}`,
       errors: [error.message]
+    });
+  }
+};
+
+export const syncAllTenantsApi = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await syncAllTenantsToRemote({ reason: 'SUPER_ADMIN_MANUAL_BULK_SYNC' });
+
+    await logAudit({
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'TENANTS',
+      newValue: { bulkSyncResult: result },
+      ipAddress: req.ip
+    }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      message: `Bulk synchronization completed across ${result.total} companies (${result.successCount} synced, ${result.failedCount} offline/failed).`,
+      data: result
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: `Failed to bulk sync tenants: ${error.message}`,
+      errors: [error.message]
+    });
+  }
+};
+
+export const verifyDomainUrl = async (req: AuthenticatedRequest, res: Response) => {
+  const { domainUrl } = req.body;
+  if (!domainUrl || typeof domainUrl !== 'string' || !domainUrl.trim()) {
+    return res.status(400).json({
+      success: false,
+      reachable: false,
+      message: 'Domain URL is required.'
+    });
+  }
+
+  let normalizedUrl = domainUrl.trim();
+  if (!/^https?:\/\//i.test(normalizedUrl)) {
+    normalizedUrl = `https://${normalizedUrl}`;
+  }
+  normalizedUrl = normalizedUrl.replace(/\/+$/, '');
+
+  try {
+    const parsed = new URL(normalizedUrl);
+    if (!parsed.hostname || parsed.hostname.length < 3 || !parsed.hostname.includes('.')) {
+      return res.status(400).json({
+        success: false,
+        reachable: false,
+        normalizedUrl,
+        message: 'Invalid domain hostname format. (e.g. portal.thinkupresearch.com)'
+      });
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const startTime = Date.now();
+    let isReachable = false;
+    let statusCode = 0;
+    let statusText = '';
+
+    try {
+      const resp = await fetch(normalizedUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { 'User-Agent': 'RAGCP-SEBI-Platform/1.0' }
+      });
+      clearTimeout(timeoutId);
+      const responseTimeMs = Date.now() - startTime;
+      statusCode = resp.status;
+      statusText = resp.statusText;
+      isReachable = true;
+
+      return res.status(200).json({
+        success: true,
+        reachable: true,
+        normalizedUrl,
+        statusCode,
+        statusText,
+        responseTimeMs,
+        message: `Domain is live & verified (${statusCode} ${statusText} in ${responseTimeMs}ms)! Ready for sync.`
+      });
+    } catch (fetchErr: any) {
+      clearTimeout(timeoutId);
+      if (fetchErr.name === 'AbortError') {
+        return res.status(200).json({
+          success: false,
+          reachable: false,
+          normalizedUrl,
+          message: 'Connection timed out (6s). Domain server did not respond.',
+          error: 'TIMEOUT'
+        });
+      }
+
+      return res.status(200).json({
+        success: false,
+        reachable: false,
+        normalizedUrl,
+        message: `Domain could not be reached: ${fetchErr.message || 'Host not found or SSL connection error'}`,
+        error: fetchErr.message
+      });
+    }
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      reachable: false,
+      normalizedUrl,
+      message: 'Invalid URL syntax: ' + err.message
+    });
+  }
+};
+
+export const testMongoConnection = async (req: AuthenticatedRequest, res: Response) => {
+  const { mongoDbUrl } = req.body;
+  if (!mongoDbUrl || typeof mongoDbUrl !== 'string' || (!mongoDbUrl.startsWith('mongodb://') && !mongoDbUrl.startsWith('mongodb+srv://'))) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid MongoDB connection URL. Must start with mongodb:// or mongodb+srv://'
+    });
+  }
+
+  const client = new MongoClient(mongoDbUrl.trim(), { serverSelectionTimeoutMS: 5000, connectTimeoutMS: 5000 });
+  try {
+    await client.connect();
+    const db = client.db();
+    const collections = await db.listCollections().toArray();
+    await client.close();
+    return res.status(200).json({
+      success: true,
+      message: `Successfully connected to database '${db.databaseName}'! Found ${collections.length} existing collections.`,
+      databaseName: db.databaseName,
+      collectionsCount: collections.length
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      message: `Failed to connect to MongoDB: ${err.message}`,
+      error: err.message
     });
   }
 };

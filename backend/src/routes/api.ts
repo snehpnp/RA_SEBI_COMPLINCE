@@ -3,10 +3,10 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp } from '../controllers/authController';
-import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, getCompanyClients, getCompanyStaff } from '../controllers/superAdminController';
+import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, verifyDomainUrl, testMongoConnection } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -207,6 +207,30 @@ router.post(
   requireRoles(['SUPER_ADMIN']),
   syncTenantApi
 );
+router.post(
+  '/super-admin/test-mongo-connection',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  testMongoConnection
+);
+router.post(
+  '/super-admin/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/tenants/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/verify-domain',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  verifyDomainUrl
+);
 router.get(
   '/super-admin/tenants/:id/clients',
   authenticateJWT,
@@ -235,6 +259,26 @@ router.put(
 router.post(
   '/sync/bootstrap',
   bootstrapTenant
+);
+router.post(
+  '/sync/update',
+  bootstrapTenant
+);
+router.post(
+  '/sync/tenant',
+  bootstrapTenant
+);
+router.post(
+  '/super-admin/tenants/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/verify-domain',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  verifyDomainUrl
 );
 router.get(
   '/sync/config',
@@ -270,6 +314,18 @@ router.put(
 );
 router.get(
   '/super-admin/telemetry',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getGlobalTelemetry
+);
+router.get(
+  '/super-admin/dashboard',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getGlobalTelemetry
+);
+router.get(
+  '/super-admin/dashboard-stats',
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   getGlobalTelemetry
@@ -318,6 +374,7 @@ router.get('/admin/email-templates', authenticateJWT, requireRoles(['ADMIN', 'PR
 router.put('/admin/email-templates/:type', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), updateEmailTemplate);
 router.post('/admin/test-smtp', authenticateJWT, requireRoles(['ADMIN']), testSmtp);
 router.post('/admin/test-smtp-connection', authenticateJWT, requireRoles(['ADMIN']), testSmtpConnection);
+router.post('/admin/verify-payment-gateway', authenticateJWT, requireRoles(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), verifyPaymentGateway);
 
 // Bulk Exports
 router.get('/admin/exports/invoices', authenticateJWT, requirePermission('EXPORT_DATA'), exportInvoicesZip);

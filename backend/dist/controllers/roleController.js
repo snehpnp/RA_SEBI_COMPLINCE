@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteRole = exports.updateRole = exports.updateRolePermissions = exports.createRole = exports.getRoles = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const auditService_1 = require("../services/auditService");
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const SYSTEM_ROLES = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'];
 const getRoles = async (req, res) => {
     try {
@@ -79,6 +80,7 @@ const createRole = async (req, res) => {
             newValue: JSON.stringify(newRole),
             ipAddress: req.ip
         });
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'ROLE_UPDATE' }).catch(() => { });
         return res.status(201).json({
             success: true,
             message: 'Role created successfully',
@@ -166,6 +168,7 @@ const updateRolePermissions = async (req, res) => {
             newValue: JSON.stringify(updatedRole.permissions),
             ipAddress: req.ip
         });
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'ROLE_PERMISSION_UPDATE' }).catch(() => { });
         return res.status(200).json({
             success: true,
             message: 'Access permissions updated successfully.',
@@ -232,6 +235,7 @@ const updateRole = async (req, res) => {
             newValue: JSON.stringify(updatedRole),
             ipAddress: req.ip
         });
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'ROLE_UPDATE' }).catch(() => { });
         return res.status(200).json({
             success: true,
             message: 'Role updated successfully',
@@ -294,6 +298,7 @@ const deleteRole = async (req, res) => {
             oldValue: JSON.stringify(role),
             ipAddress: req.ip
         });
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'ROLE_DELETE' }).catch(() => { });
         return res.status(200).json({
             success: true,
             message: 'Role deleted successfully.'

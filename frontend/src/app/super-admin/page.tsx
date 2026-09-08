@@ -86,9 +86,23 @@ function SuperAdminDashboardContent() {
   const [telemetry, setTelemetry] = useState<any>({
     totalCompanies: 0,
     activeCompanies: 0,
+    suspendedCompanies: 0,
+    pendingCompanies: 0,
     totalUsers: 0,
+    totalClients: 0,
+    activeClients: 0,
+    pendingClients: 0,
+    totalStaff: 0,
+    activeStaff: 0,
     auditLogsCount: 0,
-    activeAlerts: 0
+    activeAlerts: 0,
+    totalAlerts: 0,
+    resolvedAlerts: 0,
+    totalAudits: 0,
+    pendingAudits: 0,
+    completedAudits: 0,
+    totalPlans: 0,
+    activePlans: 0
   });
 
   // Companies state
@@ -130,6 +144,14 @@ function SuperAdminDashboardContent() {
   const [duplicateFields, setDuplicateFields] = useState<string[]>([]);
   const [companyName, setCompanyName] = useState('');
   const [domainUrl, setDomainUrl] = useState('');
+  const [isVerifyingDomain, setIsVerifyingDomain] = useState(false);
+  const [domainVerifyResult, setDomainVerifyResult] = useState<{ success: boolean; message: string; normalizedUrl?: string } | null>(null);
+  const [mongoDbUrl, setMongoDbUrl] = useState('');
+  const [dbName, setDbName] = useState('');
+  const [isTestingMongo, setIsTestingMongo] = useState(false);
+  const [mongoTestResult, setMongoTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTestingEditMongo, setIsTestingEditMongo] = useState(false);
+  const [editMongoTestResult, setEditMongoTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [companyType, setCompanyType] = useState('INDIVIDUAL');
   const [raType, setRaType] = useState('FULL_TIME');
   const [ownerName, setOwnerName] = useState('');
@@ -219,6 +241,7 @@ function SuperAdminDashboardContent() {
   const [documentHistory, setDocumentHistory] = useState<any[]>([]);
   const [isEditRuleModalOpen, setIsEditRuleModalOpen] = useState(false);
   const [editRuleData, setEditRuleData] = useState<any>(null);
+  const [isSavingRule, setIsSavingRule] = useState(false);
   const [isSavingTenant, setIsSavingTenant] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
@@ -365,8 +388,86 @@ function SuperAdminDashboardContent() {
   }, []);
 
   const handleLogout = async (allDevices: boolean = false) => {
-    await api.logout(allDevices);
+    try {
+      await api.logout(allDevices);
+    } catch (e) {}
     router.push('/login');
+  };
+
+  const handleVerifyDomain = async () => {
+    if (!domainUrl || !domainUrl.trim()) {
+      setDomainVerifyResult({ success: false, message: 'Please enter a Custom Domain URL first.' });
+      return;
+    }
+    setIsVerifyingDomain(true);
+    setDomainVerifyResult(null);
+    try {
+      const res = await api.verifyDomainUrl(domainUrl.trim());
+      if (res && res.success && res.reachable) {
+        if (res.normalizedUrl) setDomainUrl(res.normalizedUrl);
+        setDomainVerifyResult({
+          success: true,
+          message: res.message || 'Custom Domain is active, reachable & verified!',
+          normalizedUrl: res.normalizedUrl
+        });
+      } else {
+        setDomainVerifyResult({
+          success: false,
+          message: res?.message || 'Domain could not be reached. Please verify the URL.',
+          normalizedUrl: res?.normalizedUrl
+        });
+      }
+    } catch (err: any) {
+      setDomainVerifyResult({
+        success: false,
+        message: err.message || 'Domain connectivity verification failed.'
+      });
+    } finally {
+      setIsVerifyingDomain(false);
+    }
+  };
+
+  const handleTestMongoConnection = async () => {
+    if (!mongoDbUrl || !mongoDbUrl.trim()) {
+      setMongoTestResult({ success: false, message: 'Please enter a MongoDB connection URL.' });
+      return;
+    }
+    setIsTestingMongo(true);
+    setMongoTestResult(null);
+    try {
+      const res = await api.testMongoConnection(mongoDbUrl.trim());
+      if (res && res.success) {
+        setMongoTestResult({ success: true, message: res.message || 'Connected successfully to MongoDB!' });
+      } else {
+        setMongoTestResult({ success: false, message: res?.message || 'Failed to connect to MongoDB.' });
+      }
+    } catch (err: any) {
+      setMongoTestResult({ success: false, message: err.message || 'MongoDB connection test failed.' });
+    } finally {
+      setIsTestingMongo(false);
+    }
+  };
+
+  const handleTestEditMongo = async () => {
+    const url = (editData?.mongoDbUrl || '').trim();
+    if (!url) {
+      setEditMongoTestResult({ success: false, message: 'Please enter a MongoDB connection URL.' });
+      return;
+    }
+    setIsTestingEditMongo(true);
+    setEditMongoTestResult(null);
+    try {
+      const res = await api.testMongoConnection(url);
+      if (res && res.success) {
+        setEditMongoTestResult({ success: true, message: res.message || 'Connected successfully to MongoDB!' });
+      } else {
+        setEditMongoTestResult({ success: false, message: res?.message || 'Failed to connect to MongoDB.' });
+      }
+    } catch (err: any) {
+      setEditMongoTestResult({ success: false, message: err.message || 'MongoDB connection test failed.' });
+    } finally {
+      setIsTestingEditMongo(false);
+    }
   };
 
   const handleSebiCertificateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -465,6 +566,8 @@ function SuperAdminDashboardContent() {
     const formData = new FormData();
     formData.append('companyName', companyName);
     if (domainUrl) formData.append('domainUrl', domainUrl);
+    if (mongoDbUrl) formData.append('mongoDbUrl', mongoDbUrl);
+    if (dbName) formData.append('dbName', dbName);
     formData.append('companyType', companyType);
     formData.append('raType', raType);
     formData.append('ownerName', ownerName);
@@ -504,6 +607,9 @@ function SuperAdminDashboardContent() {
         setParsedFields({ companyName: false, sebiRegistration: false, certificateValidity: false, address: false });
         setCompanyName('');
         setDomainUrl('');
+        setMongoDbUrl('');
+        setDbName('');
+        setMongoTestResult(null);
         setCompanyType('INDIVIDUAL');
         setRaType('FULL_TIME');
         setOwnerName('');
@@ -830,28 +936,56 @@ function SuperAdminDashboardContent() {
     }
   };
 
+  const handleSyncAllCompanies = async () => {
+    const isConfirmed = await confirm(
+      "Are you sure you want to trigger a full database & API synchronization across all active company domains?",
+      "Sync All Company Domains"
+    );
+    if (!isConfirmed) return;
+
+    setIsSyncingApi(true);
+    try {
+      const res = await api.syncAllTenants();
+      if (res.success) {
+        triggerAlert(res.message || "All company domains synchronized successfully!");
+        loadData();
+      } else {
+        triggerAlert(res.message || "Bulk sync finished with warnings.");
+      }
+    } catch (err: any) {
+      triggerAlert("Bulk sync failed: " + err.message);
+    } finally {
+      setIsSyncingApi(false);
+    }
+  };
+
   const handleEditRuleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const isConfirmed = await confirm("Are you sure you want to update this rule?", "Confirm Update Rule");
+    const isConfirmed = await confirm("Are you sure you want to update this rule and synchronize it across all company domains and databases?", "Confirm Update & Global Sync");
     if (!isConfirmed) return;
 
+    setIsSavingRule(true);
     try {
-      await api.updateSuperAdminComplianceRule(editRuleData.id, editRuleData);
+      const res = await api.updateSuperAdminComplianceRule(editRuleData.id, editRuleData);
       setIsEditRuleModalOpen(false);
+      triggerAlert(res.message || 'Compliance rule updated and synchronized across all company domains successfully.');
       loadData();
     } catch (err: any) {
       triggerAlert('Failed to update rule: ' + err.message);
+    } finally {
+      setIsSavingRule(false);
     }
   };
 
   const handleToggleRuleActive = async (rule: any) => {
     const actionStr = rule.isActive ? 'disable' : 'enable';
-    const isConfirmed = await confirm(`Are you sure you want to ${actionStr} this rule?`, "Confirm Action");
+    const isConfirmed = await confirm(`Are you sure you want to ${actionStr} this rule across all companies?`, "Confirm Action");
     if (!isConfirmed) return;
 
     try {
-      await api.updateSuperAdminComplianceRule(rule.id, { ...rule, isActive: !rule.isActive });
+      const res = await api.updateSuperAdminComplianceRule(rule.id, { ...rule, isActive: !rule.isActive });
+      triggerAlert(res.message || `Rule ${actionStr}d and propagated across all companies.`);
       loadData();
     } catch (err: any) {
       triggerAlert('Failed to toggle rule: ' + err.message);
@@ -1013,7 +1147,7 @@ function SuperAdminDashboardContent() {
         <div className="flex-1 p-6 md:p-10 overflow-y-auto max-w-[1600px] w-full mx-auto custom-scrollbar">
 
         {/* 1. DASHBOARD TAB */}
-        {activeTab === 'dashboard' && <DashboardTab telemetry={telemetry} />}
+        {activeTab === 'dashboard' && <DashboardTab telemetry={telemetry} companies={companies} />}
 
         {/* 2. COMPANIES TAB */}
         {activeTab === 'companies' && (
@@ -1033,6 +1167,7 @@ function SuperAdminDashboardContent() {
             openConfirmModal={openConfirmModal}
             handleImpersonate={handleImpersonate}
             handleManualSyncApi={handleManualSyncApi}
+            handleSyncAllCompanies={handleSyncAllCompanies}
             setIsAddCompanyModalOpen={setIsAddCompanyModalOpen}
             setFormSuccess={setFormSuccess}
             setFormError={setFormError}
@@ -1051,6 +1186,8 @@ function SuperAdminDashboardContent() {
             handleToggleRuleActive={handleToggleRuleActive}
             setEditRuleData={setEditRuleData}
             setIsEditRuleModalOpen={setIsEditRuleModalOpen}
+            handleSyncAllCompanies={handleSyncAllCompanies}
+            isSyncing={isSyncingApi}
           />
         )}
 
@@ -1245,6 +1382,190 @@ function SuperAdminDashboardContent() {
 
               {!formSuccess && (
                 <form onSubmit={handleCreateCompany} className="space-y-6">
+                  {/* 0. Custom Domain URL & Live Verification (TOPMOST) */}
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 shadow-sm space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-2 bg-primary-500/10 text-primary-600 dark:text-primary-400 rounded-lg">
+                          <Globe className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider block">
+                            Custom Domain URL
+                          </span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Enter company domain to verify connectivity and sync collections in real-time
+                          </span>
+                        </div>
+                      </div>
+
+                      {domainVerifyResult && (
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center space-x-1.5 self-start sm:self-auto ${
+                          domainVerifyResult.success 
+                            ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                            : 'bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400'
+                        }`}>
+                          {domainVerifyResult.success ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                          <span>{domainVerifyResult.success ? 'Verified & Live' : 'Not Reachable'}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2.5">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={domainUrl}
+                          onChange={(e) => {
+                            setDomainUrl(e.target.value);
+                            if (domainVerifyResult) setDomainVerifyResult(null);
+                          }}
+                          placeholder="https://portal.thinkupresearch.com or snehj.lovable.app"
+                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/15 rounded-xl py-2.5 pl-4 pr-10 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 font-mono transition-all"
+                        />
+                        {domainUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDomainUrl('');
+                              setDomainVerifyResult(null);
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleVerifyDomain}
+                        disabled={isVerifyingDomain || !domainUrl.trim()}
+                        className="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center justify-center space-x-2 shadow-sm transition-all whitespace-nowrap cursor-pointer"
+                      >
+                        {isVerifyingDomain ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Verifying...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Globe className="h-4 w-4" />
+                            <span>Verify Domain</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {domainVerifyResult && (
+                      <p className={`text-xs font-medium ${domainVerifyResult.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                        {domainVerifyResult.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* 0.5 Dedicated MongoDB Connection (Multi-DB Architecture) */}
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 shadow-sm space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                          <Database className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100 uppercase tracking-wider block">
+                            Dedicated MongoDB Connection (Optional / Multi-DB Architecture)
+                          </span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Provide company dedicated MongoDB URL to update collections directly in real time
+                          </span>
+                        </div>
+                      </div>
+
+                      {mongoTestResult && (
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold flex items-center space-x-1.5 self-start sm:self-auto ${
+                          mongoTestResult.success 
+                            ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
+                            : 'bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400'
+                        }`}>
+                          {mongoTestResult.success ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                          <span>{mongoTestResult.success ? 'DB Connected' : 'Connection Failed'}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="md:col-span-2 relative">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          MongoDB Connection URL
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={mongoDbUrl}
+                            onChange={(e) => {
+                              setMongoDbUrl(e.target.value);
+                              if (mongoTestResult) setMongoTestResult(null);
+                            }}
+                            placeholder="mongodb://user:pass@192.168.1.203:27017/company-db"
+                            className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/15 rounded-xl py-2.5 pl-4 pr-10 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 font-mono transition-all"
+                          />
+                          {mongoDbUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMongoDbUrl('');
+                                setMongoTestResult(null);
+                              }}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Database Name
+                        </label>
+                        <input
+                          type="text"
+                          value={dbName}
+                          onChange={(e) => setDbName(e.target.value)}
+                          placeholder="e.g. thinkup-compliance"
+                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/15 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="flex-1 mr-2">
+                        {mongoTestResult && (
+                          <p className={`text-xs font-medium ${mongoTestResult.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                            {mongoTestResult.message}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTestMongoConnection}
+                        disabled={isTestingMongo || !mongoDbUrl.trim()}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center space-x-2 transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        {isTestingMongo ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Testing DB...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Database className="h-3.5 w-3.5" />
+                            <span>Test DB Connection</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
                   {/* 1. Company Profile */}
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-4 flex items-center space-x-2">
@@ -1298,12 +1619,7 @@ function SuperAdminDashboardContent() {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                        <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Custom Domain URL</label>
-                        <input type="url" value={domainUrl} onChange={e => setDomainUrl(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="https://advisors.yourcompany.com (Optional)" />
-                      </div>
-                      
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Company Legal Name *</label>
                         {parsedFields.companyName ? (
@@ -1347,6 +1663,8 @@ function SuperAdminDashboardContent() {
                           <option value="PART_TIME">Part Time RA</option>
                         </select>
                       </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Owner / Director Name *</label>
                         <input type="text" required value={ownerName} onFocus={(e) => {
@@ -1788,7 +2106,20 @@ function SuperAdminDashboardContent() {
                   <label htmlFor="isActive" className="text-sm font-bold text-slate-700 dark:text-slate-300">Rule is Active (Generates Alerts/Penalties)</label>
                 </div>
                 <div className="pt-4 flex space-x-4">
-                  <button type="submit" className="flex-1 bg-primary-600 hover:bg-primary-500 text-white font-bold py-3 rounded-xl transition-all">Save Rule Changes</button>
+                  <button
+                    type="submit"
+                    disabled={isSavingRule}
+                    className="flex-1 bg-primary-600 hover:bg-primary-500 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+                  >
+                    {isSavingRule ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Saving & Syncing All Companies...</span>
+                      </>
+                    ) : (
+                      <span>Save Rule Changes & Broadcast Sync</span>
+                    )}
+                  </button>
                 </div>
               </form>
             </div>
@@ -1846,6 +2177,83 @@ function SuperAdminDashboardContent() {
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Domain URL</label>
                     <input type="text" value={editData.domainUrl || ''} onChange={e => setEditData({ ...editData, domainUrl: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="https://betaadvisors.com" />
+                  </div>
+
+                  {/* Dedicated MongoDB Connection in Edit Modal */}
+                  <div className="col-span-2 p-4 bg-slate-50 dark:bg-slate-950/50 border border-slate-300 dark:border-white/10 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Database className="h-4 w-4 text-emerald-500" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                          Dedicated MongoDB & Multi-Database Connection
+                        </span>
+                      </div>
+                      {editMongoTestResult && (
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${editMongoTestResult.success ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'}`}>
+                          {editMongoTestResult.success ? 'DB Connected' : 'Failed'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                          MongoDB Connection URL
+                        </label>
+                        <input
+                          type="text"
+                          value={editData.mongoDbUrl || ''}
+                          onChange={e => {
+                            setEditData({ ...editData, mongoDbUrl: e.target.value });
+                            if (editMongoTestResult) setEditMongoTestResult(null);
+                          }}
+                          placeholder="mongodb://user:pass@192.168.1.203:27017/company-db"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                          Database Name
+                        </label>
+                        <input
+                          type="text"
+                          value={editData.dbName || ''}
+                          onChange={e => setEditData({ ...editData, dbName: e.target.value })}
+                          placeholder="e.g. thinkup-compliance"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <div>
+                        {editMongoTestResult && (
+                          <p className={`text-[11px] font-medium ${editMongoTestResult.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                            {editMongoTestResult.message}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={handleTestEditMongo}
+                          disabled={isTestingEditMongo || !editData.mongoDbUrl}
+                          className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 disabled:opacity-50 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition-colors cursor-pointer"
+                        >
+                          {isTestingEditMongo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+                          <span>{isTestingEditMongo ? 'Testing...' : 'Test DB'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleManualProvisionDb(editData.id)}
+                          disabled={isProvisioningDb || !editData.mongoDbUrl}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center space-x-1.5 transition-colors shadow-sm cursor-pointer"
+                        >
+                          {isProvisioningDb ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                          <span>{isProvisioningDb ? 'Syncing...' : 'Sync Dedicated DB Now'}</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Validity Date</label>

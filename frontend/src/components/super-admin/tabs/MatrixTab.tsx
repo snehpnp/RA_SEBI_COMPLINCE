@@ -1,6 +1,6 @@
 'use client';
 
-import { Download, Edit, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, Edit, ChevronLeft, ChevronRight, RefreshCw, Loader2 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
 interface MatrixTabProps {
@@ -12,33 +12,54 @@ interface MatrixTabProps {
   handleToggleRuleActive: (rule: any) => void;
   setEditRuleData: (rule: any) => void;
   setIsEditRuleModalOpen: (val: boolean) => void;
+  handleSyncAllCompanies?: () => void;
+  isSyncing?: boolean;
 }
 
 export default function MatrixTab({
   complianceRules, currentPageMatrix, setCurrentPageMatrix, itemsPerPage, setItemsPerPage,
-  handleToggleRuleActive, setEditRuleData, setIsEditRuleModalOpen
+  handleToggleRuleActive, setEditRuleData, setIsEditRuleModalOpen, handleSyncAllCompanies, isSyncing
 }: MatrixTabProps) {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Compliance Matrix Rules</h2>
-        <button
-          onClick={() => {
-            const exportData = complianceRules.map(r => ({
-              Sr_No: r.serialNo,
-              Requirement: r.requirement,
-              Frequency: r.frequency,
-              Severity: r.severityLevel,
-              Penalty: r.penaltyAmount || 'None',
-              Status: r.isActive ? 'ACTIVE' : 'INACTIVE'
-            }));
-            import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Compliance_Matrix'));
-          }}
-          className="px-4 py-2 bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 text-white"
-        >
-          <Download className="h-4 w-4" />
-          <span>Export CSV</span>
-        </button>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Compliance Matrix Rules</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Global regulatory rules broadcast across all company dedicated databases & domains in real time.
+          </p>
+        </div>
+        <div className="flex items-center space-x-3 w-full sm:w-auto">
+          {handleSyncAllCompanies && (
+            <button
+              type="button"
+              onClick={handleSyncAllCompanies}
+              disabled={isSyncing}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 text-white shadow-sm hover:shadow-md cursor-pointer"
+              title="Broadcast all compliance rules to all company dedicated databases and remote domains"
+            >
+              {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              <span>{isSyncing ? 'Syncing...' : 'Sync All Company DBs'}</span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              const exportData = complianceRules.map(r => ({
+                Sr_No: r.serialNo,
+                Requirement: r.requirement,
+                Frequency: r.frequency,
+                Severity: r.severityLevel,
+                Penalty: r.penaltyAmount || 'None',
+                Status: r.isActive ? 'ACTIVE' : 'INACTIVE'
+              }));
+              import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Compliance_Matrix'));
+            }}
+            className="px-4 py-2 bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-sm font-bold rounded-xl transition-all flex items-center space-x-2 text-white"
+          >
+            <Download className="h-4 w-4" />
+            <span>Export CSV</span>
+          </button>
+        </div>
       </div>
       <div className="bg-white/40 dark:bg-slate-900/40 backdrop-blur-sm rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden shadow-xl">
         <Table>

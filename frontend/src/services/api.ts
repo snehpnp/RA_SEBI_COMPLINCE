@@ -266,6 +266,12 @@ class ApiClient {
     });
   }
 
+  async syncAllTenants() {
+    return this.request('/super-admin/tenants/sync-all', {
+      method: 'POST'
+    });
+  }
+
   async getAuditLogs() {
     return this.request('/super-admin/logs');
   }
@@ -275,7 +281,31 @@ class ApiClient {
   }
 
   async getTelemetry() {
-    return this.request('/super-admin/telemetry');
+    try {
+      const res = await this.request('/super-admin/dashboard');
+      if (res && res.success) return res;
+      return await this.request('/super-admin/telemetry');
+    } catch {
+      return this.request('/super-admin/telemetry');
+    }
+  }
+
+  async getSuperAdminDashboard() {
+    return this.getTelemetry();
+  }
+
+  async verifyDomainUrl(domainUrl: string) {
+    return this.request('/super-admin/verify-domain', {
+      method: 'POST',
+      body: JSON.stringify({ domainUrl })
+    });
+  }
+
+  async testMongoConnection(mongoDbUrl: string) {
+    return this.request('/super-admin/test-mongo-connection', {
+      method: 'POST',
+      body: JSON.stringify({ mongoDbUrl })
+    });
   }
 
   async parseSebiCertificate(formData: FormData) {
@@ -953,6 +983,13 @@ class ApiClient {
   }
   async testSmtpConnection(data: any) {
     return this.request('/admin/test-smtp-connection', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async verifyPaymentGateway(data: any) {
+    return this.request('/admin/verify-payment-gateway', {
       method: 'POST',
       body: JSON.stringify(data)
     });

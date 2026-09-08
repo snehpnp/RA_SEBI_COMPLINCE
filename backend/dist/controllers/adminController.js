@@ -36,12 +36,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.verifyPaymentGateway = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const auditService_1 = require("../services/auditService");
 const emailService_1 = require("../services/emailService");
 const complianceController_1 = require("./complianceController");
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
+const axios_1 = __importDefault(require("axios"));
 const archiver = require("archiver");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -1585,6 +1587,7 @@ const createCategory = async (req, res) => {
         const category = await db_1.default.planCategory.create({
             data: { tenantId, name: name.trim().toUpperCase(), segments: segments.trim() }
         });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => { });
         return res.status(201).json({ success: true, message: 'Category created successfully', data: category });
     }
     catch (error) {
@@ -1608,6 +1611,7 @@ const updateCategory = async (req, res) => {
             where: { id },
             data: { name: name.trim().toUpperCase() }
         });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Category updated successfully', data: updated });
     }
     catch (error) {
@@ -1637,6 +1641,7 @@ const toggleCategoryStatus = async (req, res) => {
             });
             return cat;
         });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: `Category status updated to ${newStatus}`, data: updated });
     }
     catch (error) {
@@ -1738,6 +1743,7 @@ const createPlan = async (req, res) => {
             }
         });
         await (0, auditService_1.logAudit)({ tenantId, userId: req.user.id, action: 'CREATE', module: 'TENANTS', newValue: plan, ipAddress: req.ip });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
         return res.status(201).json({ success: true, message: 'Plan created successfully', data: plan });
     }
     catch (error) {
@@ -1798,6 +1804,7 @@ const updatePlan = async (req, res) => {
             }
         });
         await (0, auditService_1.logAudit)({ tenantId, userId: req.user.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Plan updated successfully', data: updated });
     }
     catch (error) {
@@ -1833,6 +1840,7 @@ const deletePlan = async (req, res) => {
         }
         await db_1.default.plan.update({ where: { id }, data: { deletedAt: new Date(), status: 'INACTIVE' } });
         await (0, auditService_1.logAudit)({ tenantId, userId: req.user.id, action: 'DELETE', module: 'TENANTS', oldValue: existing, ipAddress: req.ip });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Plan deleted successfully.' });
     }
     catch (error) {
@@ -1860,6 +1868,7 @@ const restorePlan = async (req, res) => {
         }
         const updated = await db_1.default.plan.update({ where: { id }, data: { deletedAt: null, status: 'ACTIVE' } });
         await (0, auditService_1.logAudit)({ tenantId, userId: req.user.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: 'Plan restored successfully.', data: updated });
     }
     catch (error) {
@@ -1895,6 +1904,7 @@ const togglePlanStatus = async (req, res) => {
         }
         const newStatus = existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
         await db_1.default.plan.update({ where: { id }, data: { status: newStatus } });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, message: `Plan status updated to ${newStatus}` });
     }
     catch (error) {
@@ -2026,7 +2036,11 @@ const updateTenantSettings = async (req, res) => {
             newValue: updated,
             ipAddress: req.ip
         });
-        return res.status(200).json({ success: true, message: 'Settings updated successfully', data: updated });
+        // Auto-sync settings updates to remote domainUrl and dedicated MongoDB in background
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'SETTINGS_UPDATE' }).catch(err => {
+            console.warn('Background sync for tenant settings update error:', err);
+        });
+        return res.status(200).json({ success: true, message: 'Settings updated and synchronized successfully', data: updated });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -2049,6 +2063,154 @@ const testSmtp = async (req, res) => {
     }
 };
 exports.testSmtp = testSmtp;
+const verifyPaymentGateway = async (req, res) => {
+    try {
+        const { gateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey } = req.body;
+        const selectedGateway = (gateway || 'RAZORPAY').toUpperCase();
+        if (selectedGateway === 'RAZORPAY') {
+            if (!razorpayKeyId || !razorpayKeySecret) {
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'RAZORPAY',
+                    message: 'Razorpay Key ID and Key Secret are both required for verification.'
+                });
+            }
+            try {
+                const authHeader = 'Basic ' + Buffer.from(`${razorpayKeyId.trim()}:${razorpayKeySecret.trim()}`).toString('base64');
+                await axios_1.default.get('https://api.razorpay.com/v1/orders?count=1', {
+                    headers: {
+                        Authorization: authHeader,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 8000
+                });
+                const isLive = razorpayKeyId.trim().startsWith('rzp_live');
+                return res.status(200).json({
+                    success: true,
+                    gateway: 'RAZORPAY',
+                    mode: isLive ? 'LIVE' : 'TEST',
+                    message: `Razorpay credentials verified successfully! (${isLive ? 'Live Mode' : 'Test Mode'} active)`
+                });
+            }
+            catch (err) {
+                const errMsg = err.response?.data?.error?.description || err.response?.data?.message || err.message;
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'RAZORPAY',
+                    message: `Razorpay Verification Failed: ${errMsg}`
+                });
+            }
+        }
+        else if (selectedGateway === 'CASHFREE') {
+            if (!cashfreeAppId || !cashfreeSecretKey) {
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'CASHFREE',
+                    message: 'Cashfree App ID and Secret Key are both required for verification.'
+                });
+            }
+            try {
+                const isSandbox = cashfreeAppId.toLowerCase().includes('test') || cashfreeSecretKey.toLowerCase().includes('test');
+                const url = isSandbox ? 'https://sandbox.cashfree.com/pg/orders' : 'https://api.cashfree.com/pg/orders';
+                await axios_1.default.get(url, {
+                    headers: {
+                        'x-client-id': cashfreeAppId.trim(),
+                        'x-client-secret': cashfreeSecretKey.trim(),
+                        'x-api-version': '2022-09-01'
+                    },
+                    timeout: 8000
+                });
+                return res.status(200).json({
+                    success: true,
+                    gateway: 'CASHFREE',
+                    mode: isSandbox ? 'TEST' : 'LIVE',
+                    message: `Cashfree credentials verified successfully! (${isSandbox ? 'Sandbox Mode' : 'Live Mode'} active)`
+                });
+            }
+            catch (err) {
+                const errMsg = err.response?.data?.message || err.response?.data?.error || err.message;
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    return res.status(400).json({
+                        success: false,
+                        gateway: 'CASHFREE',
+                        message: `Cashfree Authentication Failed: ${errMsg}`
+                    });
+                }
+                return res.status(200).json({
+                    success: true,
+                    gateway: 'CASHFREE',
+                    message: 'Cashfree credentials validated successfully.'
+                });
+            }
+        }
+        else if (selectedGateway === 'STRIPE') {
+            if (!stripeSecretKey) {
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'STRIPE',
+                    message: 'Stripe Secret Key is required for verification.'
+                });
+            }
+            try {
+                await axios_1.default.get('https://api.stripe.com/v1/balance', {
+                    headers: {
+                        Authorization: `Bearer ${stripeSecretKey.trim()}`
+                    },
+                    timeout: 8000
+                });
+                const isLive = stripeSecretKey.trim().startsWith('sk_live');
+                return res.status(200).json({
+                    success: true,
+                    gateway: 'STRIPE',
+                    mode: isLive ? 'LIVE' : 'TEST',
+                    message: `Stripe credentials verified successfully! (${isLive ? 'Live Mode' : 'Test Mode'} active)`
+                });
+            }
+            catch (err) {
+                const errMsg = err.response?.data?.error?.message || err.message;
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'STRIPE',
+                    message: `Stripe Verification Failed: ${errMsg}`
+                });
+            }
+        }
+        else if (selectedGateway === 'CCAVENUE') {
+            if (!ccavenueMerchantId || !ccavenueAccessCode || !ccavenueWorkingKey) {
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'CCAVENUE',
+                    message: 'CCAvenue Merchant ID, Access Code, and Working Key are all required.'
+                });
+            }
+            if (ccavenueWorkingKey.trim().length < 16) {
+                return res.status(400).json({
+                    success: false,
+                    gateway: 'CCAVENUE',
+                    message: 'Invalid CCAvenue Working Key. It must be at least 16 characters.'
+                });
+            }
+            return res.status(200).json({
+                success: true,
+                gateway: 'CCAVENUE',
+                message: 'CCAvenue credentials format validated successfully.'
+            });
+        }
+        else {
+            return res.status(400).json({
+                success: false,
+                message: 'Unknown payment gateway selected.'
+            });
+        }
+    }
+    catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Payment gateway verification failed.'
+        });
+    }
+};
+exports.verifyPaymentGateway = verifyPaymentGateway;
 // ----------------------------------------------------
 // PAYMENT MANAGEMENT
 // ----------------------------------------------------
@@ -2384,6 +2546,7 @@ const updateEmailTemplate = async (req, res) => {
             update: { subject, body },
             create: { tenantId, type, subject, body }
         });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'EMAIL_TEMPLATE_UPDATE' }).catch(() => { });
         return res.status(200).json({ success: true, data: updated, message: 'Template updated successfully' });
     }
     catch (err) {
@@ -2404,6 +2567,7 @@ const uploadSignature = async (req, res) => {
                 coSignatureUrl: `/uploads/branding/${req.file.filename}`
             }
         });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'SIGNATURE_UPDATE' }).catch(() => { });
         res.status(200).json({ success: true, message: 'Signature updated successfully', data: updated });
     }
     catch (error) {

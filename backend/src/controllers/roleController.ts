@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
+import { syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 
 const SYSTEM_ROLES = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'];
 
@@ -85,6 +86,8 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
       newValue: JSON.stringify(newRole),
       ipAddress: req.ip
     });
+
+    syncAllTenantsToRemote({ reason: 'ROLE_UPDATE' }).catch(() => {});
 
     return res.status(201).json({
       success: true,
@@ -184,6 +187,8 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
       ipAddress: req.ip
     });
 
+    syncAllTenantsToRemote({ reason: 'ROLE_PERMISSION_UPDATE' }).catch(() => {});
+
     return res.status(200).json({
       success: true,
       message: 'Access permissions updated successfully.',
@@ -262,6 +267,8 @@ export const updateRole = async (req: AuthenticatedRequest, res: Response) => {
       ipAddress: req.ip
     });
 
+    syncAllTenantsToRemote({ reason: 'ROLE_UPDATE' }).catch(() => {});
+
     return res.status(200).json({
       success: true,
       message: 'Role updated successfully',
@@ -330,6 +337,8 @@ export const deleteRole = async (req: AuthenticatedRequest, res: Response) => {
       oldValue: JSON.stringify(role),
       ipAddress: req.ip
     });
+
+    syncAllTenantsToRemote({ reason: 'ROLE_DELETE' }).catch(() => {});
 
     return res.status(200).json({
       success: true,

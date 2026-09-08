@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../config/db';
+import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 
 interface AuthenticatedRequest extends Request {
   user?: any;
@@ -86,15 +87,6 @@ export const getAdminPages = async (req: AuthenticatedRequest, res: Response) =>
     const existingSlugs = new Set(pages.map(p => p.slug));
     const missingPages = mandatoryPagesTemplate.filter(p => !existingSlugs.has(p.slug));
 
-    // if (missingPages.length > 0) {
-    //   await prisma.customPage.createMany({ data: missingPages as any });
-    //   
-    //   pages = await prisma.customPage.findMany({
-    //     where: { tenantId },
-    //     orderBy: { createdAt: 'asc' }
-    //   });
-    // }
-
     res.status(200).json({ success: true, data: pages });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -139,6 +131,11 @@ export const savePage = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
+    // Automatically sync updated page to tenant's domain DB
+    syncTenantToRemote(tenantId, { reason: 'PAGE_UPDATE' }).catch(e =>
+      console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message)
+    );
+
     res.status(200).json({ success: true, message: 'Page saved successfully', data: page });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -156,6 +153,11 @@ export const deletePage = async (req: AuthenticatedRequest, res: Response) => {
     if (!page || page.tenantId !== tenantId) throw new Error('Page not found');
 
     await prisma.customPage.delete({ where: { id } });
+
+    // Automatically sync deletion to tenant's domain DB
+    syncTenantToRemote(tenantId, { reason: 'PAGE_DELETE' }).catch(e =>
+      console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message)
+    );
 
     res.status(200).json({ success: true, message: 'Page deleted successfully' });
   } catch (error: any) {
