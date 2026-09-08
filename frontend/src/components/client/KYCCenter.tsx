@@ -37,20 +37,18 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
   // ── Status helpers ──────────────────────────────────────────────────────────
   const status: string = profile?.status || 'PENDING_ONBOARDING';
 
+  console.log("Profile Data:", profile)
   // Check if agreement is actually signed/active
   const isAgreementSigned = profile?.agreements?.some(
     (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
   ) ?? false;
 
-  // KRA is verified when status is past KYC stages
-  const isKraVerified =
-    status !== 'PENDING_ONBOARDING' &&
-    status !== 'KYC_PENDING' &&
-    status !== 'KYC_FAILED';
+  // KRA is verified from dedicated kraVerified boolean
+  const isKraVerified = !!profile?.kraVerified;
 
   const getStatusBanner = () => {
     // Fully verified: KRA done + agreement signed
-    if (status === 'ACTIVE' && isAgreementSigned) {
+    if (isKraVerified && isAgreementSigned) {
       return {
         border: 'border-premium-success/30',
         glow: 'bg-premium-success/5',

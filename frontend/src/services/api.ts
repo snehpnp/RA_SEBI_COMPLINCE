@@ -74,11 +74,7 @@ class ApiClient {
           localStorage.removeItem('user');
           localStorage.removeItem('tenantId');
 
-          let loginPath = '/admin/login';
-          const currentPath = window.location.pathname;
-          if (currentPath.startsWith('/client')) {
-            loginPath = '/client-login';
-          }
+          const loginPath = '/login';
 
           const isSuspended = (data.errors && (data.errors.includes('Tenant suspended') || data.errors.includes('User suspended'))) ||
             (data.message && data.message.toLowerCase().includes('suspended'));
@@ -193,6 +189,49 @@ class ApiClient {
     return this.request(`/super-admin/tenants/${id}/clients`);
   }
 
+  async getTenantStaff(id: string) {
+    try {
+      const res = await this.request(`/super-admin/tenants/${id}/staff`);
+      if (res && res.success) return res;
+    } catch (err) {
+      // If 404 or backend server is running older process without restart, fallback to tenant details
+    }
+
+    try {
+      const tenantRes = await this.request(`/super-admin/tenants/${id}`);
+      if (tenantRes && (tenantRes.success || tenantRes.data)) {
+        const rawTenant = tenantRes.data?.tenant || tenantRes.tenant || {};
+        const rawUsers = rawTenant.users || tenantRes.data?.users || [];
+        const allStaff = (tenantRes.data?.allStaff || rawUsers.filter((u: any) => (u.role?.name || '').toUpperCase() !== 'CLIENT')).map((u: any) => ({
+          id: u.staff?.id || u.id,
+          userId: u.id,
+          employeeId: u.staff?.employeeId || u.employeeCode || `EMP-${(u.id || '').slice(-4).toUpperCase()}`,
+          name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+          email: u.staff?.email || u.email,
+          mobile: u.staff?.mobile || u.mobile,
+          role: u.role?.name || u.role || 'STAFF',
+          status: u.staff?.status || u.status || 'ACTIVE',
+          nismNumber: u.staff?.nismNumber || null,
+          nismValidity: u.staff?.nismValidity || null,
+          joiningDate: u.staff?.joiningDate || u.createdAt,
+          createdAt: u.createdAt
+        }));
+
+        return {
+          success: true,
+          source: 'LOCAL_DATABASE',
+          company: rawTenant,
+          count: allStaff.length,
+          data: allStaff
+        };
+      }
+    } catch (fallbackErr: any) {
+      return { success: false, message: fallbackErr.message || 'Failed to fetch staff' };
+    }
+
+    return { success: false, message: 'Failed to fetch staff' };
+  }
+
   async createTenant(formData: FormData) {
     return this.request('/super-admin/tenants', {
       method: 'POST',
@@ -229,6 +268,10 @@ class ApiClient {
 
   async getAuditLogs() {
     return this.request('/super-admin/logs');
+  }
+
+  async getStates() {
+    return this.request('/locations/states');
   }
 
   async getTelemetry() {

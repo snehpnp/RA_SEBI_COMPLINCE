@@ -12,7 +12,7 @@ const states = [
   { name: 'Chhattisgarh', gstCode: '22' },
   { name: 'Dadra and Nagar Haveli and Daman and Diu', gstCode: '26' },
   { name: 'Delhi', gstCode: '07' },
-  { name: 'Goa', gstCode: '32' },
+  { name: 'Goa', gstCode: '30' },
   { name: 'Gujarat', gstCode: '24' },
   { name: 'Haryana', gstCode: '06' },
   { name: 'Himachal Pradesh', gstCode: '02' },

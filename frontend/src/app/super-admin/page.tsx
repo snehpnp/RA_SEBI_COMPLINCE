@@ -9,6 +9,7 @@ import SuperAdminResourcesTab from '@/components/SuperAdminResourcesTab';
 import { useGlobalConfirm } from '@/components/GlobalConfirmProvider';
 import { PaginatedList } from '@/components/ui/PaginatedList';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import dynamic from 'next/dynamic';
 import { useBranding } from '@/contexts/BrandingContext';
@@ -19,6 +20,46 @@ import MatrixTab from '../../components/super-admin/tabs/MatrixTab';
 import AuditTab from '../../components/super-admin/tabs/AuditTab';
 import ComplianceTab from '../../components/super-admin/tabs/ComplianceTab';
 import CompanyClientsModal from '../../components/super-admin/CompanyClientsModal';
+import CompanyStaffModal from '../../components/super-admin/CompanyStaffModal';
+
+const FALLBACK_INDIAN_STATES = [
+  { name: 'Andaman and Nicobar Islands', gstCode: '35' },
+  { name: 'Andhra Pradesh', gstCode: '37' },
+  { name: 'Arunachal Pradesh', gstCode: '12' },
+  { name: 'Assam', gstCode: '18' },
+  { name: 'Bihar', gstCode: '10' },
+  { name: 'Chandigarh', gstCode: '04' },
+  { name: 'Chhattisgarh', gstCode: '22' },
+  { name: 'Dadra and Nagar Haveli and Daman and Diu', gstCode: '26' },
+  { name: 'Delhi', gstCode: '07' },
+  { name: 'Goa', gstCode: '30' },
+  { name: 'Gujarat', gstCode: '24' },
+  { name: 'Haryana', gstCode: '06' },
+  { name: 'Himachal Pradesh', gstCode: '02' },
+  { name: 'Jammu and Kashmir', gstCode: '01' },
+  { name: 'Jharkhand', gstCode: '20' },
+  { name: 'Karnataka', gstCode: '29' },
+  { name: 'Kerala', gstCode: '32' },
+  { name: 'Ladakh', gstCode: '38' },
+  { name: 'Lakshadweep', gstCode: '31' },
+  { name: 'Madhya Pradesh', gstCode: '23' },
+  { name: 'Maharashtra', gstCode: '27' },
+  { name: 'Manipur', gstCode: '14' },
+  { name: 'Meghalaya', gstCode: '17' },
+  { name: 'Mizoram', gstCode: '15' },
+  { name: 'Nagaland', gstCode: '13' },
+  { name: 'Odisha', gstCode: '21' },
+  { name: 'Puducherry', gstCode: '34' },
+  { name: 'Punjab', gstCode: '03' },
+  { name: 'Rajasthan', gstCode: '08' },
+  { name: 'Sikkim', gstCode: '11' },
+  { name: 'Tamil Nadu', gstCode: '33' },
+  { name: 'Telangana', gstCode: '36' },
+  { name: 'Tripura', gstCode: '16' },
+  { name: 'Uttar Pradesh', gstCode: '09' },
+  { name: 'Uttarakhand', gstCode: '05' },
+  { name: 'West Bengal', gstCode: '19' }
+];
 
 function SuperAdminDashboardContent() {
   const router = useRouter();
@@ -88,10 +129,7 @@ function SuperAdminDashboardContent() {
   // Create Company Form State
   const [duplicateFields, setDuplicateFields] = useState<string[]>([]);
   const [companyName, setCompanyName] = useState('');
-  const [panelName, setPanelName] = useState('');
   const [domainUrl, setDomainUrl] = useState('');
-  const [mongoDbUrl, setMongoDbUrl] = useState('');
-  const [dbName, setDbName] = useState('');
   const [companyType, setCompanyType] = useState('INDIVIDUAL');
   const [raType, setRaType] = useState('FULL_TIME');
   const [ownerName, setOwnerName] = useState('');
@@ -119,6 +157,8 @@ function SuperAdminDashboardContent() {
   };
   const [mobile, setMobile] = useState('');
   const [address, setAddress] = useState('');
+  const [tenantState, setTenantState] = useState('');
+  const [statesList, setStatesList] = useState<{ id?: string; name: string; gstCode?: string | null }[]>([]);
   const [pan, setPan] = useState('');
   const [gst, setGst] = useState('');
   const [website, setWebsite] = useState('');
@@ -130,10 +170,6 @@ function SuperAdminDashboardContent() {
   const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [parsedFields, setParsedFields] = useState({ companyName: false, sebiRegistration: false, certificateValidity: false, address: false });
   const [isDocumentValid, setIsDocumentValid] = useState<boolean | null>(null);
-  const [pdfPreviewData, setPdfPreviewData] = useState<any>(null);
-  const [showPdfConfirmModal, setShowPdfConfirmModal] = useState(false);
-  const [nismPreviewData, setNismPreviewData] = useState<any>(null);
-  const [showNismConfirmModal, setShowNismConfirmModal] = useState(false);
   // Custom Global Alert State (Overrides native window.alert)
   const [globalAlert, setGlobalAlert] = useState<{ message: string, isError: boolean } | null>(null);
 
@@ -205,6 +241,25 @@ function SuperAdminDashboardContent() {
     data: []
   });
 
+  // Company Staff Modal State (Domain API Live Access)
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [selectedCompanyForStaff, setSelectedCompanyForStaff] = useState<any>(null);
+  const [companyStaffData, setCompanyStaffData] = useState<{
+    loading: boolean;
+    error: string | null;
+    source?: string;
+    domainUrl?: string | null;
+    company?: any;
+    data: any[];
+  }>({
+    loading: false,
+    error: null,
+    source: undefined,
+    domainUrl: null,
+    company: null,
+    data: []
+  });
+
   // Profile State
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -221,6 +276,13 @@ function SuperAdminDashboardContent() {
 
       const comps = await api.getTenants();
       if (comps.success) setCompanies(comps.data);
+
+      try {
+        const statesRes = await api.getStates();
+        if (statesRes.success && Array.isArray(statesRes.data) && statesRes.data.length > 0) {
+          setStatesList(statesRes.data);
+        }
+      } catch (e) {}
 
       const logs = await api.getAuditLogs();
       if (logs.success) setAuditLogs(logs.data);
@@ -314,7 +376,6 @@ function SuperAdminDashboardContent() {
 
     setSebiCertificate(file);
     setIsDocumentValid(true);
-    setPdfPreviewData(null);
 
     if (file.type !== 'application/pdf') {
       setFormError('Please upload a valid PDF file for SEBI Certificate.');
@@ -323,7 +384,6 @@ function SuperAdminDashboardContent() {
 
     setIsParsingPdf(true);
     setFormError(null);
-    setFormSuccess(null);
     try {
       const formData = new FormData();
       formData.append('sebiCertificate', file);
@@ -338,38 +398,14 @@ function SuperAdminDashboardContent() {
         if (name) { setCompanyName(name); newParsed.companyName = true; }
         if (val) { setCertificateValidity(val); newParsed.certificateValidity = true; }
         if (addr) { setAddress(addr); newParsed.address = true; }
+        if (res.data.state && !tenantState) { setTenantState(res.data.state); }
         setParsedFields(newParsed);
-
-        if (reg && name && val && addr) {
-          setPdfPreviewData(res.data);
-          setShowPdfConfirmModal(true);
-        } else {
-          setFormSuccess('SEBI Certificate attached! Detected fields auto-filled below. Please review or fill any remaining details.');
-        }
-      } else {
-        setFormSuccess('SEBI Certificate attached. Please enter or verify company details below.');
       }
     } catch (err: any) {
-      setFormSuccess('SEBI Certificate attached. Please enter or verify company details below.');
+      console.error('SEBI PDF parse error:', err);
     } finally {
       setIsParsingPdf(false);
     }
-  };
-
-  const handleConfirmPdf = () => {
-    if (pdfPreviewData) {
-      const { sebiRegistration: reg, certificateValidity: val, companyName: name, address: addr } = pdfPreviewData;
-      const newParsed = { ...parsedFields };
-
-      if (reg) { setSebiRegistration(reg); newParsed.sebiRegistration = true; }
-      if (val) { setCertificateValidity(val); newParsed.certificateValidity = true; }
-      if (name) { setCompanyName(name); newParsed.companyName = true; }
-      if (addr) { setAddress(addr); newParsed.address = true; }
-
-      setParsedFields(newParsed);
-      setIsDocumentValid(true);
-    }
-    setShowPdfConfirmModal(false);
   };
 
   const handleNismCertificateChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,7 +414,6 @@ function SuperAdminDashboardContent() {
     if (!file) return;
 
     setNismCertificate(file);
-    setNismPreviewData(null);
 
     if (file.type !== 'application/pdf') {
       setFormError('Please upload a valid PDF file for NISM Certificate.');
@@ -399,25 +434,12 @@ function SuperAdminDashboardContent() {
         if (res.data.name && !ownerName) {
           setOwnerName(res.data.name);
         }
-        if (res.data.nismRegistration && res.data.name && res.data.nismValidity) {
-          setNismPreviewData(res.data);
-          setShowNismConfirmModal(true);
-        }
       }
     } catch (err: any) {
-      // Keep file attached
+      console.error('NISM PDF parse error:', err);
     } finally {
       setIsParsingPdf(false);
     }
-  };
-
-  const handleConfirmNism = () => {
-    if (nismPreviewData) {
-      if (nismPreviewData.nismValidity) {
-        setNismValidity(nismPreviewData.nismValidity);
-      }
-    }
-    setShowNismConfirmModal(false);
   };
 
   const handleCreateCompany = async (e: React.FormEvent) => {
@@ -442,10 +464,7 @@ function SuperAdminDashboardContent() {
 
     const formData = new FormData();
     formData.append('companyName', companyName);
-    if (panelName) formData.append('panelName', panelName);
     if (domainUrl) formData.append('domainUrl', domainUrl);
-    if (mongoDbUrl) formData.append('mongoDbUrl', mongoDbUrl);
-    if (dbName) formData.append('dbName', dbName);
     formData.append('companyType', companyType);
     formData.append('raType', raType);
     formData.append('ownerName', ownerName);
@@ -454,6 +473,7 @@ function SuperAdminDashboardContent() {
     formData.append('email', email);
     formData.append('mobile', mobile);
     formData.append('address', address);
+    if (tenantState) formData.append('state', tenantState);
     formData.append('pan', pan);
     if (gst) formData.append('gst', gst);
     if (website) formData.append('website', website);
@@ -483,10 +503,7 @@ function SuperAdminDashboardContent() {
         // Clear form
         setParsedFields({ companyName: false, sebiRegistration: false, certificateValidity: false, address: false });
         setCompanyName('');
-        setPanelName('');
         setDomainUrl('');
-        setMongoDbUrl('');
-        setDbName('');
         setCompanyType('INDIVIDUAL');
         setRaType('FULL_TIME');
         setOwnerName('');
@@ -497,6 +514,7 @@ function SuperAdminDashboardContent() {
         setAdminPassword('');
         setMobile('');
         setAddress('');
+        setTenantState('');
         setPan('');
         setGst('');
         setWebsite('');
@@ -594,7 +612,6 @@ function SuperAdminDashboardContent() {
       setEditData({
         id,
         companyName: data.tenant?.companyName || '',
-        panelName: data.tenant?.panelName || '',
         domainUrl: data.tenant?.domainUrl || '',
         mongoDbUrl: data.tenant?.mongoDbUrl || '',
         dbName: data.tenant?.dbName || '',
@@ -605,6 +622,7 @@ function SuperAdminDashboardContent() {
         bseEnrollment: data.tenant?.bseEnrollment || '',
         pan: data.tenant?.pan || '',
         website: data.tenant?.website || '',
+        state: data.tenant?.state || '',
         certificateValidity: data.tenant?.certificateValidity ? new Date(data.tenant.certificateValidity).toISOString().split('T')[0] : '',
         nismValidity: data.tenant?.nismValidity ? new Date(data.tenant.nismValidity).toISOString().split('T')[0] : '',
         depositAmount: data.tenant?.depositAmount !== undefined && data.tenant?.depositAmount !== null ? String(data.tenant.depositAmount) : '',
@@ -688,6 +706,56 @@ function SuperAdminDashboardContent() {
     }
   };
 
+  const openCompanyStaffModal = async (company: any) => {
+    setSelectedCompanyForStaff(company);
+    setIsStaffModalOpen(true);
+    setCompanyStaffData({
+      loading: true,
+      error: null,
+      domainUrl: company.domainUrl || company.website || null,
+      company,
+      data: []
+    });
+
+    try {
+      const res = await api.getTenantStaff(company.id);
+      if (res && res.success) {
+        setCompanyStaffData({
+          loading: false,
+          error: null,
+          source: res.source,
+          domainUrl: res.domainUrl || company.domainUrl,
+          company: res.company || company,
+          data: res.data || []
+        });
+      } else {
+        setCompanyStaffData({
+          loading: false,
+          error: res?.message || 'Failed to fetch staff members',
+          source: 'LOCAL_DATABASE',
+          domainUrl: company.domainUrl,
+          company,
+          data: []
+        });
+      }
+    } catch (err: any) {
+      setCompanyStaffData({
+        loading: false,
+        error: err.message || 'Failed to connect to domain API',
+        source: 'LOCAL_DATABASE',
+        domainUrl: company.domainUrl,
+        company,
+        data: []
+      });
+    }
+  };
+
+  const handleRefreshCompanyStaff = () => {
+    if (selectedCompanyForStaff) {
+      openCompanyStaffModal(selectedCompanyForStaff);
+    }
+  };
+
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -751,8 +819,8 @@ function SuperAdminDashboardContent() {
         triggerAlert(res.message || 'Tenant synced successfully via API.');
         loadData();
       } else {
-        setApiSyncResultMsg({ success: false, message: res.message || 'API sync failed.' });
-        triggerAlert(res.message || 'API sync failed.');
+        setApiSyncResultMsg({ success: false, message: res.message || 'Sync Notice' });
+        triggerAlert(res.message || 'Sync Notice');
       }
     } catch (err: any) {
       setApiSyncResultMsg({ success: false, message: err.message || 'API sync failed.' });
@@ -896,93 +964,53 @@ function SuperAdminDashboardContent() {
             )
           })}
         </div>
-
-        {/* User Footer */}
-        <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-          <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
-          <div
-            onClick={() => { setActiveTab('profile'); setMobileMenuOpen(false); }}
-            className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-            <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-            <div className="relative shrink-0">
-              <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10">
-                S
-              </div>
-              <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
-            </div>
-
-            {!isSidebarCollapsed && (
-              <div className="flex-1 min-w-0 relative z-10">
-                <p className="font-bold text-sm truncate text-white">Super Admin</p>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <ShieldCheck className="w-3 h-3 text-rose-500" />
-                  <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-rose-500 via-orange-200 to-rose-500 animate-pulse">
-                    System Control
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {!isSidebarCollapsed && (
-              <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
-            )}
-          </div>
-          <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-            <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
-              {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-              <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-            </button>
-          </div>
-        </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-grow p-10 overflow-y-auto max-w-[1600px] mx-auto">
-
-        {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
-        {(() => {
-
-
-          const tabsMissingHeader = [
-            'dashboard',
-            'companies',
-            'matrix',
-            'audit',
-            'resources',
-            'compliance',
-            'profile'
-          ];
-
-          if (!tabsMissingHeader.includes(activeTab)) return null;
-
-          const tabLabels: Record<string, { title: string, desc: string }> = {
-            dashboard: { title: 'Dashboard', desc: 'Manage system pricing and tiers' },
-            companies: { title: 'Companies', desc: 'Manage system pricing and tiers' },
-            matrix: { title: 'Pricing Matrix', desc: 'Manage system pricing and tiers' },
-            audit: { title: 'Compliance Audit', desc: 'System-wide compliance and event logs' },
-            resources: { title: 'Global Resources', desc: 'Manage global resource documents' },
-            compliance: { title: 'Compliance Telemetry', desc: 'Monitor compliance across all tenants' },
-            profile: { title: 'Super Admin Profile', desc: 'Manage your profile and settings' }
-          };
-
-          const currentNav = tabLabels[activeTab];
-          if (!currentNav) return null;
-
-          return (
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                  {currentNav.title}
-                </h2>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                  {currentNav.desc}
-                </p>
-              </div>
+      <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
+        {/* Top Header Bar with Theme, User & Logout */}
+        <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+          <div className="flex items-center gap-3">
+            {/* Mobile menu toggle */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+              title="Open Navigation"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+            <div>
+              <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Super Admin'}
+              </h1>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                Master Governance & Central Multi-Tenant Administration
+              </p>
             </div>
-          );
-        })()}
+          </div>
+
+          <div className="flex items-center gap-3 md:gap-4">
+            {/* Theme Toggle */}
+            <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+              <ThemeToggle />
+            </div>
+
+            {/* Profile Dropdown with Username & Logout */}
+            <UserProfileDropdown
+              user={{
+                name: 'Super Admin',
+                email: 'superadmin@ragcp.com',
+                role: 'Super Admin'
+              }}
+              badgeLabel="System Control"
+              badgeColor="rose"
+              onProfileClick={() => setActiveTab('profile')}
+              onLogoutClick={() => setIsLogoutModalOpen(true)}
+            />
+          </div>
+        </header>
+
+        <div className="flex-1 p-6 md:p-10 overflow-y-auto max-w-[1600px] w-full mx-auto custom-scrollbar">
 
         {/* 1. DASHBOARD TAB */}
         {activeTab === 'dashboard' && <DashboardTab telemetry={telemetry} />}
@@ -1001,8 +1029,10 @@ function SuperAdminDashboardContent() {
             openViewModal={openViewModal}
             openEditModal={openEditModal}
             openClientsModal={openCompanyClientsModal}
+            openStaffModal={openCompanyStaffModal}
             openConfirmModal={openConfirmModal}
             handleImpersonate={handleImpersonate}
+            handleManualSyncApi={handleManualSyncApi}
             setIsAddCompanyModalOpen={setIsAddCompanyModalOpen}
             setFormSuccess={setFormSuccess}
             setFormError={setFormError}
@@ -1221,7 +1251,59 @@ function SuperAdminDashboardContent() {
                       <Landmark className="h-4 w-4 text-primary-500" />
                       <span>Company & SEBI Registration</span>
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">SEBI Certificate File * {isParsingPdf && <span className="text-primary-600 dark:text-primary-400 ml-2">(Parsing PDF...)</span>}</label>
+                        {sebiCertificate ? (
+                          <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2 px-4 text-xs text-emerald-600 dark:text-emerald-400 font-bold min-h-[42px]">
+                            <span className="truncate max-w-[200px]">{sebiCertificate.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSebiCertificate(null);
+                                setCompanyName('');
+                                setSebiRegistration('');
+                                setCertificateValidity('');
+                                setAddress('');
+                                setParsedFields({ companyName: false, sebiRegistration: false, certificateValidity: false, address: false });
+                                setIsDocumentValid(null);
+                              }}
+                              className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400 rounded transition-colors"
+                            >
+                              Reupload
+                            </button>
+                          </div>
+                        ) : (
+                          <input type="file" ref={sebiFileInputRef} required onChange={handleSebiCertificateChange} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-4 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400 hover:file:bg-primary-500/20" accept=".pdf" />
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">NISM certificate of PO/Researcher *</label>
+                        {nismCertificate ? (
+                          <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2 px-4 text-xs text-emerald-600 dark:text-emerald-400 font-bold min-h-[42px]">
+                            <span className="truncate max-w-[200px]">{nismCertificate.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNismCertificate(null);
+                                setNismValidity('');
+                              }}
+                              className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400 rounded transition-colors"
+                            >
+                              Reupload
+                            </button>
+                          </div>
+                        ) : (
+                          <input type="file" ref={nismFileInputRef} required onChange={handleNismCertificateChange} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-4 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400 hover:file:bg-primary-500/20" accept=".pdf" />
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Custom Domain URL</label>
+                        <input type="url" value={domainUrl} onChange={e => setDomainUrl(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="https://advisors.yourcompany.com (Optional)" />
+                      </div>
+                      
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Company Legal Name *</label>
                         {parsedFields.companyName ? (
@@ -1314,10 +1396,35 @@ function SuperAdminDashboardContent() {
                               e.target.blur();
                               setFormError('Please upload the SEBI Certificate PDF first to extract and auto-fill details.'); setTimeout(() => setFormError(null), 5000);
                             }
-                          }} onChange={e => setGst(e.target.value.toUpperCase())} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('GST') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
+                          }} onChange={e => {
+                            const upperVal = e.target.value.toUpperCase();
+                            setGst(upperVal);
+                            if (upperVal.length >= 2) {
+                              const code = upperVal.substring(0, 2);
+                              const matched = (statesList.length > 0 ? statesList : FALLBACK_INDIAN_STATES).find(s => s.gstCode === code);
+                              if (matched && !tenantState) {
+                                setTenantState(matched.name);
+                              }
+                            }
+                          }} className={`w-full bg-slate-100 dark:bg-slate-950/50 border ${duplicateFields.includes('GST') ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-400 dark:border-white/10'} rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors`}
                             placeholder="Optional" />
                           {duplicateFields.includes('GST') && <p className="text-rose-500 text-xs mt-1 font-semibold">This GST already exists.</p>}
                         </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Company State (GST Jurisdiction)</label>
+                        <select
+                          value={tenantState}
+                          onChange={e => setTenantState(e.target.value)}
+                          className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors h-[42px]"
+                        >
+                          <option value="">-- Select State --</option>
+                          {(statesList.length > 0 ? statesList : FALLBACK_INDIAN_STATES).map(s => (
+                            <option key={s.name} value={s.name}>
+                              {s.name} {s.gstCode ? `(Code ${s.gstCode})` : ''}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Website URL</label>
@@ -1337,6 +1444,7 @@ function SuperAdminDashboardContent() {
                           }
                         }} onChange={e => setBseEnrollment(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="Optional" />
                       </div>
+                    
                     </div>
                   </div>
 
@@ -1411,67 +1519,11 @@ function SuperAdminDashboardContent() {
                     </div>
                   </div>
 
-                  {/* 3. Dedicated Database & Deployment Settings Section */}
-                  <div className="bg-slate-100/70 dark:bg-slate-950/40 border border-slate-300 dark:border-white/10 rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center space-x-2">
-                        <Database className="h-4 w-4 text-indigo-500" />
-                        <span>Dedicated Database & Deployment Settings (Optional)</span>
-                      </h3>
-                      <span className="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold px-2 py-0.5 rounded-full">Auto DB Provisioning</span>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="md:col-span-2">
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">MongoDB Connection URL</label>
-                        <input
-                          type="text"
-                          value={mongoDbUrl}
-                          onChange={e => setMongoDbUrl(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors font-mono"
-                          placeholder="mongodb+srv://user:pass@cluster.mongodb.net/dbname or mongodb://..."
-                        />
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                          If provided, this database will be automatically seeded with Roles, Permissions, Default Pages, and the Admin User.
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">DB Name</label>
-                        <input
-                          type="text"
-                          value={dbName}
-                          onChange={e => setDbName(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors"
-                          placeholder="e.g. beta_compliance_db"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Panel Name</label>
-                        <input
-                          type="text"
-                          value={panelName}
-                          onChange={e => setPanelName(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors"
-                          placeholder="Beta Advisors Portal"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Custom Domain URL</label>
-                        <input
-                          type="url"
-                          value={domainUrl}
-                          onChange={e => setDomainUrl(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors"
-                          placeholder="https://advisors.yourcompany.com"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 4. Validity & Certificates */}
+                  {/* 3. Validity & Corporate Details */}
                   <div className="space-y-4">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-4 flex items-center space-x-2">
                       <FileText className="h-4 w-4 text-emerald-500" />
-                      <span>Validity & Document Uploads</span>
+                      <span>Validity & Corporate Details</span>
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
@@ -1520,53 +1572,7 @@ function SuperAdminDashboardContent() {
                         }} onChange={e => setAddress(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-4 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 transition-colors" placeholder="BKC Commercial Towers..." />
                       )}
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">SEBI Certificate File * {isParsingPdf && <span className="text-primary-600 dark:text-primary-400 ml-2">(Parsing PDF...)</span>}</label>
-                        {sebiCertificate ? (
-                          <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2 px-4 text-xs text-emerald-600 dark:text-emerald-400 font-bold min-h-[42px]">
-                            <span className="truncate max-w-[200px]">{sebiCertificate.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSebiCertificate(null);
-                                setCompanyName('');
-                                setSebiRegistration('');
-                                setCertificateValidity('');
-                                setAddress('');
-                                setParsedFields({ companyName: false, sebiRegistration: false, certificateValidity: false, address: false });
-                                setIsDocumentValid(null);
-                              }}
-                              className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400 rounded transition-colors"
-                            >
-                              Reupload
-                            </button>
-                          </div>
-                        ) : (
-                          <input type="file" ref={sebiFileInputRef} required onChange={handleSebiCertificateChange} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-4 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400 hover:file:bg-primary-500/20" accept=".pdf" />
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">NISM certificate of PO/Researcher *</label>
-                        {nismCertificate ? (
-                          <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl py-2 px-4 text-xs text-emerald-600 dark:text-emerald-400 font-bold min-h-[42px]">
-                            <span className="truncate max-w-[200px]">{nismCertificate.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setNismCertificate(null);
-                                setNismValidity('');
-                              }}
-                              className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-[10px] text-emerald-600 dark:text-emerald-400 rounded transition-colors"
-                            >
-                              Reupload
-                            </button>
-                          </div>
-                        ) : (
-                          <input type="file" ref={nismFileInputRef} required onChange={handleNismCertificateChange} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-4 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400 hover:file:bg-primary-500/20" accept=".pdf" />
-                        )}
-                      </div>
-                    </div>
+                    
                   </div>
 
                   <div className="flex justify-end space-x-3 pt-6 border-t border-slate-300 dark:border-white/5">
@@ -1662,9 +1668,7 @@ function SuperAdminDashboardContent() {
                   <h3 className="text-sm font-bold text-primary-600 dark:text-primary-400 mb-4 uppercase tracking-wider">Company Information</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div><span className="text-slate-500 block text-xs">Name</span>{viewData.tenant?.companyName || 'N/A'}</div>
-                    <div><span className="text-slate-500 block text-xs">Panel Name</span>{viewData.tenant?.panelName || 'N/A'}</div>
                     <div><span className="text-slate-500 block text-xs">Domain URL</span>{viewData.tenant?.domainUrl ? <a href={viewData.tenant.domainUrl} target="_blank" rel="noreferrer" className="text-primary-500 hover:underline">{viewData.tenant.domainUrl}</a> : 'N/A'}</div>
-                    <div><span className="text-slate-500 block text-xs">DB Name</span>{viewData.tenant?.dbName || 'Default DB'}</div>
                     <div><span className="text-slate-500 block text-xs">SEBI Reg</span>{viewData.tenant?.sebiRegistration || 'N/A'}</div>
                     <div><span className="text-slate-500 block text-xs">PAN</span>{viewData.tenant?.pan || 'N/A'}</div>
                     <div><span className="text-slate-500 block text-xs">GST</span>{viewData.tenant?.gst || 'N/A'}</div>
@@ -1673,13 +1677,70 @@ function SuperAdminDashboardContent() {
                   </div>
                 </div>
                 <div className="bg-slate-100 dark:bg-slate-950/50 p-5 rounded-xl border border-slate-300 dark:border-white/5">
-                  <h3 className="text-sm font-bold text-emerald-600 dark:emerald-400 mb-4 uppercase tracking-wider">Admin User</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Company Admin & Management</h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-600 border border-purple-500/20">PRIMARY ADMIN</span>
+                  </div>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div><span className="text-slate-500 block text-xs">Name</span>{viewData.admin?.firstName} {viewData.admin?.lastName}</div>
                     <div><span className="text-slate-500 block text-xs">Email</span>{viewData.admin?.email}</div>
                     <div><span className="text-slate-500 block text-xs">Mobile</span>{viewData.admin?.mobile || 'N/A'}</div>
                     <div><span className="text-slate-500 block text-xs">Status</span>{viewData.admin?.status}</div>
                   </div>
+                </div>
+
+                {viewData.allStaff && viewData.allStaff.length > 0 && (
+                  <div className="bg-slate-100 dark:bg-slate-950/50 p-5 rounded-xl border border-slate-300 dark:border-white/5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Company Staff & Team ({viewData.allStaff.length})</h3>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsViewModalOpen(false);
+                          if (viewData.tenant) openCompanyStaffModal(viewData.tenant);
+                        }}
+                        className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        Open Full Staff View →
+                      </button>
+                    </div>
+                    <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                      {viewData.allStaff.map((st: any, sIdx: number) => (
+                        <div key={st.id || sIdx} className="flex items-center justify-between p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 text-xs">
+                          <div>
+                            <span className="font-bold text-slate-900 dark:text-white block">{st.name}</span>
+                            <span className="text-slate-500 text-[11px]">{st.email}</span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                            {st.role}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsViewModalOpen(false);
+                      if (viewData.tenant) openCompanyClientsModal(viewData.tenant);
+                    }}
+                    className="px-4 py-2 bg-indigo-50 dark:bg-indigo-500/10 hover:bg-indigo-100 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition border border-indigo-500/20"
+                  >
+                    View Company Clients
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsViewModalOpen(false);
+                      if (viewData.tenant) openCompanyStaffModal(viewData.tenant);
+                    }}
+                    className="px-4 py-2 bg-purple-50 dark:bg-purple-500/10 hover:bg-purple-100 text-purple-600 dark:text-purple-400 rounded-xl text-xs font-bold transition border border-purple-500/20"
+                  >
+                    View Company Staff
+                  </button>
                 </div>
               </div>
             </div>
@@ -1783,20 +1844,8 @@ function SuperAdminDashboardContent() {
                     <input type="text" value={editData.website} onChange={e => setEditData({ ...editData, website: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Panel Name</label>
-                    <input type="text" value={editData.panelName || ''} onChange={e => setEditData({ ...editData, panelName: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="e.g. Beta Advisors Portal" />
-                  </div>
-                  <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Domain URL</label>
                     <input type="text" value={editData.domainUrl || ''} onChange={e => setEditData({ ...editData, domainUrl: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="https://betaadvisors.com" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">DB Name</label>
-                    <input type="text" value={editData.dbName || ''} onChange={e => setEditData({ ...editData, dbName: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="e.g. beta_advisors_db" />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">MongoDB Connection URL</label>
-                    <input type="text" value={editData.mongoDbUrl || ''} onChange={e => setEditData({ ...editData, mongoDbUrl: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white font-mono" placeholder="mongodb+srv://user:pass@cluster.mongodb.net/dbname" />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Validity Date</label>
@@ -1809,6 +1858,21 @@ function SuperAdminDashboardContent() {
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">GST</label>
                     <input type="text" value={editData.gst} onChange={e => setEditData({ ...editData, gst: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company State (GST Jurisdiction)</label>
+                    <select
+                      value={editData.state || ''}
+                      onChange={e => setEditData({ ...editData, state: e.target.value })}
+                      className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white h-[38px]"
+                    >
+                      <option value="">-- Select State --</option>
+                      {(statesList.length > 0 ? statesList : FALLBACK_INDIAN_STATES).map(s => (
+                        <option key={s.name} value={s.name}>
+                          {s.name} {s.gstCode ? `(Code ${s.gstCode})` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Company Mobile</label>
@@ -1970,64 +2034,6 @@ function SuperAdminDashboardContent() {
           </div>
         )}
 
-        {/* PDF Confirm Modal */}
-        {showPdfConfirmModal && pdfPreviewData && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
-            <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
-              <CheckCircle2 className="h-12 w-12 text-emerald-600 dark:text-emerald-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">Valid Document Detected!</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">We extracted the following details. Please confirm to auto-fill the form.</p>
-              <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl text-left text-sm space-y-4 mb-6 border border-slate-300 dark:border-white/5">
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Company Name</label>
-                  <input type="text" value={pdfPreviewData.companyName || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, companyName: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">SEBI Reg No</label>
-                  <input type="text" value={pdfPreviewData.sebiRegistration || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, sebiRegistration: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 uppercase" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Validity Date</label>
-                  <input type="date" value={pdfPreviewData.certificateValidity || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, certificateValidity: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Address</label>
-                  <textarea value={pdfPreviewData.address || ''} onChange={e => setPdfPreviewData({ ...pdfPreviewData, address: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 min-h-[60px]" />
-                </div>
-              </div>
-              <div className="flex justify-center space-x-3">
-                <button onClick={() => { setShowPdfConfirmModal(false); setSebiCertificate(null); setIsDocumentValid(false); }} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-                <button onClick={handleConfirmPdf} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20">Confirm & Auto-Fill</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* NISM PDF Confirm Modal */}
-        {showNismConfirmModal && nismPreviewData && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
-            <div className="bg-white dark:bg-slate-900 border border-emerald-500/30 rounded-2xl p-8 w-full max-w-sm shadow-2xl relative text-center animate-in zoom-in-95 duration-200">
-              <CheckCircle2 className="h-12 w-12 text-emerald-600 dark:text-emerald-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">NISM Certificate Detected!</h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">We extracted the following details. Please confirm to auto-fill the form.</p>
-              <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl text-left text-sm space-y-4 mb-6 border border-slate-300 dark:border-white/5">
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">NISM Reg No</label>
-                  <input type="text" value={nismPreviewData.nismRegistration || ''} onChange={e => setNismPreviewData({ ...nismPreviewData, nismRegistration: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500 uppercase" />
-                </div>
-                <div>
-                  <label className="text-slate-500 block text-xs font-bold uppercase mb-1">Validity Date</label>
-                  <input type="date" value={nismPreviewData.nismValidity || ''} onChange={e => setNismPreviewData({ ...nismPreviewData, nismValidity: e.target.value })} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-lg py-2 px-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-primary-500" />
-                </div>
-              </div>
-              <div className="flex justify-center space-x-3">
-                <button onClick={() => { setShowNismConfirmModal(false); setNismCertificate(null); }} className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300">Cancel</button>
-                <button onClick={handleConfirmNism} className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-sm font-bold rounded-xl transition-colors text-white shadow-lg shadow-primary-500/20">Confirm & Auto-Fill</button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Global Custom Alert Modal */}
         {globalAlert && (
           <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-xl animate-in fade-in duration-300">
@@ -2083,6 +2089,18 @@ function SuperAdminDashboardContent() {
             onRefresh={handleRefreshCompanyClients}
           />
         )}
+
+        {/* Company Staff Modal (Domain API Live Access) */}
+        {selectedCompanyForStaff && (
+          <CompanyStaffModal
+            isOpen={isStaffModalOpen}
+            onClose={() => setIsStaffModalOpen(false)}
+            company={selectedCompanyForStaff}
+            staffData={companyStaffData}
+            onRefresh={handleRefreshCompanyStaff}
+          />
+        )}
+        </div>
       </main>
     </div>
   );

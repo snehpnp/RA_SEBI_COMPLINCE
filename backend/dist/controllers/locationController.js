@@ -5,12 +5,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStates = void 0;
 const db_1 = __importDefault(require("../config/db"));
+const stateService_1 = require("../services/stateService");
 const getStates = async (req, res) => {
     try {
-        const states = await db_1.default.state.findMany({
+        let states = await db_1.default.state.findMany({
             where: { isActive: true },
             orderBy: { name: 'asc' },
         });
+        if (states.length === 0) {
+            await (0, stateService_1.ensureStates)(db_1.default);
+            states = await db_1.default.state.findMany({
+                where: { isActive: true },
+                orderBy: { name: 'asc' },
+            });
+        }
         res.json({ success: true, data: states });
     }
     catch (error) {

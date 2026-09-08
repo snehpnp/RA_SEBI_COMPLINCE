@@ -259,7 +259,8 @@ model Client {
   aadhaar     String  @unique
   category    String  @default("INDIVIDUAL") // INDIVIDUAL, NON_INDIVIDUAL
   occupation  String?
-  status      String  @default("PENDING_ONBOARDING") // PENDING_ONBOARDING, KYC_PENDING, KYC_FAILED, AGREEMENT_PENDING, PAYMENT_PENDING, ACTIVE, INACTIVE
+  status      String  @default("ACTIVE") // ACTIVE, PENDING_ONBOARDING, KYC_PENDING, KYC_FAILED, AGREEMENT_PENDING, PAYMENT_PENDING, INACTIVE
+  kraVerified Boolean @default(false)
   createdById String? @db.ObjectId
 
   // Relations

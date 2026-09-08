@@ -155,7 +155,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
             </div>
             <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Registration Successful!</h2>
             <p className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed max-w-md mx-auto">
-              Your account has been registered successfully. It will be activated after admin approval. You will receive a welcome email once approved.
+              Your account has been registered and activated successfully. You can now log in with your credentials.
             </p>
             <div className="pt-6">
               <button onClick={() => {
@@ -196,7 +196,8 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
               {/* STEP 1: Account Setup */}
               {step === 1 && (
                 <div className="animate-fade-in-up space-y-4">
-                  <div>
+                  
+                  {/* <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Select Advisor Partner</label>
                     <div className="relative">
                       <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400"><Building className="h-5 w-5" /></span>
@@ -213,7 +214,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
                         </select>
                       )}
                     </div>
-                  </div>
+                  </div> */}
 
                   <div className="bg-slate-50 dark:bg-slate-800/30 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-slate-700/50 space-y-4">
                     <div>

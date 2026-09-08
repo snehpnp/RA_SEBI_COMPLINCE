@@ -17,6 +17,7 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const api_1 = __importDefault(require("./routes/api"));
 const db_1 = __importDefault(require("./config/db"));
 const cronService_1 = require("./services/cronService");
+const stateService_1 = require("./services/stateService");
 const third_party_api_1 = require("./third-party-api");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
@@ -220,5 +221,6 @@ const ensurePermissions = async () => {
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
     await ensurePermissions();
+    await (0, stateService_1.ensureStates)(db_1.default);
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
 });

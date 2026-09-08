@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, Plus, Download, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, Key, ChevronLeft, ChevronRight, Users, Globe } from 'lucide-react';
+import { Search, Plus, Download, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, Key, ChevronLeft, ChevronRight, Users, Globe, UserCheck, RefreshCw } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 
 interface CompaniesTabProps {
@@ -15,8 +15,10 @@ interface CompaniesTabProps {
   openViewModal: (id: string) => void;
   openEditModal: (id: string) => void;
   openClientsModal?: (comp: any) => void;
+  openStaffModal?: (comp: any) => void;
   openConfirmModal: (action: string, id: string) => void;
   handleImpersonate: (id: string) => void;
+  handleManualSyncApi?: (tenantId: string, targetUrl?: string) => void;
   setIsAddCompanyModalOpen: (val: boolean) => void;
   setFormSuccess: (val: any) => void;
   setFormError: (val: any) => void;
@@ -25,8 +27,8 @@ interface CompaniesTabProps {
 
 export default function CompaniesTab({
   companies, filteredCompanies, searchQuery, setSearchQuery, itemsPerPage, setItemsPerPage,
-  currentPageCompanies, setCurrentPageCompanies, openViewModal, openEditModal, openClientsModal,
-  openConfirmModal, handleImpersonate, setIsAddCompanyModalOpen, setFormSuccess,
+  currentPageCompanies, setCurrentPageCompanies, openViewModal, openEditModal, openClientsModal, openStaffModal,
+  openConfirmModal, handleImpersonate, handleManualSyncApi, setIsAddCompanyModalOpen, setFormSuccess,
   setFormError, setNewCreds
 }: CompaniesTabProps) {
   return (
@@ -130,29 +132,37 @@ export default function CompaniesTab({
                     {comp.status}
                   </span>
                 </TableCell>
-                <TableCell className="text-right space-x-2">
-                  {comp.status !== 'DELETED' ? (
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
-                      <button onClick={() => openViewModal(comp.id)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all" title="View Details"><Eye className="h-[18px] w-[18px]" /></button>
-                      <button onClick={() => openEditModal(comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Edit"><Edit className="h-[18px] w-[18px]" /></button>
-                      {comp.status === 'ACTIVE' ? (
-                        <button onClick={() => openConfirmModal('SUSPEND', comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Suspend"><Power className="h-[18px] w-[18px]" /></button>
-                      ) : (
-                        <button onClick={() => openConfirmModal('ACTIVATE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Activate"><PowerOff className="h-[18px] w-[18px]" /></button>
-                      )}
-                      <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
-                      <button onClick={() => openConfirmModal('DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Soft Delete"><Trash2 className="h-[18px] w-[18px]" /></button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
-                      <button onClick={() => openConfirmModal('RESTORE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Restore"><RotateCcw className="h-[18px] w-[18px]" /></button>
-                      <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
-                      <button onClick={() => openConfirmModal('PERMANENT_DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Permanent Delete"><Trash2 className="h-[18px] w-[18px] text-rose-500" /></button>
-                    </div>
-                  )}
-                </TableCell>
+                  <TableCell className="text-right space-x-2">
+                    {comp.status !== 'DELETED' ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {comp.domainUrl && (
+                          <button onClick={() => handleManualSyncApi && handleManualSyncApi(comp.id, comp.domainUrl)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title={`Sync Admin & Company to Domain DB (${comp.domainUrl})`}><RefreshCw className="h-[18px] w-[18px]" /></button>
+                        )}
+                        <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openStaffModal && openStaffModal(comp)} className="p-2 text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-500/10 rounded-lg transition-all" title="View Staff & Team (Domain API)"><UserCheck className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openViewModal(comp.id)} className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all" title="View Details"><Eye className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openEditModal(comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Edit"><Edit className="h-[18px] w-[18px]" /></button>
+                        {comp.status === 'ACTIVE' ? (
+                          <button onClick={() => openConfirmModal('SUSPEND', comp.id)} className="p-2 text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 rounded-lg transition-all" title="Suspend"><Power className="h-[18px] w-[18px]" /></button>
+                        ) : (
+                          <button onClick={() => openConfirmModal('ACTIVATE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Activate"><PowerOff className="h-[18px] w-[18px]" /></button>
+                        )}
+                        <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openConfirmModal('DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Soft Delete"><Trash2 className="h-[18px] w-[18px]" /></button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {comp.domainUrl && (
+                          <button onClick={() => handleManualSyncApi && handleManualSyncApi(comp.id, comp.domainUrl)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title={`Sync Admin & Company to Domain DB (${comp.domainUrl})`}><RefreshCw className="h-[18px] w-[18px]" /></button>
+                        )}
+                        <button onClick={() => openClientsModal && openClientsModal(comp)} className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-lg transition-all" title="View Clients (Domain API)"><Users className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openStaffModal && openStaffModal(comp)} className="p-2 text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-500/10 rounded-lg transition-all" title="View Staff & Team (Domain API)"><UserCheck className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openConfirmModal('RESTORE', comp.id)} className="p-2 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all" title="Restore"><RotateCcw className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => handleImpersonate(comp.id)} className="p-2 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-all" title="Login as Admin"><Key className="h-[18px] w-[18px]" /></button>
+                        <button onClick={() => openConfirmModal('PERMANENT_DELETE', comp.id)} className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition-all" title="Permanent Delete"><Trash2 className="h-[18px] w-[18px] text-rose-500" /></button>
+                      </div>
+                    )}
+                  </TableCell>
               </TableRow>
             ))}
             {filteredCompanies.length === 0 && (

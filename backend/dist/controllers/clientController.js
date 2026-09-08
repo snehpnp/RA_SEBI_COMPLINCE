@@ -124,8 +124,8 @@ const registerClient = async (req, res) => {
                     email,
                     mobile,
                     passwordHash,
-                    status: isAdminAdded ? 'ACTIVE' : 'PENDING_APPROVAL',
-                    tempPassword: isAdminAdded ? null : password
+                    status: 'ACTIVE',
+                    tempPassword: null
                 }
             });
             const client = await tx.client.create({
@@ -138,7 +138,7 @@ const registerClient = async (req, res) => {
                     aadhaar,
                     category: category || 'INDIVIDUAL',
                     occupation,
-                    status: isAdminAdded ? 'KYC_PENDING' : 'PENDING_APPROVAL',
+                    status: 'ACTIVE',
                     createdById: creatorId
                 }
             });
@@ -164,8 +164,8 @@ const registerClient = async (req, res) => {
         });
         // Get login URL
         const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-        // Send Welcome Email only if admin added
-        if (isAdminAdded) {
+        // Send Welcome Email
+        try {
             const attachments = [];
             if (tenant.termsPdfUrl) {
                 attachments.push({ filename: 'Terms_and_Conditions.pdf', path: require('path').join(__dirname, '../../..') + tenant.termsPdfUrl });
@@ -185,9 +185,12 @@ const registerClient = async (req, res) => {
                 attachments
             });
         }
+        catch (emailErr) {
+            console.error('[EMAIL] Failed to send welcome email:', emailErr);
+        }
         return res.status(201).json({
             success: true,
-            message: 'Client registered successfully.',
+            message: 'Client registered and activated successfully.',
             data: result.client
         });
     }
@@ -285,7 +288,8 @@ const verifyKRA = async (req, res) => {
                 data: {
                     pan,
                     ...(aadhaar && { aadhaar }),
-                    status: nextStatus
+                    status: nextStatus,
+                    kraVerified: statusInput !== 'FAIL'
                 }
             });
             if (statusInput === 'FAIL') {

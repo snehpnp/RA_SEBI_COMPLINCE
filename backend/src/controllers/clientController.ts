@@ -114,8 +114,8 @@ export const registerClient = async (req: Request, res: Response) => {
           email,
           mobile,
           passwordHash,
-          status: isAdminAdded ? 'ACTIVE' : 'PENDING_APPROVAL',
-          tempPassword: isAdminAdded ? null : password
+          status: 'ACTIVE',
+          tempPassword: null
         }
       });
 
@@ -129,9 +129,9 @@ export const registerClient = async (req: Request, res: Response) => {
           aadhaar,
           category: category || 'INDIVIDUAL',
           occupation,
-          status: isAdminAdded ? 'KYC_PENDING' : 'PENDING_APPROVAL',
+          status: 'ACTIVE',
           createdById: creatorId
-        }
+        } as any
       });
 
       await tx.clientProfile.create({
@@ -160,8 +160,8 @@ export const registerClient = async (req: Request, res: Response) => {
     // Get login URL
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
     
-    // Send Welcome Email only if admin added
-    if (isAdminAdded) {
+    // Send Welcome Email
+    try {
       const attachments: any[] = [];
       if (tenant.termsPdfUrl) {
         attachments.push({ filename: 'Terms_and_Conditions.pdf', path: require('path').join(__dirname, '../../..') + tenant.termsPdfUrl });
@@ -181,11 +181,13 @@ export const registerClient = async (req: Request, res: Response) => {
         customText: tenant?.welcomeEmailText,
         attachments
       });
+    } catch (emailErr) {
+      console.error('[EMAIL] Failed to send welcome email:', emailErr);
     }
 
     return res.status(201).json({
       success: true,
-      message: 'Client registered successfully.',
+      message: 'Client registered and activated successfully.',
       data: result.client
     });
   } catch (error: any) {
@@ -300,7 +302,8 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
         data: {
           pan,
           ...(aadhaar && { aadhaar }),
-          status: nextStatus
+          status: nextStatus,
+          kraVerified: statusInput !== 'FAIL'
         }
       });
 

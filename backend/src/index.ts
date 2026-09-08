@@ -13,6 +13,7 @@ import cron from 'node-cron';
 import router from './routes/api';
 import prisma from './config/db';
 import { initCronJobs } from './services/cronService';
+import { ensureStates } from './services/stateService';
 import { thirdPartyRoutes, getThirdPartyClients } from './third-party-api';
 
 const app = express();
@@ -241,5 +242,6 @@ const ensurePermissions = async () => {
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
   await ensurePermissions();
+  await ensureStates(prisma);
   initCronJobs(); // Initialize penalty engine
 });

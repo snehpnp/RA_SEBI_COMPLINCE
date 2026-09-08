@@ -332,7 +332,7 @@ const getTenantSyncConfig = async (req, res) => {
         if (apiKey) {
             tenant = await db_1.default.tenant.findFirst({
                 where: { tenantApiKey: apiKey },
-                include: { adminPermissions: true, users: { where: { role: { name: 'ADMIN' } } } }
+                include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
             });
         }
         else if (domainHeader) {
@@ -343,13 +343,13 @@ const getTenantSyncConfig = async (req, res) => {
                         { website: { contains: domainHeader, mode: 'insensitive' } }
                     ]
                 },
-                include: { adminPermissions: true, users: { where: { role: { name: 'ADMIN' } } } }
+                include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
             });
         }
         else if (tenantIdQuery) {
             tenant = await db_1.default.tenant.findUnique({
                 where: { id: tenantIdQuery },
-                include: { adminPermissions: true, users: { where: { role: { name: 'ADMIN' } } } }
+                include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
             });
         }
         if (!tenant) {

@@ -9,6 +9,7 @@ import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
@@ -1365,7 +1366,7 @@ function AdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
+        router.push('/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);
@@ -3386,8 +3387,8 @@ function AdminDashboardContent() {
       width: '140px',
       cell: (row: any) => (
         <div className="flex flex-col gap-1.5 items-start">
-          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' : (row.status && row.status !== 'PENDING_ONBOARDING' && row.status !== 'KYC_PENDING' && row.status !== 'KYC_FAILED') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
-            KRA: {row.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? 'FAILED' : (row.status && row.status !== 'PENDING_ONBOARDING' && row.status !== 'KYC_PENDING' && row.status !== 'KYC_FAILED') ? 'VERIFIED' : 'PENDING'}
+          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.kraVerified ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
+            KRA: {row.kraVerified ? 'VERIFIED' : 'PENDING'}
           </span>
           <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
             eSign: {row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
@@ -3615,71 +3616,62 @@ function AdminDashboardContent() {
               </button>
             )}
           </div>
-
-          {/* User Footer */}
-          <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-            {/* Subtle background glow */}
-            <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
-
-            <div
-              onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-
-              {/* Shimmer effect inside the card */}
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-              <div className="relative shrink-0">
-                {/* Pulsing ring around avatar */}
-                <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10 text-lg">
-                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : (user?.name ? user.name.trim().charAt(0).toUpperCase() : 'A')}
-                </div>
-                {/* Online indicator */}
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
-              </div>
-
-              {!isSidebarCollapsed && (
-                <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-white">{user?.firstName || user?.name || 'Admin'}</p>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-rose-500" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-rose-500 via-orange-200 to-rose-500 animate-pulse">
-                      {user?.role || 'Staff'}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {!isSidebarCollapsed && (
-                <div
-                  className="relative z-10 shrink-0 mr-1"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ThemeToggle />
-                </div>
-              )}
-            </div>
-            <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
-                {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-                <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-              </button>
-            </div>
-          </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-          {user?.isImpersonated && (
-            <button
-              onClick={handleRevertImpersonate}
-              className="fixed top-4 right-16 z-50 px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition flex items-center space-x-1.5 font-semibold shadow-lg"
-              title="Back to Super Admin"
-            >
-              <LogOut className="h-3.5 w-3.5 rotate-180" />
-              <span className="hidden sm:inline">Back to Super Admin</span>
-            </button>
-          )}
+          {/* Top Header Bar with Theme, User & Logout */}
+          <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+            <div className="flex items-center gap-3">
+              {/* Mobile menu toggle */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                title="Open Navigation"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+              <div>
+                <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                  {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Dashboard'}
+                </h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                  {user?.tenant?.companyName ? `${user.tenant.companyName} Compliance Portal` : 'Research Analyst Governance & Compliance Platform'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 md:gap-4">
+              {user?.isImpersonated && (
+                <button
+                  onClick={handleRevertImpersonate}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 font-bold text-xs shadow-md shadow-indigo-600/20"
+                  title="Back to Super Admin"
+                >
+                  <LogOut className="h-3.5 w-3.5 rotate-180" />
+                  <span className="hidden sm:inline">Back to Super Admin</span>
+                </button>
+              )}
+
+              {/* Theme Toggle */}
+              <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                <ThemeToggle />
+              </div>
+
+              {/* Profile Dropdown with Username & Logout */}
+              <UserProfileDropdown
+                user={{
+                  name: user?.firstName || user?.name || 'Admin',
+                  firstName: user?.firstName,
+                  email: user?.email,
+                  role: user?.role || 'Staff'
+                }}
+                badgeColor="rose"
+                onProfileClick={() => setActiveTab('profile')}
+                onLogoutClick={() => setIsLogoutModalOpen(true)}
+              />
+            </div>
+          </header>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
             <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
@@ -3849,55 +3841,6 @@ function AdminDashboardContent() {
            ==================================================== */}
               {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
                 <div className="space-y-8">
-                  {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
-                  {(() => {
-                    const currentNav = NAV_CONFIG.find(n =>
-                      n.tab === activeTab ||
-                      (activeTab.startsWith('customPages_') && n.tab === 'customPages')
-                    );
-
-                    // if (!currentNav || activeTab === 'dashboard') return null;
-
-                    const tabsMissingHeader = [
-                      "dashboard",
-                      "staff",
-                      "clients",
-                      "plans",
-                      "research",
-                      "research-reports",
-                      "payments",
-                      "checklist",
-                      "compliance",
-                      "tickets",
-                      "settings",
-                      "customPages",
-                      "complaintReport",
-                      "roles",
-                      "auditLogs",
-                      "signature_settings",
-                      "resources"
-                    ];
-
-                    if (!tabsMissingHeader.includes(activeTab) && !activeTab.startsWith('customPages_')) {
-                      return null;
-                    }
-
-                    return (
-                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-2">
-                        <div>
-                          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {activeTab.startsWith('customPages_')
-                              ? adminPagesList?.find((p: any) => p.slug === activeTab.split('_')[1])?.title || 'Custom Page'
-                              : currentNav?.label}
-                          </h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                            {currentNav?.moduleDesc || 'Manage and view details for this section.'}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {/* PROFILE TAB */}
                   {activeTab === 'profile' && (
                     <>

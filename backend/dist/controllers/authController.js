@@ -111,11 +111,15 @@ const login = async (req, res) => {
             });
         }
         if (user.status === 'PENDING_APPROVAL') {
-            return res.status(403).json({
-                success: false,
-                message: 'Your account is pending approval by the admin.',
-                errors: ['User pending approval']
+            await db_1.default.user.update({
+                where: { id: user.id },
+                data: { status: 'ACTIVE', tempPassword: null }
             });
+            await db_1.default.client.updateMany({
+                where: { userId: user.id },
+                data: { status: 'ACTIVE' }
+            });
+            user.status = 'ACTIVE';
         }
         if (user.status === 'INACTIVE') {
             const inactiveMsg = user.role.name === 'ADMIN' ? 'Your account has been deactivated. Please contact super admin.' : 'Your account has been deactivated. Please contact admin.';

@@ -83,11 +83,15 @@ export const login = async (req: Request, res: Response) => {
     }
 
     if (user.status === 'PENDING_APPROVAL') {
-      return res.status(403).json({
-        success: false,
-        message: 'Your account is pending approval by the admin.',
-        errors: ['User pending approval']
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { status: 'ACTIVE', tempPassword: null }
       });
+      await prisma.client.updateMany({
+        where: { userId: user.id },
+        data: { status: 'ACTIVE' }
+      });
+      user.status = 'ACTIVE';
     }
 
     if (user.status === 'INACTIVE') {

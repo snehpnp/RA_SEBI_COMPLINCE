@@ -316,7 +316,7 @@ export const getTenantSyncConfig = async (req: Request, res: Response) => {
     if (apiKey) {
       tenant = await prisma.tenant.findFirst({
         where: { tenantApiKey: apiKey },
-        include: { adminPermissions: true, users: { where: { role: { name: 'ADMIN' } } } }
+        include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
       });
     } else if (domainHeader) {
       tenant = await prisma.tenant.findFirst({
@@ -326,12 +326,12 @@ export const getTenantSyncConfig = async (req: Request, res: Response) => {
             { website: { contains: domainHeader, mode: 'insensitive' } }
           ]
         },
-        include: { adminPermissions: true, users: { where: { role: { name: 'ADMIN' } } } }
+        include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
       });
     } else if (tenantIdQuery) {
       tenant = await prisma.tenant.findUnique({
         where: { id: tenantIdQuery },
-        include: { adminPermissions: true, users: { where: { role: { name: 'ADMIN' } } } }
+        include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
       });
     }
 

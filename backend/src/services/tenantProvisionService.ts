@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { ensureStates } from './stateService';
 
 interface TenantProvisionData {
   id: string;
@@ -26,6 +27,7 @@ interface TenantProvisionData {
   mongoDbUrl?: string | null;
   dbName?: string | null;
   tenantApiKey?: string | null;
+  state?: string | null;
 }
 
 interface AdminUserData {
@@ -214,7 +216,8 @@ export async function provisionTenantDatabase(
       domainUrl: tenantData.domainUrl || null,
       mongoDbUrl: tenantData.mongoDbUrl || null,
       dbName: tenantData.dbName || null,
-      tenantApiKey: tenantData.tenantApiKey || null
+      tenantApiKey: tenantData.tenantApiKey || null,
+      state: tenantData.state || null
     };
 
     let targetTenant;
@@ -369,6 +372,9 @@ export async function provisionTenantDatabase(
         }
       });
     }
+
+    // 8. Seed State collection in Target DB
+    await ensureStates(targetPrisma);
 
     return {
       success: true,

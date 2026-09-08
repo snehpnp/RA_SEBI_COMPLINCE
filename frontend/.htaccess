@@ -1,26 +1,52 @@
+# Prevent Apache from emitting http:// in redirects behind reverse proxies/Cloudflare/SSL
+ServerSignature Off
+UseCanonicalName Off
+UseCanonicalPhysicalPort Off
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
 
-  # 1. API aur Backend ke routes ko ignore karein
+  # 1. Force HTTPS on all requests (Prevents Mixed Content redirects over HTTP)
+  RewriteCond %{HTTPS} off [OR]
+  RewriteCond %{HTTP:X-Forwarded-Proto} =http [OR]
+  RewriteCond %{HTTP:CF-Visitor} '"scheme":"http"'
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # 2. Never redirect missing static assets (_next, css, js, icons) to HTML pages
+  RewriteCond %{REQUEST_URI} ^/_next/ [OR]
+  RewriteCond %{REQUEST_URI} \.(css|js|json|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|map)$ [NC]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ - [R=404,L]
+
+  # 3. Allow Backend and API routes to pass through
   RewriteCond %{REQUEST_URI} ^/backend/ [NC,OR]
   RewriteCond %{REQUEST_URI} ^/api/ [NC]
   RewriteRule ^ - [L]
 
-  # 2. Agar URL ke end mein slash (/) hai, toh usko remove karein (e.g. /admin/ -> /admin)
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^(.*)/$ /$1 [L,R=301]
+  # 4. Agar exact file ya directory exist karti hai toh direct serve karein
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
 
-  # 3. Next.js ke .html pages ko serve karein (e.g. /admin -> admin.html)
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteCond %{REQUEST_FILENAME} !-d
+  # 5. Next.js export ke folder/index.html pages ko serve karein (e.g. /super-admin/ -> /super-admin/index.html)
+  RewriteCond %{DOCUMENT_ROOT}/$1/index.html -f
+  RewriteRule ^(.*)$ $1/index.html [L]
+
+  # 6. Next.js ke .html pages ko serve karein (e.g. /login -> /login.html)
   RewriteCond %{DOCUMENT_ROOT}/$1.html -f
   RewriteRule ^(.*)$ $1.html [L]
 
-  # 4. Agar file ya folder nahi milta, toh server seedha /login par redirect kar dega
-  ErrorDocument 404 https://compliance.pnpuniverse.in/login
-  
+  # 7. SPA Fallback - Unknown routes ko index.html par bhejein
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule ^(.*)$ /login [R=301,L]
+  RewriteRule ^(.*)$ /index.html [L]
 </IfModule>
+
+# Security & Header Settings
+<IfModule mod_headers.c>
+  Header always set Content-Security-Policy "upgrade-insecure-requests"
+  Header set X-Content-Type-Options "nosniff"
+</IfModule>
+
+ErrorDocument 404 /404.html

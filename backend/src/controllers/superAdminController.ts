@@ -5,6 +5,7 @@ import * as crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { provisionTenantDatabase } from '../services/tenantProvisionService';
+import { ensureStates, detectStateFromGst, detectStateFromText, INDIAN_STATES } from '../services/stateService';
 import * as jwt from 'jsonwebtoken';
 import fs from 'fs';
 const pdfParse = require('pdf-parse');
@@ -37,7 +38,8 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
     adminPassword,
     password,
     adminName,
-    adminMobile
+    adminMobile,
+    state
   } = req.body;
 
   if (!companyName || !ownerName || !sebiRegistration || !email || !mobile || !pan || !address) {
@@ -54,6 +56,7 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
   const adminFirstName = nameParts[0] || companyName;
   const adminLastName = nameParts.slice(1).join(' ') || 'Admin';
   const adminMobileToUse = adminMobile || mobile;
+  const effectiveState = state || detectStateFromGst(gst) || detectStateFromText(address) || null;
 
   try {
     // Check duplicates in Tenant table
@@ -157,6 +160,7 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
           nismCertificateUrl,
           nismValidity: nismValidity ? new Date(nismValidity) : null,
           depositAmount: depositAmount ? parseFloat(depositAmount) : 0.0,
+          state: effectiveState,
           status: 'PENDING_PROFILE'
         }
       });
@@ -239,8 +243,20 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
         });
       }
 
+      // Automatically create / ensure the State collection with all Indian States & GST codes
+      for (const st of INDIAN_STATES) {
+        await tx.state.upsert({
+          where: { name: st.name },
+          update: { gstCode: st.gstCode, isActive: true },
+          create: { name: st.name, gstCode: st.gstCode, isActive: true }
+        });
+      }
+
       return { tenantObj, userObj };
     });
+
+    // Ensure State collection in MongoDB is seeded
+    ensureStates(prisma).catch(e => console.error('Background ensureStates error:', e));
 
     // Automatically provision remote dedicated MongoDB if mongoDbUrl is provided
     let dbProvisionResult: any = null;
@@ -270,34 +286,56 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
           rawDomain = 'https://' + rawDomain;
         }
         rawDomain = rawDomain.replace(/\/+$/, '');
-        const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
+        const candidateEndpoints = [
+          `${rawDomain}/api/v1/sync/bootstrap`,
+          `${rawDomain}/backend/api/v1/sync/bootstrap`,
+          `${rawDomain}/api/sync/bootstrap`,
+          `${rawDomain}/backend/sync/bootstrap`,
+          `${rawDomain}/sync/bootstrap`
+        ];
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const syncPayload = {
+          apiKey: generatedApiKey,
+          tenant: result.tenantObj,
+          adminUser: {
+            id: result.userObj.id,
+            email: result.userObj.email,
+            passwordHash,
+            tempPassword: rawAdminPassword,
+            firstName: result.userObj.firstName,
+            lastName: result.userObj.lastName,
+            mobile: result.userObj.mobile,
+            status: 'ACTIVE'
+          }
+        };
 
-        const response = await fetch(syncEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-tenant-api-key': generatedApiKey
-          },
-          body: JSON.stringify({
-            apiKey: generatedApiKey,
-            tenant: result.tenantObj,
-            adminUser: {
-              id: result.userObj.id,
-              email: result.userObj.email,
-              passwordHash,
-              tempPassword: rawAdminPassword,
-              firstName: result.userObj.firstName,
-              lastName: result.userObj.lastName,
-              mobile: result.userObj.mobile
+        for (const syncEndpoint of candidateEndpoints) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+            const response = await fetch(syncEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-tenant-api-key': generatedApiKey
+              },
+              body: JSON.stringify(syncPayload),
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+              apiSyncResult = await response.json().catch(() => ({ success: true, message: 'Synced successfully' }));
+              break;
             }
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        apiSyncResult = await response.json().catch(() => ({}));
+          } catch (candErr) {
+            // try next endpoint
+          }
+        }
+        if (!apiSyncResult) {
+          apiSyncResult = { success: false, message: `Remote server at ${domainUrl} is offline or endpoint returned 404. Details saved in local platform DB.` };
+        }
       } catch (err: any) {
         apiSyncResult = { success: false, message: `Could not reach ${domainUrl} API: ${err.message}` };
       }
@@ -740,7 +778,6 @@ export const getTenantDetails = async (req: AuthenticatedRequest, res: Response)
     const tenant = await prisma.tenant.findUnique({
       where: { id },
       include: {
-        adminPermissions: true,
         users: {
           include: { role: true, staff: { include: { personAssociated: true } } }
         }
@@ -751,15 +788,25 @@ export const getTenantDetails = async (req: AuthenticatedRequest, res: Response)
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const admin = tenant.users.find(u => u.role.name === 'ADMIN');
-    const officers = tenant.users.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role.name));
+    const admin = tenant.users.find(u => u.role?.name === 'ADMIN');
+    const officers = tenant.users.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role?.name));
+    const allStaff = tenant.users.filter(u => u.role?.name !== 'CLIENT').map(u => ({
+      id: u.staff?.id || u.id,
+      userId: u.id,
+      name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+      email: u.staff?.email || u.email,
+      mobile: u.staff?.mobile || u.mobile,
+      role: u.role?.name || 'STAFF',
+      status: u.staff?.status || u.status || 'ACTIVE'
+    }));
 
     return res.status(200).json({
       success: true,
       data: {
         tenant,
         admin,
-        officers
+        officers,
+        allStaff
       }
     });
   } catch (error: any) {
@@ -792,7 +839,8 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
     pan,
     website,
     depositAmount,
-    raType
+    raType,
+    state
   } = req.body;
 
   try {
@@ -855,6 +903,7 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
     if (website !== undefined) tenantUpdateData.website = String(website).trim() || null;
     if (address !== undefined && address !== '') tenantUpdateData.address = String(address).trim();
     if (gst !== undefined) tenantUpdateData.gst = String(gst).trim().toUpperCase() || null;
+    if (state !== undefined) tenantUpdateData.state = state ? String(state).trim() : null;
     if (status !== undefined && status !== '') tenantUpdateData.status = status;
 
     const incomingMobile = supportMobile || req.body.tenantMobile || req.body.mobile;
@@ -1169,13 +1218,17 @@ export const parseSebiCertificate = async (req: AuthenticatedRequest, res: Respo
       }
     }
 
+    // Auto-detect state from address or text
+    const detectedState = detectStateFromText(address) || detectStateFromText(text) || '';
+
     return res.status(200).json({
       success: true,
       data: {
         sebiRegistration,
         certificateValidity,
         companyName,
-        address
+        address,
+        state: detectedState
       },
       message: 'SEBI certificate read successfully.'
     });
@@ -1425,12 +1478,47 @@ export const syncTenantApi = async (req: AuthenticatedRequest, res: Response) =>
       });
     }
 
-    const adminUser = await prisma.user.findFirst({
+    let adminUser = await prisma.user.findFirst({
       where: { tenantId: id, role: { name: 'ADMIN' } }
     });
 
     if (!adminUser) {
-      return res.status(404).json({ success: false, message: 'No Admin user found for this company.' });
+      adminUser = await prisma.user.findFirst({
+        where: { tenantId: id }
+      });
+    }
+
+    if (!adminUser && tenant.email) {
+      adminUser = await prisma.user.findFirst({
+        where: { email: tenant.email.toLowerCase().trim() }
+      });
+    }
+
+    if (!adminUser) {
+      // Auto-create Admin user for this tenant if missing
+      const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } });
+      if (adminRole) {
+        const defaultPass = 'Admin@12345';
+        const salt = await bcrypt.genSalt(10);
+        const passHash = await bcrypt.hash(defaultPass, salt);
+        adminUser = await prisma.user.create({
+          data: {
+            tenantId: tenant.id,
+            roleId: adminRole.id,
+            firstName: tenant.companyName,
+            lastName: 'Admin',
+            email: tenant.email,
+            mobile: tenant.mobile || '9999999999',
+            passwordHash: passHash,
+            tempPassword: defaultPass,
+            status: 'ACTIVE'
+          }
+        });
+      }
+    }
+
+    if (!adminUser) {
+      return res.status(404).json({ success: false, message: 'No Admin user could be found or provisioned for this company.' });
     }
 
     let apiKey = tenant.tenantApiKey;
@@ -1447,10 +1535,14 @@ export const syncTenantApi = async (req: AuthenticatedRequest, res: Response) =>
       rawDomain = 'https://' + rawDomain;
     }
     rawDomain = rawDomain.replace(/\/+$/, '');
-    const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const candidateEndpoints = [
+      `${rawDomain}/api/v1/sync/bootstrap`,
+      `${rawDomain}/backend/api/v1/sync/bootstrap`,
+      `${rawDomain}/api/sync/bootstrap`,
+      `${rawDomain}/backend/sync/bootstrap`,
+      `${rawDomain}/sync/bootstrap`
+    ];
 
     const payload = {
       apiKey,
@@ -1470,39 +1562,60 @@ export const syncTenantApi = async (req: AuthenticatedRequest, res: Response) =>
       }
     };
 
-    const response = await fetch(syncEndpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-tenant-api-key': apiKey
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
+    let successfulData: any = null;
+    let endpointSuccess: string = '';
+    let lastError: any = null;
 
-    const responseData: any = await response.json().catch(() => ({}));
+    for (const endpoint of candidateEndpoints) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-    if (!response.ok) {
-      return res.status(response.status || 500).json({
-        success: false,
-        message: responseData.message || `Remote server responded with error code ${response.status}`,
-        error: responseData
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-api-key': apiKey
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          successfulData = await response.json().catch(() => ({ success: true }));
+          endpointSuccess = endpoint;
+          break;
+        } else {
+          const respJson: any = await response.json().catch(() => ({}));
+          lastError = { status: response.status, message: respJson?.message || `HTTP ${response.status}` };
+        }
+      } catch (e: any) {
+        lastError = { status: 500, message: e.message };
+      }
+    }
+
+    if (successfulData) {
+      await logAudit({
+        userId: req.user!.id,
+        action: 'UPDATE',
+        module: 'TENANTS',
+        newValue: { ...tenant, apiSyncedAt: new Date(), targetDomain, endpointUsed: endpointSuccess },
+        ipAddress: req.ip
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: successfulData.message || `Successfully synced tenant and Admin user to ${targetDomain} via API!`,
+        data: successfulData
       });
     }
 
-    await logAudit({
-      userId: req.user!.id,
-      action: 'UPDATE',
-      module: 'TENANTS',
-      newValue: { ...tenant, apiSyncedAt: new Date(), targetDomain },
-      ipAddress: req.ip
-    });
-
     return res.status(200).json({
-      success: true,
-      message: responseData.message || `Successfully synced tenant and Admin user to ${targetDomain} via API!`,
-      data: responseData
+      success: false,
+      isRemoteUnreachable: true,
+      message: `Remote server (${targetDomain}) ne 404 (Not Found) ya connection error diya: ${lastError?.message || 'Endpoint not found'}. Remote domain par RAGCP backend API server running hona zaroori hai. Local database me company aur admin user successfully ready hain!`,
+      error: lastError
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -1559,7 +1672,7 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
       for (const endpoint of candidateEndpoints) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          const timeoutId = setTimeout(() => controller.abort(), 1500);
 
           const headers: Record<string, string> = {
             'Content-Type': 'application/json',
@@ -1703,4 +1816,174 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
     });
   }
 };
+
+/**
+ * Dynamic Company Staff Endpoint for Super Admin.
+ * Checks remote company domainUrl to fetch 3rd party staff records from the company's own software,
+ * with fast fallback to local platform DB if unreachable or domain not configured.
+ * GET /api/v1/super-admin/tenants/:id/staff
+ */
+export const getCompanyStaff = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id } });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant company not found' });
+    }
+
+    const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
+
+    // 1. Try remote domain API if domainUrl is configured
+    if (rawDomain) {
+      let targetOrigin = rawDomain;
+      if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
+        targetOrigin = 'https://' + targetOrigin;
+      }
+      try {
+        const parsed = new URL(targetOrigin);
+        targetOrigin = parsed.origin;
+      } catch (e) {
+        targetOrigin = targetOrigin.replace(/\/+$/, '');
+      }
+
+      const candidateEndpoints = [
+        `${targetOrigin}/backend/api/v1/third-party-api/staff`,
+        `${targetOrigin}/backend/api/v1/third-party-api/${tenant.id}/staff`,
+        `${targetOrigin}/backend/api/v1/staff`,
+        `${targetOrigin}/backend/third-party-api/staff`,
+        `${targetOrigin}/backend/staff`,
+        `${targetOrigin}/api/v1/third-party-api/staff`,
+        `${targetOrigin}/api/v1/third-party-api/${tenant.id}/staff`,
+        `${targetOrigin}/third-party-api/staff`,
+        `${targetOrigin}/api/v1/staff`,
+        `${targetOrigin}/staff`
+      ];
+
+      for (const endpoint of candidateEndpoints) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1500);
+
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'x-tenant-id': tenant.id
+          };
+          if (tenant.tenantApiKey) {
+            headers['x-tenant-api-key'] = tenant.tenantApiKey;
+          }
+
+          const remoteRes = await fetch(endpoint, {
+            method: 'GET',
+            headers,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (remoteRes.ok) {
+            const remoteData: any = await remoteRes.json().catch(() => null);
+            if (remoteData && (Array.isArray(remoteData.data) || Array.isArray(remoteData))) {
+              const staffArray = Array.isArray(remoteData.data) ? remoteData.data : remoteData;
+              return res.status(200).json({
+                success: true,
+                source: 'REMOTE_DOMAIN_API',
+                domainUrl: targetOrigin,
+                endpointUsed: endpoint,
+                company: {
+                  id: tenant.id,
+                  companyName: tenant.companyName,
+                  sebiRegistration: tenant.sebiRegistration,
+                  domainUrl: tenant.domainUrl,
+                  website: tenant.website
+                },
+                count: staffArray.length,
+                data: staffArray
+              });
+            }
+          }
+        } catch (remoteErr) {
+          // Continue to next candidate or fallback to local DB
+        }
+      }
+    }
+
+    // 2. Fallback to Local Platform Database
+    // Fetch all non-client users associated with this tenant
+    const localStaffUsers = await prisma.user.findMany({
+      where: {
+        tenantId: tenant.id,
+        role: {
+          name: { not: 'CLIENT' }
+        }
+      },
+      include: {
+        role: {
+          select: {
+            id: true,
+            name: true,
+            description: true
+          }
+        },
+        staff: {
+          include: {
+            personAssociated: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    const sanitizedStaff = localStaffUsers.map(u => {
+      const staffRecord = u.staff;
+      const personAssoc = staffRecord?.personAssociated;
+      const roleName = u.role?.name || 'STAFF';
+
+      return {
+        id: staffRecord?.id || u.id,
+        userId: u.id,
+        employeeId: staffRecord?.employeeId || u.employeeCode || `EMP-${u.id.slice(-4).toUpperCase()}`,
+        name: staffRecord?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+        email: staffRecord?.email || u.email,
+        mobile: staffRecord?.mobile || u.mobile,
+        role: roleName,
+        roleDescription: u.role?.description || null,
+        personAssociatedType: personAssoc?.roleType || null,
+        customRole: personAssoc?.customRole || null,
+        dob: staffRecord?.dob || null,
+        joiningDate: staffRecord?.joiningDate || u.createdAt,
+        nismNumber: staffRecord?.nismNumber || null,
+        nismValidity: staffRecord?.nismValidity || null,
+        nismUpload: staffRecord?.nismUpload || null,
+        status: staffRecord?.status || u.status || 'ACTIVE',
+        lastLogin: u.lastLogin,
+        createdAt: u.createdAt
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      source: 'LOCAL_DATABASE',
+      domainUrl: rawDomain || null,
+      company: {
+        id: tenant.id,
+        companyName: tenant.companyName,
+        sebiRegistration: tenant.sebiRegistration,
+        domainUrl: tenant.domainUrl,
+        website: tenant.website
+      },
+      count: sanitizedStaff.length,
+      data: sanitizedStaff
+    });
+  } catch (error: any) {
+    console.error('Error fetching company staff:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch company staff: ' + error.message,
+      errors: [error.message]
+    });
+  }
+};
+
 

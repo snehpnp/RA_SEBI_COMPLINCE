@@ -136,6 +136,7 @@ router.put('/super-admin/tenants/:id', auth_1.authenticateJWT, (0, auth_1.requir
 router.post('/super-admin/tenants/:id/provision-db', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.provisionTenantDb);
 router.post('/super-admin/tenants/:id/sync-api', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncTenantApi);
 router.get('/super-admin/tenants/:id/clients', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyClients);
+router.get('/super-admin/tenants/:id/staff', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyStaff);
 router.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
 router.get('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.getTenantPermissions);
 router.put('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.updateTenantPermissions);

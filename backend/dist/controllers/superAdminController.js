@@ -36,18 +36,19 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCompanyClients = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
+exports.getCompanyStaff = exports.getCompanyClients = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const crypto = __importStar(require("crypto"));
 const auditService_1 = require("../services/auditService");
 const tenantProvisionService_1 = require("../services/tenantProvisionService");
+const stateService_1 = require("../services/stateService");
 const jwt = __importStar(require("jsonwebtoken"));
 const pdfParse = require('pdf-parse');
 const pdfOcr_1 = require("../utils/pdfOcr");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 const createTenant = async (req, res) => {
-    const { companyName, panelName, domainUrl, mongoDbUrl, dbName, companyType, raType, ownerName, sebiRegistration, bseEnrollment, email, mobile, address, pan, gst, website, certificateValidity, nismValidity, depositAmount, adminEmail, adminPassword, password, adminName, adminMobile } = req.body;
+    const { companyName, panelName, domainUrl, mongoDbUrl, dbName, companyType, raType, ownerName, sebiRegistration, bseEnrollment, email, mobile, address, pan, gst, website, certificateValidity, nismValidity, depositAmount, adminEmail, adminPassword, password, adminName, adminMobile, state } = req.body;
     if (!companyName || !ownerName || !sebiRegistration || !email || !mobile || !pan || !address) {
         return res.status(400).json({
             success: false,
@@ -61,6 +62,7 @@ const createTenant = async (req, res) => {
     const adminFirstName = nameParts[0] || companyName;
     const adminLastName = nameParts.slice(1).join(' ') || 'Admin';
     const adminMobileToUse = adminMobile || mobile;
+    const effectiveState = state || (0, stateService_1.detectStateFromGst)(gst) || (0, stateService_1.detectStateFromText)(address) || null;
     try {
         // Check duplicates in Tenant table
         const existingTenants = await db_1.default.tenant.findMany({
@@ -160,6 +162,7 @@ const createTenant = async (req, res) => {
                     nismCertificateUrl,
                     nismValidity: nismValidity ? new Date(nismValidity) : null,
                     depositAmount: depositAmount ? parseFloat(depositAmount) : 0.0,
+                    state: effectiveState,
                     status: 'PENDING_PROFILE'
                 }
             });
@@ -237,6 +240,8 @@ const createTenant = async (req, res) => {
             }
             return { tenantObj, userObj };
         });
+        // Ensure State collection in MongoDB is seeded
+        (0, stateService_1.ensureStates)(db_1.default).catch(e => console.error('Background ensureStates error:', e));
         // Automatically provision remote dedicated MongoDB if mongoDbUrl is provided
         let dbProvisionResult = null;
         if (mongoDbUrl && mongoDbUrl.trim()) {
@@ -265,32 +270,53 @@ const createTenant = async (req, res) => {
                     rawDomain = 'https://' + rawDomain;
                 }
                 rawDomain = rawDomain.replace(/\/+$/, '');
-                const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 6000);
-                const response = await fetch(syncEndpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-tenant-api-key': generatedApiKey
-                    },
-                    body: JSON.stringify({
-                        apiKey: generatedApiKey,
-                        tenant: result.tenantObj,
-                        adminUser: {
-                            id: result.userObj.id,
-                            email: result.userObj.email,
-                            passwordHash,
-                            tempPassword: rawAdminPassword,
-                            firstName: result.userObj.firstName,
-                            lastName: result.userObj.lastName,
-                            mobile: result.userObj.mobile
+                const candidateEndpoints = [
+                    `${rawDomain}/api/v1/sync/bootstrap`,
+                    `${rawDomain}/backend/api/v1/sync/bootstrap`,
+                    `${rawDomain}/api/sync/bootstrap`,
+                    `${rawDomain}/backend/sync/bootstrap`,
+                    `${rawDomain}/sync/bootstrap`
+                ];
+                const syncPayload = {
+                    apiKey: generatedApiKey,
+                    tenant: result.tenantObj,
+                    adminUser: {
+                        id: result.userObj.id,
+                        email: result.userObj.email,
+                        passwordHash,
+                        tempPassword: rawAdminPassword,
+                        firstName: result.userObj.firstName,
+                        lastName: result.userObj.lastName,
+                        mobile: result.userObj.mobile,
+                        status: 'ACTIVE'
+                    }
+                };
+                for (const syncEndpoint of candidateEndpoints) {
+                    try {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 3500);
+                        const response = await fetch(syncEndpoint, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'x-tenant-api-key': generatedApiKey
+                            },
+                            body: JSON.stringify(syncPayload),
+                            signal: controller.signal
+                        });
+                        clearTimeout(timeoutId);
+                        if (response.ok) {
+                            apiSyncResult = await response.json().catch(() => ({ success: true, message: 'Synced successfully' }));
+                            break;
                         }
-                    }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                apiSyncResult = await response.json().catch(() => ({}));
+                    }
+                    catch (candErr) {
+                        // try next endpoint
+                    }
+                }
+                if (!apiSyncResult) {
+                    apiSyncResult = { success: false, message: `Remote server at ${domainUrl} is offline or endpoint returned 404. Details saved in local platform DB.` };
+                }
             }
             catch (err) {
                 apiSyncResult = { success: false, message: `Could not reach ${domainUrl} API: ${err.message}` };
@@ -701,7 +727,6 @@ const getTenantDetails = async (req, res) => {
         const tenant = await db_1.default.tenant.findUnique({
             where: { id },
             include: {
-                adminPermissions: true,
                 users: {
                     include: { role: true, staff: { include: { personAssociated: true } } }
                 }
@@ -710,14 +735,24 @@ const getTenantDetails = async (req, res) => {
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Tenant not found' });
         }
-        const admin = tenant.users.find(u => u.role.name === 'ADMIN');
-        const officers = tenant.users.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role.name));
+        const admin = tenant.users.find(u => u.role?.name === 'ADMIN');
+        const officers = tenant.users.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role?.name));
+        const allStaff = tenant.users.filter(u => u.role?.name !== 'CLIENT').map(u => ({
+            id: u.staff?.id || u.id,
+            userId: u.id,
+            name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+            email: u.staff?.email || u.email,
+            mobile: u.staff?.mobile || u.mobile,
+            role: u.role?.name || 'STAFF',
+            status: u.staff?.status || u.status || 'ACTIVE'
+        }));
         return res.status(200).json({
             success: true,
             data: {
                 tenant,
                 admin,
-                officers
+                officers,
+                allStaff
             }
         });
     }
@@ -728,7 +763,7 @@ const getTenantDetails = async (req, res) => {
 exports.getTenantDetails = getTenantDetails;
 const updateTenantDetails = async (req, res) => {
     const { id } = req.params;
-    const { companyName, panelName, domainUrl, mongoDbUrl, dbName, certificateValidity, status, address, gst, supportMobile, adminName, adminMobile, adminEmail, adminPassword, adminStatus, nismValidity, companyType, sebiRegistration, bseEnrollment, pan, website, depositAmount, raType } = req.body;
+    const { companyName, panelName, domainUrl, mongoDbUrl, dbName, certificateValidity, status, address, gst, supportMobile, adminName, adminMobile, adminEmail, adminPassword, adminStatus, nismValidity, companyType, sebiRegistration, bseEnrollment, pan, website, depositAmount, raType, state } = req.body;
     try {
         const oldTenant = await db_1.default.tenant.findUnique({ where: { id } });
         if (!oldTenant) {
@@ -798,6 +833,8 @@ const updateTenantDetails = async (req, res) => {
             tenantUpdateData.address = String(address).trim();
         if (gst !== undefined)
             tenantUpdateData.gst = String(gst).trim().toUpperCase() || null;
+        if (state !== undefined)
+            tenantUpdateData.state = state ? String(state).trim() : null;
         if (status !== undefined && status !== '')
             tenantUpdateData.status = status;
         const incomingMobile = supportMobile || req.body.tenantMobile || req.body.mobile;
@@ -1081,13 +1118,16 @@ const parseSebiCertificate = async (req, res) => {
                 address = lines.slice(addrStartIdx, addrEndIdx).join(', ');
             }
         }
+        // Auto-detect state from address or text
+        const detectedState = (0, stateService_1.detectStateFromText)(address) || (0, stateService_1.detectStateFromText)(text) || '';
         return res.status(200).json({
             success: true,
             data: {
                 sebiRegistration,
                 certificateValidity,
                 companyName,
-                address
+                address,
+                state: detectedState
             },
             message: 'SEBI certificate read successfully.'
         });
@@ -1310,11 +1350,43 @@ const syncTenantApi = async (req, res) => {
                 message: 'No Domain URL configured or provided for this company. Please configure Domain URL first.'
             });
         }
-        const adminUser = await db_1.default.user.findFirst({
+        let adminUser = await db_1.default.user.findFirst({
             where: { tenantId: id, role: { name: 'ADMIN' } }
         });
         if (!adminUser) {
-            return res.status(404).json({ success: false, message: 'No Admin user found for this company.' });
+            adminUser = await db_1.default.user.findFirst({
+                where: { tenantId: id }
+            });
+        }
+        if (!adminUser && tenant.email) {
+            adminUser = await db_1.default.user.findFirst({
+                where: { email: tenant.email.toLowerCase().trim() }
+            });
+        }
+        if (!adminUser) {
+            // Auto-create Admin user for this tenant if missing
+            const adminRole = await db_1.default.role.findUnique({ where: { name: 'ADMIN' } });
+            if (adminRole) {
+                const defaultPass = 'Admin@12345';
+                const salt = await bcrypt.genSalt(10);
+                const passHash = await bcrypt.hash(defaultPass, salt);
+                adminUser = await db_1.default.user.create({
+                    data: {
+                        tenantId: tenant.id,
+                        roleId: adminRole.id,
+                        firstName: tenant.companyName,
+                        lastName: 'Admin',
+                        email: tenant.email,
+                        mobile: tenant.mobile || '9999999999',
+                        passwordHash: passHash,
+                        tempPassword: defaultPass,
+                        status: 'ACTIVE'
+                    }
+                });
+            }
+        }
+        if (!adminUser) {
+            return res.status(404).json({ success: false, message: 'No Admin user could be found or provisioned for this company.' });
         }
         let apiKey = tenant.tenantApiKey;
         if (!apiKey) {
@@ -1329,9 +1401,13 @@ const syncTenantApi = async (req, res) => {
             rawDomain = 'https://' + rawDomain;
         }
         rawDomain = rawDomain.replace(/\/+$/, '');
-        const syncEndpoint = `${rawDomain}/api/v1/sync/bootstrap`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const candidateEndpoints = [
+            `${rawDomain}/api/v1/sync/bootstrap`,
+            `${rawDomain}/backend/api/v1/sync/bootstrap`,
+            `${rawDomain}/api/sync/bootstrap`,
+            `${rawDomain}/backend/sync/bootstrap`,
+            `${rawDomain}/sync/bootstrap`
+        ];
         const payload = {
             apiKey,
             tenant: {
@@ -1349,35 +1425,56 @@ const syncTenantApi = async (req, res) => {
                 status: adminUser.status || (tenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
             }
         };
-        const response = await fetch(syncEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-tenant-api-key': apiKey
-            },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const responseData = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            return res.status(response.status || 500).json({
-                success: false,
-                message: responseData.message || `Remote server responded with error code ${response.status}`,
-                error: responseData
+        let successfulData = null;
+        let endpointSuccess = '';
+        let lastError = null;
+        for (const endpoint of candidateEndpoints) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-tenant-api-key': apiKey
+                    },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                if (response.ok) {
+                    successfulData = await response.json().catch(() => ({ success: true }));
+                    endpointSuccess = endpoint;
+                    break;
+                }
+                else {
+                    const respJson = await response.json().catch(() => ({}));
+                    lastError = { status: response.status, message: respJson?.message || `HTTP ${response.status}` };
+                }
+            }
+            catch (e) {
+                lastError = { status: 500, message: e.message };
+            }
+        }
+        if (successfulData) {
+            await (0, auditService_1.logAudit)({
+                userId: req.user.id,
+                action: 'UPDATE',
+                module: 'TENANTS',
+                newValue: { ...tenant, apiSyncedAt: new Date(), targetDomain, endpointUsed: endpointSuccess },
+                ipAddress: req.ip
+            });
+            return res.status(200).json({
+                success: true,
+                message: successfulData.message || `Successfully synced tenant and Admin user to ${targetDomain} via API!`,
+                data: successfulData
             });
         }
-        await (0, auditService_1.logAudit)({
-            userId: req.user.id,
-            action: 'UPDATE',
-            module: 'TENANTS',
-            newValue: { ...tenant, apiSyncedAt: new Date(), targetDomain },
-            ipAddress: req.ip
-        });
         return res.status(200).json({
-            success: true,
-            message: responseData.message || `Successfully synced tenant and Admin user to ${targetDomain} via API!`,
-            data: responseData
+            success: false,
+            isRemoteUnreachable: true,
+            message: `Remote server (${targetDomain}) ne 404 (Not Found) ya connection error diya: ${lastError?.message || 'Endpoint not found'}. Remote domain par RAGCP backend API server running hona zaroori hai. Local database me company aur admin user successfully ready hain!`,
+            error: lastError
         });
     }
     catch (error) {
@@ -1431,7 +1528,7 @@ const getCompanyClients = async (req, res) => {
             for (const endpoint of candidateEndpoints) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 6000);
+                    const timeoutId = setTimeout(() => controller.abort(), 1500);
                     const headers = {
                         'Content-Type': 'application/json',
                         'x-tenant-id': tenant.id
@@ -1572,3 +1669,163 @@ const getCompanyClients = async (req, res) => {
     }
 };
 exports.getCompanyClients = getCompanyClients;
+/**
+ * Dynamic Company Staff Endpoint for Super Admin.
+ * Checks remote company domainUrl to fetch 3rd party staff records from the company's own software,
+ * with fast fallback to local platform DB if unreachable or domain not configured.
+ * GET /api/v1/super-admin/tenants/:id/staff
+ */
+const getCompanyStaff = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant company not found' });
+        }
+        const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
+        // 1. Try remote domain API if domainUrl is configured
+        if (rawDomain) {
+            let targetOrigin = rawDomain;
+            if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
+                targetOrigin = 'https://' + targetOrigin;
+            }
+            try {
+                const parsed = new URL(targetOrigin);
+                targetOrigin = parsed.origin;
+            }
+            catch (e) {
+                targetOrigin = targetOrigin.replace(/\/+$/, '');
+            }
+            const candidateEndpoints = [
+                `${targetOrigin}/backend/api/v1/third-party-api/staff`,
+                `${targetOrigin}/backend/api/v1/third-party-api/${tenant.id}/staff`,
+                `${targetOrigin}/backend/api/v1/staff`,
+                `${targetOrigin}/backend/third-party-api/staff`,
+                `${targetOrigin}/backend/staff`,
+                `${targetOrigin}/api/v1/third-party-api/staff`,
+                `${targetOrigin}/api/v1/third-party-api/${tenant.id}/staff`,
+                `${targetOrigin}/third-party-api/staff`,
+                `${targetOrigin}/api/v1/staff`,
+                `${targetOrigin}/staff`
+            ];
+            for (const endpoint of candidateEndpoints) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 1500);
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        'x-tenant-id': tenant.id
+                    };
+                    if (tenant.tenantApiKey) {
+                        headers['x-tenant-api-key'] = tenant.tenantApiKey;
+                    }
+                    const remoteRes = await fetch(endpoint, {
+                        method: 'GET',
+                        headers,
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+                    if (remoteRes.ok) {
+                        const remoteData = await remoteRes.json().catch(() => null);
+                        if (remoteData && (Array.isArray(remoteData.data) || Array.isArray(remoteData))) {
+                            const staffArray = Array.isArray(remoteData.data) ? remoteData.data : remoteData;
+                            return res.status(200).json({
+                                success: true,
+                                source: 'REMOTE_DOMAIN_API',
+                                domainUrl: targetOrigin,
+                                endpointUsed: endpoint,
+                                company: {
+                                    id: tenant.id,
+                                    companyName: tenant.companyName,
+                                    sebiRegistration: tenant.sebiRegistration,
+                                    domainUrl: tenant.domainUrl,
+                                    website: tenant.website
+                                },
+                                count: staffArray.length,
+                                data: staffArray
+                            });
+                        }
+                    }
+                }
+                catch (remoteErr) {
+                    // Continue to next candidate or fallback to local DB
+                }
+            }
+        }
+        // 2. Fallback to Local Platform Database
+        // Fetch all non-client users associated with this tenant
+        const localStaffUsers = await db_1.default.user.findMany({
+            where: {
+                tenantId: tenant.id,
+                role: {
+                    name: { not: 'CLIENT' }
+                }
+            },
+            include: {
+                role: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                staff: {
+                    include: {
+                        personAssociated: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+        const sanitizedStaff = localStaffUsers.map(u => {
+            const staffRecord = u.staff;
+            const personAssoc = staffRecord?.personAssociated;
+            const roleName = u.role?.name || 'STAFF';
+            return {
+                id: staffRecord?.id || u.id,
+                userId: u.id,
+                employeeId: staffRecord?.employeeId || u.employeeCode || `EMP-${u.id.slice(-4).toUpperCase()}`,
+                name: staffRecord?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+                email: staffRecord?.email || u.email,
+                mobile: staffRecord?.mobile || u.mobile,
+                role: roleName,
+                roleDescription: u.role?.description || null,
+                personAssociatedType: personAssoc?.roleType || null,
+                customRole: personAssoc?.customRole || null,
+                dob: staffRecord?.dob || null,
+                joiningDate: staffRecord?.joiningDate || u.createdAt,
+                nismNumber: staffRecord?.nismNumber || null,
+                nismValidity: staffRecord?.nismValidity || null,
+                nismUpload: staffRecord?.nismUpload || null,
+                status: staffRecord?.status || u.status || 'ACTIVE',
+                lastLogin: u.lastLogin,
+                createdAt: u.createdAt
+            };
+        });
+        return res.status(200).json({
+            success: true,
+            source: 'LOCAL_DATABASE',
+            domainUrl: rawDomain || null,
+            company: {
+                id: tenant.id,
+                companyName: tenant.companyName,
+                sebiRegistration: tenant.sebiRegistration,
+                domainUrl: tenant.domainUrl,
+                website: tenant.website
+            },
+            count: sanitizedStaff.length,
+            data: sanitizedStaff
+        });
+    }
+    catch (error) {
+        console.error('Error fetching company staff:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch company staff: ' + error.message,
+            errors: [error.message]
+        });
+    }
+};
+exports.getCompanyStaff = getCompanyStaff;

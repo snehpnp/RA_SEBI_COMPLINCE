@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.provisionTenantDatabase = provisionTenantDatabase;
 const client_1 = require("@prisma/client");
+const stateService_1 = require("./stateService");
 /**
  * Connects to a target MongoDB database via Prisma, seeds required collections (Roles, Permissions,
  * RolePermissions, Tenant, Admin User, Mandatory Pages, AdminPermissions) so that a standalone
@@ -156,7 +157,8 @@ async function provisionTenantDatabase(mongoDbUrl, tenantData, adminUserData) {
             domainUrl: tenantData.domainUrl || null,
             mongoDbUrl: tenantData.mongoDbUrl || null,
             dbName: tenantData.dbName || null,
-            tenantApiKey: tenantData.tenantApiKey || null
+            tenantApiKey: tenantData.tenantApiKey || null,
+            state: tenantData.state || null
         };
         let targetTenant;
         if (tenantData.id) {
@@ -300,6 +302,8 @@ async function provisionTenantDatabase(mongoDbUrl, tenantData, adminUserData) {
                 }
             });
         }
+        // 8. Seed State collection in Target DB
+        await (0, stateService_1.ensureStates)(targetPrisma);
         return {
             success: true,
             message: `Tenant database provisioned successfully. Admin user ${adminEmail} is ready for login.`
