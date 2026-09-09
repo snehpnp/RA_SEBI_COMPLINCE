@@ -582,7 +582,7 @@ export const getGlobalTelemetry = async (req: AuthenticatedRequest, res: Respons
       }
     });
 
-    const validClients = allClients.filter(c => c.user && !c.user.deletedAt && tenantIds.includes(c.user.tenantId));
+    const validClients = allClients.filter(c => c.user && !c.user.deletedAt && c.user.tenantId && tenantIds.includes(c.user.tenantId));
     const totalClients = validClients.length;
     const activeClients = validClients.filter(c => c.status === 'ACTIVE').length;
     const pendingClients = validClients.filter(c => c.status !== 'ACTIVE').length;
@@ -595,7 +595,7 @@ export const getGlobalTelemetry = async (req: AuthenticatedRequest, res: Respons
         }
       }
     });
-    const validStaff = allStaff.filter(s => s.user && !s.user.deletedAt && tenantIds.includes(s.user.tenantId));
+    const validStaff = allStaff.filter(s => s.user && !s.user.deletedAt && s.user.tenantId && tenantIds.includes(s.user.tenantId));
     const totalStaff = validStaff.length;
     const activeStaff = validStaff.filter(s => s.status === 'ACTIVE').length;
 

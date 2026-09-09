@@ -41,6 +41,7 @@ const db_1 = __importDefault(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const auditService_1 = require("../services/auditService");
 const emailService_1 = require("../services/emailService");
+const pdfService_1 = require("../services/pdfService");
 const digioService_1 = require("../services/digioService");
 const registerClient = async (req, res) => {
     const { tenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode } = req.body;
@@ -164,15 +165,9 @@ const registerClient = async (req, res) => {
         });
         // Get login URL
         const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-        // Send Welcome Email
+        // Send Welcome Email with Terms & Conditions PDF and Privacy Policy PDF
         try {
-            const attachments = [];
-            if (tenant.termsPdfUrl) {
-                attachments.push({ filename: 'Terms_and_Conditions.pdf', path: require('path').join(__dirname, '../../..') + tenant.termsPdfUrl });
-            }
-            if (tenant.privacyPdfUrl) {
-                attachments.push({ filename: 'Privacy_Policy.pdf', path: require('path').join(__dirname, '../../..') + tenant.privacyPdfUrl });
-            }
+            const attachments = await (0, pdfService_1.getTenantComplianceAttachments)(tenant);
             await (0, emailService_1.sendWelcomeEmail)({
                 tenantId,
                 toEmail: email,

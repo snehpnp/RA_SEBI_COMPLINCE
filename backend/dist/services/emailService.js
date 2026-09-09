@@ -78,11 +78,21 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
         return false;
     }
 }
+const pdfService_1 = require("./pdfService");
 /**
  * Welcome email sent to newly onboarded Staff or Client.
  */
 async function sendWelcomeEmail(opts) {
-    const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText, attachments } = opts;
+    const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText } = opts;
+    let attachments = opts.attachments || [];
+    if ((!attachments || attachments.length === 0) && role === 'CLIENT' && tenantId) {
+        try {
+            attachments = await (0, pdfService_1.getTenantComplianceAttachments)(tenantId);
+        }
+        catch (attErr) {
+            console.error('[EMAIL] Error loading default compliance attachments:', attErr);
+        }
+    }
     const subject = `Welcome to ${companyName || 'RAGCP'} — Your Account is Ready`;
     const html = `
 <!DOCTYPE html>
@@ -135,6 +145,22 @@ async function sendWelcomeEmail(opts) {
         </div>
       </div>
       <p style="color:#94a3b8; font-size:12px;">⚠️ Please change your password after first login for security.</p>
+
+      ${role === 'CLIENT' || (attachments && attachments.length > 0) ? `
+      <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 18px; margin: 20px 0;">
+        <div style="font-weight: 700; color: #818cf8; font-size: 13px; margin-bottom: 8px;">
+          📎 Mandatory Compliance Documents Attached (PDF):
+        </div>
+        <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
+          <div style="margin-bottom: 4px;">• 📄 <strong>Terms & Conditions (PDF)</strong> — Advisory terms, disclosures & risk warnings</div>
+          <div>• 📄 <strong>Privacy Policy (PDF)</strong> — Client data protection & confidentiality policy</div>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 10px;">
+          Please review and keep these attached PDF documents for your compliance and regulatory records.
+        </div>
+      </div>
+      ` : ''}
+
       <a href="${loginUrl}" class="btn">Login to Your Account →</a>
     </div>
     <div class="footer">

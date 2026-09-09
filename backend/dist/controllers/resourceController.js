@@ -7,6 +7,7 @@ exports.deleteResource = exports.getResources = exports.uploadResource = void 0;
 const client_1 = require("@prisma/client");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const prisma = new client_1.PrismaClient();
 const uploadResource = async (req, res) => {
     try {
@@ -23,6 +24,10 @@ const uploadResource = async (req, res) => {
                 fileUrl,
                 fileName: file.originalname,
             },
+        });
+        // Auto-sync new resource across all company databases in background
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'RESOURCE_UPLOAD' }).catch(syncErr => {
+            console.warn('[SYNC] Resource upload sync note:', syncErr.message);
         });
         res.status(201).json({ success: true, data: resource });
     }
@@ -64,6 +69,10 @@ const deleteResource = async (req, res) => {
         }
         await prisma.resource.delete({
             where: { id },
+        });
+        // Auto-sync resource deletion across all company databases in background
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'RESOURCE_DELETE' }).catch(syncErr => {
+            console.warn('[SYNC] Resource delete sync note:', syncErr.message);
         });
         res.status(200).json({ success: true, message: 'Resource deleted successfully' });
     }

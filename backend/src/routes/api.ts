@@ -231,6 +231,11 @@ router.post(
   requireRoles(['SUPER_ADMIN']),
   verifyDomainUrl
 );
+router.post('/sync/bootstrap', bootstrapTenant);
+router.post('/sync/update', bootstrapTenant);
+router.post('/sync/tenant', bootstrapTenant);
+router.get('/sync/config', getTenantSyncConfig);
+router.get('/tenant/sync-config', getTenantSyncConfig);
 router.get(
   '/super-admin/tenants/:id/clients',
   authenticateJWT,
@@ -1190,7 +1195,6 @@ router.delete(
 router.get(
   '/resources',
   authenticateJWT,
-  requireRoles(['SUPER_ADMIN', 'ADMIN', 'COMPLIANCE_OFFICER', 'PRINCIPAL_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'SALES', 'MARKETING']),
   getResources
 );
 
@@ -1214,15 +1218,33 @@ router.get('/download', (req, res) => {
 
     // Prevent directory traversal
     const normalizedUrl = path.normalize(fileUrl).replace(/^(\.\.[\/\\])+/, '');
-
-    // Strip the leading slash or /uploads/ so path.join doesn't treat it as absolute
-    // Using the pre-computed uploadRoot from the top of the file
     const relativePath = normalizedUrl.replace(/^[\/\\]?uploads[\/\\]/, '');
-    const uploadRoot = path.join(__dirname, '../../../uploads'); // re-declaring in scope just in case
-    const filePath = path.join(uploadRoot, relativePath);
+    const fileName = path.basename(normalizedUrl);
 
-    if (fs.existsSync(filePath)) {
-      res.download(filePath);
+    const candidatePaths = [
+      path.resolve(__dirname, '../../../uploads', relativePath),
+      path.resolve(process.cwd(), '../uploads', relativePath),
+      path.resolve(process.cwd(), 'uploads', relativePath),
+      path.resolve(__dirname, '../../..', normalizedUrl.replace(/^[/\\]+/, '')),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads', relativePath),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/policies', fileName),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/agreements', fileName),
+    ];
+
+    let foundPath: string | null = null;
+    for (const candidate of candidatePaths) {
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          foundPath = candidate;
+          break;
+        }
+      } catch {}
+    }
+
+    if (foundPath) {
+      res.download(foundPath, fileName);
     } else {
       res.status(404).json({ success: false, message: 'File not found on server' });
     }

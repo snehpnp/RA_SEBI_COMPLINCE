@@ -1,5 +1,7 @@
 import prisma from '../config/db';
 import * as crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { provisionTenantDatabase } from './tenantProvisionService';
 
 export interface SyncOptions {
@@ -95,13 +97,49 @@ export async function syncTenantToRemote(
   };
 
   // Fetch all related collections for dynamic sync
-  const [plans, planCategories, complianceRequirements, complianceAudits, systemSettings] = await Promise.all([
+  const [plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
     prisma.plan.findMany({ where: { tenantId, deletedAt: null } }).catch(() => []),
     prisma.planCategory.findMany({ where: { tenantId } }).catch(() => []),
     prisma.complianceRequirement.findMany({ orderBy: { serialNo: 'asc' } }).catch(() => []),
     prisma.complianceAudit.findMany({ where: { tenantId } }).catch(() => []),
-    prisma.systemSetting.findMany().catch(() => [])
+    prisma.systemSetting.findMany().catch(() => []),
+    prisma.resource.findMany().catch(() => [])
   ]);
+
+  // Read physical files for resources to sync binary content
+  const uploadRoot = path.join(__dirname, '../../../uploads');
+  const resources = rawResources.map((r) => {
+    let fileBase64: string | null = null;
+    try {
+      const fileName = path.basename(r.fileUrl);
+      const candidates = [
+        path.resolve(uploadRoot, 'resources', fileName),
+        path.resolve(process.cwd(), '../uploads/resources', fileName),
+        path.resolve(process.cwd(), 'uploads/resources', fileName),
+        path.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
+        path.join(__dirname, '../../..', r.fileUrl.replace(/^[/\\]+/, ''))
+      ];
+
+      for (const cand of candidates) {
+        if (fs.existsSync(cand) && fs.statSync(cand).isFile()) {
+          fileBase64 = fs.readFileSync(cand).toString('base64');
+          break;
+        }
+      }
+    } catch (fErr) {
+      console.warn('[SYNC] Note reading resource file for payload:', fErr);
+    }
+
+    return {
+      id: r.id,
+      title: r.title,
+      category: r.category,
+      fileUrl: r.fileUrl,
+      fileName: r.fileName,
+      uploadedAt: r.uploadedAt,
+      fileBase64
+    };
+  });
 
   const tenantPayload = {
     ...tenant,
@@ -112,7 +150,8 @@ export async function syncTenantToRemote(
     planCategories,
     complianceRequirements,
     complianceAudits,
-    systemSettings
+    systemSettings,
+    resources
   };
 
   const syncPayload = {
@@ -128,6 +167,7 @@ export async function syncTenantToRemote(
     complianceRequirements,
     complianceAudits,
     systemSettings,
+    resources,
     syncedAt: new Date().toISOString()
   };
 
@@ -158,7 +198,7 @@ export async function syncTenantToRemote(
       for (const endpoint of candidateEndpoints) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1500);
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
           const response = await fetch(endpoint, {
             method: 'POST',

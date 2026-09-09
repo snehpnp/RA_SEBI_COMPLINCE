@@ -781,6 +781,76 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
     catch (settingErr) {
         console.warn('System settings sync note:', settingErr);
     }
+    // 13. Seed / Sync Global Resources & Physical Files
+    try {
+        const uploadRoot = path.join(__dirname, '../../../uploads');
+        const resourceDir = path.join(uploadRoot, 'resources');
+        if (!fs.existsSync(resourceDir)) {
+            fs.mkdirSync(resourceDir, { recursive: true });
+        }
+        if (tenantData.resources && tenantData.resources.length > 0) {
+            const activeIds = [];
+            for (const res of tenantData.resources) {
+                if (!res.title || !res.fileUrl)
+                    continue;
+                const resId = res.id ? (typeof res.id === 'object' ? res.id.toString() : String(res.id)) : undefined;
+                if (!resId)
+                    continue;
+                activeIds.push(resId);
+                // If base64 file data provided, save physical file on disk
+                if (res.fileBase64) {
+                    try {
+                        const fileName = path.basename(res.fileUrl);
+                        const targetFilePath = path.join(resourceDir, fileName);
+                        fs.writeFileSync(targetFilePath, Buffer.from(res.fileBase64, 'base64'));
+                    }
+                    catch (writeErr) {
+                        console.warn('[SYNC] Error writing resource file to disk:', writeErr);
+                    }
+                }
+                await targetPrisma.resource.upsert({
+                    where: { id: resId },
+                    update: {
+                        title: res.title,
+                        category: res.category || 'OTHER',
+                        fileUrl: res.fileUrl,
+                        fileName: res.fileName || res.title,
+                    },
+                    create: {
+                        id: resId,
+                        title: res.title,
+                        category: res.category || 'OTHER',
+                        fileUrl: res.fileUrl,
+                        fileName: res.fileName || res.title,
+                        uploadedAt: res.uploadedAt ? new Date(res.uploadedAt) : new Date()
+                    }
+                });
+            }
+            // Cleanup deleted resources from remote database and disk
+            try {
+                const localResources = await targetPrisma.resource.findMany({}).catch(() => []);
+                for (const localRes of localResources) {
+                    if (!activeIds.includes(String(localRes.id))) {
+                        const fileName = path.basename(localRes.fileUrl);
+                        const targetFilePath = path.join(resourceDir, fileName);
+                        if (fs.existsSync(targetFilePath)) {
+                            try {
+                                fs.unlinkSync(targetFilePath);
+                            }
+                            catch { }
+                        }
+                        await targetPrisma.resource.delete({ where: { id: localRes.id } }).catch(() => { });
+                    }
+                }
+            }
+            catch (cleanErr) {
+                console.warn('[SYNC] Error cleaning up deleted resources:', cleanErr);
+            }
+        }
+    }
+    catch (resErr) {
+        console.warn('Global resources sync note:', resErr);
+    }
     return { tenant: targetTenant, adminUser: createdAdminUser };
 }
 /**
@@ -795,9 +865,8 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
     });
     try {
         await client.connect();
-        const db = client.db();
+        const db = client.db(); // Uses database name from URI
         const tenantId = tenantData.id || new mongodb_1.ObjectId().toString();
-
         // 1. Roles
         const roles = [
             { name: 'SUPER_ADMIN', description: 'System Owner' },
@@ -810,16 +879,11 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
         ];
         const roleMap = {};
         for (const r of roles) {
-            const res = await db.collection('Role').findOneAndUpdate(
-                { name: r.name },
-                { $set: { name: r.name, description: r.description, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
-                { upsert: true, returnDocument: 'after' }
-            );
+            const res = await db.collection('Role').findOneAndUpdate({ name: r.name }, { $set: { name: r.name, description: r.description, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true, returnDocument: 'after' });
             if (res && res._id) {
                 roleMap[r.name] = res._id.toString();
             }
         }
-
         // 2. Permissions
         const permissions = [
             { code: 'CREATE', name: 'Create Records' },
@@ -843,30 +907,20 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
         ];
         const permMap = {};
         for (const p of permissions) {
-            const res = await db.collection('Permission').findOneAndUpdate(
-                { code: p.code },
-                { $set: { code: p.code, name: p.name, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
-                { upsert: true, returnDocument: 'after' }
-            );
+            const res = await db.collection('Permission').findOneAndUpdate({ code: p.code }, { $set: { code: p.code, name: p.name, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true, returnDocument: 'after' });
             if (res && res._id) {
                 permMap[p.code] = res._id.toString();
             }
         }
-
-        // 3. RolePermissions
+        // 3. RolePermissions (ADMIN gets all)
         const adminRoleId = roleMap['ADMIN'];
         if (adminRoleId) {
             for (const pCode of Object.keys(permMap)) {
                 const pId = permMap[pCode];
-                await db.collection('RolePermission').updateOne(
-                    { roleId: adminRoleId, permissionId: pId },
-                    { $set: { roleId: adminRoleId, permissionId: pId, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
-                    { upsert: true }
-                );
+                await db.collection('RolePermission').updateOne({ roleId: adminRoleId, permissionId: pId }, { $set: { roleId: adminRoleId, permissionId: pId, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
             }
         }
-
-        // 4. Tenant
+        // 4. Tenant Profile & Config
         const tenantDoc = {
             companyName: tenantData.companyName,
             companyType: tenantData.companyType || 'INDIVIDUAL',
@@ -933,7 +987,6 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             internalPolicyUrl: tenantData.internalPolicyUrl || null,
             updatedAt: new Date()
         };
-
         let targetTenant = await db.collection('Tenant').findOne({
             $or: [
                 ...(tenantData.id ? [{ _id: new mongodb_1.ObjectId(tenantData.id) }, { id: tenantData.id }] : []),
@@ -941,10 +994,10 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 { email: tenantData.email }
             ]
         });
-
         if (targetTenant) {
             await db.collection('Tenant').updateOne({ _id: targetTenant._id }, { $set: tenantDoc });
-        } else {
+        }
+        else {
             const inserted = await db.collection('Tenant').insertOne({
                 ...(tenantData.id ? { _id: new mongodb_1.ObjectId(tenantData.id), id: tenantData.id } : {}),
                 ...tenantDoc,
@@ -952,7 +1005,6 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             });
             targetTenant = { _id: inserted.insertedId, ...tenantDoc };
         }
-
         // 5. Admin User
         const adminEmail = (adminUserData.email || tenantData.email).toLowerCase().trim();
         let finalPasswordHash = adminUserData.passwordHash;
@@ -960,7 +1012,6 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             const salt = await bcrypt.genSalt(10);
             finalPasswordHash = await bcrypt.hash((adminUserData.tempPassword || adminUserData.password).trim(), salt);
         }
-
         const userDoc = {
             tenantId,
             roleId: adminRoleId,
@@ -971,46 +1022,41 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             status: tenantData.status === 'SUSPENDED' ? 'SUSPENDED' : (tenantData.status === 'DELETED' ? 'DELETED' : (adminUserData.status || 'ACTIVE')),
             updatedAt: new Date()
         };
-        if (finalPasswordHash) userDoc.passwordHash = finalPasswordHash;
-        if (adminUserData.tempPassword !== undefined) userDoc.tempPassword = adminUserData.tempPassword;
-
+        if (finalPasswordHash)
+            userDoc.passwordHash = finalPasswordHash;
+        if (adminUserData.tempPassword !== undefined)
+            userDoc.tempPassword = adminUserData.tempPassword;
         let targetUser = await db.collection('User').findOne({ email: adminEmail });
         if (targetUser) {
             await db.collection('User').updateOne({ _id: targetUser._id }, { $set: userDoc });
-        } else {
+        }
+        else {
             await db.collection('User').insertOne({
                 ...(adminUserData.id ? { _id: new mongodb_1.ObjectId(adminUserData.id), id: adminUserData.id } : {}),
                 ...userDoc,
                 createdAt: new Date()
             });
         }
-
-        // 6. Admin Permissions
+        // 6. Admin Permissions (10 Modules)
         const defaultModules = ['CLIENTS', 'RESEARCH_REPORTS', 'SIGNALS', 'COMPLIANCE', 'BILLING', 'KYC', 'COUPONS', 'CUSTOM_PAGES', 'AI_FEATURES', 'EXPORT_DATA'];
         const permsToSync = (customPermissions && customPermissions.length > 0) ? customPermissions : defaultModules.map(m => ({ module: m, canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true, isEnabled: true }));
-
         for (const p of permsToSync) {
-            await db.collection('AdminPermission').updateOne(
-                { tenantId, module: p.module },
-                {
-                    $set: {
-                        tenantId,
-                        module: p.module,
-                        canView: p.canView ?? true,
-                        canCreate: p.canCreate ?? true,
-                        canEdit: p.canEdit ?? true,
-                        canDelete: p.canDelete ?? true,
-                        canExport: p.canExport ?? true,
-                        isEnabled: p.isEnabled ?? true,
-                        customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits || null,
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
+            await db.collection('AdminPermission').updateOne({ tenantId, module: p.module }, {
+                $set: {
+                    tenantId,
+                    module: p.module,
+                    canView: p.canView ?? true,
+                    canCreate: p.canCreate ?? true,
+                    canEdit: p.canEdit ?? true,
+                    canDelete: p.canDelete ?? true,
+                    canExport: p.canExport ?? true,
+                    isEnabled: p.isEnabled ?? true,
+                    customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits || null,
+                    updatedAt: new Date()
                 },
-                { upsert: true }
-            );
+                $setOnInsert: { createdAt: new Date() }
+            }, { upsert: true });
         }
-
         // 7. Custom Pages
         const defaultPages = [
             { title: 'Complaint Status', slug: 'complaint-status', type: 'CONTENT', content: '<h3>Monthly Complaint Status</h3><p>Status of investor complaints received and resolved per SEBI guidelines.</p>', isSystem: true },
@@ -1024,27 +1070,23 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
         ];
         const pagesToSync = tenantData.customPages && tenantData.customPages.length > 0 ? tenantData.customPages : defaultPages;
         for (const page of pagesToSync) {
-            if (!page.slug) continue;
-            await db.collection('CustomPage').updateOne(
-                { tenantId, slug: page.slug },
-                {
-                    $set: {
-                        tenantId,
-                        title: page.title,
-                        slug: page.slug,
-                        type: page.type || 'CONTENT',
-                        content: page.content || null,
-                        externalUrl: page.externalUrl || null,
-                        isSystem: page.isSystem ?? true,
-                        status: page.status || 'ACTIVE',
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
+            if (!page.slug)
+                continue;
+            await db.collection('CustomPage').updateOne({ tenantId, slug: page.slug }, {
+                $set: {
+                    tenantId,
+                    title: page.title,
+                    slug: page.slug,
+                    type: page.type || 'CONTENT',
+                    content: page.content || null,
+                    externalUrl: page.externalUrl || null,
+                    isSystem: page.isSystem ?? true,
+                    status: page.status || 'ACTIVE',
+                    updatedAt: new Date()
                 },
-                { upsert: true }
-            );
+                $setOnInsert: { createdAt: new Date() }
+            }, { upsert: true });
         }
-
         // 8. Email Templates
         const defaultTemplates = [
             { type: 'WELCOME', subject: `Welcome to ${tenantData.companyName}`, body: `Dear {{clientName}},\n\nWelcome to ${tenantData.companyName}! Your advisory account is registered.\n\nBest regards,\n${tenantData.companyName}` },
@@ -1054,23 +1096,19 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
         ];
         const templatesToSync = tenantData.emailTemplates && tenantData.emailTemplates.length > 0 ? tenantData.emailTemplates : defaultTemplates;
         for (const t of templatesToSync) {
-            if (!t.type) continue;
-            await db.collection('EmailTemplate').updateOne(
-                { tenantId, type: t.type },
-                {
-                    $set: {
-                        tenantId,
-                        type: t.type,
-                        subject: t.subject,
-                        body: t.body,
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
+            if (!t.type)
+                continue;
+            await db.collection('EmailTemplate').updateOne({ tenantId, type: t.type }, {
+                $set: {
+                    tenantId,
+                    type: t.type,
+                    subject: t.subject,
+                    body: t.body,
+                    updatedAt: new Date()
                 },
-                { upsert: true }
-            );
+                $setOnInsert: { createdAt: new Date() }
+            }, { upsert: true });
         }
-
         // 9. Compliance Requirements (ALL SEBI RULES)
         let rulesToSync = tenantData.complianceRequirements;
         if (!rulesToSync || rulesToSync.length === 0) {
@@ -1081,45 +1119,65 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
         }
         if (rulesToSync && rulesToSync.length > 0) {
             for (const rule of rulesToSync) {
-                await db.collection('ComplianceRequirement').updateOne(
-                    { serialNo: Number(rule.serialNo) },
-                    {
-                        $set: {
-                            serialNo: Number(rule.serialNo),
-                            requirement: rule.requirement,
-                            frequency: rule.frequency,
-                            frequencyType: rule.frequencyType || 'CONTINUOUS',
-                            severityLevel: rule.severityLevel || 'HIGH',
-                            penaltyAmount: rule.penaltyAmount !== undefined ? rule.penaltyAmount : null,
-                            isActive: typeof rule.isActive === 'boolean' ? rule.isActive : true,
-                            updatedAt: new Date()
-                        },
-                        $setOnInsert: { createdAt: new Date() }
+                await db.collection('ComplianceRequirement').updateOne({ serialNo: Number(rule.serialNo) }, {
+                    $set: {
+                        serialNo: Number(rule.serialNo),
+                        requirement: rule.requirement,
+                        frequency: rule.frequency,
+                        frequencyType: rule.frequencyType || 'CONTINUOUS',
+                        severityLevel: rule.severityLevel || 'HIGH',
+                        penaltyAmount: rule.penaltyAmount !== undefined ? rule.penaltyAmount : null,
+                        isActive: typeof rule.isActive === 'boolean' ? rule.isActive : true,
+                        updatedAt: new Date()
                     },
-                    { upsert: true }
-                );
+                    $setOnInsert: { createdAt: new Date() }
+                }, { upsert: true });
             }
         }
-
-        // 10. System Settings
+        // 10. System Settings (Branding & Global Configurations)
         if (tenantData.systemSettings && tenantData.systemSettings.length > 0) {
             for (const setting of tenantData.systemSettings) {
-                if (!setting.key) continue;
-                await db.collection('SystemSetting').updateOne(
-                    { key: setting.key },
-                    {
-                        $set: {
-                            key: setting.key,
-                            value: typeof setting.value === 'object' ? JSON.stringify(setting.value) : String(setting.value),
-                            updatedAt: new Date()
-                        },
-                        $setOnInsert: { createdAt: new Date() }
+                if (!setting.key)
+                    continue;
+                await db.collection('SystemSetting').updateOne({ key: setting.key }, {
+                    $set: {
+                        key: setting.key,
+                        value: typeof setting.value === 'object' ? JSON.stringify(setting.value) : String(setting.value),
+                        updatedAt: new Date()
                     },
-                    { upsert: true }
-                );
+                    $setOnInsert: { createdAt: new Date() }
+                }, { upsert: true });
             }
         }
-
+        // 11. Global Resources
+        if (tenantData.resources) {
+            const activeObjectIds = [];
+            for (const res of tenantData.resources) {
+                if (!res.title || !res.fileUrl)
+                    continue;
+                const rawId = res.id || res._id;
+                const resId = rawId && mongodb_1.ObjectId.isValid(String(rawId)) ? new mongodb_1.ObjectId(String(rawId)) : new mongodb_1.ObjectId();
+                activeObjectIds.push(resId);
+                await db.collection('Resource').updateOne({ _id: resId }, {
+                    $set: {
+                        title: res.title,
+                        category: res.category || 'OTHER',
+                        fileUrl: res.fileUrl,
+                        fileName: res.fileName || res.title,
+                        uploadedAt: res.uploadedAt ? new Date(res.uploadedAt) : new Date()
+                    }
+                }, { upsert: true });
+            }
+            // Cleanup deleted resources from remote MongoDB collection
+            if (activeObjectIds.length > 0) {
+                await db.collection('Resource').deleteMany({
+                    _id: { $nin: activeObjectIds }
+                }).catch(() => { });
+            }
+            else if (tenantData.resources.length === 0) {
+                await db.collection('Resource').deleteMany({}).catch(() => { });
+            }
+        }
         return {
             success: true,
             message: `Dedicated MongoDB database provisioned and synced successfully for ${tenantData.companyName}. Admin user ${adminEmail} is active with all 11 collections synchronized.`,
@@ -1128,14 +1186,14 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             adminEmail,
             adminUserId: adminUserData.id
         };
-    } finally {
-        await client.close().catch(() => {});
+    }
+    finally {
+        await client.close().catch(() => { });
     }
 }
-
 /**
- * Connects to a target MongoDB database via native MongoClient (or Prisma fallback),
- * ensuring all collections and baseline records are created on the remote dedicated database.
+ * Connects to a target MongoDB database, ensuring all collections and baseline records
+ * are created or updated on the remote dedicated database.
  */
 async function provisionTenantDatabase(mongoDbUrl, tenantData, adminUserData, customPermissions) {
     if (!mongoDbUrl || (!mongoDbUrl.startsWith('mongodb://') && !mongoDbUrl.startsWith('mongodb+srv://'))) {
@@ -1146,7 +1204,8 @@ async function provisionTenantDatabase(mongoDbUrl, tenantData, adminUserData, cu
     }
     try {
         return await syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserData, customPermissions);
-    } catch (directErr) {
+    }
+    catch (directErr) {
         console.warn('Native MongoDB sync attempt note, falling back to Prisma:', directErr.message);
         let targetPrisma = null;
         try {
@@ -1166,16 +1225,18 @@ async function provisionTenantDatabase(mongoDbUrl, tenantData, adminUserData, cu
                 adminEmail: adminUser.email,
                 adminUserId: adminUser.id
             };
-        } catch (error) {
+        }
+        catch (error) {
             console.error('Failed to provision tenant database at:', mongoDbUrl, error);
             return {
                 success: false,
                 message: `Database provisioning failed: ${error.message}`,
                 error: error.message
             };
-        } finally {
+        }
+        finally {
             if (targetPrisma) {
-                await targetPrisma.$disconnect().catch(() => {});
+                await targetPrisma.$disconnect().catch(() => { });
             }
         }
     }

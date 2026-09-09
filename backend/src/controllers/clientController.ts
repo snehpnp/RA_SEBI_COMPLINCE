@@ -5,6 +5,7 @@ import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { sendWelcomeEmail } from '../services/emailService';
+import { getTenantComplianceAttachments } from '../services/pdfService';
 import { createKycRequest } from '../services/digioService';
 
 export const registerClient = async (req: Request, res: Response) => {
@@ -160,15 +161,9 @@ export const registerClient = async (req: Request, res: Response) => {
     // Get login URL
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
     
-    // Send Welcome Email
+    // Send Welcome Email with Terms & Conditions PDF and Privacy Policy PDF
     try {
-      const attachments: any[] = [];
-      if (tenant.termsPdfUrl) {
-        attachments.push({ filename: 'Terms_and_Conditions.pdf', path: require('path').join(__dirname, '../../..') + tenant.termsPdfUrl });
-      }
-      if (tenant.privacyPdfUrl) {
-        attachments.push({ filename: 'Privacy_Policy.pdf', path: require('path').join(__dirname, '../../..') + tenant.privacyPdfUrl });
-      }
+      const attachments = await getTenantComplianceAttachments(tenant);
 
       await sendWelcomeEmail({
         tenantId,

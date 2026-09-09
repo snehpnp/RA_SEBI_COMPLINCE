@@ -16,7 +16,7 @@ const tenantProvisionService_1 = require("../services/tenantProvisionService");
 const bootstrapTenant = async (req, res) => {
     try {
         const apiKey = req.headers['x-tenant-api-key'] || req.body.apiKey;
-        const { tenant, adminUser, permissions, action, emailTemplates, customPages, plans, planCategories, complianceRequirements, complianceAudits, systemSettings } = req.body;
+        const { tenant, adminUser, permissions, action, emailTemplates, customPages, plans, planCategories, complianceRequirements, complianceAudits, systemSettings, resources } = req.body;
         if (!tenant || !adminUser) {
             return res.status(400).json({
                 success: false,
@@ -38,6 +38,7 @@ const bootstrapTenant = async (req, res) => {
             complianceRequirements: complianceRequirements || tenant.complianceRequirements || [],
             complianceAudits: complianceAudits || tenant.complianceAudits || [],
             systemSettings: systemSettings || tenant.systemSettings || [],
+            resources: resources || tenant.resources || [],
             tenantApiKey: apiKey || tenant.tenantApiKey || null
         };
         // Execute comprehensive provisioning of all 11 collections on the local DB

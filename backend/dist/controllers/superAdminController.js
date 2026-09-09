@@ -36,9 +36,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testMongoConnection = exports.verifyDomainUrl = exports.getCompanyStaff = exports.getCompanyClients = exports.syncAllTenantsApi = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
-const db_1 = __importDefault(require("../config/db"));
+exports.getCompanyStaff = exports.getCompanyClients = exports.testMongoConnection = exports.verifyDomainUrl = exports.syncAllTenantsApi = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
 const mongodb_1 = require("mongodb");
+const db_1 = __importDefault(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const crypto = __importStar(require("crypto"));
 const auditService_1 = require("../services/auditService");
@@ -532,12 +532,10 @@ const getGlobalTelemetry = async (req, res) => {
         });
         const validTenants = allTenants.filter(t => !t.deletedAt && t.status !== 'DELETED');
         const tenantIds = validTenants.map(t => t.id);
-
         const totalCompanies = validTenants.length;
         const activeCompanies = validTenants.filter(t => t.status === 'ACTIVE').length;
         const suspendedCompanies = validTenants.filter(t => t.status === 'SUSPENDED').length;
         const pendingCompanies = validTenants.filter(t => t.status === 'PENDING_PROFILE').length;
-
         // Fetch all clients across active/non-deleted tenants
         const allClients = await db_1.default.client.findMany({
             include: {
@@ -546,12 +544,10 @@ const getGlobalTelemetry = async (req, res) => {
                 }
             }
         });
-
-        const validClients = allClients.filter(c => c.user && !c.user.deletedAt && tenantIds.includes(c.user.tenantId));
+        const validClients = allClients.filter(c => c.user && !c.user.deletedAt && c.user.tenantId && tenantIds.includes(c.user.tenantId));
         const totalClients = validClients.length;
         const activeClients = validClients.filter(c => c.status === 'ACTIVE').length;
         const pendingClients = validClients.filter(c => c.status !== 'ACTIVE').length;
-
         // Fetch all staff across active/non-deleted tenants
         const allStaff = await db_1.default.staff.findMany({
             include: {
@@ -560,10 +556,9 @@ const getGlobalTelemetry = async (req, res) => {
                 }
             }
         });
-        const validStaff = allStaff.filter(s => s.user && !s.user.deletedAt && tenantIds.includes(s.user.tenantId));
+        const validStaff = allStaff.filter(s => s.user && !s.user.deletedAt && s.user.tenantId && tenantIds.includes(s.user.tenantId));
         const totalStaff = validStaff.length;
         const activeStaff = validStaff.filter(s => s.status === 'ACTIVE').length;
-
         // Fetch alerts count
         const activeAlerts = await db_1.default.complianceAlert.count({
             where: { tenantId: { in: tenantIds }, status: 'OPEN' }
@@ -574,10 +569,8 @@ const getGlobalTelemetry = async (req, res) => {
         const resolvedAlerts = await db_1.default.complianceAlert.count({
             where: { tenantId: { in: tenantIds }, status: 'RESOLVED' }
         });
-
         // Audit logs count
         const auditLogsCount = await db_1.default.auditLog.count();
-
         // Compliance audits count
         const totalAudits = await db_1.default.complianceAudit.count({
             where: { tenantId: { in: tenantIds } }
@@ -588,7 +581,6 @@ const getGlobalTelemetry = async (req, res) => {
         const completedAudits = await db_1.default.complianceAudit.count({
             where: { tenantId: { in: tenantIds }, status: 'COMPLETED' }
         });
-
         // Plans count
         const allPlans = await db_1.default.plan.findMany({
             where: { tenantId: { in: tenantIds } },
@@ -597,7 +589,6 @@ const getGlobalTelemetry = async (req, res) => {
         const validPlans = allPlans.filter(p => !p.deletedAt);
         const totalPlans = validPlans.length;
         const activePlans = validPlans.filter(p => p.status === 'ACTIVE').length;
-
         return res.status(200).json({
             success: true,
             data: {
@@ -1099,17 +1090,17 @@ const updateComplianceRule = async (req, res) => {
     try {
         const oldRule = await db_1.default.complianceRequirement.findUnique({ where: { id } });
         if (!oldRule) {
-            return res.status(404).json({ success: false, message: 'Rule not found' });
+            return res.status(404).json({ success: false, message: 'Compliance rule not found' });
         }
         const updatedRule = await db_1.default.complianceRequirement.update({
             where: { id },
             data: {
-                requirement,
-                frequency,
-                frequencyType,
-                severityLevel,
-                penaltyAmount,
-                isActive: typeof isActive === 'boolean' ? isActive : undefined
+                requirement: requirement !== undefined ? requirement : oldRule.requirement,
+                frequency: frequency !== undefined ? frequency : oldRule.frequency,
+                frequencyType: frequencyType !== undefined ? frequencyType : oldRule.frequencyType,
+                severityLevel: severityLevel !== undefined ? severityLevel : oldRule.severityLevel,
+                penaltyAmount: penaltyAmount !== undefined ? penaltyAmount : oldRule.penaltyAmount,
+                isActive: typeof isActive === 'boolean' ? isActive : oldRule.isActive
             }
         });
         await (0, auditService_1.logAudit)({
@@ -1126,14 +1117,14 @@ const updateComplianceRule = async (req, res) => {
             syncResult = await (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'COMPLIANCE_RULE_UPDATE' });
         }
         catch (err) {
-            console.warn('Background sync for compliance rule update error:', err);
+            console.warn('Sync dispatch note for compliance rule update:', err.message);
         }
         const syncMsg = syncResult
-            ? ` (${syncResult.successCount}/${syncResult.total} company domains & DBs synchronized in real-time)`
+            ? ` (${syncResult.successCount}/${syncResult.total} company domains synced)`
             : '';
         return res.status(200).json({
             success: true,
-            message: `Compliance Rule #${updatedRule.serialNo || id} updated and propagated across all companies successfully${syncMsg}.`,
+            message: `Compliance Rule #${updatedRule.serialNo} updated and propagated across all company databases successfully${syncMsg}.`,
             data: updatedRule,
             syncResult
         });
@@ -1345,7 +1336,6 @@ const verifyDomainUrl = async (req, res) => {
     }
 };
 exports.verifyDomainUrl = verifyDomainUrl;
-
 const testMongoConnection = async (req, res) => {
     const { mongoDbUrl } = req.body;
     if (!mongoDbUrl || typeof mongoDbUrl !== 'string' || (!mongoDbUrl.startsWith('mongodb://') && !mongoDbUrl.startsWith('mongodb+srv://'))) {
@@ -1366,7 +1356,8 @@ const testMongoConnection = async (req, res) => {
             databaseName: db.databaseName,
             collectionsCount: collections.length
         });
-    } catch (err) {
+    }
+    catch (err) {
         return res.status(400).json({
             success: false,
             message: `Failed to connect to MongoDB: ${err.message}`,

@@ -23,7 +23,8 @@ export const bootstrapTenant = async (req: Request, res: Response) => {
       planCategories,
       complianceRequirements,
       complianceAudits,
-      systemSettings
+      systemSettings,
+      resources
     } = req.body;
 
     if (!tenant || !adminUser) {
@@ -49,6 +50,7 @@ export const bootstrapTenant = async (req: Request, res: Response) => {
       complianceRequirements: complianceRequirements || tenant.complianceRequirements || [],
       complianceAudits: complianceAudits || tenant.complianceAudits || [],
       systemSettings: systemSettings || tenant.systemSettings || [],
+      resources: resources || tenant.resources || [],
       tenantApiKey: apiKey || tenant.tenantApiKey || null
     };
 

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
+import { syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 
 const prisma = new PrismaClient();
 
@@ -23,6 +24,11 @@ export const uploadResource = async (req: Request, res: Response) => {
         fileUrl,
         fileName: file.originalname,
       },
+    });
+
+    // Auto-sync new resource across all company databases in background
+    syncAllTenantsToRemote({ reason: 'RESOURCE_UPLOAD' }).catch(syncErr => {
+      console.warn('[SYNC] Resource upload sync note:', syncErr.message);
     });
 
     res.status(201).json({ success: true, data: resource });
@@ -66,6 +72,11 @@ export const deleteResource = async (req: Request, res: Response) => {
 
     await prisma.resource.delete({
       where: { id },
+    });
+
+    // Auto-sync resource deletion across all company databases in background
+    syncAllTenantsToRemote({ reason: 'RESOURCE_DELETE' }).catch(syncErr => {
+      console.warn('[SYNC] Resource delete sync note:', syncErr.message);
     });
 
     res.status(200).json({ success: true, message: 'Resource deleted successfully' });

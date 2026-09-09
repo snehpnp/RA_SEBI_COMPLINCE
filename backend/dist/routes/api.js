@@ -135,6 +135,15 @@ router.put('/super-admin/tenants/:id', auth_1.authenticateJWT, (0, auth_1.requir
 ]), superAdminController_1.updateTenantDetails);
 router.post('/super-admin/tenants/:id/provision-db', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.provisionTenantDb);
 router.post('/super-admin/tenants/:id/sync-api', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncTenantApi);
+router.post('/super-admin/test-mongo-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.testMongoConnection);
+router.post('/super-admin/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/tenants/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/verify-domain', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.verifyDomainUrl);
+router.post('/sync/bootstrap', tenantSyncController_1.bootstrapTenant);
+router.post('/sync/update', tenantSyncController_1.bootstrapTenant);
+router.post('/sync/tenant', tenantSyncController_1.bootstrapTenant);
+router.get('/sync/config', tenantSyncController_1.getTenantSyncConfig);
+router.get('/tenant/sync-config', tenantSyncController_1.getTenantSyncConfig);
 router.get('/super-admin/tenants/:id/clients', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyClients);
 router.get('/super-admin/tenants/:id/staff', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyStaff);
 router.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
@@ -143,8 +152,6 @@ router.put('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT,
 router.post('/sync/bootstrap', tenantSyncController_1.bootstrapTenant);
 router.post('/sync/update', tenantSyncController_1.bootstrapTenant);
 router.post('/sync/tenant', tenantSyncController_1.bootstrapTenant);
-router.post('/super-admin/test-mongo-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.testMongoConnection);
-router.post('/super-admin/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
 router.post('/super-admin/tenants/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
 router.post('/super-admin/verify-domain', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.verifyDomainUrl);
 router.get('/sync/config', tenantSyncController_1.getTenantSyncConfig);
@@ -349,7 +356,7 @@ router.put('/compliance/complaints/:id/resolve', auth_1.authenticateJWT, (0, aut
 // ----------------------------------------------------
 router.post('/super-admin/resources', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), upload.single('file'), resourceController_1.uploadResource);
 router.delete('/super-admin/resources/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), resourceController_1.deleteResource);
-router.get('/resources', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'COMPLIANCE_OFFICER', 'PRINCIPAL_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'SALES', 'MARKETING']), resourceController_1.getResources);
+router.get('/resources', auth_1.authenticateJWT, resourceController_1.getResources);
 // ----------------------------------------------------
 // LOCATIONS MANAGEMENT
 // ----------------------------------------------------
@@ -365,13 +372,31 @@ router.get('/download', (req, res) => {
         }
         // Prevent directory traversal
         const normalizedUrl = path_1.default.normalize(fileUrl).replace(/^(\.\.[\/\\])+/, '');
-        // Strip the leading slash or /uploads/ so path.join doesn't treat it as absolute
-        // Using the pre-computed uploadRoot from the top of the file
         const relativePath = normalizedUrl.replace(/^[\/\\]?uploads[\/\\]/, '');
-        const uploadRoot = path_1.default.join(__dirname, '../../../uploads'); // re-declaring in scope just in case
-        const filePath = path_1.default.join(uploadRoot, relativePath);
-        if (fs_1.default.existsSync(filePath)) {
-            res.download(filePath);
+        const fileName = path_1.default.basename(normalizedUrl);
+        const candidatePaths = [
+            path_1.default.resolve(__dirname, '../../../uploads', relativePath),
+            path_1.default.resolve(process.cwd(), '../uploads', relativePath),
+            path_1.default.resolve(process.cwd(), 'uploads', relativePath),
+            path_1.default.resolve(__dirname, '../../..', normalizedUrl.replace(/^[/\\]+/, '')),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads', relativePath),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/policies', fileName),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/agreements', fileName),
+        ];
+        let foundPath = null;
+        for (const candidate of candidatePaths) {
+            try {
+                if (fs_1.default.existsSync(candidate) && fs_1.default.statSync(candidate).isFile()) {
+                    foundPath = candidate;
+                    break;
+                }
+            }
+            catch { }
+        }
+        if (foundPath) {
+            res.download(foundPath, fileName);
         }
         else {
             res.status(404).json({ success: false, message: 'File not found on server' });

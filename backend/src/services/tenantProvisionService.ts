@@ -79,6 +79,7 @@ export interface TenantProvisionData {
   complianceRequirements?: any[];
   complianceAudits?: any[];
   systemSettings?: any[];
+  resources?: any[];
   states?: any[];
 }
 
@@ -857,6 +858,74 @@ export async function provisionAllTenantCollections(
     console.warn('System settings sync note:', settingErr);
   }
 
+  // 13. Seed / Sync Global Resources & Physical Files
+  try {
+    const uploadRoot = path.join(__dirname, '../../../uploads');
+    const resourceDir = path.join(uploadRoot, 'resources');
+    if (!fs.existsSync(resourceDir)) {
+      fs.mkdirSync(resourceDir, { recursive: true });
+    }
+
+    if (tenantData.resources && tenantData.resources.length > 0) {
+      const activeIds: string[] = [];
+
+      for (const res of tenantData.resources) {
+        if (!res.title || !res.fileUrl) continue;
+        const resId = res.id ? (typeof res.id === 'object' ? res.id.toString() : String(res.id)) : undefined;
+        if (!resId) continue;
+        activeIds.push(resId);
+
+        // If base64 file data provided, save physical file on disk
+        if (res.fileBase64) {
+          try {
+            const fileName = path.basename(res.fileUrl);
+            const targetFilePath = path.join(resourceDir, fileName);
+            fs.writeFileSync(targetFilePath, Buffer.from(res.fileBase64, 'base64'));
+          } catch (writeErr) {
+            console.warn('[SYNC] Error writing resource file to disk:', writeErr);
+          }
+        }
+
+        await (targetPrisma as any).resource.upsert({
+          where: { id: resId },
+          update: {
+            title: res.title,
+            category: res.category || 'OTHER',
+            fileUrl: res.fileUrl,
+            fileName: res.fileName || res.title,
+          },
+          create: {
+            id: resId,
+            title: res.title,
+            category: res.category || 'OTHER',
+            fileUrl: res.fileUrl,
+            fileName: res.fileName || res.title,
+            uploadedAt: res.uploadedAt ? new Date(res.uploadedAt) : new Date()
+          }
+        });
+      }
+
+      // Cleanup deleted resources from remote database and disk
+      try {
+        const localResources = await (targetPrisma as any).resource.findMany({}).catch(() => []);
+        for (const localRes of localResources) {
+          if (!activeIds.includes(String(localRes.id))) {
+            const fileName = path.basename(localRes.fileUrl);
+            const targetFilePath = path.join(resourceDir, fileName);
+            if (fs.existsSync(targetFilePath)) {
+              try { fs.unlinkSync(targetFilePath); } catch {}
+            }
+            await (targetPrisma as any).resource.delete({ where: { id: localRes.id } }).catch(() => {});
+          }
+        }
+      } catch (cleanErr) {
+        console.warn('[SYNC] Error cleaning up deleted resources:', cleanErr);
+      }
+    }
+  } catch (resErr) {
+    console.warn('Global resources sync note:', resErr);
+  }
+
   return { tenant: targetTenant, adminUser: createdAdminUser };
 }
 
@@ -1207,6 +1276,39 @@ export async function syncTenantDedicatedMongoDirect(
           },
           { upsert: true }
         );
+      }
+    }
+
+    // 11. Global Resources
+    if (tenantData.resources) {
+      const activeObjectIds: any[] = [];
+      for (const res of tenantData.resources) {
+        if (!res.title || !res.fileUrl) continue;
+        const rawId = res.id || res._id;
+        const resId = rawId && ObjectId.isValid(String(rawId)) ? new ObjectId(String(rawId)) : new ObjectId();
+        activeObjectIds.push(resId);
+        await db.collection('Resource').updateOne(
+          { _id: resId as any },
+          {
+            $set: {
+              title: res.title,
+              category: res.category || 'OTHER',
+              fileUrl: res.fileUrl,
+              fileName: res.fileName || res.title,
+              uploadedAt: res.uploadedAt ? new Date(res.uploadedAt) : new Date()
+            }
+          },
+          { upsert: true }
+        );
+      }
+
+      // Cleanup deleted resources from remote MongoDB collection
+      if (activeObjectIds.length > 0) {
+        await db.collection('Resource').deleteMany({
+          _id: { $nin: activeObjectIds }
+        }).catch(() => {});
+      } else if (tenantData.resources.length === 0) {
+        await db.collection('Resource').deleteMany({}).catch(() => {});
       }
     }
 

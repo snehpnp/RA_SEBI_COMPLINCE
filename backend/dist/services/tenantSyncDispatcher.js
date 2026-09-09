@@ -40,6 +40,8 @@ exports.syncTenantToRemote = syncTenantToRemote;
 exports.syncAllTenantsToRemote = syncAllTenantsToRemote;
 const db_1 = __importDefault(require("../config/db"));
 const crypto = __importStar(require("crypto"));
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
 const tenantProvisionService_1 = require("./tenantProvisionService");
 /**
  * Dispatches synchronization for a specific tenant to its configured domainUrl API
@@ -100,13 +102,47 @@ async function syncTenantToRemote(tenantId, options) {
         status: effectiveStatus
     };
     // Fetch all related collections for dynamic sync
-    const [plans, planCategories, complianceRequirements, complianceAudits, systemSettings] = await Promise.all([
+    const [plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
         db_1.default.plan.findMany({ where: { tenantId, deletedAt: null } }).catch(() => []),
         db_1.default.planCategory.findMany({ where: { tenantId } }).catch(() => []),
-        db_1.default.complianceRequirement.findMany({ where: { isActive: true } }).catch(() => []),
+        db_1.default.complianceRequirement.findMany({ orderBy: { serialNo: 'asc' } }).catch(() => []),
         db_1.default.complianceAudit.findMany({ where: { tenantId } }).catch(() => []),
-        db_1.default.systemSetting.findMany().catch(() => [])
+        db_1.default.systemSetting.findMany().catch(() => []),
+        db_1.default.resource.findMany().catch(() => [])
     ]);
+    // Read physical files for resources to sync binary content
+    const uploadRoot = path_1.default.join(__dirname, '../../../uploads');
+    const resources = rawResources.map((r) => {
+        let fileBase64 = null;
+        try {
+            const fileName = path_1.default.basename(r.fileUrl);
+            const candidates = [
+                path_1.default.resolve(uploadRoot, 'resources', fileName),
+                path_1.default.resolve(process.cwd(), '../uploads/resources', fileName),
+                path_1.default.resolve(process.cwd(), 'uploads/resources', fileName),
+                path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
+                path_1.default.join(__dirname, '../../..', r.fileUrl.replace(/^[/\\]+/, ''))
+            ];
+            for (const cand of candidates) {
+                if (fs_1.default.existsSync(cand) && fs_1.default.statSync(cand).isFile()) {
+                    fileBase64 = fs_1.default.readFileSync(cand).toString('base64');
+                    break;
+                }
+            }
+        }
+        catch (fErr) {
+            console.warn('[SYNC] Note reading resource file for payload:', fErr);
+        }
+        return {
+            id: r.id,
+            title: r.title,
+            category: r.category,
+            fileUrl: r.fileUrl,
+            fileName: r.fileName,
+            uploadedAt: r.uploadedAt,
+            fileBase64
+        };
+    });
     const tenantPayload = {
         ...tenant,
         tenantApiKey: apiKey,
@@ -116,7 +152,8 @@ async function syncTenantToRemote(tenantId, options) {
         planCategories,
         complianceRequirements,
         complianceAudits,
-        systemSettings
+        systemSettings,
+        resources
     };
     const syncPayload = {
         apiKey,
@@ -131,6 +168,7 @@ async function syncTenantToRemote(tenantId, options) {
         complianceRequirements,
         complianceAudits,
         systemSettings,
+        resources,
         syncedAt: new Date().toISOString()
     };
     const targetDomainRaw = (options?.targetUrl || tenant.domainUrl || tenant.website || '').trim();
@@ -155,7 +193,7 @@ async function syncTenantToRemote(tenantId, options) {
             for (const endpoint of candidateEndpoints) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 1500);
+                    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
                     const response = await fetch(endpoint, {
                         method: 'POST',
                         headers: {
