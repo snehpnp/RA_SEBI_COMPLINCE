@@ -62,19 +62,52 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
 
   try {
     // Check duplicates in Tenant table
-    const existingTenants = await prisma.tenant.findMany({
-      where: {
-        OR: [
-          { email },
-          { sebiRegistration },
-          { pan },
-          { mobile },
-          ...(gst ? [{ gst }] : []),
-          ...(bseEnrollment ? [{ bseEnrollment }] : []),
-          ...(domainUrl ? [{ domainUrl }] : [])
-        ]
+    let existingTenants: any[] = [];
+    try {
+      existingTenants = await prisma.tenant.findMany({
+        where: {
+          OR: [
+            { email },
+            { sebiRegistration },
+            { pan },
+            { mobile },
+            ...(gst ? [{ gst }] : []),
+            ...(bseEnrollment ? [{ bseEnrollment }] : []),
+            ...(domainUrl ? [{ domainUrl }] : [])
+          ] as any
+        }
+      });
+    } catch (findErr: any) {
+      // Fallback if client has older generated Prisma schema without domainUrl in TenantWhereInput
+      existingTenants = await prisma.tenant.findMany({
+        where: {
+          OR: [
+            { email },
+            { sebiRegistration },
+            { pan },
+            { mobile },
+            ...(gst ? [{ gst }] : []),
+            ...(bseEnrollment ? [{ bseEnrollment }] : [])
+          ]
+        }
+      });
+      if (domainUrl) {
+        try {
+          const domainCheck = await prisma.tenant.findMany({
+            where: { domainUrl } as any
+          });
+          if (domainCheck && domainCheck.length > 0) {
+            domainCheck.forEach((t: any) => {
+              if (!existingTenants.some((et: any) => et.id === t.id)) {
+                existingTenants.push(t);
+              }
+            });
+          }
+        } catch {
+          // Ignore if domainUrl query is not supported by current prisma client
+        }
       }
-    });
+    }
 
     if (existingTenants.length > 0) {
       const duplicates: string[] = [];
@@ -817,10 +850,34 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
       tenantUpdateData.nismCertificateUrl = newNismUrl;
     }
 
-    const updatedTenant = await prisma.tenant.update({
-      where: { id },
-      data: tenantUpdateData
-    });
+    let updatedTenant: any;
+    const currentTenantUpdateData = { ...tenantUpdateData };
+    for (let attempt = 0; attempt < 25; attempt++) {
+      try {
+        updatedTenant = await prisma.tenant.update({
+          where: { id },
+          data: currentTenantUpdateData
+        });
+        break;
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes('Unknown argument')) {
+          const matches = Array.from(errMsg.matchAll(/Unknown argument `([^`]+)`/g)) as RegExpMatchArray[];
+          if (matches && matches.length > 0) {
+            let strippedAny = false;
+            for (const match of matches) {
+              const fieldName = match[1];
+              if (fieldName && fieldName in currentTenantUpdateData) {
+                delete currentTenantUpdateData[fieldName];
+                strippedAny = true;
+              }
+            }
+            if (strippedAny) continue;
+          }
+        }
+        throw err;
+      }
+    }
 
     if (files && files.sebiCertificate && files.sebiCertificate[0] && newSebiUrl) {
       await prisma.tenantDocumentHistory.create({

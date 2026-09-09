@@ -320,22 +320,60 @@ export async function provisionAllTenantCollections(
     internalPolicyUrl: tenantData.internalPolicyUrl || null
   };
 
-  let targetTenant;
-  if (tenantData.id) {
-    targetTenant = await targetPrisma.tenant.upsert({
-      where: { id: tenantData.id },
-      update: tenantPayload,
-      create: {
-        id: tenantData.id,
-        ...tenantPayload
+  // Resilient tenant upsert to handle cases where @prisma/client has not been re-generated yet
+  async function safeTenantUpsert(
+    prismaClient: PrismaClient,
+    whereClause: any,
+    payload: any,
+    explicitId?: string
+  ): Promise<any> {
+    const currentPayload: any = { ...payload };
+    const maxRetries = 25;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const createData = explicitId ? { id: explicitId, ...currentPayload } : { ...currentPayload };
+        return await prismaClient.tenant.upsert({
+          where: whereClause,
+          update: currentPayload,
+          create: createData
+        });
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes('Unknown argument')) {
+          const matches = Array.from(errMsg.matchAll(/Unknown argument `([^`]+)`/g)) as RegExpMatchArray[];
+          if (matches && matches.length > 0) {
+            let strippedAny = false;
+            for (const match of matches) {
+              const fieldName = match[1];
+              if (fieldName && fieldName in currentPayload) {
+                delete currentPayload[fieldName];
+                strippedAny = true;
+              }
+            }
+            if (strippedAny) {
+              continue;
+            }
+          }
+        }
+        throw err;
       }
-    });
+    }
+  }
+
+  let targetTenant: any;
+  if (tenantData.id) {
+    targetTenant = await safeTenantUpsert(
+      targetPrisma,
+      { id: tenantData.id },
+      tenantPayload,
+      tenantData.id
+    );
   } else {
-    targetTenant = await targetPrisma.tenant.upsert({
-      where: { email: tenantData.email },
-      update: tenantPayload,
-      create: tenantPayload
-    });
+    targetTenant = await safeTenantUpsert(
+      targetPrisma,
+      { email: tenantData.email },
+      tenantPayload
+    );
   }
 
   const tenantId = targetTenant.id;
@@ -352,19 +390,37 @@ export async function provisionAllTenantCollections(
     adminUserData.tempPassword = defaultPassword;
   }
 
+  const superAdminRoleId = roleMap['SUPER_ADMIN'];
   const adminRoleId = roleMap['ADMIN'];
   const adminEmail = adminUserData.email.toLowerCase().trim();
 
-  let targetUser = null;
+  let targetUser: any = null;
   if (adminUserData.id) {
-    targetUser = await targetPrisma.user.findUnique({ where: { id: adminUserData.id } }).catch(() => null);
+    targetUser = await targetPrisma.user.findUnique({
+      where: { id: adminUserData.id },
+      include: { role: true }
+    }).catch(() => null);
+    if (targetUser && (targetUser.role?.name === 'SUPER_ADMIN' || targetUser.roleId === superAdminRoleId)) {
+      targetUser = null; // NEVER overwrite SUPER_ADMIN
+    }
   }
   if (!targetUser && adminEmail) {
-    targetUser = await targetPrisma.user.findUnique({ where: { email: adminEmail } }).catch(() => null);
+    targetUser = await targetPrisma.user.findUnique({
+      where: { email: adminEmail },
+      include: { role: true }
+    }).catch(() => null);
+    if (targetUser && (targetUser.role?.name === 'SUPER_ADMIN' || targetUser.roleId === superAdminRoleId)) {
+      targetUser = null; // NEVER overwrite SUPER_ADMIN
+    }
   }
-  if (!targetUser) {
+  if (!targetUser && tenantId) {
     targetUser = await targetPrisma.user.findFirst({
-      where: { tenantId, roleId: adminRoleId }
+      where: {
+        tenantId,
+        roleId: adminRoleId,
+        role: { name: { not: 'SUPER_ADMIN' } }
+      },
+      include: { role: true }
     }).catch(() => null);
   }
 

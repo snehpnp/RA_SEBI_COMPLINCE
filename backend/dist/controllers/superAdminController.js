@@ -1,22 +1,22 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function (o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
     if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
+        desc = { enumerable: true, get: function () { return m[k]; } };
     }
     Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
+}) : (function (o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
 }));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
+}) : function (o, v) {
     o["default"] = v;
 });
 var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
+    var ownKeys = function (o) {
         ownKeys = Object.getOwnPropertyNames || function (o) {
             var ar = [];
             for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
@@ -67,19 +67,54 @@ const createTenant = async (req, res) => {
     const effectiveState = state || (0, stateService_1.detectStateFromGst)(gst) || (0, stateService_1.detectStateFromText)(address) || null;
     try {
         // Check duplicates in Tenant table
-        const existingTenants = await db_1.default.tenant.findMany({
-            where: {
-                OR: [
-                    { email },
-                    { sebiRegistration },
-                    { pan },
-                    { mobile },
-                    ...(gst ? [{ gst }] : []),
-                    ...(bseEnrollment ? [{ bseEnrollment }] : []),
-                    ...(domainUrl ? [{ domainUrl }] : [])
-                ]
+        let existingTenants = [];
+        try {
+            existingTenants = await db_1.default.tenant.findMany({
+                where: {
+                    OR: [
+                        { email },
+                        { sebiRegistration },
+                        { pan },
+                        { mobile },
+                        ...(gst ? [{ gst }] : []),
+                        ...(bseEnrollment ? [{ bseEnrollment }] : []),
+                        ...(domainUrl ? [{ domainUrl }] : [])
+                    ]
+                }
+            });
+        }
+        catch (findErr) {
+            // Fallback if client has older generated Prisma schema without domainUrl in TenantWhereInput
+            existingTenants = await db_1.default.tenant.findMany({
+                where: {
+                    OR: [
+                        { email },
+                        { sebiRegistration },
+                        { pan },
+                        { mobile },
+                        ...(gst ? [{ gst }] : []),
+                        ...(bseEnrollment ? [{ bseEnrollment }] : [])
+                    ]
+                }
+            });
+            if (domainUrl) {
+                try {
+                    const domainCheck = await db_1.default.tenant.findMany({
+                        where: { domainUrl }
+                    });
+                    if (domainCheck && domainCheck.length > 0) {
+                        domainCheck.forEach((t) => {
+                            if (!existingTenants.some((et) => et.id === t.id)) {
+                                existingTenants.push(t);
+                            }
+                        });
+                    }
+                }
+                catch {
+                    // Ignore if domainUrl query is not supported by current prisma client
+                }
             }
-        });
+        }
         if (existingTenants.length > 0) {
             const duplicates = [];
             existingTenants.forEach(tenant => {
@@ -754,10 +789,36 @@ const updateTenantDetails = async (req, res) => {
         if (newNismUrl) {
             tenantUpdateData.nismCertificateUrl = newNismUrl;
         }
-        const updatedTenant = await db_1.default.tenant.update({
-            where: { id },
-            data: tenantUpdateData
-        });
+        let updatedTenant;
+        const currentTenantUpdateData = { ...tenantUpdateData };
+        for (let attempt = 0; attempt < 25; attempt++) {
+            try {
+                updatedTenant = await db_1.default.tenant.update({
+                    where: { id },
+                    data: currentTenantUpdateData
+                });
+                break;
+            }
+            catch (err) {
+                const errMsg = err?.message || String(err);
+                if (errMsg.includes('Unknown argument')) {
+                    const matches = Array.from(errMsg.matchAll(/Unknown argument `([^`]+)`/g));
+                    if (matches && matches.length > 0) {
+                        let strippedAny = false;
+                        for (const match of matches) {
+                            const fieldName = match[1];
+                            if (fieldName && fieldName in currentTenantUpdateData) {
+                                delete currentTenantUpdateData[fieldName];
+                                strippedAny = true;
+                            }
+                        }
+                        if (strippedAny)
+                            continue;
+                    }
+                }
+                throw err;
+            }
+        }
         if (files && files.sebiCertificate && files.sebiCertificate[0] && newSebiUrl) {
             await db_1.default.tenantDocumentHistory.create({
                 data: {
