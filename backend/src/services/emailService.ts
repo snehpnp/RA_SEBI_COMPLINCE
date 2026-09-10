@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
-import prisma from '../config/db';
+import { Tenant, NotificationLog } from '../config/db';
+import { getTenantComplianceAttachments } from './pdfService';
 
 /**
  * Generic email sender using tenant's configured SMTP settings.
@@ -18,7 +19,7 @@ export async function sendEmail(
       return false;
     }
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenant: any = await Tenant.findById(tenantId).lean();
     if (!tenant || !tenant.smtpHost || !tenant.smtpUser || !tenant.smtpPassword) {
       console.warn('[EMAIL] SMTP not configured for tenant:', tenantId, '. Skipping email to:', to);
       return false;
@@ -30,9 +31,9 @@ export async function sendEmail(
       secure: (tenant.smtpPort || 587) === 465,
       auth: {
         user: tenant.smtpUser,
-        pass: tenant.smtpPassword,
+        pass: tenant.smtpPassword
       },
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: false }
     });
 
     const fromName = tenant.smtpFrom || tenant.companyName || 'RAGCP Platform';
@@ -43,21 +44,18 @@ export async function sendEmail(
       to,
       subject,
       html,
-      attachments,
+      attachments
     });
 
     // Log to NotificationLog
-    await prisma.notificationLog.create({
-      data: {
-        tenantId,
-        recipient: to,
-        channel: 'EMAIL',
-        title: subject,
-        message: html.replace(/<[^>]*>/g, '').slice(0, 500),
-        status: 'SENT',
-      },
+    await NotificationLog.create({
+      tenantId,
+      recipient: to,
+      channel: 'EMAIL',
+      title: subject,
+      message: html.replace(/<[^>]*>/g, '').slice(0, 500),
+      status: 'SENT'
     });
-
 
     return true;
   } catch (err: any) {
@@ -65,23 +63,19 @@ export async function sendEmail(
     // Log failure
     if (tenantId) {
       try {
-        await prisma.notificationLog.create({
-          data: {
-            tenantId,
-            recipient: to,
-            channel: 'EMAIL',
-            title: subject,
-            message: `Failed: ${err.message}`,
-            status: 'FAILED',
-          },
+        await NotificationLog.create({
+          tenantId,
+          recipient: to,
+          channel: 'EMAIL',
+          title: subject,
+          message: `Failed: ${err.message}`,
+          status: 'FAILED'
         });
       } catch {}
     }
     return false;
   }
 }
-
-import { getTenantComplianceAttachments } from './pdfService';
 
 /**
  * Welcome email sent to newly onboarded Staff or Client.
@@ -98,7 +92,7 @@ export async function sendWelcomeEmail(opts: {
   attachments?: any[];
 }): Promise<boolean> {
   const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText } = opts;
-  
+
   let attachments = opts.attachments || [];
   if ((!attachments || attachments.length === 0) && role === 'CLIENT' && tenantId) {
     try {
@@ -256,7 +250,7 @@ export async function sendForgotPasswordEmail(opts: {
  * Send a test email to verify SMTP configuration.
  */
 export async function sendTestEmail(tenantId: string, toEmail: string): Promise<{ success: boolean; message: string }> {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  const tenant: any = await Tenant.findById(tenantId).lean();
   if (!tenant?.smtpHost || !tenant?.smtpUser || !tenant?.smtpPassword) {
     return { success: false, message: 'SMTP is not fully configured. Please fill in all SMTP fields first.' };
   }

@@ -1,13 +1,10 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.INDIAN_STATES = void 0;
 exports.ensureStates = ensureStates;
 exports.detectStateFromGst = detectStateFromGst;
 exports.detectStateFromText = detectStateFromText;
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = require("../config/db");
 exports.INDIAN_STATES = [
     { name: 'Andaman and Nicobar Islands', gstCode: '35' },
     { name: 'Andhra Pradesh', gstCode: '37' },
@@ -44,27 +41,16 @@ exports.INDIAN_STATES = [
     { name: 'Tripura', gstCode: '16' },
     { name: 'Uttar Pradesh', gstCode: '09' },
     { name: 'Uttarakhand', gstCode: '05' },
-    { name: 'West Bengal', gstCode: '19' },
+    { name: 'West Bengal', gstCode: '19' }
 ];
 /**
- * Ensures the State collection in the given PrismaClient (or default DB)
+ * Ensures the State collection in the given DB
  * is populated with all Indian States and their GST codes.
  */
-async function ensureStates(client = db_1.default) {
+async function ensureStates(StateModel = db_1.State) {
     try {
         for (const state of exports.INDIAN_STATES) {
-            await client.state.upsert({
-                where: { name: state.name },
-                update: {
-                    gstCode: state.gstCode,
-                    isActive: true
-                },
-                create: {
-                    name: state.name,
-                    gstCode: state.gstCode,
-                    isActive: true
-                }
-            });
+            await StateModel.findOneAndUpdate({ name: state.name }, { gstCode: state.gstCode, isActive: true }, { upsert: true, returnDocument: 'after' });
         }
         console.log(`[StateService] Indian states collection successfully verified/seeded (${exports.INDIAN_STATES.length} states).`);
     }
@@ -82,7 +68,7 @@ function detectStateFromGst(gstin) {
     if (clean.length < 2)
         return null;
     const code = clean.substring(0, 2);
-    const found = exports.INDIAN_STATES.find(s => s.gstCode === code);
+    const found = exports.INDIAN_STATES.find((s) => s.gstCode === code);
     return found ? found.name : null;
 }
 /**
@@ -100,10 +86,18 @@ function detectStateFromText(text) {
         }
     }
     // Common aliases
-    if (upper.includes('MUMBAI') || upper.includes('PUNE') || upper.includes('NAGPUR') || upper.includes('THANE') || upper.includes('NAVI MUMBAI')) {
+    if (upper.includes('MUMBAI') ||
+        upper.includes('PUNE') ||
+        upper.includes('NAGPUR') ||
+        upper.includes('THANE') ||
+        upper.includes('NAVI MUMBAI')) {
         return 'Maharashtra';
     }
-    if (upper.includes('NEW DELHI') || upper.includes('DELHI NCR') || upper.includes('NOIDA') || upper.includes('GURGAON') || upper.includes('GURUGRAM')) {
+    if (upper.includes('NEW DELHI') ||
+        upper.includes('DELHI NCR') ||
+        upper.includes('NOIDA') ||
+        upper.includes('GURGAON') ||
+        upper.includes('GURUGRAM')) {
         if (upper.includes('NOIDA'))
             return 'Uttar Pradesh';
         if (upper.includes('GURGAON') || upper.includes('GURUGRAM'))
@@ -119,7 +113,10 @@ function detectStateFromText(text) {
     if (upper.includes('CHENNAI') || upper.includes('COIMBATORE')) {
         return 'Tamil Nadu';
     }
-    if (upper.includes('AHMEDABAD') || upper.includes('SURAT') || upper.includes('VADODARA') || upper.includes('RAJKOT')) {
+    if (upper.includes('AHMEDABAD') ||
+        upper.includes('SURAT') ||
+        upper.includes('VADODARA') ||
+        upper.includes('RAJKOT')) {
         return 'Gujarat';
     }
     if (upper.includes('KOLKATA') || upper.includes('CALCUTTA')) {
@@ -128,7 +125,10 @@ function detectStateFromText(text) {
     if (upper.includes('JAIPUR') || upper.includes('UDAIPUR') || upper.includes('JODHPUR')) {
         return 'Rajasthan';
     }
-    if (upper.includes('LUCKNOW') || upper.includes('KANPUR') || upper.includes('VARANASI') || upper.includes('AGRA')) {
+    if (upper.includes('LUCKNOW') ||
+        upper.includes('KANPUR') ||
+        upper.includes('VARANASI') ||
+        upper.includes('AGRA')) {
         return 'Uttar Pradesh';
     }
     if (upper.includes('CHANDIGARH')) {

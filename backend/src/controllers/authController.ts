@@ -1,8 +1,8 @@
 import nodemailer from 'nodemailer';
-
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
-import prisma, { centralPrisma } from '../config/db';
+import { User, Tenant, Client, NotificationLog, EmailVerification } from '../config/db';
+import { centralModels } from '../services/tenantConnectionManager';
 import tenantConnectionManager from '../services/tenantConnectionManager';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
@@ -25,55 +25,49 @@ export const login = async (req: Request, res: Response) => {
   }
 
   try {
-    let user = await prisma.user.findUnique({
-      where: { email },
-      include: {
-        role: {
-          include: {
-            permissions: {
-              include: {
-                permission: true
-              }
-            }
-          }
-        },
-        tenant: true
-      }
-    });
+    const cleanEmail = String(email || '').toLowerCase().trim();
+    const emailQuery = { email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
+
+    let user: any = await User.findOne(emailQuery)
+      .populate({
+        path: 'role',
+        populate: {
+          path: 'permissions',
+          populate: { path: 'permission' }
+        }
+      })
+      .populate('tenant')
+      .lean();
 
     // Fallback: If user wasn't found in current context (e.g. portal login without domain header), locate tenant
     if (!user) {
-      const tenantMatch: any = await centralPrisma.allCompany.findFirst({
-        where: { email: email.toLowerCase().trim() }
-      }).catch(() => null) || await centralPrisma.tenant.findFirst({
-        where: { email: email.toLowerCase().trim() }
-      }).catch(() => null);
+      const tenantMatch: any =
+        (await centralModels.AllCompany.findOne(emailQuery).lean().catch(() => null)) ||
+        (await centralModels.Tenant.findOne(emailQuery).lean().catch(() => null));
 
       if (tenantMatch) {
-        const resolved = await tenantConnectionManager.getTenantPrisma(tenantMatch.tenantId || tenantMatch.id);
+        const resolved = await tenantConnectionManager.getTenantConnection(tenantMatch.tenantId || tenantMatch._id || tenantMatch.id);
         if (resolved) {
-          user = await resolved.prisma.user.findUnique({
-            where: { email },
-            include: {
-              role: {
-                include: {
-                  permissions: {
-                    include: {
-                      permission: true
-                    }
-                  }
-                }
-              },
-              tenant: true
-            }
-          });
+          user = await resolved.models.User.findOne(emailQuery)
+            .populate({
+              path: 'role',
+              populate: {
+                path: 'permissions',
+                populate: { path: 'permission' }
+              }
+            })
+            .populate('tenant')
+            .lean();
         }
       }
     }
 
     if (!user || user.deletedAt || user.status === 'DELETED') {
       if (user && (user.deletedAt || user.status === 'DELETED')) {
-        const adminMsg = user.role.name === 'ADMIN' ? 'Your company has been removed. Please contact super admin.' : 'Your company has been removed. Please contact admin.';
+        const adminMsg =
+          user.role?.name === 'ADMIN'
+            ? 'Your company has been removed. Please contact super admin.'
+            : 'Your company has been removed. Please contact admin.';
         return res.status(403).json({
           success: false,
           message: adminMsg,
@@ -95,7 +89,7 @@ export const login = async (req: Request, res: Response) => {
           errors: ['Tenant deleted', 'User inactive or suspended']
         });
       }
-      if (user.tenant.status === 'SUSPENDED' && user.role.name !== 'SUPER_ADMIN') {
+      if (user.tenant.status === 'SUSPENDED' && user.role?.name !== 'SUPER_ADMIN') {
         return res.status(403).json({
           success: false,
           message: 'This company portal has been suspended by Super Admin. Access is disabled.',
@@ -105,7 +99,10 @@ export const login = async (req: Request, res: Response) => {
     }
 
     if (user.status === 'SUSPENDED') {
-      const suspendMsg = user.role.name === 'ADMIN' ? 'Your account is suspended. Please contact super admin.' : 'Your account is suspended. Please contact admin.';
+      const suspendMsg =
+        user.role?.name === 'ADMIN'
+          ? 'Your account is suspended. Please contact super admin.'
+          : 'Your account is suspended. Please contact admin.';
       return res.status(403).json({
         success: false,
         message: suspendMsg,
@@ -114,19 +111,19 @@ export const login = async (req: Request, res: Response) => {
     }
 
     if (user.status === 'PENDING_APPROVAL') {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { status: 'ACTIVE', tempPassword: null }
+      await User.findByIdAndUpdate(user._id || user.id, {
+        status: 'ACTIVE',
+        tempPassword: null
       });
-      await prisma.client.updateMany({
-        where: { userId: user.id },
-        data: { status: 'ACTIVE' }
-      });
+      await Client.updateMany({ userId: user._id || user.id }, { status: 'ACTIVE' });
       user.status = 'ACTIVE';
     }
 
     if (user.status === 'INACTIVE') {
-      const inactiveMsg = user.role.name === 'ADMIN' ? 'Your account has been deactivated. Please contact super admin.' : 'Your account has been deactivated. Please contact admin.';
+      const inactiveMsg =
+        user.role?.name === 'ADMIN'
+          ? 'Your account has been deactivated. Please contact super admin.'
+          : 'Your account has been deactivated. Please contact admin.';
       return res.status(403).json({
         success: false,
         message: inactiveMsg,
@@ -143,18 +140,20 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    const permissions = user.role.permissions.map(rp => rp.permission.code);
+    const permissions =
+      user.role?.permissions?.map((rp: any) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
 
     const sessionId = crypto.randomUUID();
+    const userId = (user._id || user.id).toString();
 
     // Generate tokens
     const accessToken = jwt.sign(
       {
-        id: user.id,
+        id: userId,
         email: user.email,
-        role: user.role.name,
-        tenantId: user.tenantId,
-        tokenVersion: user.tokenVersion,
+        role: user.role?.name,
+        tenantId: user.tenantId ? user.tenantId.toString() : null,
+        tokenVersion: user.tokenVersion || 0,
         sessionId: sessionId
       },
       JWT_SECRET,
@@ -163,8 +162,8 @@ export const login = async (req: Request, res: Response) => {
 
     const refreshToken = jwt.sign(
       {
-        id: user.id,
-        tokenVersion: user.tokenVersion,
+        id: userId,
+        tokenVersion: user.tokenVersion || 0,
         sessionId: sessionId
       },
       REFRESH_SECRET,
@@ -172,19 +171,16 @@ export const login = async (req: Request, res: Response) => {
     );
 
     // Update last login and session tracking
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        lastLogin: new Date(),
-        currentSessionId: sessionId,
-        sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000) // 1 hour
-      }
+    await User.findByIdAndUpdate(userId, {
+      lastLogin: new Date(),
+      currentSessionId: sessionId,
+      sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000)
     });
 
     // Write audit log
     await logAudit({
-      tenantId: user.tenantId,
-      userId: user.id,
+      tenantId: user.tenantId ? user.tenantId.toString() : null,
+      userId: userId,
       action: 'LOGIN',
       module: 'USERS',
       ipAddress: req.ip
@@ -197,14 +193,14 @@ export const login = async (req: Request, res: Response) => {
         accessToken,
         refreshToken,
         user: {
-          id: user.id,
+          id: userId,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          role: user.role.name,
-          allowMultiDeviceLogin: user.role.allowMultiDeviceLogin,
+          role: user.role?.name,
+          allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
           permissions,
-          tenantId: user.tenantId,
+          tenantId: user.tenantId ? user.tenantId.toString() : null,
           tenantStatus: user.tenant?.status || null,
           tenantName: user.tenant?.companyName || 'RAGCP',
           tenantLogo: user.tenant?.logoUrl || null
@@ -212,6 +208,7 @@ export const login = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
+    console.error('Login error:', error);
     return res.status(500).json({
       success: false,
       message: 'Server error',
@@ -233,10 +230,7 @@ export const refreshToken = async (req: Request, res: Response) => {
 
   try {
     const decoded: any = jwt.verify(token, REFRESH_SECRET);
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      include: { role: true }
-    });
+    const user: any = await User.findById(decoded.id).populate('role').lean();
 
     if (!user || user.deletedAt || user.status !== 'ACTIVE') {
       return res.status(403).json({
@@ -246,8 +240,15 @@ export const refreshToken = async (req: Request, res: Response) => {
       });
     }
 
+    const userId = (user._id || user.id).toString();
+
     const newAccessToken = jwt.sign(
-      { id: user.id, email: user.email, role: user.role.name, tenantId: user.tenantId },
+      {
+        id: userId,
+        email: user.email,
+        role: user.role?.name,
+        tenantId: user.tenantId ? user.tenantId.toString() : null
+      },
       JWT_SECRET,
       { expiresIn: '1h' }
     );
@@ -274,40 +275,27 @@ export const forgotPassword = async (req: Request, res: Response) => {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: { role: true }
-    });
+    const user: any = await User.findOne({ email }).populate('role').lean();
 
     if (!user) {
-      // Security: don't reveal if email exists
       return res.status(200).json({
         success: true,
         message: 'If this email is registered, a new password has been sent to it.'
       });
     }
 
-    // Generate new temporary password
     const newPassword = 'Temp@' + Math.floor(100000 + Math.random() * 900000);
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(newPassword, salt);
 
-    // Update password in DB
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash }
-    });
+    await User.findByIdAndUpdate(user._id || user.id, { passwordHash });
 
-    // Get login URL from request origin
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-
-    // Fetch company name
-    const tenant = user.tenantId ? await prisma.tenant.findUnique({ where: { id: user.tenantId } }) : null;
+    const tenant: any = user.tenantId ? await Tenant.findById(user.tenantId).lean() : null;
     const userName = user.firstName + (user.lastName ? ' ' + user.lastName : '');
 
-    // Send email with new password
     await sendForgotPasswordEmail({
-      tenantId: user.tenantId,
+      tenantId: user.tenantId ? user.tenantId.toString() : null,
       toEmail: email,
       name: userName,
       newPassword,
@@ -315,16 +303,13 @@ export const forgotPassword = async (req: Request, res: Response) => {
       companyName: tenant?.companyName || 'RAGCP Platform'
     });
 
-    // Notification log
-    await prisma.notificationLog.create({
-      data: {
-        tenantId: user.tenantId,
-        recipient: email,
-        channel: 'EMAIL',
-        title: 'Password Reset',
-        message: `New temporary password sent to ${email}`,
-        status: 'SENT'
-      }
+    await NotificationLog.create({
+      tenantId: user.tenantId || null,
+      recipient: email,
+      channel: 'EMAIL',
+      title: 'Password Reset',
+      message: `New temporary password sent to ${email}`,
+      status: 'SENT'
     });
 
     return res.status(200).json({
@@ -364,10 +349,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(newPassword, salt);
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash }
-    });
+    await User.findByIdAndUpdate(userId, { passwordHash });
 
     return res.status(200).json({
       success: true,
@@ -387,37 +369,30 @@ export const getMe = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(401).json({ success: false, message: 'Not authenticated' });
   }
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      include: {
-        role: {
-          include: {
-            permissions: {
-              include: {
-                permission: true
-              }
-            }
-          }
-        },
-        tenant: true,
-        staff: {
-          include: {
-            personAssociated: true
-          }
-        },
-        client: {
-          include: {
-            profile: true
-          }
+    const user: any = await User.findById(req.user.id)
+      .populate({
+        path: 'role',
+        populate: {
+          path: 'permissions',
+          populate: { path: 'permission' }
         }
-      }
-    });
+      })
+      .populate('tenant')
+      .populate({
+        path: 'staff',
+        populate: { path: 'personAssociated' }
+      })
+      .populate({
+        path: 'client',
+        populate: { path: 'profile' }
+      })
+      .lean();
 
     if (!user || user.deletedAt) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role.name !== 'SUPER_ADMIN') {
+    if (user.tenant && user.tenant.status === 'SUSPENDED' && user.role?.name !== 'SUPER_ADMIN') {
       return res.status(403).json({
         success: false,
         message: 'Your organization account is suspended. Please contact super admin.',
@@ -425,21 +400,24 @@ export const getMe = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    const permissions = user.role.permissions.map(rp => rp.permission.code);
+    const permissions =
+      user.role?.permissions?.map((rp: any) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
+
+    const userId = (user._id || user.id).toString();
 
     return res.status(200).json({
       success: true,
       data: {
         user: {
-          id: user.id,
+          id: userId,
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
           mobile: user.mobile,
-          role: user.role.name,
-          allowMultiDeviceLogin: user.role.allowMultiDeviceLogin,
+          role: user.role?.name,
+          allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
           permissions,
-          tenantId: user.tenantId,
+          tenantId: user.tenantId ? user.tenantId.toString() : null,
           tenantStatus: user.tenant?.status || null,
           staff: user.staff,
           client: user.client,
@@ -454,13 +432,9 @@ export const getMe = async (req: AuthenticatedRequest, res: Response) => {
 
 export const getPublicTenants = async (req: Request, res: Response) => {
   try {
-    const tenants = await prisma.tenant.findMany({
-      where: { status: 'ACTIVE' },
-      select: {
-        id: true,
-        companyName: true
-      }
-    });
+    const tenants = await Tenant.find({ status: 'ACTIVE' })
+      .select('id companyName')
+      .lean();
 
     return res.json({ success: true, data: tenants });
   } catch (err: any) {
@@ -477,7 +451,7 @@ export const changePassword = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Current password and new password are required' });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user: any = await User.findById(userId).lean();
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
@@ -486,14 +460,11 @@ export const changePassword = async (req: Request, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const newHash = await bcrypt.hash(newPassword, salt);
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: newHash,
-        tokenVersion: { increment: 1 },
-        currentSessionId: null,
-        sessionExpiresAt: null
-      }
+    await User.findByIdAndUpdate(userId, {
+      passwordHash: newHash,
+      $inc: { tokenVersion: 1 },
+      currentSessionId: null,
+      sessionExpiresAt: null
     });
 
     return res.json({ success: true, message: 'Password changed successfully' });
@@ -511,22 +482,15 @@ export const logout = async (req: AuthenticatedRequest, res: Response) => {
     const { allDevices } = req.body;
 
     if (allDevices) {
-      await prisma.user.update({
-        where: { id: req.user.id },
-        data: {
-          tokenVersion: { increment: 1 },
-          currentSessionId: null,
-          sessionExpiresAt: null
-        }
+      await User.findByIdAndUpdate(req.user.id, {
+        $inc: { tokenVersion: 1 },
+        currentSessionId: null,
+        sessionExpiresAt: null
       });
     } else {
-      // Just clear the current session ID to allow single-device logins again
-      await prisma.user.update({
-        where: { id: req.user.id },
-        data: {
-          currentSessionId: null,
-          sessionExpiresAt: null
-        }
+      await User.findByIdAndUpdate(req.user.id, {
+        currentSessionId: null,
+        sessionExpiresAt: null
       });
     }
 
@@ -541,27 +505,20 @@ export const requestOtp = async (req: Request, res: Response) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
 
-    // Check if email already exists
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await User.findOne({ email }).lean();
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'Email is already registered. Please login.' });
     }
 
-    // Generate 6 digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store in DB (upsert so we don't duplicate for same email)
-    await prisma.emailVerification.upsert({
-      where: { email },
-      update: { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }, // 10 mins expiry
-      create: { email, otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }
-    });
+    await EmailVerification.findOneAndUpdate(
+      { email },
+      { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) },
+      { upsert: true, returnDocument: 'after' }
+    );
 
-    // We need to send email here if SMTP is configured. 
-    // Since we don't have SMTP configured for all users by default in the global environment,
-    // we'll simulate it by returning it in the console for development if needed, 
-    // or actually send it if possible. The user hasn't provided SMTP creds, so let's use a mock or standard response.
-        console.log(`OTP for ${email} is: ${otp}`);
+    console.log(`OTP for ${email} is: ${otp}`);
 
     try {
       let smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
@@ -573,7 +530,7 @@ export const requestOtp = async (req: Request, res: Response) => {
 
       const { tenantId } = req.body;
       if (tenantId) {
-        const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+        const tenant: any = await Tenant.findById(tenantId).lean();
         if (tenant && tenant.smtpHost && tenant.smtpUser && tenant.smtpPassword) {
           smtpHost = tenant.smtpHost;
           smtpPort = tenant.smtpPort || 587;
@@ -616,9 +573,6 @@ export const requestOtp = async (req: Request, res: Response) => {
       console.error('Failed to send OTP email:', emailErr);
     }
 
-
-    // Actually let's just use nodemailer if there's a global config, but usually there isn't.
-    // For now, we'll return a success message.
     return res.json({ success: true, message: 'OTP sent successfully to your email.' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
@@ -630,18 +584,16 @@ export const verifyOtp = async (req: Request, res: Response) => {
     const { email, otp } = req.body;
     if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP are required' });
 
-    const record = await prisma.emailVerification.findUnique({ where: { email } });
+    const record: any = await EmailVerification.findOne({ email }).lean();
     if (!record) return res.status(400).json({ success: false, message: 'No OTP requested for this email' });
 
     if (record.otp !== otp) return res.status(400).json({ success: false, message: 'Invalid OTP' });
-    if (record.expiresAt < new Date()) return res.status(400).json({ success: false, message: 'OTP has expired' });
+    if (new Date(record.expiresAt) < new Date()) return res.status(400).json({ success: false, message: 'OTP has expired' });
 
-    // Mark as verified by deleting it or just keeping it? We can delete it.
-    await prisma.emailVerification.delete({ where: { email } });
+    await EmailVerification.deleteOne({ email });
 
     return res.json({ success: true, message: 'Email verified successfully.' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-

@@ -1,30 +1,31 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import dynamicDb from '../config/db';
 
 export const getStocks = async (req: Request, res: Response) => {
- 
   try {
     const { query } = req.query;
-    let whereClause = {};
+    let whereClause: any = {};
     if (query && typeof query === 'string' && query.trim() !== '') {
-      const q = query.trim().toUpperCase();
+      const q = query.trim();
       whereClause = {
-        OR: [
-          { symbol: { contains: q } },
-          { name: { contains: q } }
+        $or: [
+          { symbol: { $regex: q, $options: 'i' } },
+          { name: { $regex: q, $options: 'i' } }
         ]
       };
     }
 
-    const stocks = await prisma.stock.findMany({
-      where: whereClause,
-      take: 50, // Limit to 50 results for dropdown performance
-      orderBy: { symbol: 'asc' }
-    });
+    const stocks = await dynamicDb.Stock.find(whereClause)
+      .limit(50)
+      .sort({ symbol: 1 })
+      .lean();
 
-    return res.json({ success: true, data: stocks });
+    const formattedStocks = stocks.map((s: any) => ({
+      ...s,
+      id: s._id?.toString() || s.id
+    }));
+
+    return res.json({ success: true, data: formattedStocks });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -49,12 +50,13 @@ export const createSignal = async (req: Request, res: Response) => {
     const userRole = (req as any).user.role;
     const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
     if (!isFullAdmin) {
-      const hasAdd = await prisma.rolePermission.findFirst({
-        where: { role: { name: userRole }, permission: { code: 'ADD_RESEARCH' } }
-      });
-      const hasOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: userRole }, permission: { code: 'OWN_RESEARCH' } }
-      });
+      const roleDoc = await dynamicDb.Role.findOne({ name: userRole }).lean();
+      const roleId = roleDoc?._id;
+      const addPerm = await dynamicDb.Permission.findOne({ code: 'ADD_RESEARCH' }).lean();
+      const ownPerm = await dynamicDb.Permission.findOne({ code: 'OWN_RESEARCH' }).lean();
+
+      const hasAdd = addPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: addPerm._id }).lean() : null;
+      const hasOwn = ownPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: ownPerm._id }).lean() : null;
 
       if (!hasAdd && !hasOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to create signals.' });
@@ -73,37 +75,34 @@ export const createSignal = async (req: Request, res: Response) => {
     }
 
     const createdSignals: any[] = [];
-
-    // Use transaction to ensure all or nothing
-    await prisma.$transaction(async (tx) => {
-      for (const pId of parsedPlanIds) {
-        const newSignal = await tx.signal.create({
-          data: {
-            tenantId,
-            segment,
-            planId: pId,
-            callType,
-            tradeDuration,
-            stockId,
-            expiryDate: expiryDate ? new Date(expiryDate) : null,
-            strikePrice: strikePrice ? parseFloat(strikePrice) : null,
-            optionType: optionType || null,
-            entryPrice: parseFloat(entryPrice),
-            entryType,
-            suggestedQuantity,
-            target1: parseFloat(target1),
-            target2: target2 ? parseFloat(target2) : null,
-            target3: target3 ? parseFloat(target3) : null,
-            stoploss: parseFloat(stoploss),
-            description,
-            reportUrl,
-            createdById: userId,
-            status: 'OPEN'
-          }
-        });
-        createdSignals.push(newSignal);
-      }
-    });
+    for (const pId of parsedPlanIds) {
+      const newSignal = await dynamicDb.Signal.create({
+        tenantId,
+        segment,
+        planId: pId,
+        callType,
+        tradeDuration,
+        stockId,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        strikePrice: strikePrice ? parseFloat(strikePrice) : null,
+        optionType: optionType || null,
+        entryPrice: parseFloat(entryPrice),
+        entryType,
+        suggestedQuantity,
+        target1: parseFloat(target1),
+        target2: target2 ? parseFloat(target2) : null,
+        target3: target3 ? parseFloat(target3) : null,
+        stoploss: parseFloat(stoploss),
+        description,
+        reportUrl,
+        createdById: userId,
+        status: 'OPEN'
+      });
+      createdSignals.push({
+        ...newSignal.toObject(),
+        id: newSignal._id.toString()
+      });
+    }
 
     return res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
   } catch (err: any) {
@@ -119,7 +118,7 @@ export const listSignals = async (req: Request, res: Response) => {
     let whereClause: any = { tenantId };
 
     if (userRole === 'CLIENT') {
-      const client = await prisma.client.findFirst({ where: { userId: (req as any).user.id } });
+      const client = await dynamicDb.Client.findOne({ userId: (req as any).user.id }).lean();
       if (!client) {
         return res.status(403).json({
           success: false,
@@ -128,50 +127,38 @@ export const listSignals = async (req: Request, res: Response) => {
         });
       }
 
-      // Find all subscriptions (active, expired, etc.)
-      const allSubs = await prisma.subscription.findMany({
-        where: { clientId: client.id }
-      });
+      // Find all subscriptions
+      const allSubs = await dynamicDb.Subscription.find({ clientId: client._id }).lean();
 
       if (allSubs.length === 0) {
         return res.json({ success: true, data: [] });
       } else {
-        // Construct OR clause: Signal must be created during the active window of the subscription
-        const subConditions = allSubs.map(sub => {
+        const subConditions = allSubs.map((sub: any) => {
           const conditions: any = {
             planId: sub.planId,
-            createdAt: { gte: sub.startDate }
+            createdAt: { $gte: sub.startDate }
           };
           if (sub.endDate) {
-            conditions.createdAt.lte = sub.endDate;
+            conditions.createdAt.$lte = sub.endDate;
           }
           return conditions;
         });
 
-        if (whereClause.OR) {
-          // If there's already an OR clause, we need to wrap them in an AND
-          whereClause.AND = [
-            { OR: whereClause.OR },
-            { OR: subConditions }
-          ];
-          delete whereClause.OR;
-        } else {
-          whereClause.OR = subConditions;
-        }
+        whereClause.$or = subConditions;
       }
     } else {
       // Staff/Admin Permissions
       const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
       if (!isFullAdmin) {
-        const hasAdd = await prisma.rolePermission.findFirst({
-          where: { role: { name: userRole }, permission: { code: 'ADD_RESEARCH' } }
-        });
-        const hasView = await prisma.rolePermission.findFirst({
-          where: { role: { name: userRole }, permission: { code: 'VIEW_RESEARCH' } }
-        });
-        const hasOwn = await prisma.rolePermission.findFirst({
-          where: { role: { name: userRole }, permission: { code: 'OWN_RESEARCH' } }
-        });
+        const roleDoc = await dynamicDb.Role.findOne({ name: userRole }).lean();
+        const roleId = roleDoc?._id;
+        const addPerm = await dynamicDb.Permission.findOne({ code: 'ADD_RESEARCH' }).lean();
+        const viewPerm = await dynamicDb.Permission.findOne({ code: 'VIEW_RESEARCH' }).lean();
+        const ownPerm = await dynamicDb.Permission.findOne({ code: 'OWN_RESEARCH' }).lean();
+
+        const hasAdd = addPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: addPerm._id }).lean() : null;
+        const hasView = viewPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: viewPerm._id }).lean() : null;
+        const hasOwn = ownPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: ownPerm._id }).lean() : null;
 
         if (!hasAdd && !hasView && !hasOwn) {
           return res.status(403).json({ success: false, message: 'You do not have permission to view signals.' });
@@ -183,36 +170,44 @@ export const listSignals = async (req: Request, res: Response) => {
       }
     }
 
-    const signals = await prisma.signal.findMany({
-      where: whereClause,
-      include: {
-        stock: true,
-        messages: {
-          orderBy: { createdAt: 'desc' }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    const signals = await dynamicDb.Signal.find(whereClause)
+      .populate('stock')
+      .populate({
+        path: 'messages',
+        options: { sort: { createdAt: -1 } }
+      })
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const planIds = signals.map(s => s.planId);
-    const plans = await prisma.plan.findMany({ where: { id: { in: planIds } } });
-    const categories = await prisma.planCategory.findMany({ where: { id: { in: planIds } } });
+    const planIds = signals.map((s: any) => s.planId).filter(Boolean);
+    const plans = await dynamicDb.Plan.find({ _id: { $in: planIds } }).lean();
+    const categories = await dynamicDb.PlanCategory.find({ _id: { $in: planIds } }).lean();
 
-    const map = new Map();
-    plans.forEach(p => map.set(p.id, p.name));
-    categories.forEach(c => map.set(c.id, c.name));
+    const map = new Map<string, string>();
+    plans.forEach((p: any) => map.set(p._id.toString(), p.name));
+    categories.forEach((c: any) => map.set(c._id.toString(), c.name));
 
     // Manually fetch researcher names
-    const userIds = [...new Set(signals.map(s => s.createdById))];
-    const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, firstName: true, lastName: true } });
-    const userMap = new Map();
-    users.forEach(u => userMap.set(u.id, `${u.firstName} ${u.lastName}`));
+    const userIds = [...new Set(signals.map((s: any) => s.createdById).filter(Boolean))];
+    const users = await dynamicDb.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
+    const userMap = new Map<string, string>();
+    users.forEach((u: any) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
 
-    const finalData = signals.map(s => ({
-      ...s,
-      planName: map.get(s.planId) || s.planId,
-      createdByName: userMap.get(s.createdById) || 'Unknown Researcher'
-    }));
+    const finalData = signals.map((s: any) => {
+      const pIdStr = s.planId?.toString();
+      const cIdStr = s.createdById?.toString();
+      const stock = s.stockId || s.stock;
+      return {
+        ...s,
+        id: s._id?.toString() || s.id,
+        stock: stock ? {
+          ...stock,
+          id: stock._id?.toString() || stock.id
+        } : null,
+        planName: (pIdStr && map.get(pIdStr)) || pIdStr || '',
+        createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher'
+      };
+    });
 
     return res.json({ success: true, data: finalData });
   } catch (err: any) {
@@ -226,54 +221,67 @@ export const closeSignal = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { closeStatus, exitPrice, closeRemark, closeTargets, isFinalClose } = req.body;
 
-    const signal = await prisma.signal.findFirst({
-      where: { id, tenantId },
-      include: { stock: true }
-    });
+    const signal = await dynamicDb.Signal.findOne({ _id: id, tenantId })
+      .populate('stock')
+      .lean();
 
     if (!signal) {
       return res.status(404).json({ success: false, message: 'Signal not found' });
     }
 
-    const updatedSignal = await prisma.signal.update({
-      where: { id },
-      data: {
-        status: isFinalClose ? 'CLOSED' : 'OPEN', // Only close if it's a final close
-        closeStatus,
-        exitPrice: exitPrice ? parseFloat(exitPrice) : null,
-        closeRemark,
-        closeTargets,
-        closedAt: isFinalClose ? new Date() : null
-      }
-    });
+    const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: isFinalClose ? 'CLOSED' : 'OPEN',
+          closeStatus,
+          exitPrice: exitPrice ? parseFloat(exitPrice) : null,
+          closeRemark,
+          closeTargets,
+          closedAt: isFinalClose ? new Date() : null
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
 
     // Notify clients who were subscribed to this plan AT THE TIME the signal was created
-    const allSubs = await prisma.subscription.findMany({
-      where: {
-        planId: signal.planId,
-        startDate: { lte: signal.createdAt }
-      },
-      include: { client: { include: { user: true } } }
-    });
+    const allSubs = await dynamicDb.Subscription.find({
+      planId: signal.planId,
+      startDate: { $lte: signal.createdAt }
+    })
+      .populate({
+        path: 'clientId',
+        populate: { path: 'userId', select: '_id id firstName lastName' }
+      })
+      .lean();
 
-    // Filter out subscriptions that expired BEFORE the signal was created
-    const eligibleSubs = allSubs.filter(sub => !sub.endDate || sub.endDate >= signal.createdAt);
+    const sig: any = signal;
+    const eligibleSubs = allSubs.filter((sub: any) => !sub.endDate || new Date(sub.endDate) >= new Date(signal.createdAt));
+    const stock = sig.stockId || sig.stock || {};
+    const stockSymbol = stock.symbol || 'Stock';
 
-    const notificationPromises = eligibleSubs.map(sub => {
-      return prisma.notificationLog.create({
-        data: {
-          tenantId,
-          recipient: sub.client.userId,
-          channel: 'INAPP',
-          title: `Signal Update: ${signal.stock.symbol}`,
-          message: `The signal for ${signal.stock.symbol} has been closed/updated. Status: ${closeStatus}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`
-        }
+    const notificationPromises = eligibleSubs.map((sub: any) => {
+      const client = sub.clientId || sub.client;
+      const user = client?.userId || client?.user;
+      const recipientId = user?._id || client?.userId;
+      if (!recipientId) return null;
+
+      return dynamicDb.NotificationLog.create({
+        tenantId,
+        recipient: recipientId,
+        channel: 'INAPP',
+        title: `Signal Update: ${stockSymbol}`,
+        message: `The signal for ${stockSymbol} has been closed/updated. Status: ${closeStatus}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`
       });
-    });
+    }).filter(Boolean);
 
     await Promise.all(notificationPromises);
 
-    return res.json({ success: true, data: updatedSignal, message: 'Signal closed successfully and clients notified.' });
+    return res.json({
+      success: true,
+      data: updatedSignal ? { ...updatedSignal, id: updatedSignal._id?.toString() || updatedSignal.id } : null,
+      message: 'Signal closed successfully and clients notified.'
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -290,25 +298,27 @@ export const uploadReport = async (req: Request, res: Response) => {
 
     const reportUrl = `/uploads/research/${req.file.filename}`;
 
-    const signal = await prisma.signal.findFirst({
-      where: { id, tenantId }
-    });
+    const signal = await dynamicDb.Signal.findOne({ _id: id, tenantId });
 
     if (!signal) {
       return res.status(404).json({ success: false, message: 'Signal not found' });
     }
 
-    const updatedSignal = await prisma.signal.update({
-      where: { id },
-      data: { reportUrl }
-    });
+    const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(
+      id,
+      { $set: { reportUrl } },
+      { returnDocument: 'after', lean: true }
+    );
 
-    return res.json({ success: true, data: updatedSignal, message: 'Report uploaded successfully.' });
+    return res.json({
+      success: true,
+      data: updatedSignal ? { ...updatedSignal, id: updatedSignal._id?.toString() || updatedSignal.id } : null,
+      message: 'Report uploaded successfully.'
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 export const addSignalMessage = async (req: Request, res: Response) => {
   try {
@@ -319,49 +329,59 @@ export const addSignalMessage = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Message is required' });
     }
 
-    const signalMessage = await prisma.signalMessage.create({
-      data: {
-        signalId: id,
-        message
-      }
+    const signalMessage = await dynamicDb.SignalMessage.create({
+      signalId: id,
+      message
     });
 
-    const signal = await prisma.signal.findFirst({
-      where: { id },
-      include: { stock: true }
-    });
+    const signal = await dynamicDb.Signal.findById(id)
+      .populate('stock')
+      .lean();
 
     if (signal) {
       const tenantId = (req as any).user.tenantId || signal.tenantId;
 
-      // Notify clients who were subscribed to this plan AT THE TIME the signal was created
-      const allSubs = await prisma.subscription.findMany({
-        where: {
-          planId: signal.planId,
-          startDate: { lte: signal.createdAt }
-        },
-        include: { client: { include: { user: true } } }
-      });
+      const allSubs = await dynamicDb.Subscription.find({
+        planId: signal.planId,
+        startDate: { $lte: signal.createdAt }
+      })
+        .populate({
+          path: 'clientId',
+          populate: { path: 'userId', select: '_id id' }
+        })
+        .lean();
 
-      // Filter out subscriptions that expired BEFORE the signal was created
-      const eligibleSubs = allSubs.filter(sub => !sub.endDate || sub.endDate >= signal.createdAt);
+      const eligibleSubs = allSubs.filter((sub: any) => !sub.endDate || new Date(sub.endDate) >= new Date(signal.createdAt));
+      const sig: any = signal;
+      const stock = sig.stockId || sig.stock || {};
+      const stockSymbol = stock.symbol || 'Stock';
 
-      const notificationPromises = eligibleSubs.map(sub => {
-        return prisma.notificationLog.create({
-          data: {
-            tenantId,
-            recipient: sub.client.userId,
-            channel: 'INAPP',
-            title: `Trade Update: ${signal.stock.symbol}`,
-            message: `New update on trade ${signal.stock.symbol}: ${message}`
-          }
+      const notificationPromises = eligibleSubs.map((sub: any) => {
+        const client = sub.clientId || sub.client;
+        const user = client?.userId || client?.user;
+        const recipientId = user?._id || client?.userId;
+        if (!recipientId) return null;
+
+        return dynamicDb.NotificationLog.create({
+          tenantId,
+          recipient: recipientId,
+          channel: 'INAPP',
+          title: `Trade Update: ${stockSymbol}`,
+          message: `New update on trade ${stockSymbol}: ${message}`
         });
-      });
+      }).filter(Boolean);
 
       await Promise.all(notificationPromises);
     }
 
-    res.status(201).json({ success: true, message: 'Alert sent successfully', data: signalMessage });
+    res.status(201).json({
+      success: true,
+      message: 'Alert sent successfully',
+      data: {
+        ...signalMessage.toObject(),
+        id: signalMessage._id.toString()
+      }
+    });
   } catch (error: any) {
     console.error('Error adding signal message:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });

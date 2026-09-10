@@ -4,16 +4,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.testSmtpConnection = exports.updateGlobalBranding = exports.getGlobalBranding = void 0;
-const client_1 = require("@prisma/client");
+const db_1 = __importDefault(require("../config/db"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
-const prisma = new client_1.PrismaClient();
 const BRANDING_KEY = 'GLOBAL_BRANDING';
 const getGlobalBranding = async (req, res) => {
     try {
-        const setting = await prisma.systemSetting.findUnique({
-            where: { key: BRANDING_KEY },
-        });
+        const setting = await db_1.default.SystemSetting.findOne({
+            key: BRANDING_KEY,
+        }).lean();
         if (!setting) {
             // Return default branding if not set
             return res.status(200).json({
@@ -48,7 +47,7 @@ const updateGlobalBranding = async (req, res) => {
         }
         // Read existing branding to preserve fields not being updated
         let existingData = { appName: 'RAGCP', logoUrl: '/logo-light.png', faviconUrl: '/favicon.ico', loginLogoUrl: '/logo-light.png' };
-        const existing = await prisma.systemSetting.findUnique({ where: { key: BRANDING_KEY } });
+        const existing = await db_1.default.SystemSetting.findOne({ key: BRANDING_KEY }).lean();
         if (existing) {
             try {
                 existingData = JSON.parse(existing.value);
@@ -85,26 +84,21 @@ const updateGlobalBranding = async (req, res) => {
             faviconUrl,
             loginLogoUrl
         };
-        const setting = await prisma.systemSetting.upsert({
-            where: { key: BRANDING_KEY },
-            update: {
+        const setting = await db_1.default.SystemSetting.findOneAndUpdate({ key: BRANDING_KEY }, {
+            $set: {
                 value: JSON.stringify(brandingData),
                 updatedById: user.id
             },
-            create: {
-                key: BRANDING_KEY,
-                value: JSON.stringify(brandingData),
-                updatedById: user.id
-            }
-        });
+            $setOnInsert: { key: BRANDING_KEY }
+        }, { upsert: true, returnDocument: 'after', lean: true });
         // Auto-sync global branding updates across all company domains in background
-        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'BRANDING_UPDATE' }).catch(err => {
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'BRANDING_UPDATE' }).catch((err) => {
             console.warn('Background sync for global branding update error:', err);
         });
         res.status(200).json({
             success: true,
             message: 'Global branding updated and propagated across companies successfully',
-            data: JSON.parse(setting.value)
+            data: setting ? JSON.parse(setting.value) : {}
         });
     }
     catch (error) {

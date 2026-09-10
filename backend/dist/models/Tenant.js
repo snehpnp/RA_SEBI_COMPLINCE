@@ -1,0 +1,109 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Tenant = exports.TenantSchema = void 0;
+const mongoose_1 = __importStar(require("mongoose"));
+const _schemaOptions_1 = require("./_schemaOptions");
+exports.TenantSchema = new mongoose_1.Schema({
+    companyName: { type: String, required: true },
+    companyType: { type: String, default: 'INDIVIDUAL' },
+    raType: { type: String, default: 'FULL_TIME' },
+    sebiRegistration: { type: String, required: true },
+    bseEnrollment: { type: String, default: null },
+    email: { type: String, required: true, unique: true },
+    mobile: { type: String, required: true },
+    address: { type: String, required: true },
+    pan: { type: String, required: true },
+    gst: { type: String, default: null },
+    website: { type: String, default: null },
+    ownerName: { type: String, default: 'Admin User' },
+    certificateUrl: { type: String, default: null },
+    certificateValidity: { type: Date, default: null },
+    nismCertificateUrl: { type: String, default: null },
+    nismValidity: { type: Date, default: null },
+    status: { type: String, default: 'PENDING_PROFILE' },
+    previousStatus: { type: String, default: null },
+    depositAmount: { type: Number, default: 0.0 },
+    aiUsage: { type: Boolean, default: false },
+    internalPolicyUrl: { type: String, default: null },
+    logoUrl: { type: String, default: null },
+    faviconUrl: { type: String, default: null },
+    gstCalculationType: { type: String, default: 'EXCLUSIVE' },
+    state: { type: String, default: null },
+    smtpHost: { type: String, default: null },
+    smtpPort: { type: Number, default: null },
+    smtpUser: { type: String, default: null },
+    smtpPassword: { type: String, default: null },
+    smtpFrom: { type: String, default: null },
+    bankAccountName: { type: String, default: null },
+    bankAccountNo: { type: String, default: null },
+    bankAccountType: { type: String, default: null },
+    bankIfsc: { type: String, default: null },
+    bankName: { type: String, default: null },
+    bankBranch: { type: String, default: null },
+    socialMediaLinks: { type: String, default: null },
+    digioClientId: { type: String, default: null },
+    digioClientSecret: { type: String, default: null },
+    digioKycTemplateName: { type: String, default: null },
+    agreementContent: { type: String, default: null },
+    kraProvider: { type: String, default: null },
+    kraApiKey: { type: String, default: null },
+    kraApiSecret: { type: String, default: null },
+    coSignatureUrl: { type: String, default: null },
+    activePaymentGateway: { type: String, default: 'RAZORPAY' },
+    razorpayKeyId: { type: String, default: null },
+    razorpayKeySecret: { type: String, default: null },
+    cashfreeAppId: { type: String, default: null },
+    cashfreeSecretKey: { type: String, default: null },
+    ccavenueMerchantId: { type: String, default: null },
+    ccavenueAccessCode: { type: String, default: null },
+    ccavenueWorkingKey: { type: String, default: null },
+    stripePublishableKey: { type: String, default: null },
+    stripeSecretKey: { type: String, default: null },
+    kycFirst: { type: Boolean, default: true },
+    welcomeEmailText: { type: String, default: null },
+    termsPdfUrl: { type: String, default: null },
+    privacyPdfUrl: { type: String, default: null },
+    reportDisclaimer: { type: String, default: null },
+    panelName: { type: String, default: null },
+    domainUrl: { type: String, default: null },
+    mongoDbUrl: { type: String, default: null },
+    dbName: { type: String, default: null },
+    tenantApiKey: { type: String, default: null },
+    createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
+    deletedAt: { type: Date, default: null }
+}, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Tenant' });
+exports.Tenant = mongoose_1.default.models.Tenant || mongoose_1.default.model('Tenant', exports.TenantSchema, 'Tenant');
+exports.default = exports.Tenant;

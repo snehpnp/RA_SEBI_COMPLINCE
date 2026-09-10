@@ -1,29 +1,26 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middlewares/auth';
-import { PrismaClient } from '@prisma/client';
+import dynamicDb from '../config/db';
 import { createKycRequest, createDocumentForEsign } from '../services/digioService';
 import { generateAgreementPdf } from '../services/pdfService';
-
-const prisma = new PrismaClient();
 
 export const initiateKyc = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
-    const client = await prisma.client.findFirst({ where: { userId }, include: { user: true } });
+    const client: any = await dynamicDb.Client.findOne({ userId }).populate('userId').lean();
     
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found' });
     }
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId as string } });
+    const tenant: any = await dynamicDb.Tenant.findById(req.user!.tenantId as string).lean();
     if (!tenant || !tenant.digioClientId || !tenant.digioClientSecret) {
       return res.status(400).json({ success: false, message: 'Digio credentials not configured by Admin' });
     }
 
-    // Usually Digio uses the PAN or Phone/Email as identifier. 
-    // For Digilocker KYC, customer_identifier is usually email or phone.
     const identifier = client.email || req.user!.email;
-    const customerName = client.name || `${client.user.firstName} ${client.user.lastName}`.trim() || 'Client';
+    const userObj = client.userId || {};
+    const customerName = client.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || 'Client';
 
     const digioResponse = await createKycRequest(
       tenant.digioClientId as string, 
@@ -46,23 +43,24 @@ export const initiateKyc = async (req: AuthenticatedRequest, res: Response) => {
 export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
-    const client = await prisma.client.findFirst({ where: { userId }, include: { user: true } });
+    const client: any = await dynamicDb.Client.findOne({ userId }).populate('userId').lean();
     
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found' });
     }
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: req.user!.tenantId as string } });
+    const tenant: any = await dynamicDb.Tenant.findById(req.user!.tenantId as string).lean();
     if (!tenant || !tenant.digioClientId || !tenant.digioClientSecret) {
       return res.status(400).json({ success: false, message: 'Digio credentials not configured by Admin' });
     }
 
     // 1. Generate PDF dynamically
-    const pdfBuffer = await generateAgreementPdf(client.id);
+    const clientIdStr = String(client._id || client.id);
+    const pdfBuffer = await generateAgreementPdf(clientIdStr);
 
     // 2. Upload to Digio for eSign
-    const identifier = req.user!.email; // Signer identifier
-    const fileName = `Agreement_${client.id}.pdf`;
+    const identifier = req.user!.email;
+    const fileName = `Agreement_${clientIdStr}.pdf`;
 
     const digioResponse = await createDocumentForEsign(
       tenant.digioClientId as string,
@@ -74,7 +72,7 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
 
     res.json({
       success: true,
-      data: digioResponse // Usually contains document id for the SDK to open
+      data: digioResponse
     });
   } catch (error: any) {
     console.error('Initiate Agreement Error:', error);
@@ -82,24 +80,23 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
   }
 };
 
-// Simplified webhook / status update logic for now
 export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { status, type } = req.body; // type = 'KYC' or 'AGREEMENT'
     const userId = req.user!.id;
     
-    const client = await prisma.client.findFirst({ where: { userId } });
+    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
 
+    const clientId = client._id || client.id;
+
     if (type === 'KYC' && status === 'COMPLETED') {
-      await prisma.client.update({
-        where: { id: client.id },
-        data: { status: 'AGREEMENT_PENDING' }
+      await dynamicDb.Client.findByIdAndUpdate(clientId, {
+        $set: { status: 'AGREEMENT_PENDING' }
       });
     } else if (type === 'AGREEMENT' && status === 'COMPLETED') {
-      await prisma.client.update({
-        where: { id: client.id },
-        data: { status: 'PAYMENT_PENDING' } // or ACTIVE based on flow
+      await dynamicDb.Client.findByIdAndUpdate(clientId, {
+        $set: { status: 'PAYMENT_PENDING' }
       });
     }
 

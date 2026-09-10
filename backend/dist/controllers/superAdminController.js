@@ -45,7 +45,6 @@ const tenantConnectionManager_1 = require("../services/tenantConnectionManager")
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const stateService_1 = require("../services/stateService");
 const jwt = __importStar(require("jsonwebtoken"));
-const pdfParse = require('pdf-parse');
 const pdfOcr_1 = require("../utils/pdfOcr");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 const createTenant = async (req, res) => {
@@ -68,26 +67,29 @@ const createTenant = async (req, res) => {
         // Check duplicates in Central DB all_companies
         let existingTenants = [];
         try {
-            existingTenants = await db_1.centralPrisma.allCompany.findMany({
-                where: {
-                    OR: [
-                        { email },
-                        { sebiRegistration },
-                        ...(pan ? [{ pan }] : []),
-                        { mobile },
-                        ...(gst ? [{ gst }] : []),
-                        ...(bseEnrollment ? [{ bseEnrollment }] : []),
-                        ...(domainUrl ? [{ domainUrl }] : [])
-                    ]
-                }
-            });
+            const orConditions = [
+                { email },
+                { sebiRegistration },
+                { mobile }
+            ];
+            if (pan)
+                orConditions.push({ pan });
+            if (gst)
+                orConditions.push({ gst });
+            if (bseEnrollment)
+                orConditions.push({ bseEnrollment });
+            if (domainUrl)
+                orConditions.push({ domainUrl });
+            existingTenants = await db_1.centralModels.AllCompany.find({
+                $or: orConditions
+            }).lean();
         }
         catch {
             existingTenants = [];
         }
         if (existingTenants.length > 0) {
             const duplicates = [];
-            existingTenants.forEach(tenant => {
+            existingTenants.forEach((tenant) => {
                 if (tenant.email === email)
                     duplicates.push('Email');
                 if (tenant.sebiRegistration === sebiRegistration)
@@ -112,9 +114,9 @@ const createTenant = async (req, res) => {
             });
         }
         // Check duplicates in User table
-        const existingUser = await db_1.default.user.findUnique({
-            where: { email: adminEmailToUse }
-        }).catch(() => null);
+        const existingUser = await db_1.centralModels.User.findOne({
+            email: adminEmailToUse
+        }).lean();
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -133,7 +135,7 @@ const createTenant = async (req, res) => {
         if (files && files.nismCertificate && files.nismCertificate[0]) {
             nismCertificateUrl = `/uploads/policies/${files.nismCertificate[0].filename}`;
         }
-        let ocrExtractedReg = sebiRegistration;
+        const ocrExtractedReg = sebiRegistration;
         // Hash credentials
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(rawAdminPassword, salt);
@@ -190,28 +192,24 @@ const createTenant = async (req, res) => {
                 errors: provisionResult.errors || [provisionResult.message]
             });
         }
-        const createdTenant = await db_1.centralPrisma.allCompany.findUnique({
-            where: { tenantId: provisionResult.tenantId }
-        });
+        const createdTenant = await db_1.centralModels.AllCompany.findOne({
+            tenantId: provisionResult.tenantId
+        }).lean();
         // Record document history if certificate files were uploaded
         if (certificateUrl && files?.sebiCertificate?.[0]) {
-            await db_1.centralPrisma.tenantDocumentHistory.create({
-                data: {
-                    tenantId: provisionResult.tenantId,
-                    docType: 'SEBI_CERTIFICATE',
-                    fileUrl: certificateUrl,
-                    fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
-                }
+            await db_1.centralModels.TenantDocumentHistory.create({
+                tenantId: provisionResult.tenantId,
+                docType: 'SEBI_CERTIFICATE',
+                fileUrl: certificateUrl,
+                fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
             }).catch(() => { });
         }
         if (nismCertificateUrl && files?.nismCertificate?.[0]) {
-            await db_1.centralPrisma.tenantDocumentHistory.create({
-                data: {
-                    tenantId: provisionResult.tenantId,
-                    docType: 'NISM_CERTIFICATE',
-                    fileUrl: nismCertificateUrl,
-                    fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
-                }
+            await db_1.centralModels.TenantDocumentHistory.create({
+                tenantId: provisionResult.tenantId,
+                docType: 'NISM_CERTIFICATE',
+                fileUrl: nismCertificateUrl,
+                fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
             }).catch(() => { });
         }
         // Automatically dispatch sync if remote domainUrl API is configured
@@ -226,15 +224,13 @@ const createTenant = async (req, res) => {
             console.warn('Auto-sync dispatch warning during tenant creation:', syncErr?.message || syncErr);
         }
         // Write SMTP notification log in Central DB
-        await db_1.centralPrisma.notificationLog.create({
-            data: {
-                tenantId: provisionResult.tenantId,
-                recipient: adminEmailToUse,
-                channel: 'EMAIL',
-                title: 'Company Registration & Dedicated Database Created',
-                message: `Welcome ${companyName}! Your dedicated database (${provisionResult.dbName}) is provisioned with all collections on RAGCP. Admin credentials: Username: ${adminEmailToUse}, Password: ${rawAdminPassword}. Domain: ${domainUrl || 'Configured'}.`,
-                status: 'SENT'
-            }
+        await db_1.centralModels.NotificationLog.create({
+            tenantId: provisionResult.tenantId,
+            recipient: adminEmailToUse,
+            channel: 'EMAIL',
+            title: 'Company Registration & Dedicated Database Created',
+            message: `Welcome ${companyName}! Your dedicated database (${provisionResult.dbName}) is provisioned with all collections on RAGCP. Admin credentials: Username: ${adminEmailToUse}, Password: ${rawAdminPassword}. Domain: ${domainUrl || 'Configured'}.`,
+            status: 'SENT'
         }).catch(() => { });
         // Log Super Admin Audit Trail
         await (0, auditService_1.logAudit)({
@@ -282,10 +278,11 @@ exports.createTenant = createTenant;
 const getTenantDocumentHistory = async (req, res) => {
     const { id } = req.params;
     try {
-        const history = await db_1.default.tenantDocumentHistory.findMany({
-            where: { tenantId: id },
-            orderBy: { uploadedAt: 'desc' }
-        });
+        const history = await db_1.centralModels.TenantDocumentHistory.find({
+            tenantId: id
+        })
+            .sort({ uploadedAt: -1 })
+            .lean();
         return res.status(200).json({ success: true, data: history });
     }
     catch (error) {
@@ -295,9 +292,9 @@ const getTenantDocumentHistory = async (req, res) => {
 exports.getTenantDocumentHistory = getTenantDocumentHistory;
 const getTenants = async (req, res) => {
     try {
-        const companies = await db_1.centralPrisma.allCompany.findMany({
-            orderBy: { createdAt: 'desc' }
-        });
+        const companies = await db_1.centralModels.AllCompany.find({})
+            .sort({ createdAt: -1 })
+            .lean();
         return res.status(200).json({ success: true, data: companies });
     }
     catch (error) {
@@ -312,29 +309,25 @@ const toggleTenantStatus = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid status' });
     }
     try {
-        const oldCompany = await db_1.centralPrisma.allCompany.findFirst({
-            where: { OR: [{ tenantId: id }, { id }] }
-        });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const oldCompany = await db_1.centralModels.AllCompany.findOne({
+            $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean();
         if (!oldCompany) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
-        const updatedCompany = await db_1.centralPrisma.allCompany.update({
-            where: { id: oldCompany.id },
-            data: { status }
-        });
+        const updatedCompany = await db_1.centralModels.AllCompany.findByIdAndUpdate(oldCompany._id || oldCompany.id, { $set: { status } }, { returnDocument: 'after', lean: true });
         // Update company's dedicated database
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantPrisma(id);
+            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
             if (resolved) {
-                await resolved.prisma.tenant.updateMany({
-                    data: { status }
-                }).catch(() => { });
-                await resolved.prisma.user.updateMany({
-                    data: {
+                await resolved.models.Tenant.updateMany({}, { $set: { status } }).catch(() => { });
+                await resolved.models.User.updateMany({}, {
+                    $set: {
                         status: status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
-                        tokenVersion: { increment: 1 },
                         currentSessionId: null
-                    }
+                    },
+                    $inc: { tokenVersion: 1 }
                 }).catch(() => { });
             }
         }
@@ -343,7 +336,7 @@ const toggleTenantStatus = async (req, res) => {
         }
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync status change to remote domainUrl API if configured
-        (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'STATUS_CHANGE' }).catch(syncErr => {
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'STATUS_CHANGE' }).catch((syncErr) => {
             console.warn('Auto-sync status change warning:', syncErr);
         });
         await (0, auditService_1.logAudit)({
@@ -368,26 +361,20 @@ exports.toggleTenantStatus = toggleTenantStatus;
 const deleteTenant = async (req, res) => {
     const { id } = req.params;
     try {
-        const oldCompany = await db_1.centralPrisma.allCompany.findFirst({
-            where: { OR: [{ tenantId: id }, { id }] }
-        });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const oldCompany = await db_1.centralModels.AllCompany.findOne({
+            $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean();
         if (!oldCompany) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
-        const updatedCompany = await db_1.centralPrisma.allCompany.update({
-            where: { id: oldCompany.id },
-            data: { status: 'DELETED' }
-        });
+        const updatedCompany = await db_1.centralModels.AllCompany.findByIdAndUpdate(oldCompany._id || oldCompany.id, { $set: { status: 'DELETED' } }, { returnDocument: 'after', lean: true });
         // Mark users and tenant as DELETED in company's dedicated DB
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantPrisma(id);
+            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
             if (resolved) {
-                await resolved.prisma.tenant.updateMany({
-                    data: { status: 'DELETED', deletedAt: new Date() }
-                }).catch(() => { });
-                await resolved.prisma.user.updateMany({
-                    data: { status: 'DELETED', deletedAt: new Date() }
-                }).catch(() => { });
+                await resolved.models.Tenant.updateMany({}, { $set: { status: 'DELETED', deletedAt: new Date() } }).catch(() => { });
+                await resolved.models.User.updateMany({}, { $set: { status: 'DELETED', deletedAt: new Date() } }).catch(() => { });
             }
         }
         catch (err) {
@@ -395,7 +382,7 @@ const deleteTenant = async (req, res) => {
         }
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync soft delete to remote domainUrl API if configured
-        (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'DELETE' }).catch(syncErr => {
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'DELETE' }).catch((syncErr) => {
             console.warn('Auto-sync soft-delete warning:', syncErr);
         });
         await (0, auditService_1.logAudit)({
@@ -420,26 +407,20 @@ exports.deleteTenant = deleteTenant;
 const restoreTenant = async (req, res) => {
     const { id } = req.params;
     try {
-        const oldCompany = await db_1.centralPrisma.allCompany.findFirst({
-            where: { OR: [{ tenantId: id }, { id }] }
-        });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const oldCompany = await db_1.centralModels.AllCompany.findOne({
+            $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean();
         if (!oldCompany) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
-        const updatedCompany = await db_1.centralPrisma.allCompany.update({
-            where: { id: oldCompany.id },
-            data: { status: 'ACTIVE' }
-        });
+        const updatedCompany = await db_1.centralModels.AllCompany.findByIdAndUpdate(oldCompany._id || oldCompany.id, { $set: { status: 'ACTIVE' } }, { returnDocument: 'after', lean: true });
         // Restore users and tenant in company's dedicated DB
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantPrisma(id);
+            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
             if (resolved) {
-                await resolved.prisma.tenant.updateMany({
-                    data: { status: 'ACTIVE', deletedAt: null }
-                }).catch(() => { });
-                await resolved.prisma.user.updateMany({
-                    data: { status: 'ACTIVE', deletedAt: null }
-                }).catch(() => { });
+                await resolved.models.Tenant.updateMany({}, { $set: { status: 'ACTIVE', deletedAt: null } }).catch(() => { });
+                await resolved.models.User.updateMany({}, { $set: { status: 'ACTIVE', deletedAt: null } }).catch(() => { });
             }
         }
         catch (err) {
@@ -447,7 +428,7 @@ const restoreTenant = async (req, res) => {
         }
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync restore to remote domainUrl API if configured
-        (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'RESTORE' }).catch(syncErr => {
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'RESTORE' }).catch((syncErr) => {
             console.warn('Auto-sync restore warning:', syncErr);
         });
         await (0, auditService_1.logAudit)({
@@ -476,7 +457,7 @@ const permanentDeleteTenant = async (req, res) => {
         if (!password) {
             return res.status(400).json({ success: false, message: 'Password is required to confirm permanent deletion' });
         }
-        const superAdmin = await db_1.centralPrisma.user.findUnique({ where: { id: req.user.id } });
+        const superAdmin = await db_1.centralModels.User.findById(req.user.id).lean();
         if (!superAdmin) {
             return res.status(401).json({ success: false, message: 'Unauthorized' });
         }
@@ -484,16 +465,15 @@ const permanentDeleteTenant = async (req, res) => {
         if (!isMatch) {
             return res.status(400).json({ success: false, message: 'Incorrect password' });
         }
-        const oldCompany = await db_1.centralPrisma.allCompany.findFirst({
-            where: { OR: [{ tenantId: id }, { id }] }
-        });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const oldCompany = await db_1.centralModels.AllCompany.findOne({
+            $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean();
         if (!oldCompany) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
         // Delete from all_companies in Central DB
-        await db_1.centralPrisma.allCompany.delete({
-            where: { id: oldCompany.id }
-        });
+        await db_1.centralModels.AllCompany.findByIdAndDelete(oldCompany._id || oldCompany.id);
         // Drop the dedicated MongoDB database
         if (oldCompany.mongoDbUrl) {
             await tenantProvisionEngine_1.tenantProvisionEngine.dropTenantDatabase(oldCompany.mongoDbUrl).catch(() => { });
@@ -519,23 +499,32 @@ exports.permanentDeleteTenant = permanentDeleteTenant;
 const impersonateTenant = async (req, res) => {
     const { id } = req.params; // tenantId
     try {
-        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const tenant = await db_1.centralModels.AllCompany.findOne({
+            $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean() || await db_1.default.Tenant.findById(id).lean();
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Tenant not found' });
         }
+        const tenantIdStr = (tenant.tenantId || tenant._id || tenant.id).toString();
         // Find the Admin user for this tenant
-        const adminUser = await db_1.default.user.findFirst({
-            where: { tenantId: id, role: { name: 'ADMIN' } },
-            include: { role: true }
-        });
+        const adminRole = await db_1.default.Role.findOne({ name: 'ADMIN' }).lean();
+        let adminUser = await db_1.default.User.findOne({
+            tenantId: tenantIdStr,
+            ...(adminRole ? { roleId: adminRole._id || adminRole.id } : {})
+        }).populate('roleId').lean();
+        if (!adminUser) {
+            adminUser = await db_1.default.User.findOne({ tenantId: tenantIdStr }).populate('roleId').lean();
+        }
         if (!adminUser) {
             return res.status(404).json({ success: false, message: 'Admin user not found for this tenant' });
         }
+        const roleName = adminUser.roleId?.name || 'ADMIN';
         // Generate token with isImpersonated flag
         const accessToken = jwt.sign({
-            id: adminUser.id,
+            id: String(adminUser._id || adminUser.id),
             email: adminUser.email,
-            role: adminUser.role.name,
+            role: roleName,
             tenantId: adminUser.tenantId,
             isImpersonated: true
         }, JWT_SECRET, { expiresIn: '1h' });
@@ -543,7 +532,7 @@ const impersonateTenant = async (req, res) => {
             userId: req.user.id,
             action: 'IMPERSONATE',
             module: 'TENANTS',
-            newValue: { impersonatedUserId: adminUser.id, tenantId: id },
+            newValue: { impersonatedUserId: String(adminUser._id || adminUser.id), tenantId: id },
             ipAddress: req.ip
         });
         return res.status(200).json({
@@ -552,11 +541,11 @@ const impersonateTenant = async (req, res) => {
             data: {
                 accessToken,
                 user: {
-                    id: adminUser.id,
+                    id: String(adminUser._id || adminUser.id),
                     firstName: adminUser.firstName,
                     lastName: adminUser.lastName,
                     email: adminUser.email,
-                    role: adminUser.role.name,
+                    role: roleName,
                     tenantId: adminUser.tenantId,
                     tenantStatus: tenant.status,
                     isImpersonated: true
@@ -571,14 +560,10 @@ const impersonateTenant = async (req, res) => {
 exports.impersonateTenant = impersonateTenant;
 const getAuditLogs = async (req, res) => {
     try {
-        const logs = await db_1.default.auditLog.findMany({
-            include: {
-                user: {
-                    select: { firstName: true, lastName: true, email: true }
-                }
-            },
-            orderBy: { timestamp: 'desc' }
-        });
+        const logs = await db_1.default.AuditLog.find({})
+            .populate('userId', 'firstName lastName email')
+            .sort({ timestamp: -1 })
+            .lean();
         return res.status(200).json({ success: true, data: logs });
     }
     catch (error) {
@@ -588,89 +573,67 @@ const getAuditLogs = async (req, res) => {
 exports.getAuditLogs = getAuditLogs;
 const getGlobalTelemetry = async (req, res) => {
     try {
-        const allTenants = await db_1.centralPrisma.allCompany.findMany({
-            select: { id: true, tenantId: true, companyName: true, status: true, deletedAt: true }
-        }).catch(() => []);
-        const validTenants = allTenants.filter(t => !t.deletedAt && t.status !== 'DELETED');
-        const tenantIds = validTenants.map(t => t.tenantId || t.id);
+        const allTenants = await db_1.centralModels.AllCompany.find({}, 'tenantId companyName status deletedAt').lean().catch(() => []);
+        const validTenants = allTenants.filter((t) => !t.deletedAt && t.status !== 'DELETED');
         const totalCompanies = validTenants.length;
-        const activeCompanies = validTenants.filter(t => t.status === 'ACTIVE').length;
-        const suspendedCompanies = validTenants.filter(t => t.status === 'SUSPENDED').length;
-        const pendingCompanies = validTenants.filter(t => t.status === 'PENDING_PROFILE').length;
+        const activeCompanies = validTenants.filter((t) => t.status === 'ACTIVE').length;
+        const suspendedCompanies = validTenants.filter((t) => t.status === 'SUSPENDED').length;
+        const pendingCompanies = validTenants.filter((t) => t.status === 'PENDING_PROFILE').length;
         // Fetch clients count safely
         let totalClients = 0;
         let activeClients = 0;
         let pendingClients = 0;
         try {
-            const allClients = await db_1.default.client.findMany({
-                select: { id: true, status: true }
-            });
+            const allClients = await db_1.default.Client.find({}, 'status').lean();
             totalClients = allClients.length;
-            activeClients = allClients.filter(c => c.status === 'ACTIVE').length;
-            pendingClients = allClients.filter(c => c.status !== 'ACTIVE').length;
+            activeClients = allClients.filter((c) => c.status === 'ACTIVE').length;
+            pendingClients = allClients.filter((c) => c.status !== 'ACTIVE').length;
         }
-        catch {
-            // Safe fallback
-        }
+        catch { }
         // Fetch staff count safely
         let totalStaff = 0;
         let activeStaff = 0;
         try {
-            const allStaff = await db_1.default.staff.findMany({
-                select: { id: true, status: true }
-            });
+            const allStaff = await db_1.default.Staff.find({}, 'status').lean();
             totalStaff = allStaff.length;
-            activeStaff = allStaff.filter(s => s.status === 'ACTIVE').length;
+            activeStaff = allStaff.filter((s) => s.status === 'ACTIVE').length;
         }
-        catch {
-            // Safe fallback
-        }
+        catch { }
         // Fetch alerts count safely
         let activeAlerts = 0;
         let totalAlerts = 0;
         let resolvedAlerts = 0;
         try {
-            activeAlerts = await db_1.default.complianceAlert.count({ where: { status: 'OPEN' } });
-            totalAlerts = await db_1.default.complianceAlert.count();
-            resolvedAlerts = await db_1.default.complianceAlert.count({ where: { status: 'RESOLVED' } });
+            activeAlerts = await db_1.default.ComplianceAlert.countDocuments({ status: 'OPEN' });
+            totalAlerts = await db_1.default.ComplianceAlert.countDocuments();
+            resolvedAlerts = await db_1.default.ComplianceAlert.countDocuments({ status: 'RESOLVED' });
         }
-        catch {
-            // Safe fallback
-        }
+        catch { }
         // Audit logs count
         let auditLogsCount = 0;
         try {
-            auditLogsCount = await db_1.default.auditLog.count();
+            auditLogsCount = await db_1.default.AuditLog.countDocuments();
         }
-        catch {
-            // Safe fallback
-        }
+        catch { }
         // Compliance audits count
         let totalAudits = 0;
         let pendingAudits = 0;
         let completedAudits = 0;
         try {
-            totalAudits = await db_1.default.complianceAudit.count();
-            pendingAudits = await db_1.default.complianceAudit.count({ where: { status: { in: ['PENDING', 'OVERDUE'] } } });
-            completedAudits = await db_1.default.complianceAudit.count({ where: { status: 'COMPLETED' } });
+            totalAudits = await db_1.default.ComplianceAudit.countDocuments();
+            pendingAudits = await db_1.default.ComplianceAudit.countDocuments({ status: { $in: ['PENDING', 'OVERDUE'] } });
+            completedAudits = await db_1.default.ComplianceAudit.countDocuments({ status: 'COMPLETED' });
         }
-        catch {
-            // Safe fallback
-        }
+        catch { }
         // Plans count
         let totalPlans = 0;
         let activePlans = 0;
         try {
-            const allPlans = await db_1.default.plan.findMany({
-                select: { id: true, status: true, deletedAt: true }
-            });
-            const validPlans = allPlans.filter(p => !p.deletedAt);
-            totalPlans = validPlans.length;
-            activePlans = validPlans.filter(p => p.status === 'ACTIVE').length;
+            const allPlans = await db_1.default.Plan.find({ deletedAt: null }, 'status').lean();
+            totalPlans = allPlans.length;
+            activePlans = allPlans.filter((p) => p.status === 'ACTIVE').length;
         }
-        catch {
-            // Safe fallback
-        }
+        catch { }
         return res.status(200).json({
             success: true,
             data: {
@@ -707,14 +670,14 @@ const getTenantDetails = async (req, res) => {
         const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
         let company = null;
         if (isObjectId) {
-            company = await db_1.centralPrisma.allCompany.findFirst({
-                where: { OR: [{ tenantId: id.trim() }, { id: id.trim() }] }
-            });
+            company = await db_1.centralModels.AllCompany.findOne({
+                $or: [{ tenantId: id.trim() }, { _id: id.trim() }]
+            }).lean();
         }
         else {
-            company = await db_1.centralPrisma.allCompany.findFirst({
-                where: { domainUrl: { contains: id.trim(), mode: 'insensitive' } }
-            });
+            company = await db_1.centralModels.AllCompany.findOne({
+                domainUrl: { $regex: id.trim(), $options: 'i' }
+            }).lean();
         }
         let tenantData = company;
         let admin = null;
@@ -722,28 +685,28 @@ const getTenantDetails = async (req, res) => {
         let allStaff = [];
         // Try to get live details from tenant's dedicated database
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantPrisma(company?.tenantId || id);
+            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(company?.tenantId || id);
             if (resolved) {
-                const liveTenant = await resolved.prisma.tenant.findFirst({
-                    include: {
-                        users: {
-                            include: { role: true, staff: { include: { personAssociated: true } } }
-                        }
-                    }
-                }).catch(() => null);
+                const liveTenant = await resolved.models.Tenant.findOne({}).lean();
+                const users = await resolved.models.User.find({}).populate('roleId').lean();
+                const staffRecords = await resolved.models.Staff.find({}).populate('personAssociated').lean();
+                const staffMap = new Map(staffRecords.map((s) => [String(s.userId), s]));
                 if (liveTenant) {
                     tenantData = { ...company, ...liveTenant };
-                    admin = liveTenant.users?.find(u => u.role?.name === 'ADMIN');
-                    officers = liveTenant.users?.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role?.name)) || [];
-                    allStaff = liveTenant.users?.filter(u => u.role?.name !== 'CLIENT').map(u => ({
-                        id: u.staff?.id || u.id,
-                        userId: u.id,
-                        name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
-                        email: u.staff?.email || u.email,
-                        mobile: u.staff?.mobile || u.mobile,
-                        role: u.role?.name || 'STAFF',
-                        status: u.staff?.status || u.status || 'ACTIVE'
-                    })) || [];
+                    admin = users.find((u) => u.roleId?.name === 'ADMIN');
+                    officers = users.filter((u) => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.roleId?.name)) || [];
+                    allStaff = users.filter((u) => u.roleId?.name !== 'CLIENT').map((u) => {
+                        const st = staffMap.get(String(u._id || u.id));
+                        return {
+                            id: st ? String(st._id || st.id) : String(u._id || u.id),
+                            userId: String(u._id || u.id),
+                            name: st?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+                            email: st?.email || u.email,
+                            mobile: st?.mobile || u.mobile,
+                            role: u.roleId?.name || 'STAFF',
+                            status: st?.status || u.status || 'ACTIVE'
+                        };
+                    }) || [];
                 }
             }
         }
@@ -772,7 +735,11 @@ const updateTenantDetails = async (req, res) => {
     const { id } = req.params;
     const { companyName, panelName, domainUrl, mongoDbUrl, dbName, certificateValidity, status, address, gst, supportMobile, adminName, adminMobile, adminEmail, adminPassword, adminStatus, nismValidity, companyType, sebiRegistration, bseEnrollment, pan, website, depositAmount, raType, state } = req.body;
     try {
-        const oldTenant = await db_1.default.tenant.findUnique({ where: { id } });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const oldTenant = await db_1.default.Tenant.findById(id).lean() ||
+            await db_1.centralModels.AllCompany.findOne({
+                $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+            }).lean();
         if (!oldTenant) {
             return res.status(404).json({ success: false, message: 'Tenant not found' });
         }
@@ -863,74 +830,41 @@ const updateTenantDetails = async (req, res) => {
         if (newNismUrl) {
             tenantUpdateData.nismCertificateUrl = newNismUrl;
         }
-        let updatedTenant;
-        const currentTenantUpdateData = { ...tenantUpdateData };
-        for (let attempt = 0; attempt < 25; attempt++) {
-            try {
-                updatedTenant = await db_1.default.tenant.update({
-                    where: { id },
-                    data: currentTenantUpdateData
-                });
-                break;
-            }
-            catch (err) {
-                const errMsg = err?.message || String(err);
-                if (errMsg.includes('Unknown argument')) {
-                    const matches = Array.from(errMsg.matchAll(/Unknown argument `([^`]+)`/g));
-                    if (matches && matches.length > 0) {
-                        let strippedAny = false;
-                        for (const match of matches) {
-                            const fieldName = match[1];
-                            if (fieldName && fieldName in currentTenantUpdateData) {
-                                delete currentTenantUpdateData[fieldName];
-                                strippedAny = true;
-                            }
-                        }
-                        if (strippedAny)
-                            continue;
-                    }
-                }
-                throw err;
-            }
+        let updatedTenant = await db_1.default.Tenant.findByIdAndUpdate(id, { $set: tenantUpdateData }, { returnDocument: 'after', lean: true });
+        if (!updatedTenant) {
+            updatedTenant = { ...oldTenant, ...tenantUpdateData };
         }
         if (files && files.sebiCertificate && files.sebiCertificate[0] && newSebiUrl) {
-            await db_1.default.tenantDocumentHistory.create({
-                data: {
-                    tenantId: id,
-                    docType: 'SEBI_CERTIFICATE',
-                    fileUrl: newSebiUrl,
-                    fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
-                }
-            });
+            await db_1.centralModels.TenantDocumentHistory.create({
+                tenantId: id,
+                docType: 'SEBI_CERTIFICATE',
+                fileUrl: newSebiUrl,
+                fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
+            }).catch(() => { });
         }
         if (files && files.nismCertificate && files.nismCertificate[0] && newNismUrl) {
-            await db_1.default.tenantDocumentHistory.create({
-                data: {
-                    tenantId: id,
-                    docType: 'NISM_CERTIFICATE',
-                    fileUrl: newNismUrl,
-                    fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
-                }
-            });
+            await db_1.centralModels.TenantDocumentHistory.create({
+                tenantId: id,
+                docType: 'NISM_CERTIFICATE',
+                fileUrl: newNismUrl,
+                fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
+            }).catch(() => { });
         }
         // Ensure tenantApiKey exists
         let apiKey = updatedTenant.tenantApiKey;
         if (!apiKey) {
             apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
-            await db_1.default.tenant.update({
-                where: { id: updatedTenant.id },
-                data: { tenantApiKey: apiKey }
-            });
+            await db_1.default.Tenant.findByIdAndUpdate(updatedTenant._id || updatedTenant.id || id, { $set: { tenantApiKey: apiKey } });
             updatedTenant.tenantApiKey = apiKey;
         }
         // Admin user update
-        let adminUser = await db_1.default.user.findFirst({
-            where: { tenantId: id, role: { name: 'ADMIN' } }
+        const adminRole = await db_1.default.Role.findOne({ name: 'ADMIN' }).lean();
+        let adminUser = await db_1.default.User.findOne({
+            tenantId: id,
+            ...(adminRole ? { roleId: adminRole._id || adminRole.id } : {})
         });
         if (!adminUser) {
-            adminUser = await db_1.default.user.findFirst({
-                where: { tenantId: id }
-            });
+            adminUser = await db_1.default.User.findOne({ tenantId: id });
         }
         if (adminUser) {
             const updateData = {};
@@ -945,8 +879,8 @@ const updateTenantDetails = async (req, res) => {
             if (adminEmail !== undefined && String(adminEmail).trim() !== '') {
                 const newEmail = String(adminEmail).toLowerCase().trim();
                 if (newEmail !== adminUser.email) {
-                    const existingUser = await db_1.default.user.findUnique({ where: { email: newEmail } });
-                    if (existingUser && existingUser.id !== adminUser.id) {
+                    const existingUser = await db_1.default.User.findOne({ email: newEmail }).lean();
+                    if (existingUser && String(existingUser._id || existingUser.id) !== String(adminUser._id || adminUser.id)) {
                         return res.status(400).json({
                             success: false,
                             message: `Admin email '${newEmail}' is already registered to another user.`
@@ -964,17 +898,14 @@ const updateTenantDetails = async (req, res) => {
                 updateData.tempPassword = adminPassword.trim();
             }
             if (Object.keys(updateData).length > 0) {
-                const updatedAdmin = await db_1.default.user.update({
-                    where: { id: adminUser.id },
-                    data: updateData
-                });
-                adminUser = updatedAdmin;
+                adminUser = await db_1.default.User.findByIdAndUpdate(adminUser._id || adminUser.id, { $set: updateData }, { returnDocument: 'after', lean: true });
             }
         }
         else {
-            const adminRole = await db_1.default.role.findUnique({ where: { name: 'ADMIN' } }) || await db_1.default.role.create({
-                data: { name: 'ADMIN', description: 'RA Company Owner' }
-            });
+            let roleDoc = adminRole;
+            if (!roleDoc) {
+                roleDoc = await db_1.default.Role.create({ name: 'ADMIN', description: 'RA Company Owner' });
+            }
             const targetEmail = (adminEmail && String(adminEmail).trim()) || updatedTenant.email;
             const targetName = (adminName && String(adminName).trim()) || updatedTenant.ownerName || updatedTenant.companyName;
             const parts = targetName.split(' ');
@@ -983,24 +914,21 @@ const updateTenantDetails = async (req, res) => {
             const rawPass = (adminPassword && String(adminPassword).trim()) || 'Admin@123';
             const salt = await bcrypt.genSalt(10);
             const hash = await bcrypt.hash(rawPass, salt);
-            adminUser = await db_1.default.user.create({
-                data: {
-                    tenantId: id,
-                    roleId: adminRole.id,
-                    firstName,
-                    lastName,
-                    email: targetEmail.toLowerCase().trim(),
-                    mobile: (adminMobile && String(adminMobile).trim()) || updatedTenant.mobile,
-                    passwordHash: hash,
-                    tempPassword: rawPass,
-                    status: (adminStatus && String(adminStatus).trim()) || 'ACTIVE'
-                }
+            adminUser = await db_1.default.User.create({
+                tenantId: id,
+                roleId: roleDoc._id || roleDoc.id,
+                firstName,
+                lastName,
+                email: targetEmail.toLowerCase().trim(),
+                mobile: (adminMobile && String(adminMobile).trim()) || updatedTenant.mobile,
+                passwordHash: hash,
+                tempPassword: rawPass,
+                status: (adminStatus && String(adminStatus).trim()) || 'ACTIVE'
             });
         }
         // Sync to Central all_companies catalog
-        await db_1.centralPrisma.allCompany.upsert({
-            where: { tenantId: id },
-            update: {
+        await db_1.centralModels.AllCompany.findOneAndUpdate({ tenantId: id }, {
+            $set: {
                 companyName: updatedTenant.companyName,
                 domainUrl: updatedTenant.domainUrl || null,
                 ownerName: updatedTenant.ownerName,
@@ -1009,25 +937,18 @@ const updateTenantDetails = async (req, res) => {
                 sebiRegistration: updatedTenant.sebiRegistration,
                 status: updatedTenant.status
             },
-            create: {
+            $setOnInsert: {
                 tenantId: id,
-                companyName: updatedTenant.companyName,
-                domainUrl: updatedTenant.domainUrl || null,
                 dbName: updatedTenant.dbName || tenantConnectionManager_1.tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id),
-                mongoDbUrl: updatedTenant.mongoDbUrl || tenantConnectionManager_1.tenantConnectionManager.buildTenantMongoUri(updatedTenant.dbName || tenantConnectionManager_1.tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id)),
-                ownerName: updatedTenant.ownerName,
-                email: updatedTenant.email,
-                mobile: updatedTenant.mobile,
-                sebiRegistration: updatedTenant.sebiRegistration,
-                status: updatedTenant.status
+                mongoDbUrl: updatedTenant.mongoDbUrl || tenantConnectionManager_1.tenantConnectionManager.buildTenantMongoUri(updatedTenant.dbName || tenantConnectionManager_1.tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id))
             }
-        }).catch(() => { });
+        }, { upsert: true, returnDocument: 'after' }).catch(() => { });
         // Sync updates directly to the dedicated Tenant Database
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantPrisma(id);
+            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
             if (resolved) {
-                await resolved.prisma.tenant.updateMany({
-                    data: {
+                await resolved.models.Tenant.updateMany({}, {
+                    $set: {
                         companyName: updatedTenant.companyName,
                         domainUrl: updatedTenant.domainUrl,
                         ownerName: updatedTenant.ownerName,
@@ -1041,9 +962,8 @@ const updateTenantDetails = async (req, res) => {
                     }
                 }).catch(() => { });
                 if (adminUser) {
-                    await resolved.prisma.user.updateMany({
-                        where: { email: adminUser.email },
-                        data: {
+                    await resolved.models.User.updateMany({ email: adminUser.email }, {
+                        $set: {
                             firstName: adminUser.firstName,
                             lastName: adminUser.lastName,
                             mobile: adminUser.mobile,
@@ -1063,7 +983,7 @@ const updateTenantDetails = async (req, res) => {
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, {
             reason: 'UPDATE',
             adminPassword
-        }).catch(syncErr => {
+        }).catch((syncErr) => {
             console.warn('Auto-sync dispatch warning during tenant edit:', syncErr);
         });
         // Write audit log safely
@@ -1075,7 +995,7 @@ const updateTenantDetails = async (req, res) => {
                 oldValue: oldTenant,
                 newValue: updatedTenant,
                 ipAddress: req.ip
-            }).catch(err => console.error('Audit log failed:', err));
+            }).catch((err) => console.error('Audit log failed:', err));
         }
         return res.status(200).json({
             success: true,
@@ -1092,7 +1012,7 @@ exports.updateTenantDetails = updateTenantDetails;
 const updateSuperAdminPassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     try {
-        const user = await db_1.default.user.findUnique({ where: { id: req.user.id } });
+        const user = await db_1.centralModels.User.findById(req.user.id);
         if (!user) {
             return res.status(404).json({ success: false, message: 'Super admin user not found' });
         }
@@ -1105,10 +1025,7 @@ const updateSuperAdminPassword = async (req, res) => {
         }
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(newPassword, salt);
-        await db_1.default.user.update({
-            where: { id: user.id },
-            data: { passwordHash }
-        });
+        await db_1.centralModels.User.findByIdAndUpdate(user._id || user.id, { $set: { passwordHash } });
         return res.status(200).json({ success: true, message: 'Password updated successfully' });
     }
     catch (error) {
@@ -1125,7 +1042,6 @@ const parseSebiCertificate = async (req, res) => {
         const text = await (0, pdfOcr_1.extractTextFromPdf)(file.path);
         // If still no readable text after OCR, return graceful fallback
         if (!text || text.trim().length < 20) {
-            // Prevent NISM being uploaded as SEBI
             if (file.originalname.toLowerCase().includes('nism')) {
                 return res.status(200).json({
                     success: false,
@@ -1133,7 +1049,6 @@ const parseSebiCertificate = async (req, res) => {
                     message: 'Document Mismatch: You uploaded a NISM certificate in the SEBI field.'
                 });
             }
-            // Graceful fallback — return empty data so user can fill manually
             return res.status(200).json({
                 success: false,
                 data: null,
@@ -1222,7 +1137,6 @@ const parseNismCertificate = async (req, res) => {
                     message: 'Document Mismatch: You uploaded a SEBI certificate in the NISM field.'
                 });
             }
-            // Graceful fallback — return empty data so user can fill manually
             return res.status(200).json({
                 success: false,
                 data: null,
@@ -1297,9 +1211,9 @@ const parseNismCertificate = async (req, res) => {
 exports.parseNismCertificate = parseNismCertificate;
 const getComplianceRules = async (req, res) => {
     try {
-        const rules = await db_1.default.complianceRequirement.findMany({
-            orderBy: { serialNo: 'asc' }
-        });
+        const rules = await db_1.default.ComplianceRequirement.find({})
+            .sort({ serialNo: 1 })
+            .lean();
         return res.status(200).json({ success: true, data: rules });
     }
     catch (error) {
@@ -1311,13 +1225,12 @@ const updateComplianceRule = async (req, res) => {
     const { id } = req.params;
     const { requirement, frequency, frequencyType, severityLevel, penaltyAmount, isActive } = req.body;
     try {
-        const oldRule = await db_1.default.complianceRequirement.findUnique({ where: { id } });
+        const oldRule = await db_1.default.ComplianceRequirement.findById(id).lean();
         if (!oldRule) {
             return res.status(404).json({ success: false, message: 'Compliance rule not found' });
         }
-        const updatedRule = await db_1.default.complianceRequirement.update({
-            where: { id },
-            data: {
+        const updatedRule = await db_1.default.ComplianceRequirement.findByIdAndUpdate(id, {
+            $set: {
                 requirement: requirement !== undefined ? requirement : oldRule.requirement,
                 frequency: frequency !== undefined ? frequency : oldRule.frequency,
                 frequencyType: frequencyType !== undefined ? frequencyType : oldRule.frequencyType,
@@ -1325,7 +1238,7 @@ const updateComplianceRule = async (req, res) => {
                 penaltyAmount: penaltyAmount !== undefined ? penaltyAmount : oldRule.penaltyAmount,
                 isActive: typeof isActive === 'boolean' ? isActive : oldRule.isActive
             }
-        });
+        }, { returnDocument: 'after', lean: true });
         await (0, auditService_1.logAudit)({
             userId: req.user.id,
             action: 'UPDATE',
@@ -1347,7 +1260,7 @@ const updateComplianceRule = async (req, res) => {
             : '';
         return res.status(200).json({
             success: true,
-            message: `Compliance Rule #${updatedRule.serialNo} updated and propagated across all company databases successfully${syncMsg}.`,
+            message: `Compliance Rule #${updatedRule?.serialNo} updated and propagated across all company databases successfully${syncMsg}.`,
             data: updatedRule,
             syncResult
         });
@@ -1360,7 +1273,7 @@ exports.updateComplianceRule = updateComplianceRule;
 const provisionTenantDb = async (req, res) => {
     const { id } = req.params;
     try {
-        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        const tenant = await db_1.default.Tenant.findById(id).lean();
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
@@ -1370,14 +1283,20 @@ const provisionTenantDb = async (req, res) => {
                 message: 'No MongoDB Connection URL configured for this company. Please set MongoDB Connection URL first in Edit Company.'
             });
         }
-        const adminUser = await db_1.default.user.findFirst({
-            where: { tenantId: id, role: { name: 'ADMIN' } }
-        });
+        const adminRole = await db_1.default.Role.findOne({ name: 'ADMIN' }).lean();
+        const adminUser = await db_1.default.User.findOne({
+            tenantId: id,
+            ...(adminRole ? { roleId: adminRole._id || adminRole.id } : {})
+        }).lean();
         if (!adminUser) {
             return res.status(404).json({ success: false, message: 'No Admin user found for this company.' });
         }
-        const result = await (0, tenantProvisionService_1.provisionTenantDatabase)(tenant.mongoDbUrl.trim(), tenant, {
-            id: adminUser.id,
+        const connRes = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
+        if (!connRes) {
+            return res.status(500).json({ success: false, message: 'Could not connect to tenant database' });
+        }
+        const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(connRes.models, tenant, {
+            id: String(adminUser._id || adminUser.id),
             email: adminUser.email,
             passwordHash: adminUser.passwordHash,
             tempPassword: adminUser.tempPassword,
@@ -1386,13 +1305,6 @@ const provisionTenantDb = async (req, res) => {
             mobile: adminUser.mobile,
             status: adminUser.status || (tenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
         });
-        if (!result.success) {
-            return res.status(500).json({
-                success: false,
-                message: result.message,
-                error: result.error
-            });
-        }
         await (0, auditService_1.logAudit)({
             userId: req.user.id,
             action: 'UPDATE',
@@ -1402,7 +1314,7 @@ const provisionTenantDb = async (req, res) => {
         }).catch(() => { });
         return res.status(200).json({
             success: true,
-            message: result.message,
+            message: 'Tenant database provisioned successfully.',
             data: result
         });
     }
@@ -1505,9 +1417,6 @@ const verifyDomainUrl = async (req, res) => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
         const startTime = Date.now();
-        let isReachable = false;
-        let statusCode = 0;
-        let statusText = '';
         try {
             const resp = await fetch(normalizedUrl, {
                 method: 'GET',
@@ -1516,9 +1425,8 @@ const verifyDomainUrl = async (req, res) => {
             });
             clearTimeout(timeoutId);
             const responseTimeMs = Date.now() - startTime;
-            statusCode = resp.status;
-            statusText = resp.statusText;
-            isReachable = true;
+            const statusCode = resp.status;
+            const statusText = resp.statusText;
             return res.status(200).json({
                 success: true,
                 reachable: true,
@@ -1591,17 +1499,19 @@ const testMongoConnection = async (req, res) => {
 exports.testMongoConnection = testMongoConnection;
 /**
  * Dynamic Company Clients Endpoint for Super Admin.
- * Concatenates the company's domainUrl to fetch 3rd party clients from the company's own software,
- * with fast fallback to local platform DB if unreachable or domain not configured.
- * GET /api/v1/super-admin/tenants/:id/clients
  */
 const getCompanyClients = async (req, res) => {
     const { id } = req.params;
     try {
-        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const tenant = await db_1.default.Tenant.findById(id).lean() ||
+            await db_1.centralModels.AllCompany.findOne({
+                $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+            }).lean();
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
+        const tenantIdStr = (tenant.tenantId || tenant._id || tenant.id).toString();
         const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
         // 1. Try remote domain API if domainUrl is configured
         if (rawDomain) {
@@ -1618,12 +1528,12 @@ const getCompanyClients = async (req, res) => {
             }
             const candidateEndpoints = [
                 `${targetOrigin}/backend/api/v1/third-party-api/clients`,
-                `${targetOrigin}/backend/api/v1/third-party-api/${tenant.id}/clients`,
+                `${targetOrigin}/backend/api/v1/third-party-api/${tenantIdStr}/clients`,
                 `${targetOrigin}/backend/api/v1/clients`,
                 `${targetOrigin}/backend/third-party-api/clients`,
                 `${targetOrigin}/backend/clients`,
                 `${targetOrigin}/api/v1/third-party-api/clients`,
-                `${targetOrigin}/api/v1/third-party-api/${tenant.id}/clients`,
+                `${targetOrigin}/api/v1/third-party-api/${tenantIdStr}/clients`,
                 `${targetOrigin}/third-party-api/clients`,
                 `${targetOrigin}/api/v1/clients`,
                 `${targetOrigin}/clients`
@@ -1634,7 +1544,7 @@ const getCompanyClients = async (req, res) => {
                     const timeoutId = setTimeout(() => controller.abort(), 1500);
                     const headers = {
                         'Content-Type': 'application/json',
-                        'x-tenant-id': tenant.id
+                        'x-tenant-id': tenantIdStr
                     };
                     if (tenant.tenantApiKey) {
                         headers['x-tenant-api-key'] = tenant.tenantApiKey;
@@ -1655,7 +1565,7 @@ const getCompanyClients = async (req, res) => {
                                 domainUrl: targetOrigin,
                                 endpointUsed: endpoint,
                                 company: {
-                                    id: tenant.id,
+                                    id: tenantIdStr,
                                     companyName: tenant.companyName,
                                     sebiRegistration: tenant.sebiRegistration,
                                     domainUrl: tenant.domainUrl,
@@ -1668,91 +1578,75 @@ const getCompanyClients = async (req, res) => {
                     }
                 }
                 catch (remoteErr) {
-                    // Continue to next candidate or fallback to local DB
+                    // Continue
                 }
             }
         }
         // 2. Fallback to Local Platform Database
-        const localClients = await db_1.default.client.findMany({
-            where: {
-                user: { tenantId: tenant.id }
-            },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        email: true,
-                        mobile: true,
-                        firstName: true,
-                        lastName: true,
-                        status: true,
-                        createdAt: true,
-                        lastLogin: true
-                    }
-                },
-                profile: true,
-                subscriptions: {
-                    include: {
-                        plan: {
-                            select: {
-                                id: true,
-                                name: true,
-                                price: true,
-                                durationMonths: true,
-                                researchSegments: true
-                            }
-                        }
-                    },
-                    orderBy: { createdAt: 'desc' }
-                },
-                agreements: {
-                    select: {
-                        id: true,
-                        status: true,
-                        signedAt: true,
-                        agreementUrl: true
-                    }
-                },
-                documents: {
-                    select: {
-                        id: true,
-                        docType: true,
-                        status: true,
-                        fileName: true,
-                        uploadedAt: true
-                    }
-                }
-            },
-            orderBy: {
-                user: { createdAt: 'desc' }
-            }
+        const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(tenantIdStr);
+        const dbModels = resolved ? resolved.models : db_1.default;
+        const localClients = await dbModels.Client.find({})
+            .populate('userId', 'email mobile firstName lastName status createdAt lastLogin')
+            .sort({ createdAt: -1 })
+            .lean();
+        const clientIds = localClients.map((c) => c._id || c.id);
+        const profiles = await dbModels.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
+        const profileMap = new Map(profiles.map((p) => [String(p.clientId), p]));
+        const subscriptions = await dbModels.Subscription.find({ clientId: { $in: clientIds } })
+            .populate('planId', 'name price durationMonths researchSegments')
+            .sort({ createdAt: -1 })
+            .lean();
+        const subMap = new Map();
+        for (const sub of subscriptions) {
+            const cId = String(sub.clientId);
+            if (!subMap.has(cId))
+                subMap.set(cId, []);
+            subMap.get(cId).push(sub);
+        }
+        const agreements = await dbModels.Agreement.find({ clientId: { $in: clientIds } }).lean();
+        const agMap = new Map();
+        for (const ag of agreements) {
+            const cId = String(ag.clientId);
+            agMap.set(cId, (agMap.get(cId) || 0) + 1);
+        }
+        const documents = await dbModels.ClientDocument.find({ clientId: { $in: clientIds } }).lean();
+        const docMap = new Map();
+        for (const doc of documents) {
+            const cId = String(doc.clientId);
+            docMap.set(cId, (docMap.get(cId) || 0) + 1);
+        }
+        const sanitizedClients = localClients.map((c) => {
+            const cIdStr = String(c._id || c.id);
+            const userObj = c.userId || {};
+            const prof = profileMap.get(cIdStr);
+            const clientSubs = subMap.get(cIdStr) || [];
+            return {
+                id: cIdStr,
+                userId: String(userObj._id || userObj.id || c.userId),
+                name: c.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim(),
+                email: c.email || userObj.email,
+                mobile: c.mobile || userObj.mobile,
+                pan: c.pan,
+                aadhaar: c.aadhaar,
+                category: c.category,
+                occupation: c.occupation,
+                status: c.status || userObj.status,
+                riskProfile: prof?.riskProfile || 'MODERATE',
+                city: prof?.city || null,
+                state: prof?.state || null,
+                joinedAt: userObj.createdAt || c.createdAt,
+                activeSubscription: clientSubs[0] || null,
+                subscriptionsCount: clientSubs.length,
+                agreementsCount: agMap.get(cIdStr) || 0,
+                documentsCount: docMap.get(cIdStr) || 0
+            };
         });
-        const sanitizedClients = localClients.map(c => ({
-            id: c.id,
-            userId: c.userId,
-            name: c.name || `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim(),
-            email: c.email || c.user?.email,
-            mobile: c.mobile || c.user?.mobile,
-            pan: c.pan,
-            aadhaar: c.aadhaar,
-            category: c.category,
-            occupation: c.occupation,
-            status: c.status || c.user?.status,
-            riskProfile: c.profile?.riskProfile || 'MODERATE',
-            city: c.profile?.city || null,
-            state: c.profile?.state || null,
-            joinedAt: c.user?.createdAt,
-            activeSubscription: c.subscriptions?.[0] || null,
-            subscriptionsCount: c.subscriptions?.length || 0,
-            agreementsCount: c.agreements?.length || 0,
-            documentsCount: c.documents?.length || 0
-        }));
         return res.status(200).json({
             success: true,
             source: 'LOCAL_DATABASE',
             domainUrl: rawDomain || null,
             company: {
-                id: tenant.id,
+                id: tenantIdStr,
                 companyName: tenant.companyName,
                 sebiRegistration: tenant.sebiRegistration,
                 domainUrl: tenant.domainUrl,
@@ -1774,17 +1668,19 @@ const getCompanyClients = async (req, res) => {
 exports.getCompanyClients = getCompanyClients;
 /**
  * Dynamic Company Staff Endpoint for Super Admin.
- * Checks remote company domainUrl to fetch 3rd party staff records from the company's own software,
- * with fast fallback to local platform DB if unreachable or domain not configured.
- * GET /api/v1/super-admin/tenants/:id/staff
  */
 const getCompanyStaff = async (req, res) => {
     const { id } = req.params;
     try {
-        const tenant = await db_1.default.tenant.findUnique({ where: { id } });
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const tenant = await db_1.default.Tenant.findById(id).lean() ||
+            await db_1.centralModels.AllCompany.findOne({
+                $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+            }).lean();
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
+        const tenantIdStr = (tenant.tenantId || tenant._id || tenant.id).toString();
         const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
         // 1. Try remote domain API if domainUrl is configured
         if (rawDomain) {
@@ -1801,12 +1697,12 @@ const getCompanyStaff = async (req, res) => {
             }
             const candidateEndpoints = [
                 `${targetOrigin}/backend/api/v1/third-party-api/staff`,
-                `${targetOrigin}/backend/api/v1/third-party-api/${tenant.id}/staff`,
+                `${targetOrigin}/backend/api/v1/third-party-api/${tenantIdStr}/staff`,
                 `${targetOrigin}/backend/api/v1/staff`,
                 `${targetOrigin}/backend/third-party-api/staff`,
                 `${targetOrigin}/backend/staff`,
                 `${targetOrigin}/api/v1/third-party-api/staff`,
-                `${targetOrigin}/api/v1/third-party-api/${tenant.id}/staff`,
+                `${targetOrigin}/api/v1/third-party-api/${tenantIdStr}/staff`,
                 `${targetOrigin}/third-party-api/staff`,
                 `${targetOrigin}/api/v1/staff`,
                 `${targetOrigin}/staff`
@@ -1817,7 +1713,7 @@ const getCompanyStaff = async (req, res) => {
                     const timeoutId = setTimeout(() => controller.abort(), 1500);
                     const headers = {
                         'Content-Type': 'application/json',
-                        'x-tenant-id': tenant.id
+                        'x-tenant-id': tenantIdStr
                     };
                     if (tenant.tenantApiKey) {
                         headers['x-tenant-api-key'] = tenant.tenantApiKey;
@@ -1838,7 +1734,7 @@ const getCompanyStaff = async (req, res) => {
                                 domainUrl: targetOrigin,
                                 endpointUsed: endpoint,
                                 company: {
-                                    id: tenant.id,
+                                    id: tenantIdStr,
                                     companyName: tenant.companyName,
                                     sebiRegistration: tenant.sebiRegistration,
                                     domainUrl: tenant.domainUrl,
@@ -1851,50 +1747,42 @@ const getCompanyStaff = async (req, res) => {
                     }
                 }
                 catch (remoteErr) {
-                    // Continue to next candidate or fallback to local DB
+                    // Continue
                 }
             }
         }
         // 2. Fallback to Local Platform Database
-        // Fetch all non-client users associated with this tenant
-        const localStaffUsers = await db_1.default.user.findMany({
-            where: {
-                tenantId: tenant.id,
-                role: {
-                    name: { not: 'CLIENT' }
-                }
-            },
-            include: {
-                role: {
-                    select: {
-                        id: true,
-                        name: true,
-                        description: true
-                    }
-                },
-                staff: {
-                    include: {
-                        personAssociated: true
-                    }
-                }
-            },
-            orderBy: {
-                createdAt: 'desc'
-            }
-        });
-        const sanitizedStaff = localStaffUsers.map(u => {
-            const staffRecord = u.staff;
-            const personAssoc = staffRecord?.personAssociated;
-            const roleName = u.role?.name || 'STAFF';
+        const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(tenantIdStr);
+        const dbModels = resolved ? resolved.models : db_1.default;
+        const clientRole = await dbModels.Role.findOne({ name: 'CLIENT' }).lean();
+        const filterQuery = { tenantId: tenantIdStr };
+        if (clientRole) {
+            filterQuery.roleId = { $ne: clientRole._id || clientRole.id };
+        }
+        const localStaffUsers = await dbModels.User.find(filterQuery)
+            .populate('roleId', 'id name description')
+            .sort({ createdAt: -1 })
+            .lean();
+        const userIds = localStaffUsers.map((u) => u._id || u.id);
+        const staffList = await dbModels.Staff.find({ userId: { $in: userIds } }).lean();
+        const staffIds = staffList.map((s) => s._id || s.id);
+        const personAssocs = await dbModels.PersonAssociated.find({ staffId: { $in: staffIds } }).lean();
+        const paMap = new Map(personAssocs.map((p) => [String(p.staffId), p]));
+        const staffMap = new Map(staffList.map((s) => [String(s.userId), s]));
+        const sanitizedStaff = localStaffUsers.map((u) => {
+            const uIdStr = String(u._id || u.id);
+            const staffRecord = staffMap.get(uIdStr);
+            const personAssoc = staffRecord ? paMap.get(String(staffRecord._id || staffRecord.id)) : null;
+            const roleName = u.roleId?.name || 'STAFF';
             return {
-                id: staffRecord?.id || u.id,
-                userId: u.id,
-                employeeId: staffRecord?.employeeId || u.employeeCode || `EMP-${u.id.slice(-4).toUpperCase()}`,
+                id: staffRecord ? String(staffRecord._id || staffRecord.id) : uIdStr,
+                userId: uIdStr,
+                employeeId: staffRecord?.employeeId || u.employeeCode || `EMP-${uIdStr.slice(-4).toUpperCase()}`,
                 name: staffRecord?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
                 email: staffRecord?.email || u.email,
                 mobile: staffRecord?.mobile || u.mobile,
                 role: roleName,
-                roleDescription: u.role?.description || null,
+                roleDescription: u.roleId?.description || null,
                 personAssociatedType: personAssoc?.roleType || null,
                 customRole: personAssoc?.customRole || null,
                 dob: staffRecord?.dob || null,
@@ -1912,7 +1800,7 @@ const getCompanyStaff = async (req, res) => {
             source: 'LOCAL_DATABASE',
             domainUrl: rawDomain || null,
             company: {
-                id: tenant.id,
+                id: tenantIdStr,
                 companyName: tenant.companyName,
                 sebiRegistration: tenant.sebiRegistration,
                 domainUrl: tenant.domainUrl,

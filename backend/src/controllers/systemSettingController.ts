@@ -1,17 +1,15 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import dynamicDb from '../config/db';
 import nodemailer from 'nodemailer';
 import { syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
-
-const prisma = new PrismaClient();
 
 const BRANDING_KEY = 'GLOBAL_BRANDING';
 
 export const getGlobalBranding = async (req: Request, res: Response) => {
   try {
-    const setting = await prisma.systemSetting.findUnique({
-      where: { key: BRANDING_KEY },
-    });
+    const setting = await dynamicDb.SystemSetting.findOne({
+      key: BRANDING_KEY,
+    }).lean();
 
     if (!setting) {
       // Return default branding if not set
@@ -49,7 +47,7 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
 
     // Read existing branding to preserve fields not being updated
     let existingData: any = { appName: 'RAGCP', logoUrl: '/logo-light.png', faviconUrl: '/favicon.ico', loginLogoUrl: '/logo-light.png' };
-    const existing = await prisma.systemSetting.findUnique({ where: { key: BRANDING_KEY } });
+    const existing = await dynamicDb.SystemSetting.findOne({ key: BRANDING_KEY }).lean();
     if (existing) {
       try { existingData = JSON.parse(existing.value); } catch {}
     }
@@ -87,28 +85,27 @@ export const updateGlobalBranding = async (req: Request, res: Response) => {
       loginLogoUrl
     };
 
-    const setting = await prisma.systemSetting.upsert({
-      where: { key: BRANDING_KEY },
-      update: {
-        value: JSON.stringify(brandingData),
-        updatedById: user.id
+    const setting = await dynamicDb.SystemSetting.findOneAndUpdate(
+      { key: BRANDING_KEY },
+      {
+        $set: {
+          value: JSON.stringify(brandingData),
+          updatedById: user.id
+        },
+        $setOnInsert: { key: BRANDING_KEY }
       },
-      create: {
-        key: BRANDING_KEY,
-        value: JSON.stringify(brandingData),
-        updatedById: user.id
-      }
-    });
+      { upsert: true, returnDocument: 'after', lean: true }
+    );
 
     // Auto-sync global branding updates across all company domains in background
-    syncAllTenantsToRemote({ reason: 'BRANDING_UPDATE' }).catch(err => {
+    syncAllTenantsToRemote({ reason: 'BRANDING_UPDATE' }).catch((err: any) => {
       console.warn('Background sync for global branding update error:', err);
     });
 
     res.status(200).json({
       success: true,
       message: 'Global branding updated and propagated across companies successfully',
-      data: JSON.parse(setting.value)
+      data: setting ? JSON.parse(setting.value) : {}
     });
   } catch (error: any) {
     console.error('Error updating global branding:', error);

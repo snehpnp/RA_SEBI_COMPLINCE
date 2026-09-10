@@ -38,7 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncTenantToRemote = syncTenantToRemote;
 exports.syncAllTenantsToRemote = syncAllTenantsToRemote;
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = require("../config/db");
 const crypto = __importStar(require("crypto"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -48,22 +48,7 @@ const tenantProvisionService_1 = require("./tenantProvisionService");
  * and/or its dedicated MongoDB database.
  */
 async function syncTenantToRemote(tenantId, options) {
-    const tenant = await db_1.default.tenant.findUnique({
-        where: { id: tenantId },
-        include: {
-            users: {
-                where: {
-                    OR: [
-                        { role: { name: 'ADMIN' } },
-                        { role: { name: 'SUPER_ADMIN' } }
-                    ]
-                }
-            },
-            adminPermissions: true,
-            emailTemplates: true,
-            customPages: true
-        }
-    });
+    const tenant = await db_1.Tenant.findById(tenantId).lean();
     if (!tenant) {
         return {
             success: false,
@@ -76,23 +61,32 @@ async function syncTenantToRemote(tenantId, options) {
     let apiKey = tenant.tenantApiKey;
     if (!apiKey) {
         apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
-        await db_1.default.tenant.update({
-            where: { id: tenant.id },
-            data: { tenantApiKey: apiKey }
-        });
+        await db_1.Tenant.findByIdAndUpdate(tenant._id || tenant.id, { tenantApiKey: apiKey });
         tenant.tenantApiKey = apiKey;
     }
-    let adminUser = tenant.users && tenant.users.length > 0 ? tenant.users[0] : null;
-    if (!adminUser) {
-        adminUser = await db_1.default.user.findFirst({
-            where: { tenantId }
-        });
-    }
+    const [adminUser, adminPermissions, emailTemplates, customPages, plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
+        db_1.User.findOne({
+            tenantId,
+            $or: [
+                { role: 'ADMIN' },
+                { roleId: { $ne: null } }
+            ]
+        }).populate('role').lean(),
+        db_1.AdminPermission.find({ tenantId }).lean().catch(() => []),
+        db_1.EmailTemplate.find({ tenantId }).lean().catch(() => []),
+        db_1.CustomPage.find({ tenantId }).lean().catch(() => []),
+        db_1.Plan.find({ tenantId, deletedAt: null }).lean().catch(() => []),
+        db_1.PlanCategory.find({ tenantId }).lean().catch(() => []),
+        db_1.ComplianceRequirement.find({}).sort({ serialNo: 1 }).lean().catch(() => []),
+        db_1.ComplianceAudit.find({ tenantId }).lean().catch(() => []),
+        db_1.SystemSetting.find({}).lean().catch(() => []),
+        db_1.Resource.find({}).lean().catch(() => [])
+    ]);
     const effectiveStatus = tenant.status === 'SUSPENDED'
         ? 'SUSPENDED'
         : (tenant.status === 'DELETED' ? 'DELETED' : (adminUser?.status || 'ACTIVE'));
     const adminPayload = {
-        id: adminUser?.id,
+        id: adminUser?._id?.toString() || adminUser?.id,
         email: adminUser?.email || tenant.email,
         firstName: adminUser?.firstName || tenant.companyName,
         lastName: adminUser?.lastName || 'Admin',
@@ -101,15 +95,6 @@ async function syncTenantToRemote(tenantId, options) {
         tempPassword: adminUser?.tempPassword || options?.adminPassword || null,
         status: effectiveStatus
     };
-    // Fetch all related collections for dynamic sync
-    const [plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
-        db_1.default.plan.findMany({ where: { tenantId, deletedAt: null } }).catch(() => []),
-        db_1.default.planCategory.findMany({ where: { tenantId } }).catch(() => []),
-        db_1.default.complianceRequirement.findMany({ orderBy: { serialNo: 'asc' } }).catch(() => []),
-        db_1.default.complianceAudit.findMany({ where: { tenantId } }).catch(() => []),
-        db_1.default.systemSetting.findMany().catch(() => []),
-        db_1.default.resource.findMany().catch(() => [])
-    ]);
     // Read physical files for resources to sync binary content
     const uploadRoot = path_1.default.join(__dirname, '../../../uploads');
     const resources = rawResources.map((r) => {
@@ -134,7 +119,7 @@ async function syncTenantToRemote(tenantId, options) {
             console.warn('[SYNC] Note reading resource file for payload:', fErr);
         }
         return {
-            id: r.id,
+            id: r._id ? r._id.toString() : r.id,
             title: r.title,
             category: r.category,
             fileUrl: r.fileUrl,
@@ -145,9 +130,10 @@ async function syncTenantToRemote(tenantId, options) {
     });
     const tenantPayload = {
         ...tenant,
+        id: tenant._id ? tenant._id.toString() : tenant.id,
         tenantApiKey: apiKey,
-        customPages: tenant.customPages || [],
-        emailTemplates: tenant.emailTemplates || [],
+        customPages: customPages || [],
+        emailTemplates: emailTemplates || [],
         plans,
         planCategories,
         complianceRequirements,
@@ -160,9 +146,9 @@ async function syncTenantToRemote(tenantId, options) {
         action: options?.reason || 'UPDATE',
         tenant: tenantPayload,
         adminUser: adminPayload,
-        permissions: tenant.adminPermissions || [],
-        emailTemplates: tenant.emailTemplates || [],
-        customPages: tenant.customPages || [],
+        permissions: adminPermissions || [],
+        emailTemplates: emailTemplates || [],
+        customPages: customPages || [],
         plans,
         planCategories,
         complianceRequirements,
@@ -239,7 +225,7 @@ async function syncTenantToRemote(tenantId, options) {
         let dbSyncResult = null;
         if (tenant.mongoDbUrl && tenant.mongoDbUrl.trim()) {
             try {
-                const result = await (0, tenantProvisionService_1.provisionTenantDatabase)(tenant.mongoDbUrl.trim(), tenantPayload, adminPayload, tenant.adminPermissions);
+                const result = await (0, tenantProvisionService_1.provisionTenantDatabase)(tenant.mongoDbUrl.trim(), tenantPayload, adminPayload, adminPermissions);
                 dbSyncResult = result;
             }
             catch (dbErr) {
@@ -270,7 +256,7 @@ async function syncTenantToRemote(tenantId, options) {
     }
     return {
         success: overallSuccess,
-        tenantId: tenant.id,
+        tenantId: tenant._id ? tenant._id.toString() : tenant.id,
         companyName: tenant.companyName,
         domainUrl: tenant.domainUrl || tenant.website,
         domainSyncResult,
@@ -283,13 +269,10 @@ async function syncTenantToRemote(tenantId, options) {
  * Global Branding, or system-wide settings are updated by Super Admin).
  */
 async function syncAllTenantsToRemote(options) {
-    const tenants = await db_1.default.tenant.findMany({
-        where: {
-            status: { not: 'DELETED' }
-        },
-        select: { id: true, companyName: true, domainUrl: true, website: true, mongoDbUrl: true }
-    });
-    const promises = tenants.map(t => syncTenantToRemote(t.id, { reason: options?.reason || 'GLOBAL_UPDATE' }));
+    const tenants = await db_1.Tenant.find({
+        status: { $ne: 'DELETED' }
+    }).select('id companyName domainUrl website mongoDbUrl').lean();
+    const promises = tenants.map(t => syncTenantToRemote(t._id ? t._id.toString() : t.id, { reason: options?.reason || 'GLOBAL_UPDATE' }));
     const results = await Promise.allSettled(promises);
     const successResults = [];
     let failedCount = 0;

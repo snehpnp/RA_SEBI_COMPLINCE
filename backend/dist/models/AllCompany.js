@@ -1,0 +1,73 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AllCompany = exports.AllCompanySchema = void 0;
+const mongoose_1 = __importStar(require("mongoose"));
+const _schemaOptions_1 = require("./_schemaOptions");
+exports.AllCompanySchema = new mongoose_1.Schema({
+    tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', required: true, unique: true },
+    companyName: { type: String, required: true },
+    companyType: { type: String, default: 'INDIVIDUAL' },
+    raType: { type: String, default: 'FULL_TIME' },
+    sebiRegistration: { type: String, required: true },
+    bseEnrollment: { type: String, default: null },
+    email: { type: String, required: true },
+    mobile: { type: String, required: true },
+    address: { type: String, default: null },
+    pan: { type: String, default: null },
+    gst: { type: String, default: null },
+    website: { type: String, default: null },
+    ownerName: { type: String, default: 'Admin User' },
+    certificateUrl: { type: String, default: null },
+    certificateValidity: { type: Date, default: null },
+    nismCertificateUrl: { type: String, default: null },
+    nismValidity: { type: Date, default: null },
+    status: { type: String, default: 'ACTIVE' },
+    previousStatus: { type: String, default: null },
+    depositAmount: { type: Number, default: 0.0 },
+    state: { type: String, default: null },
+    panelName: { type: String, default: null },
+    domainUrl: { type: String, default: null },
+    mongoDbUrl: { type: String, required: true },
+    dbName: { type: String, required: true },
+    tenantApiKey: { type: String, default: null },
+    createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
+    deletedAt: { type: Date, default: null }
+}, {
+    ..._schemaOptions_1.baseSchemaOptions,
+    collection: 'all_companies'
+});
+exports.AllCompany = mongoose_1.default.models.AllCompany || mongoose_1.default.model('AllCompany', exports.AllCompanySchema, 'all_companies');
+exports.default = exports.AllCompany;

@@ -1,10 +1,44 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getThirdPartyInfo = exports.getThirdPartyPlans = exports.getThirdPartyStaff = exports.getThirdPartyClients = exports.resolveTenantFromRequest = void 0;
-const db_1 = __importDefault(require("../config/db"));
+const mongoose_1 = __importDefault(require("mongoose"));
+const db_1 = __importStar(require("../config/db"));
 /**
  * Helper to resolve Tenant from route params, query, or headers without requiring JWT auth
  */
@@ -18,33 +52,47 @@ const resolveTenantFromRequest = async (req) => {
     const headerTenantId = req.headers['x-tenant-id'] || req.headers['tenant-id'];
     // 1. Try by API Key
     if (apiKey) {
-        const tenant = await db_1.default.tenant.findFirst({
-            where: { tenantApiKey: apiKey }
-        });
+        let tenant = await db_1.default.Tenant.findOne({ tenantApiKey: apiKey }).lean();
+        if (!tenant && db_1.centralModels.CentralTenant) {
+            tenant = await db_1.centralModels.CentralTenant.findOne({ tenantApiKey: apiKey }).lean();
+        }
+        if (!tenant && db_1.centralModels.AllCompany) {
+            tenant = await db_1.centralModels.AllCompany.findOne({ apiKey: apiKey }).lean();
+        }
         if (tenant)
             return tenant;
     }
     // 2. Try by Tenant ID (Header / Param / Query)
     const directTenantId = headerTenantId || paramId || queryTenantId;
     if (directTenantId) {
-        const tenant = await db_1.default.tenant.findUnique({
-            where: { id: directTenantId }
-        }).catch(() => null);
+        let tenant = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(directTenantId)) {
+            tenant = await db_1.default.Tenant.findById(directTenantId).lean().catch(() => null);
+            if (!tenant && db_1.centralModels.CentralTenant) {
+                tenant = await db_1.centralModels.CentralTenant.findById(directTenantId).lean().catch(() => null);
+            }
+        }
+        if (!tenant && db_1.centralModels.AllCompany) {
+            tenant = await db_1.centralModels.AllCompany.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(directTenantId) ? [{ _id: directTenantId }] : []),
+                    { companyId: directTenantId }
+                ]
+            }).lean().catch(() => null);
+        }
         if (tenant)
             return tenant;
     }
     // 3. Try by Admin User ID / Email
     const adminIdentifier = queryEmail || paramId || queryAdminId;
     if (adminIdentifier) {
-        const adminUser = await db_1.default.user.findFirst({
-            where: {
-                OR: [
-                    { id: adminIdentifier },
-                    { email: adminIdentifier.toLowerCase().trim() }
-                ]
-            },
-            include: { tenant: true }
-        }).catch(() => null);
+        const isOid = mongoose_1.default.Types.ObjectId.isValid(adminIdentifier);
+        const adminUser = await db_1.default.User.findOne({
+            $or: [
+                ...(isOid ? [{ _id: adminIdentifier }] : []),
+                { email: String(adminIdentifier).toLowerCase().trim() }
+            ]
+        }).populate('tenant').lean().catch(() => null);
         if (adminUser?.tenant)
             return adminUser.tenant;
     }
@@ -52,22 +100,28 @@ const resolveTenantFromRequest = async (req) => {
     if (domainHeader) {
         const cleanDomain = domainHeader.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '').toLowerCase().trim();
         if (cleanDomain && cleanDomain !== 'localhost' && cleanDomain !== '127.0.0.1') {
-            const tenant = await db_1.default.tenant.findFirst({
-                where: {
-                    OR: [
-                        { domainUrl: { contains: cleanDomain, mode: 'insensitive' } },
-                        { website: { contains: cleanDomain, mode: 'insensitive' } }
+            let tenant = await db_1.default.Tenant.findOne({
+                $or: [
+                    { domainUrl: { $regex: cleanDomain, $options: 'i' } },
+                    { website: { $regex: cleanDomain, $options: 'i' } }
+                ]
+            }).lean();
+            if (!tenant && db_1.centralModels.CentralTenant) {
+                tenant = await db_1.centralModels.CentralTenant.findOne({
+                    $or: [
+                        { domainUrl: { $regex: cleanDomain, $options: 'i' } },
+                        { website: { $regex: cleanDomain, $options: 'i' } }
                     ]
-                }
-            });
+                }).lean();
+            }
             if (tenant)
                 return tenant;
         }
     }
     // 5. Fallback for Single-Tenant standalone instance
-    const tenantCount = await db_1.default.tenant.count({ where: { deletedAt: null } });
+    const tenantCount = await db_1.default.Tenant.countDocuments({ deletedAt: null });
     if (tenantCount === 1) {
-        return await db_1.default.tenant.findFirst({ where: { deletedAt: null } });
+        return await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
     }
     return null;
 };
@@ -79,87 +133,66 @@ exports.resolveTenantFromRequest = resolveTenantFromRequest;
 const getThirdPartyClients = async (req, res) => {
     try {
         const tenant = await (0, exports.resolveTenantFromRequest)(req);
-        const whereClause = {};
+        const userFilter = {};
         if (tenant) {
-            whereClause.user = { tenantId: tenant.id };
+            userFilter.tenantId = tenant._id || tenant.id;
         }
-        const clients = await db_1.default.client.findMany({
-            where: whereClause,
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        email: true,
-                        mobile: true,
-                        firstName: true,
-                        lastName: true,
-                        status: true,
-                        createdAt: true,
-                        lastLogin: true
-                    }
-                },
-                profile: true,
-                subscriptions: {
-                    include: {
-                        plan: {
-                            select: {
-                                id: true,
-                                name: true,
-                                price: true,
-                                durationMonths: true,
-                                researchSegments: true
-                            }
-                        }
-                    },
-                    orderBy: { createdAt: 'desc' }
-                },
-                agreements: {
-                    select: {
-                        id: true,
-                        status: true,
-                        signedAt: true,
-                        agreementUrl: true
-                    }
-                },
-                documents: {
-                    select: {
-                        id: true,
-                        docType: true,
-                        status: true,
-                        fileName: true,
-                        uploadedAt: true
-                    }
-                }
+        const matchingUsers = await db_1.default.User.find(userFilter).select('_id').lean();
+        const userIds = matchingUsers.map(u => u._id);
+        const clients = await db_1.default.Client.find({
+            ...(userIds.length > 0 || !tenant ? { userId: { $in: userIds } } : { _id: null })
+        })
+            .populate({
+            path: 'userId',
+            select: 'id email mobile firstName lastName status createdAt lastLogin'
+        })
+            .populate('profile')
+            .populate({
+            path: 'subscriptions',
+            populate: {
+                path: 'plan',
+                select: 'id name price durationMonths researchSegments'
             },
-            orderBy: {
-                user: { createdAt: 'desc' }
-            }
+            options: { sort: { createdAt: -1 } }
+        })
+            .populate({
+            path: 'agreements',
+            select: 'id status signedAt agreementUrl'
+        })
+            .populate({
+            path: 'documents',
+            select: 'id docType status fileName uploadedAt'
+        })
+            .sort({ createdAt: -1 })
+            .lean();
+        const sanitizedClients = clients.map((c) => {
+            const user = c.userId || {};
+            return {
+                id: c._id?.toString() || c.id,
+                userId: user._id?.toString() || user.id || c.userId,
+                name: c.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                email: c.email || user.email,
+                mobile: c.mobile || user.mobile,
+                pan: c.pan,
+                aadhaar: c.aadhaar,
+                category: c.category,
+                occupation: c.occupation,
+                status: c.status || user.status,
+                riskProfile: c.profile?.riskProfile || 'MODERATE',
+                city: c.profile?.city || null,
+                state: c.profile?.state || null,
+                joinedAt: user.createdAt,
+                activeSubscription: c.subscriptions?.[0] || null,
+                subscriptionsCount: c.subscriptions?.length || 0,
+                agreementsCount: c.agreements?.length || 0,
+                documentsCount: c.documents?.length || 0
+            };
         });
-        const sanitizedClients = clients.map(c => ({
-            id: c.id,
-            userId: c.userId,
-            name: c.name || `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim(),
-            email: c.email || c.user?.email,
-            mobile: c.mobile || c.user?.mobile,
-            pan: c.pan,
-            aadhaar: c.aadhaar,
-            category: c.category,
-            occupation: c.occupation,
-            status: c.status || c.user?.status,
-            riskProfile: c.profile?.riskProfile || 'MODERATE',
-            city: c.profile?.city || null,
-            state: c.profile?.state || null,
-            joinedAt: c.user?.createdAt,
-            activeSubscription: c.subscriptions?.[0] || null,
-            subscriptionsCount: c.subscriptions?.length || 0,
-            agreementsCount: c.agreements?.length || 0,
-            documentsCount: c.documents?.length || 0
-        }));
         return res.status(200).json({
             success: true,
             source: 'THIRD_PARTY_API',
             company: tenant ? {
-                id: tenant.id,
+                id: tenant._id?.toString() || tenant.id,
                 companyName: tenant.companyName,
                 sebiRegistration: tenant.sebiRegistration,
                 domainUrl: tenant.domainUrl,
@@ -191,38 +224,46 @@ const getThirdPartyStaff = async (req, res) => {
                 message: 'Tenant company not found.'
             });
         }
-        const staffMembers = await db_1.default.staff.findMany({
-            where: {
-                user: { tenantId: tenant.id }
-            },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        email: true,
-                        mobile: true,
-                        firstName: true,
-                        lastName: true,
-                        status: true,
-                        role: { select: { name: true } }
-                    }
-                },
-                personAssociated: true
-            },
-            orderBy: {
-                user: { createdAt: 'desc' }
-            }
+        const tenantId = tenant._id || tenant.id;
+        const users = await db_1.default.User.find({ tenantId }).select('_id').lean();
+        const userIds = users.map(u => u._id);
+        const staffMembers = await db_1.default.Staff.find({
+            userId: { $in: userIds }
+        })
+            .populate({
+            path: 'userId',
+            select: 'id email mobile firstName lastName status roleId',
+            populate: { path: 'role', select: 'name' }
+        })
+            .populate('personAssociated')
+            .sort({ createdAt: -1 })
+            .lean();
+        const formattedStaff = staffMembers.map((s) => {
+            const user = s.userId || {};
+            return {
+                ...s,
+                id: s._id?.toString() || s.id,
+                user: user ? {
+                    id: user._id?.toString() || user.id,
+                    email: user.email,
+                    mobile: user.mobile,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    status: user.status,
+                    role: user.role ? { name: user.role.name } : null
+                } : null
+            };
         });
         return res.status(200).json({
             success: true,
             source: 'THIRD_PARTY_API',
             company: {
-                id: tenant.id,
+                id: tenant._id?.toString() || tenant.id,
                 companyName: tenant.companyName,
                 sebiRegistration: tenant.sebiRegistration
             },
-            count: staffMembers.length,
-            data: staffMembers
+            count: formattedStaff.length,
+            data: formattedStaff
         });
     }
     catch (error) {
@@ -246,21 +287,23 @@ const getThirdPartyPlans = async (req, res) => {
                 message: 'Tenant company not found.'
             });
         }
-        const plans = await db_1.default.plan.findMany({
-            where: {
-                tenantId: tenant.id,
-                status: 'ACTIVE'
-            },
-            include: {
-                category: true
-            },
-            orderBy: { price: 'asc' }
-        });
+        const tenantId = tenant._id || tenant.id;
+        const plans = await db_1.default.Plan.find({
+            tenantId,
+            status: 'ACTIVE'
+        })
+            .populate('category')
+            .sort({ price: 1 })
+            .lean();
+        const formattedPlans = plans.map((p) => ({
+            ...p,
+            id: p._id?.toString() || p.id
+        }));
         return res.status(200).json({
             success: true,
             source: 'THIRD_PARTY_API',
-            count: plans.length,
-            data: plans
+            count: formattedPlans.length,
+            data: formattedPlans
         });
     }
     catch (error) {
@@ -288,7 +331,7 @@ const getThirdPartyInfo = async (req, res) => {
             success: true,
             source: 'THIRD_PARTY_API',
             data: {
-                id: tenant.id,
+                id: tenant._id?.toString() || tenant.id,
                 companyName: tenant.companyName,
                 panelName: tenant.panelName || `${tenant.companyName} Portal`,
                 sebiRegistration: tenant.sebiRegistration,

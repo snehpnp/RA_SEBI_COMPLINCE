@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
@@ -8,29 +8,45 @@ const SYSTEM_ROLES = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_O
 
 export const getRoles = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const roles = await prisma.role.findMany({
-      include: {
-        permissions: {
-          include: {
-            permission: true
-          }
-        },
-        _count: {
-          select: { users: true }
-        }
+    const roles = await dynamicDb.Role.find({}).lean();
+    const roleIds = roles.map((r: any) => r._id || r.id);
+
+    // Fetch all role permissions populated with permission details
+    const rolePermissions = await dynamicDb.RolePermission.find({
+      roleId: { $in: roleIds }
+    }).populate('permissionId').lean();
+
+    // Fetch user counts grouped by roleId
+    const userCounts = await dynamicDb.User.aggregate([
+      { $match: { roleId: { $in: roleIds } } },
+      { $group: { _id: '$roleId', count: { $sum: 1 } } }
+    ]);
+    const userCountMap = new Map(userCounts.map((uc: any) => [String(uc._id), uc.count]));
+
+    // Group permissions by roleId
+    const permMap = new Map<string, string[]>();
+    for (const rp of rolePermissions) {
+      const rId = String((rp as any).roleId);
+      const permCode = (rp as any).permissionId?.code || (rp as any).permission?.code;
+      if (permCode) {
+        if (!permMap.has(rId)) permMap.set(rId, []);
+        permMap.get(rId)!.push(permCode);
       }
-    });
+    }
 
     const formattedRoles = roles
-      .filter(r => r.name !== 'CLIENT' && r.name !== 'PERSON_ASSOCIATED')
-      .map(role => ({
-        id: role.id,
-        name: role.name,
-        description: role.description,
-        allowMultiDeviceLogin: role.allowMultiDeviceLogin,
-        permissions: role.permissions.map(p => p.permission.code),
-        isAssigned: role._count.users > 0
-    }));
+      .filter((r: any) => r.name !== 'CLIENT' && r.name !== 'PERSON_ASSOCIATED')
+      .map((role: any) => {
+        const idStr = String(role._id || role.id);
+        return {
+          id: idStr,
+          name: role.name,
+          description: role.description,
+          allowMultiDeviceLogin: role.allowMultiDeviceLogin || false,
+          permissions: permMap.get(idStr) || [],
+          isAssigned: (userCountMap.get(idStr) || 0) > 0
+        };
+      });
 
     return res.status(200).json({
       success: true,
@@ -44,7 +60,6 @@ export const getRoles = async (req: AuthenticatedRequest, res: Response) => {
     });
   }
 };
-
 
 export const createRole = async (req: AuthenticatedRequest, res: Response) => {
   const { name, description } = req.body;
@@ -60,8 +75,8 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
   const formattedName = name.toUpperCase().trim().replace(/\s+/g, '_');
 
   try {
-    const existing = await prisma.role.findUnique({
-      where: { name: formattedName }
+    const existing = await dynamicDb.Role.findOne({
+      name: formattedName
     });
 
     if (existing) {
@@ -71,11 +86,9 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    const newRole = await prisma.role.create({
-      data: {
-        name: formattedName,
-        description
-      }
+    const newRole = await dynamicDb.Role.create({
+      name: formattedName,
+      description
     });
 
     await logAudit({
@@ -93,7 +106,7 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
       success: true,
       message: 'Role created successfully',
       data: {
-        id: newRole.id,
+        id: String(newRole._id || newRole.id),
         name: newRole.name,
         description: newRole.description,
         permissions: []
@@ -120,10 +133,7 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
   }
 
   try {
-    const role = await prisma.role.findUnique({
-      where: { id },
-      include: { permissions: { include: { permission: true } } }
-    });
+    const role = await dynamicDb.Role.findById(id);
 
     if (!role) {
       return res.status(404).json({
@@ -144,38 +154,33 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
     const RESTRICTED_PERMISSIONS = ['ACCESS_SETTINGS', 'ACCESS_ROLES', 'ACCESS_STAFF_LOGS'];
     const filteredPermissions = permissions.filter(p => !RESTRICTED_PERMISSIONS.includes(p));
 
-    const oldPerms = role.permissions.map(p => p.permission.code);
+    const existingRolePerms = await dynamicDb.RolePermission.find({ roleId: id }).populate('permissionId').lean();
+    const oldPerms = existingRolePerms.map((p: any) => p.permissionId?.code || p.permission?.code).filter(Boolean);
 
-    const updatedRole = await prisma.$transaction(async (tx) => {
-      // 1. Delete existing role permissions
-      await tx.rolePermission.deleteMany({
-        where: { roleId: id }
-      });
+    // 1. Delete existing role permissions
+    await dynamicDb.RolePermission.deleteMany({ roleId: id });
 
-      // 2. Fetch the permissions matching the request codes
-      const dbPermissions = await tx.permission.findMany({
-        where: {
-          code: { in: filteredPermissions }
-        }
-      });
+    // 2. Fetch the permissions matching the request codes
+    const dbPermissions = await dynamicDb.Permission.find({
+      code: { $in: filteredPermissions }
+    }).lean();
 
-      // 3. Create new role permission links
-      if (dbPermissions.length > 0) {
-        await tx.rolePermission.createMany({
-          data: dbPermissions.map(perm => ({
-            roleId: id,
-            permissionId: perm.id
-          }))
-        });
-      }
+    // 3. Create new role permission links
+    if (dbPermissions.length > 0) {
+      await dynamicDb.RolePermission.insertMany(
+        dbPermissions.map((perm: any) => ({
+          roleId: id,
+          permissionId: perm._id || perm.id
+        }))
+      );
+    }
 
-      return {
-        id: role.id,
-        name: role.name,
-        description: role.description,
-        permissions: dbPermissions.map(p => p.code)
-      };
-    });
+    const updatedData = {
+      id: String(role._id || role.id),
+      name: role.name,
+      description: role.description,
+      permissions: dbPermissions.map((p: any) => p.code)
+    };
 
     await logAudit({
       tenantId: req.user?.tenantId,
@@ -183,7 +188,7 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
       action: 'UPDATE',
       module: 'USERS',
       oldValue: JSON.stringify(oldPerms),
-      newValue: JSON.stringify(updatedRole.permissions),
+      newValue: JSON.stringify(updatedData.permissions),
       ipAddress: req.ip
     });
 
@@ -192,7 +197,7 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
     return res.status(200).json({
       success: true,
       message: 'Access permissions updated successfully.',
-      data: updatedRole
+      data: updatedData
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -208,10 +213,7 @@ export const updateRole = async (req: AuthenticatedRequest, res: Response) => {
   const { name, description, allowMultiDeviceLogin } = req.body;
 
   try {
-    const role = await prisma.role.findUnique({
-      where: { id },
-      include: { _count: { select: { users: true } } }
-    });
+    const role = await dynamicDb.Role.findById(id);
 
     if (!role) {
       return res.status(404).json({ success: false, message: 'Role not found.' });
@@ -234,17 +236,20 @@ export const updateRole = async (req: AuthenticatedRequest, res: Response) => {
       }
 
       if (role.name !== formattedName) {
-        const existing = await prisma.role.findUnique({ where: { name: formattedName } });
-        if (existing) {
+        const existing = await dynamicDb.Role.findOne({ name: formattedName });
+        if (existing && String(existing._id || existing.id) !== id) {
           return res.status(400).json({ success: false, message: `Role '${formattedName}' already exists.` });
         }
       }
 
-      if (role._count.users > 0) {
+      const userCount = await dynamicDb.User.countDocuments({ roleId: id });
+      if (userCount > 0) {
         return res.status(400).json({ success: false, message: 'Cannot edit role name because it is assigned to one or more users.' });
       }
 
       dataToUpdate.name = formattedName;
+      dataToUpdate.description = description;
+    } else if (description !== undefined) {
       dataToUpdate.description = description;
     }
 
@@ -252,10 +257,11 @@ export const updateRole = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'No updates provided.' });
     }
 
-    const updatedRole = await prisma.role.update({
-      where: { id },
-      data: dataToUpdate
-    });
+    const updatedRole = await dynamicDb.Role.findByIdAndUpdate(
+      id,
+      { $set: dataToUpdate },
+      { returnDocument: 'after' }
+    );
 
     await logAudit({
       tenantId: req.user?.tenantId,
@@ -287,14 +293,7 @@ export const deleteRole = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    const role = await prisma.role.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: { users: true }
-        }
-      }
-    });
+    const role = await dynamicDb.Role.findById(id);
 
     if (!role) {
       return res.status(404).json({
@@ -310,24 +309,19 @@ export const deleteRole = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
-    if (role._count.users > 0) {
+    const userCount = await dynamicDb.User.countDocuments({ roleId: id });
+    if (userCount > 0) {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete role because it is assigned to one or more users.'
       });
     }
 
-    await prisma.$transaction(async (tx) => {
-      // 1. Delete associated permissions first
-      await tx.rolePermission.deleteMany({
-        where: { roleId: id }
-      });
+    // 1. Delete associated permissions first
+    await dynamicDb.RolePermission.deleteMany({ roleId: id });
 
-      // 2. Delete the role
-      await tx.role.delete({
-        where: { id }
-      });
-    });
+    // 2. Delete the role
+    await dynamicDb.Role.findByIdAndDelete(id);
 
     await logAudit({
       tenantId: req.user?.tenantId,
@@ -352,4 +346,3 @@ export const deleteRole = async (req: AuthenticatedRequest, res: Response) => {
     });
   }
 };
-

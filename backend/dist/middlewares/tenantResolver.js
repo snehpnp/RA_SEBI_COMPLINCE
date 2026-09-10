@@ -40,13 +40,13 @@ const tenantConnectionManager_1 = require("../services/tenantConnectionManager")
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 /**
  * Global Middleware: Automatically resolves the Tenant Database from Domain, Headers, or JWT.
- * Sets the active Tenant Prisma Client in AsyncLocalStorage context for 100% transparent isolation.
+ * Sets the active Tenant Mongoose Connection & Models in AsyncLocalStorage context for transparent isolation.
  */
 async function tenantResolverMiddleware(req, res, next) {
     const path = req.path || '';
     // 1. SuperAdmin management routes always execute in Central DB context
     if (path.startsWith('/api/super-admin')) {
-        return (0, tenantContext_1.runWithTenantContext)({ isCentral: true, prisma: tenantConnectionManager_1.centralPrisma }, () => next());
+        return (0, tenantContext_1.runWithTenantContext)({ isCentral: true, connection: tenantConnectionManager_1.centralConnection, models: tenantConnectionManager_1.centralModels }, () => next());
     }
     // 2. Extract tenant identifier candidates
     let tenantIdentifier = null;
@@ -79,7 +79,7 @@ async function tenantResolverMiddleware(req, res, next) {
             if (token) {
                 const decoded = jwt.decode(token);
                 if (decoded && decoded.role === 'SUPER_ADMIN') {
-                    return (0, tenantContext_1.runWithTenantContext)({ isCentral: true, prisma: tenantConnectionManager_1.centralPrisma }, () => next());
+                    return (0, tenantContext_1.runWithTenantContext)({ isCentral: true, connection: tenantConnectionManager_1.centralConnection, models: tenantConnectionManager_1.centralModels }, () => next());
                 }
                 if (decoded && decoded.tenantId) {
                     tenantIdentifier = decoded.tenantId;
@@ -91,17 +91,19 @@ async function tenantResolverMiddleware(req, res, next) {
     // 3. If a tenant was identified, resolve its dedicated database connection
     if (tenantIdentifier) {
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantPrisma(tenantIdentifier);
+            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(tenantIdentifier);
             if (resolved) {
                 req.tenant = resolved.meta;
                 req.tenantId = resolved.meta.id;
-                req.tenantPrisma = resolved.prisma;
+                req.tenantConnection = resolved.connection;
+                req.tenantModels = resolved.models;
                 return (0, tenantContext_1.runWithTenantContext)({
                     tenantId: resolved.meta.id,
                     domainUrl: resolved.meta.domainUrl,
                     dbName: resolved.meta.dbName,
                     mongoDbUrl: resolved.meta.mongoDbUrl,
-                    prisma: resolved.prisma,
+                    connection: resolved.connection,
+                    models: resolved.models,
                     isCentral: false
                 }, () => next());
             }
@@ -111,6 +113,6 @@ async function tenantResolverMiddleware(req, res, next) {
         }
     }
     // 4. Default fallback: Central DB context
-    return (0, tenantContext_1.runWithTenantContext)({ isCentral: true, prisma: tenantConnectionManager_1.centralPrisma }, () => next());
+    return (0, tenantContext_1.runWithTenantContext)({ isCentral: true, connection: tenantConnectionManager_1.centralConnection, models: tenantConnectionManager_1.centralModels }, () => next());
 }
 exports.default = tenantResolverMiddleware;

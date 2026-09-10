@@ -1,5 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-import prisma from '../config/db';
+import { State } from '../config/db';
 
 export interface StateData {
   name: string;
@@ -42,28 +41,21 @@ export const INDIAN_STATES: StateData[] = [
   { name: 'Tripura', gstCode: '16' },
   { name: 'Uttar Pradesh', gstCode: '09' },
   { name: 'Uttarakhand', gstCode: '05' },
-  { name: 'West Bengal', gstCode: '19' },
+  { name: 'West Bengal', gstCode: '19' }
 ];
 
 /**
- * Ensures the State collection in the given PrismaClient (or default DB)
+ * Ensures the State collection in the given DB
  * is populated with all Indian States and their GST codes.
  */
-export async function ensureStates(client: PrismaClient = prisma): Promise<void> {
+export async function ensureStates(StateModel: any = State): Promise<void> {
   try {
     for (const state of INDIAN_STATES) {
-      await client.state.upsert({
-        where: { name: state.name },
-        update: {
-          gstCode: state.gstCode,
-          isActive: true
-        },
-        create: {
-          name: state.name,
-          gstCode: state.gstCode,
-          isActive: true
-        }
-      });
+      await StateModel.findOneAndUpdate(
+        { name: state.name },
+        { gstCode: state.gstCode, isActive: true },
+        { upsert: true, returnDocument: 'after' }
+      );
     }
     console.log(`[StateService] Indian states collection successfully verified/seeded (${INDIAN_STATES.length} states).`);
   } catch (err: any) {
@@ -79,7 +71,7 @@ export function detectStateFromGst(gstin?: string | null): string | null {
   const clean = gstin.trim();
   if (clean.length < 2) return null;
   const code = clean.substring(0, 2);
-  const found = INDIAN_STATES.find(s => s.gstCode === code);
+  const found = INDIAN_STATES.find((s) => s.gstCode === code);
   return found ? found.name : null;
 }
 
@@ -99,10 +91,22 @@ export function detectStateFromText(text?: string | null): string | null {
   }
 
   // Common aliases
-  if (upper.includes('MUMBAI') || upper.includes('PUNE') || upper.includes('NAGPUR') || upper.includes('THANE') || upper.includes('NAVI MUMBAI')) {
+  if (
+    upper.includes('MUMBAI') ||
+    upper.includes('PUNE') ||
+    upper.includes('NAGPUR') ||
+    upper.includes('THANE') ||
+    upper.includes('NAVI MUMBAI')
+  ) {
     return 'Maharashtra';
   }
-  if (upper.includes('NEW DELHI') || upper.includes('DELHI NCR') || upper.includes('NOIDA') || upper.includes('GURGAON') || upper.includes('GURUGRAM')) {
+  if (
+    upper.includes('NEW DELHI') ||
+    upper.includes('DELHI NCR') ||
+    upper.includes('NOIDA') ||
+    upper.includes('GURGAON') ||
+    upper.includes('GURUGRAM')
+  ) {
     if (upper.includes('NOIDA')) return 'Uttar Pradesh';
     if (upper.includes('GURGAON') || upper.includes('GURUGRAM')) return 'Haryana';
     return 'Delhi';
@@ -116,7 +120,12 @@ export function detectStateFromText(text?: string | null): string | null {
   if (upper.includes('CHENNAI') || upper.includes('COIMBATORE')) {
     return 'Tamil Nadu';
   }
-  if (upper.includes('AHMEDABAD') || upper.includes('SURAT') || upper.includes('VADODARA') || upper.includes('RAJKOT')) {
+  if (
+    upper.includes('AHMEDABAD') ||
+    upper.includes('SURAT') ||
+    upper.includes('VADODARA') ||
+    upper.includes('RAJKOT')
+  ) {
     return 'Gujarat';
   }
   if (upper.includes('KOLKATA') || upper.includes('CALCUTTA')) {
@@ -125,7 +134,12 @@ export function detectStateFromText(text?: string | null): string | null {
   if (upper.includes('JAIPUR') || upper.includes('UDAIPUR') || upper.includes('JODHPUR')) {
     return 'Rajasthan';
   }
-  if (upper.includes('LUCKNOW') || upper.includes('KANPUR') || upper.includes('VARANASI') || upper.includes('AGRA')) {
+  if (
+    upper.includes('LUCKNOW') ||
+    upper.includes('KANPUR') ||
+    upper.includes('VARANASI') ||
+    upper.includes('AGRA')
+  ) {
     return 'Uttar Pradesh';
   }
   if (upper.includes('CHANDIGARH')) {

@@ -18,35 +18,36 @@ export default function AuthFlipContainer({ initialView = 'login' }: AuthFlipCon
   }, [initialView]);
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center p-4 relative font-sans overflow-hidden" style={{ perspective: '1000px' }}>
-      {/* Background decorations */}
-      <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-blue-500/10 blur-[120px]" />
-      <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-indigo-500/10 blur-[120px]" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex flex-col items-center justify-center p-4 sm:p-6 relative font-sans overflow-hidden selection:bg-blue-500 selection:text-white" style={{ perspective: '1200px' }}>
+      {/* Ambient background glows */}
+      <div className="absolute top-[-15%] right-[-10%] w-[600px] h-[600px] rounded-full bg-blue-400/15 dark:bg-blue-600/10 blur-[140px] pointer-events-none" />
+      <div className="absolute bottom-[-15%] left-[-10%] w-[600px] h-[600px] rounded-full bg-indigo-400/15 dark:bg-indigo-600/10 blur-[140px] pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(#94a3b8_1px,transparent_1px)] [background-size:24px_24px] opacity-20 dark:opacity-5 pointer-events-none" />
 
-      {/* Logo at the very top */}
-      <div className="relative z-20 mb-8 animate-fade-in-up">
+      {/* Logo at the top */}
+      <div className="relative z-20 mb-6 sm:mb-8 transition-transform hover:scale-[1.02] duration-300">
         {loginLogoUrl && loginLogoUrl !== '/logo-light.png' ? (
-          <img src={loginLogoUrl} alt={appName || 'Logo'} className="h-16 object-contain" />
+          <img src={loginLogoUrl} alt={appName || 'Logo'} className="h-14 sm:h-16 object-contain drop-shadow-sm" />
         ) : (
-          <div className="flex items-center gap-2">
-            <img src="/logo-light.png" alt="RAGCP" className="h-12 dark:hidden" />
-            <img src="/logo-dark.png" alt="RAGCP" className="h-12 hidden dark:block" />
+          <div className="flex items-center gap-2 drop-shadow-sm">
+            <img src="/logo-light.png" alt="RAGCP" className="h-12 sm:h-14 dark:hidden" />
+            <img src="/logo-dark.png" alt="RAGCP" className="h-12 sm:h-14 hidden dark:block" />
           </div>
         )}
       </div>
 
-      {/* Flip Container */}
-      <div className="relative z-10 w-full max-w-md md:max-w-xl transition-all duration-700 ease-in-out"
+      {/* Flip Container Card */}
+      <div className="relative z-10 w-full max-w-md md:max-w-lg transition-all duration-700 ease-in-out"
            style={{ transformStyle: 'preserve-3d', transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
         
         {/* Front Side: Login */}
-        <div className={`w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-3xl shadow-2xl p-6 md:p-8 flex flex-col transition-all duration-300 ${isFlipped ? 'pointer-events-none absolute top-0 left-0 opacity-0' : 'relative opacity-100'}`}
+        <div className={`w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/90 dark:border-slate-800 rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)] dark:shadow-[0_25px_70px_-15px_rgba(0,0,0,0.7)] p-6 sm:p-8 md:p-9 flex flex-col transition-all duration-300 ${isFlipped ? 'pointer-events-none absolute top-0 left-0 opacity-0' : 'relative opacity-100'}`}
              style={{ backfaceVisibility: 'hidden' }}>
           <LoginForm onFlip={() => setIsFlipped(true)} />
         </div>
 
         {/* Back Side: Register */}
-        <div className={`w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-3xl shadow-2xl p-6 md:p-8 flex flex-col transition-all duration-300 ${!isFlipped ? 'pointer-events-none absolute top-0 left-0 opacity-0' : 'relative opacity-100'}`}
+        <div className={`w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/90 dark:border-slate-800 rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)] dark:shadow-[0_25px_70px_-15px_rgba(0,0,0,0.7)] p-6 sm:p-8 md:p-9 flex flex-col transition-all duration-300 ${!isFlipped ? 'pointer-events-none absolute top-0 left-0 opacity-0' : 'relative opacity-100'}`}
              style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
           <RegisterForm onFlip={() => setIsFlipped(false)} />
         </div>

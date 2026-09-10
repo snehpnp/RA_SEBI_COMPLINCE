@@ -40,7 +40,7 @@ const crypto = __importStar(require("crypto"));
 const tenantConnectionManager_1 = require("./tenantConnectionManager");
 const tenantProvisionService_1 = require("./tenantProvisionService");
 class TenantProvisionEngine {
-    ALL_PRISMA_COLLECTIONS = [
+    ALL_COLLECTIONS = [
         'Tenant',
         'User',
         'Role',
@@ -53,17 +53,19 @@ class TenantProvisionEngine {
         'ClientProfile',
         'ClientDocument',
         'Agreement',
+        'AgreementHistory',
         'Consent',
+        'ConsentHistory',
         'Subscription',
         'ClientIdentityHistory',
         'PlanCategory',
         'Plan',
         'Coupon',
         'Payment',
-        'Invoice',
         'Signal',
         'SignalMessage',
         'ResearchReport',
+        'ResearchAnalytics',
         'Stock',
         'ComplianceRequirement',
         'ComplianceAudit',
@@ -74,12 +76,15 @@ class TenantProvisionEngine {
         'ComplaintMonthlyReport',
         'CustomPage',
         'EmailTemplate',
+        'EmailVerification',
+        'SystemSetting',
         'State',
         'SupportTicket',
         'TicketMessage',
         'AuditLog',
         'NotificationLog',
-        'TenantDocumentHistory'
+        'TenantDocumentHistory',
+        'Resource'
     ];
     /**
      * Pre-creates all collections in the dedicated MongoDB database using native driver
@@ -89,8 +94,8 @@ class TenantProvisionEngine {
         try {
             await client.connect();
             const db = dbName ? client.db(dbName) : client.db();
-            const existingCollections = (await db.listCollections().toArray()).map(c => c.name);
-            for (const colName of this.ALL_PRISMA_COLLECTIONS) {
+            const existingCollections = (await db.listCollections().toArray()).map((c) => c.name);
+            for (const colName of this.ALL_COLLECTIONS) {
                 if (!existingCollections.includes(colName)) {
                     await db.createCollection(colName).catch(() => { });
                 }
@@ -107,13 +112,12 @@ class TenantProvisionEngine {
      *    - Creates `Tenant` collection with Company B's single profile.
      *    - Creates `User` collection with Company B's Admin user.
      *    - Initializes all other collections in Company B's database.
-     * Central DB's `Tenant` collection is NOT populated with other companies.
      */
     async provisionTenantFull(tenantPayload, adminPayload, createdById) {
         const companyName = tenantPayload.companyName.trim();
         const adminEmail = adminPayload.email.toLowerCase().trim();
-        const rawPassword = adminPayload.tempPassword || adminPayload.password || ('Admin@' + Math.floor(1000 + Math.random() * 9000));
-        const apiKey = tenantPayload.tenantApiKey || ('ragcp_' + crypto.randomBytes(16).toString('hex'));
+        const rawPassword = adminPayload.tempPassword || adminPayload.password || 'Admin@' + Math.floor(1000 + Math.random() * 9000);
+        const apiKey = tenantPayload.tenantApiKey || 'ragcp_' + crypto.randomBytes(16).toString('hex');
         const salt = await bcrypt.genSalt(10);
         const passwordHash = adminPayload.passwordHash || (await bcrypt.hash(rawPassword, salt));
         // Step 1: Generate unique tenantId, database name and connection URI
@@ -130,68 +134,37 @@ class TenantProvisionEngine {
         const depAmt = tenantPayload.depositAmount && !isNaN(parseFloat(String(tenantPayload.depositAmount)))
             ? parseFloat(String(tenantPayload.depositAmount))
             : 0.0;
-        let createdTenantPrisma = null;
         try {
-            // Step 2: Register in Central DB `all_companies` collection ONLY (Full Tenant format)
-            await tenantConnectionManager_1.centralPrisma.allCompany.upsert({
-                where: { tenantId },
-                update: {
-                    companyName,
-                    companyType: tenantPayload.companyType || 'INDIVIDUAL',
-                    raType: tenantPayload.raType || 'FULL_TIME',
-                    sebiRegistration: tenantPayload.sebiRegistration,
-                    bseEnrollment: tenantPayload.bseEnrollment || null,
-                    email: tenantPayload.email,
-                    mobile: tenantPayload.mobile,
-                    address: tenantPayload.address || null,
-                    pan: tenantPayload.pan || null,
-                    gst: tenantPayload.gst || null,
-                    website: tenantPayload.website || null,
-                    ownerName,
-                    certificateUrl: tenantPayload.certificateUrl || null,
-                    certificateValidity: certValidity,
-                    nismCertificateUrl: tenantPayload.nismCertificateUrl || null,
-                    nismValidity: nismVal,
-                    status: tenantPayload.status || 'ACTIVE',
-                    depositAmount: depAmt,
-                    state: tenantPayload.state || null,
-                    panelName: tenantPayload.panelName || `${companyName} Portal`,
-                    domainUrl: tenantPayload.domainUrl || null,
-                    mongoDbUrl,
-                    dbName,
-                    tenantApiKey: apiKey,
-                    createdById: createdById || null
-                },
-                create: {
-                    tenantId,
-                    companyName,
-                    companyType: tenantPayload.companyType || 'INDIVIDUAL',
-                    raType: tenantPayload.raType || 'FULL_TIME',
-                    sebiRegistration: tenantPayload.sebiRegistration,
-                    bseEnrollment: tenantPayload.bseEnrollment || null,
-                    email: tenantPayload.email,
-                    mobile: tenantPayload.mobile,
-                    address: tenantPayload.address || null,
-                    pan: tenantPayload.pan || null,
-                    gst: tenantPayload.gst || null,
-                    website: tenantPayload.website || null,
-                    ownerName,
-                    certificateUrl: tenantPayload.certificateUrl || null,
-                    certificateValidity: certValidity,
-                    nismCertificateUrl: tenantPayload.nismCertificateUrl || null,
-                    nismValidity: nismVal,
-                    status: tenantPayload.status || 'ACTIVE',
-                    depositAmount: depAmt,
-                    state: tenantPayload.state || null,
-                    panelName: tenantPayload.panelName || `${companyName} Portal`,
-                    domainUrl: tenantPayload.domainUrl || null,
-                    mongoDbUrl,
-                    dbName,
-                    tenantApiKey: apiKey,
-                    createdById: createdById || null
-                }
-            });
-            // Step 3: Provision in Company Database (DB B)
+            // Step 2: Register in Central DB `all_companies` collection
+            await tenantConnectionManager_1.centralModels.AllCompany.findOneAndUpdate({ tenantId }, {
+                tenantId,
+                companyName,
+                companyType: tenantPayload.companyType || 'INDIVIDUAL',
+                raType: tenantPayload.raType || 'FULL_TIME',
+                sebiRegistration: tenantPayload.sebiRegistration,
+                bseEnrollment: tenantPayload.bseEnrollment || null,
+                email: tenantPayload.email,
+                mobile: tenantPayload.mobile,
+                address: tenantPayload.address || null,
+                pan: tenantPayload.pan || null,
+                gst: tenantPayload.gst || null,
+                website: tenantPayload.website || null,
+                ownerName,
+                certificateUrl: tenantPayload.certificateUrl || null,
+                certificateValidity: certValidity,
+                nismCertificateUrl: tenantPayload.nismCertificateUrl || null,
+                nismValidity: nismVal,
+                status: tenantPayload.status || 'ACTIVE',
+                depositAmount: depAmt,
+                state: tenantPayload.state || null,
+                panelName: tenantPayload.panelName || `${companyName} Portal`,
+                domainUrl: tenantPayload.domainUrl || null,
+                mongoDbUrl,
+                dbName,
+                tenantApiKey: apiKey,
+                createdById: createdById || null
+            }, { upsert: true, returnDocument: 'after' });
+            // Step 3: Provision in Company Database
             const fullTenantData = {
                 ...tenantPayload,
                 id: tenantId,
@@ -209,8 +182,8 @@ class TenantProvisionEngine {
             };
             // Precreate all collections on the dedicated DB
             await this.precreateAllCollections(mongoDbUrl, dbName);
-            createdTenantPrisma = tenantConnectionManager_1.tenantConnectionManager.getPrismaByUri(mongoDbUrl);
-            const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(createdTenantPrisma, fullTenantData, fullAdminData);
+            const targetPool = tenantConnectionManager_1.tenantConnectionManager.getConnectionByUri(mongoDbUrl);
+            const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(targetPool.models, fullTenantData, fullAdminData);
             const createdAdmin = result.adminUser;
             return {
                 success: true,
@@ -221,14 +194,14 @@ class TenantProvisionEngine {
                 dbName,
                 mongoDbUrl,
                 adminEmail,
-                adminUserId: createdAdmin?.id,
+                adminUserId: createdAdmin?._id?.toString() || createdAdmin?.id,
                 tempPassword: rawPassword
             };
         }
         catch (error) {
             console.error(`Automated Tenant Provisioning failed for ${companyName}:`, error);
             // Rollback Central DB all_companies record if provisioning fails
-            await tenantConnectionManager_1.centralPrisma.allCompany.deleteMany({ where: { tenantId } }).catch(() => { });
+            await tenantConnectionManager_1.centralModels.AllCompany.deleteMany({ tenantId }).catch(() => { });
             return {
                 success: false,
                 message: `Failed to provision company database: ${error.message}`,

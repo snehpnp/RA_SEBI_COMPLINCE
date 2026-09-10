@@ -1,9 +1,7 @@
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
+import { Tenant, Client } from '../config/db';
 import fs from 'fs';
 import path from 'path';
-
-const prisma = new PrismaClient();
 
 /**
  * Safely resolves an attachment file path across different runtime working directories
@@ -31,7 +29,7 @@ export const resolveAttachmentFilePath = (filePathOrUrl?: string | null): string
     path.resolve('a:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
     path.join(__dirname, '../../../uploads/branding', fileName),
     path.join(process.cwd(), '../uploads/branding', fileName),
-    path.join(process.cwd(), 'uploads/branding', fileName),
+    path.join(process.cwd(), 'uploads/branding', fileName)
   ];
 
   for (const candidate of candidatePaths) {
@@ -72,7 +70,7 @@ export const generateTermsAndConditionsPdf = async (tenant: any): Promise<Buffer
       doc.moveDown(3.5);
       doc.fillColor('#0F172A').fontSize(14).font('Helvetica-Bold').text('TERMS & CONDITIONS FOR RESEARCH ANALYST SERVICES', { align: 'center' });
       doc.moveDown(0.5);
-      doc.fillColor('#64748B').fontSize(8).font('Helvetica').text(`Effective Date: ${new Date().toLocaleDateString('en-IN')} | Document ID: TNC-${tenant?.id || 'GLOBAL'}`, { align: 'center' });
+      doc.fillColor('#64748B').fontSize(8).font('Helvetica').text(`Effective Date: ${new Date().toLocaleDateString('en-IN')} | Document ID: TNC-${tenant?.id || tenant?._id || 'GLOBAL'}`, { align: 'center' });
       doc.moveDown(1);
 
       const sections = [
@@ -149,7 +147,7 @@ export const generatePrivacyPolicyPdf = async (tenant: any): Promise<Buffer> => 
       doc.moveDown(3.5);
       doc.fillColor('#0F172A').fontSize(14).font('Helvetica-Bold').text('PRIVACY & DATA PROTECTION POLICY', { align: 'center' });
       doc.moveDown(0.5);
-      doc.fillColor('#64748B').fontSize(8).font('Helvetica').text(`Effective Date: ${new Date().toLocaleDateString('en-IN')} | Document ID: PRIV-${tenant?.id || 'GLOBAL'}`, { align: 'center' });
+      doc.fillColor('#64748B').fontSize(8).font('Helvetica').text(`Effective Date: ${new Date().toLocaleDateString('en-IN')} | Document ID: PRIV-${tenant?.id || tenant?._id || 'GLOBAL'}`, { align: 'center' });
       doc.moveDown(1);
 
       const sections = [
@@ -211,7 +209,7 @@ export const getTenantComplianceAttachments = async (
   try {
     let tenant = tenantOrId;
     if (typeof tenantOrId === 'string') {
-      tenant = await prisma.tenant.findUnique({ where: { id: tenantOrId } });
+      tenant = await Tenant.findById(tenantOrId).lean();
     }
     if (!tenant) return [];
 
@@ -269,34 +267,31 @@ export const getTenantComplianceAttachments = async (
 export const generateAgreementPdf = async (clientId: string): Promise<Buffer> => {
   return new Promise(async (resolve, reject) => {
     try {
-      const client = await prisma.client.findUnique({
-        where: { id: clientId },
-        include: { user: true, profile: true }
-      });
+      const client: any = await Client.findById(clientId).populate('user').populate('profile').lean();
 
       if (!client) {
         return reject(new Error('Client not found'));
       }
 
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: client.user.tenantId as string }
-      });
+      const tenant: any = await Tenant.findById(client.user?.tenantId).lean();
 
       if (!tenant) {
         return reject(new Error('Tenant not found'));
       }
 
-      // Fallback agreement content if none configured
-      let agreementText = tenant.agreementContent || "SERVICE AGREEMENT\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}.\n\nDate: {{DATE}}";
+      let agreementText =
+        tenant.agreementContent ||
+        'SERVICE AGREEMENT\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}.\n\nDate: {{DATE}}';
 
-      // Replacements
       const replacements: Record<string, string> = {
-        '{{CLIENT_NAME}}': `${client.user.firstName} ${client.user.lastName}`,
-        '{{CLIENT_EMAIL}}': client.user.email,
+        '{{CLIENT_NAME}}': `${client.user?.firstName || ''} ${client.user?.lastName || ''}`,
+        '{{CLIENT_EMAIL}}': client.user?.email || '',
         '{{CLIENT_MOBILE}}': client.mobile || 'NA',
         '{{PAN_NUMBER}}': client.pan,
         '{{AADHAAR_NUMBER}}': client.aadhaar,
-        '{{CLIENT_ADDRESS}}': client.profile?.addressLine1 ? `${client.profile.addressLine1}, ${client.profile.city}` : 'NA',
+        '{{CLIENT_ADDRESS}}': client.profile?.addressLine1
+          ? `${client.profile.addressLine1}, ${client.profile.city || ''}`
+          : 'NA',
         '{{COMPANY_NAME}}': tenant.companyName,
         '{{SEBI_REGISTRATION}}': tenant.sebiRegistration,
         '{{COMPANY_ADDRESS}}': tenant.address,
@@ -304,11 +299,9 @@ export const generateAgreementPdf = async (clientId: string): Promise<Buffer> =>
       };
 
       for (const [key, value] of Object.entries(replacements)) {
-        // Replace all occurrences using global regex
         agreementText = agreementText.replace(new RegExp(key, 'g'), value);
       }
 
-      // Generate PDF (compress: false prevents zlib RangeError: Maximum call stack size exceeded)
       const doc = new PDFDocument({ compress: false, margins: { top: 50, bottom: 150, left: 50, right: 50 } });
       const buffers: Buffer[] = [];
 
@@ -318,22 +311,16 @@ export const generateAgreementPdf = async (clientId: string): Promise<Buffer> =>
         resolve(pdfData);
       });
 
-      // Add to first page
       doc.fontSize(20).text('SERVICE AGREEMENT', { align: 'center' });
       doc.moveDown(2);
 
-      // Simple regex to strip HTML if the admin uses rich text editor
       let plainText = agreementText;
-      // If it contains simple HTML, we can replace some common tags to preserve some structure
       plainText = plainText.replace(/<\/p>/g, '\n\n');
       plainText = plainText.replace(/<br\s*\/?>/g, '\n');
       plainText = plainText.replace(/<li>/gi, '- ');
       plainText = plainText.replace(/<\/li>/gi, '\n');
-      plainText = plainText.replace(/<[^>]*>?/gm, ''); // strip remaining HTML
-      // Decode entities if needed (basic)
+      plainText = plainText.replace(/<[^>]*>?/gm, '');
       plainText = plainText.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
-      
-      // Prevent pdfkit "Maximum call stack size exceeded" by splitting any extremely long unbroken words (e.g. stray base64 data)
       plainText = plainText.replace(/(\S{100})/g, '$1 ');
 
       doc.fontSize(12).text(plainText.trim(), {
@@ -342,9 +329,8 @@ export const generateAgreementPdf = async (clientId: string): Promise<Buffer> =>
       });
 
       doc.end();
-
     } catch (error) {
-      console.error("PDF Generation Error:", error);
+      console.error('PDF Generation Error:', error);
       reject(error);
     }
   });

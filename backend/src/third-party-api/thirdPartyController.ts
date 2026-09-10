@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import prisma from '../config/db';
+import mongoose from 'mongoose';
+import dynamicDb, { centralModels } from '../config/db';
 
 /**
  * Helper to resolve Tenant from route params, query, or headers without requiring JWT auth
@@ -15,33 +16,47 @@ export const resolveTenantFromRequest = async (req: Request) => {
 
   // 1. Try by API Key
   if (apiKey) {
-    const tenant = await prisma.tenant.findFirst({
-      where: { tenantApiKey: apiKey }
-    });
+    let tenant: any = await dynamicDb.Tenant.findOne({ tenantApiKey: apiKey }).lean();
+    if (!tenant && centralModels.CentralTenant) {
+      tenant = await centralModels.CentralTenant.findOne({ tenantApiKey: apiKey }).lean();
+    }
+    if (!tenant && centralModels.AllCompany) {
+      tenant = await centralModels.AllCompany.findOne({ apiKey: apiKey }).lean();
+    }
     if (tenant) return tenant;
   }
 
   // 2. Try by Tenant ID (Header / Param / Query)
   const directTenantId = headerTenantId || paramId || queryTenantId;
   if (directTenantId) {
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: directTenantId }
-    }).catch(() => null);
+    let tenant: any = null;
+    if (mongoose.Types.ObjectId.isValid(directTenantId)) {
+      tenant = await dynamicDb.Tenant.findById(directTenantId).lean().catch(() => null);
+      if (!tenant && centralModels.CentralTenant) {
+        tenant = await centralModels.CentralTenant.findById(directTenantId).lean().catch(() => null);
+      }
+    }
+    if (!tenant && centralModels.AllCompany) {
+      tenant = await centralModels.AllCompany.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(directTenantId) ? [{ _id: directTenantId }] : []),
+          { companyId: directTenantId }
+        ]
+      }).lean().catch(() => null);
+    }
     if (tenant) return tenant;
   }
 
   // 3. Try by Admin User ID / Email
   const adminIdentifier = queryEmail || paramId || queryAdminId;
   if (adminIdentifier) {
-    const adminUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { id: adminIdentifier },
-          { email: adminIdentifier.toLowerCase().trim() }
-        ]
-      },
-      include: { tenant: true }
-    }).catch(() => null);
+    const isOid = mongoose.Types.ObjectId.isValid(adminIdentifier);
+    const adminUser: any = await dynamicDb.User.findOne({
+      $or: [
+        ...(isOid ? [{ _id: adminIdentifier }] : []),
+        { email: String(adminIdentifier).toLowerCase().trim() }
+      ]
+    }).populate('tenant').lean().catch(() => null);
     if (adminUser?.tenant) return adminUser.tenant;
   }
 
@@ -49,22 +64,28 @@ export const resolveTenantFromRequest = async (req: Request) => {
   if (domainHeader) {
     const cleanDomain = domainHeader.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '').toLowerCase().trim();
     if (cleanDomain && cleanDomain !== 'localhost' && cleanDomain !== '127.0.0.1') {
-      const tenant = await prisma.tenant.findFirst({
-        where: {
-          OR: [
-            { domainUrl: { contains: cleanDomain, mode: 'insensitive' } },
-            { website: { contains: cleanDomain, mode: 'insensitive' } }
+      let tenant: any = await dynamicDb.Tenant.findOne({
+        $or: [
+          { domainUrl: { $regex: cleanDomain, $options: 'i' } },
+          { website: { $regex: cleanDomain, $options: 'i' } }
+        ]
+      }).lean();
+      if (!tenant && centralModels.CentralTenant) {
+        tenant = await centralModels.CentralTenant.findOne({
+          $or: [
+            { domainUrl: { $regex: cleanDomain, $options: 'i' } },
+            { website: { $regex: cleanDomain, $options: 'i' } }
           ]
-        }
-      });
+        }).lean();
+      }
       if (tenant) return tenant;
     }
   }
 
   // 5. Fallback for Single-Tenant standalone instance
-  const tenantCount = await prisma.tenant.count({ where: { deletedAt: null } });
+  const tenantCount = await dynamicDb.Tenant.countDocuments({ deletedAt: null });
   if (tenantCount === 1) {
-    return await prisma.tenant.findFirst({ where: { deletedAt: null } });
+    return await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
   }
 
   return null;
@@ -76,92 +97,72 @@ export const resolveTenantFromRequest = async (req: Request) => {
  */
 export const getThirdPartyClients = async (req: Request, res: Response) => {
   try {
-    const tenant = await resolveTenantFromRequest(req);
+    const tenant: any = await resolveTenantFromRequest(req);
 
-    const whereClause: any = {};
+    const userFilter: any = {};
     if (tenant) {
-      whereClause.user = { tenantId: tenant.id };
+      userFilter.tenantId = tenant._id || tenant.id;
     }
 
-    const clients = await prisma.client.findMany({
-      where: whereClause,
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            mobile: true,
-            firstName: true,
-            lastName: true,
-            status: true,
-            createdAt: true,
-            lastLogin: true
-          }
-        },
-        profile: true,
-        subscriptions: {
-          include: {
-            plan: {
-              select: {
-                id: true,
-                name: true,
-                price: true,
-                durationMonths: true,
-                researchSegments: true
-              }
-            }
-          },
-          orderBy: { createdAt: 'desc' }
-        },
-        agreements: {
-          select: {
-            id: true,
-            status: true,
-            signedAt: true,
-            agreementUrl: true
-          }
-        },
-        documents: {
-          select: {
-            id: true,
-            docType: true,
-            status: true,
-            fileName: true,
-            uploadedAt: true
-          }
-        }
-      },
-      orderBy: {
-        user: { createdAt: 'desc' }
-      }
-    });
+    const matchingUsers = await dynamicDb.User.find(userFilter).select('_id').lean();
+    const userIds = matchingUsers.map(u => u._id);
 
-    const sanitizedClients = clients.map(c => ({
-      id: c.id,
-      userId: c.userId,
-      name: c.name || `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim(),
-      email: c.email || c.user?.email,
-      mobile: c.mobile || c.user?.mobile,
-      pan: c.pan,
-      aadhaar: c.aadhaar,
-      category: c.category,
-      occupation: c.occupation,
-      status: c.status || c.user?.status,
-      riskProfile: c.profile?.riskProfile || 'MODERATE',
-      city: c.profile?.city || null,
-      state: c.profile?.state || null,
-      joinedAt: c.user?.createdAt,
-      activeSubscription: c.subscriptions?.[0] || null,
-      subscriptionsCount: c.subscriptions?.length || 0,
-      agreementsCount: c.agreements?.length || 0,
-      documentsCount: c.documents?.length || 0
-    }));
+    const clients = await dynamicDb.Client.find({
+      ...(userIds.length > 0 || !tenant ? { userId: { $in: userIds } } : { _id: null })
+    })
+      .populate({
+        path: 'userId',
+        select: 'id email mobile firstName lastName status createdAt lastLogin'
+      })
+      .populate('profile')
+      .populate({
+        path: 'subscriptions',
+        populate: {
+          path: 'plan',
+          select: 'id name price durationMonths researchSegments'
+        },
+        options: { sort: { createdAt: -1 } }
+      })
+      .populate({
+        path: 'agreements',
+        select: 'id status signedAt agreementUrl'
+      })
+      .populate({
+        path: 'documents',
+        select: 'id docType status fileName uploadedAt'
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const sanitizedClients = clients.map((c: any) => {
+      const user = c.userId || {};
+      return {
+        id: c._id?.toString() || c.id,
+        userId: user._id?.toString() || user.id || c.userId,
+        name: c.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+        email: c.email || user.email,
+        mobile: c.mobile || user.mobile,
+        pan: c.pan,
+        aadhaar: c.aadhaar,
+        category: c.category,
+        occupation: c.occupation,
+        status: c.status || user.status,
+        riskProfile: c.profile?.riskProfile || 'MODERATE',
+        city: c.profile?.city || null,
+        state: c.profile?.state || null,
+        joinedAt: user.createdAt,
+        activeSubscription: c.subscriptions?.[0] || null,
+        subscriptionsCount: c.subscriptions?.length || 0,
+        agreementsCount: c.agreements?.length || 0,
+        documentsCount: c.documents?.length || 0
+      };
+    });
 
     return res.status(200).json({
       success: true,
       source: 'THIRD_PARTY_API',
       company: tenant ? {
-        id: tenant.id,
+        id: tenant._id?.toString() || tenant.id,
         companyName: tenant.companyName,
         sebiRegistration: tenant.sebiRegistration,
         domainUrl: tenant.domainUrl,
@@ -185,7 +186,7 @@ export const getThirdPartyClients = async (req: Request, res: Response) => {
  */
 export const getThirdPartyStaff = async (req: Request, res: Response) => {
   try {
-    const tenant = await resolveTenantFromRequest(req);
+    const tenant: any = await resolveTenantFromRequest(req);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -193,39 +194,49 @@ export const getThirdPartyStaff = async (req: Request, res: Response) => {
       });
     }
 
-    const staffMembers = await prisma.staff.findMany({
-      where: {
-        user: { tenantId: tenant.id }
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            mobile: true,
-            firstName: true,
-            lastName: true,
-            status: true,
-            role: { select: { name: true } }
-          }
-        },
-        personAssociated: true
-      },
-      orderBy: {
-        user: { createdAt: 'desc' }
-      }
+    const tenantId = tenant._id || tenant.id;
+    const users = await dynamicDb.User.find({ tenantId }).select('_id').lean();
+    const userIds = users.map(u => u._id);
+
+    const staffMembers = await dynamicDb.Staff.find({
+      userId: { $in: userIds }
+    })
+      .populate({
+        path: 'userId',
+        select: 'id email mobile firstName lastName status roleId',
+        populate: { path: 'role', select: 'name' }
+      })
+      .populate('personAssociated')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedStaff = staffMembers.map((s: any) => {
+      const user = s.userId || {};
+      return {
+        ...s,
+        id: s._id?.toString() || s.id,
+        user: user ? {
+          id: user._id?.toString() || user.id,
+          email: user.email,
+          mobile: user.mobile,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          status: user.status,
+          role: user.role ? { name: user.role.name } : null
+        } : null
+      };
     });
 
     return res.status(200).json({
       success: true,
       source: 'THIRD_PARTY_API',
       company: {
-        id: tenant.id,
+        id: tenant._id?.toString() || tenant.id,
         companyName: tenant.companyName,
         sebiRegistration: tenant.sebiRegistration
       },
-      count: staffMembers.length,
-      data: staffMembers
+      count: formattedStaff.length,
+      data: formattedStaff
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -241,7 +252,7 @@ export const getThirdPartyStaff = async (req: Request, res: Response) => {
  */
 export const getThirdPartyPlans = async (req: Request, res: Response) => {
   try {
-    const tenant = await resolveTenantFromRequest(req);
+    const tenant: any = await resolveTenantFromRequest(req);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -249,22 +260,25 @@ export const getThirdPartyPlans = async (req: Request, res: Response) => {
       });
     }
 
-    const plans = await prisma.plan.findMany({
-      where: {
-        tenantId: tenant.id,
-        status: 'ACTIVE'
-      },
-      include: {
-        category: true
-      },
-      orderBy: { price: 'asc' }
-    });
+    const tenantId = tenant._id || tenant.id;
+    const plans = await dynamicDb.Plan.find({
+      tenantId,
+      status: 'ACTIVE'
+    })
+      .populate('category')
+      .sort({ price: 1 })
+      .lean();
+
+    const formattedPlans = plans.map((p: any) => ({
+      ...p,
+      id: p._id?.toString() || p.id
+    }));
 
     return res.status(200).json({
       success: true,
       source: 'THIRD_PARTY_API',
-      count: plans.length,
-      data: plans
+      count: formattedPlans.length,
+      data: formattedPlans
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -280,7 +294,7 @@ export const getThirdPartyPlans = async (req: Request, res: Response) => {
  */
 export const getThirdPartyInfo = async (req: Request, res: Response) => {
   try {
-    const tenant = await resolveTenantFromRequest(req);
+    const tenant: any = await resolveTenantFromRequest(req);
     if (!tenant) {
       return res.status(404).json({
         success: false,
@@ -292,7 +306,7 @@ export const getThirdPartyInfo = async (req: Request, res: Response) => {
       success: true,
       source: 'THIRD_PARTY_API',
       data: {
-        id: tenant.id,
+        id: tenant._id?.toString() || tenant.id,
         companyName: tenant.companyName,
         panelName: tenant.panelName || `${tenant.companyName} Portal`,
         sebiRegistration: tenant.sebiRegistration,

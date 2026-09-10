@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
@@ -39,11 +39,23 @@ export const getDashboardStats = async (req: AuthenticatedRequest, res: Response
     const isFullAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
     const userId = req.user?.id;
 
+    const clientAndAdminRoles = await dynamicDb.Role.find({ name: { $in: ['CLIENT', 'ADMIN'] } }).lean();
+    const excludeRoleIds = clientAndAdminRoles.map((r: any) => r._id || r.id);
+
+    const clientFilter: any = { tenantId };
+    if (!isFullAdmin && userId) clientFilter.createdById = userId;
+
+    const researchFilter: any = { tenantId };
+    if (!isFullAdmin && userId) researchFilter.createdById = userId;
+
+    const planFilter: any = { tenantId, deletedAt: null };
+    if (!isFullAdmin && userId) planFilter.createdById = userId;
+
     const [staffCount, clientCount, researchCount, planCount] = await Promise.all([
-      prisma.user.count({ where: { tenantId, role: { name: { notIn: ['CLIENT', 'ADMIN'] } }, deletedAt: null } }),
-      prisma.client.count({ where: { user: { tenantId }, ...(isFullAdmin ? {} : { createdById: userId }) } }),
-      prisma.researchReport.count({ where: { tenantId, ...(isFullAdmin ? {} : { createdById: userId }) } }),
-      prisma.plan.count({ where: { tenantId, deletedAt: null, ...(isFullAdmin ? {} : { createdById: userId }) } })
+      dynamicDb.User.countDocuments({ tenantId, roleId: { $nin: excludeRoleIds }, deletedAt: null }),
+      dynamicDb.Client.countDocuments(clientFilter),
+      dynamicDb.ResearchReport.countDocuments(researchFilter),
+      dynamicDb.Plan.countDocuments(planFilter)
     ]);
 
     res.json({
@@ -62,16 +74,15 @@ export const getDashboardStats = async (req: AuthenticatedRequest, res: Response
 
 // Helper to calculate profile completeness score
 export const calculateCompleteness = async (tenantId: string) => {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    include: {
-      users: {
-        include: { role: true, staff: true }
-      }
-    }
-  });
-
+  const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
   if (!tenant) return 0;
+
+  const users: any[] = await dynamicDb.User.find({ tenantId })
+    .populate('roleId')
+    .lean();
+  const userIds = users.map((u: any) => u._id || u.id);
+  const staffList = await dynamicDb.Staff.find({ userId: { $in: userIds } }).lean();
+  const staffMap = new Map(staffList.map((s: any) => [String(s.userId), s]));
 
   let score = 0;
   const details = {
@@ -89,22 +100,22 @@ export const calculateCompleteness = async (tenantId: string) => {
   }
 
   // 2. Principal Officer (User with role PRINCIPAL_OFFICER)
-  const poUser = tenant.users.find(u => u.role.name === 'PRINCIPAL_OFFICER' && u.status !== 'DELETED');
-  if (poUser && poUser.staff && poUser.staff.nismNumber && poUser.staff.nismValidity) {
+  const poUser = users.find(u => u.roleId?.name === 'PRINCIPAL_OFFICER' && u.status !== 'DELETED');
+  const poStaff = poUser ? staffMap.get(String(poUser._id || poUser.id)) : null;
+  if (poUser && poStaff && poStaff.nismNumber && poStaff.nismValidity) {
     score += 20;
     details.principalOfficer = true;
   }
 
   // 3. Compliance Officer (User with role COMPLIANCE_OFFICER)
-  const coUser = tenant.users.find(u => u.role.name === 'COMPLIANCE_OFFICER' && u.status !== 'DELETED');
-  if (coUser && coUser.staff && coUser.staff.nismNumber) {
+  const coUser = users.find(u => u.roleId?.name === 'COMPLIANCE_OFFICER' && u.status !== 'DELETED');
+  const coStaff = coUser ? staffMap.get(String(coUser._id || coUser.id)) : null;
+  if (coUser && coStaff && coStaff.nismNumber) {
     score += 20;
     details.complianceOfficer = true;
   }
 
-  // 4. Grievance Officer details (Can be simulated as stored in a policy config or checking if grievance email/name exists in tenant settings or stored database columns)
-  // Let's assume it is filled if we have a Grievance Officer config (we store this in settings or check a mock configuration flag in Tenant settings)
-  // To keep it simple, we check if the tenant has website and support email configured
+  // 4. Grievance Officer details
   if (tenant.email && tenant.mobile && tenant.website) {
     score += 20;
     details.grievance = true;
@@ -202,7 +213,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
   }
 
   try {
-    const oldTenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const oldTenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
     if (!oldTenant) {
       return res.status(404).json({
         success: false,
@@ -213,23 +224,27 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
 
     if (step === 'ORG') {
       if (data.gst) {
-        const duplicateGst = await prisma.tenant.findFirst({
-          where: { gst: data.gst, id: { not: tenantId } }
-        });
+        const duplicateGst = await dynamicDb.Tenant.findOne({
+          gst: data.gst,
+          _id: { $ne: tenantId }
+        }).lean();
         if (duplicateGst) {
           return res.status(400).json({ success: false, message: 'This GST number is already registered. Please provide a unique GST number.' });
         }
       }
 
-      const updatedTenant = await prisma.tenant.update({
-        where: { id: tenantId },
-        data: {
-          address: data.address,
-          website: data.website,
-          mobile: data.mobile,
-          gst: data.gst
-        }
-      });
+      const updatedTenant = await dynamicDb.Tenant.findByIdAndUpdate(
+        tenantId,
+        {
+          $set: {
+            address: data.address,
+            website: data.website,
+            mobile: data.mobile,
+            gst: data.gst
+          }
+        },
+        { returnDocument: 'after', lean: true }
+      );
       await logAudit({
         tenantId,
         userId: req.user!.id,
@@ -240,8 +255,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
         ipAddress: req.ip
       });
     } else if (step === 'PO') {
-      // Find or create Principal Officer User/Staff
-      const poRole = await prisma.role.findUnique({ where: { name: 'PRINCIPAL_OFFICER' } });
+      const poRole = await dynamicDb.Role.findOne({ name: 'PRINCIPAL_OFFICER' }).lean();
       if (!poRole) throw new Error('Principal Officer role not found');
 
       const salt = await bcrypt.genSalt(10);
@@ -249,77 +263,71 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
 
       const email = data.email;
 
-      // Check if email already used by a user in a DIFFERENT tenant
-      const emailConflictUser = await prisma.user.findUnique({ where: { email } });
+      const emailConflictUser: any = await dynamicDb.User.findOne({ email }).lean();
       if (emailConflictUser && emailConflictUser.tenantId !== tenantId) {
         return res.status(400).json({ success: false, message: 'This email is already registered in the system under a different company. Please use a unique email.' });
       }
 
-      // Check if current tenant already has a Principal Officer
-      const existingPO = await prisma.user.findFirst({
-        where: { tenantId, roleId: poRole.id },
-        include: { staff: true }
+      const existingPO: any = await dynamicDb.User.findOne({
+        tenantId,
+        roleId: poRole._id || poRole.id
       });
 
       if (existingPO) {
-        // Update existing PO - handle email change if different
         if (existingPO.email !== email) {
-          const newEmailConflict = await prisma.user.findUnique({ where: { email } });
+          const newEmailConflict = await dynamicDb.User.findOne({ email }).lean();
           if (newEmailConflict) {
             return res.status(400).json({ success: false, message: 'This email is already in use by another user.' });
           }
         }
-        await prisma.user.update({
-          where: { id: existingPO.id },
-          data: { firstName: data.name, mobile: data.mobile, email }
+        await dynamicDb.User.findByIdAndUpdate(existingPO._id || existingPO.id, {
+          $set: { firstName: data.name, mobile: data.mobile, email }
         });
-        if (existingPO.staff) {
-          await prisma.staff.update({
-            where: { userId: existingPO.id },
-            data: {
-              name: data.name, email, mobile: data.mobile,
+        
+        await dynamicDb.Staff.findOneAndUpdate(
+          { userId: existingPO._id || existingPO.id },
+          {
+            $set: {
+              name: data.name,
+              email,
+              mobile: data.mobile,
               nismNumber: data.nismNumber,
               nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
-              nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : undefined
-            }
-          });
-        } else {
-          await prisma.staff.create({
-            data: {
-              userId: existingPO.id,
+              ...(req.file ? { nismUpload: `/uploads/staff/${req.file.filename}` } : {})
+            },
+            $setOnInsert: {
+              userId: existingPO._id || existingPO.id,
               employeeId: 'EMP-PO-' + Math.floor(100 + Math.random() * 900),
-              name: data.name, email, mobile: data.mobile,
-              nismNumber: data.nismNumber,
-              nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
-              nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : undefined,
               status: 'ACTIVE'
             }
-          });
-        }
+          },
+          { upsert: true, returnDocument: 'after' }
+        );
       } else {
-        // No existing PO – create new user (email conflict already checked above)
-        const newUser = await prisma.user.create({
-          data: {
-            tenantId, roleId: poRole.id, email,
-            firstName: data.name, lastName: '(PO)',
-            mobile: data.mobile, passwordHash, status: 'ACTIVE'
-          }
+        const newUser: any = await dynamicDb.User.create({
+          tenantId,
+          roleId: poRole._id || poRole.id,
+          email,
+          firstName: data.name,
+          lastName: '(PO)',
+          mobile: data.mobile,
+          passwordHash,
+          status: 'ACTIVE'
         });
-        await prisma.staff.create({
-          data: {
-            userId: newUser.id,
-            employeeId: 'EMP-PO-' + Math.floor(100 + Math.random() * 900),
-            name: data.name, email, mobile: data.mobile,
-            nismNumber: data.nismNumber,
-            nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
-            nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : undefined,
-            status: 'ACTIVE'
-          }
+        await dynamicDb.Staff.create({
+          userId: newUser._id || newUser.id,
+          employeeId: 'EMP-PO-' + Math.floor(100 + Math.random() * 900),
+          name: data.name,
+          email,
+          mobile: data.mobile,
+          nismNumber: data.nismNumber,
+          nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
+          nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : null,
+          status: 'ACTIVE'
         });
       }
     } else if (step === 'CO') {
-      // Compliance Officer
-      const coRole = await prisma.role.findUnique({ where: { name: 'COMPLIANCE_OFFICER' } });
+      const coRole = await dynamicDb.Role.findOne({ name: 'COMPLIANCE_OFFICER' }).lean();
       if (!coRole) throw new Error('Compliance Officer role not found');
 
       const salt = await bcrypt.genSalt(10);
@@ -327,81 +335,79 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
 
       const email = data.email;
 
-      // Check if email already used by a user in a DIFFERENT tenant
-      const emailConflictUserCO = await prisma.user.findUnique({ where: { email } });
+      const emailConflictUserCO: any = await dynamicDb.User.findOne({ email }).lean();
       if (emailConflictUserCO && emailConflictUserCO.tenantId !== tenantId) {
         return res.status(400).json({ success: false, message: 'This email is already registered in the system under a different company. Please use a unique email.' });
       }
 
-      // Check if current tenant already has a Compliance Officer
-      const existingCO = await prisma.user.findFirst({
-        where: { tenantId, roleId: coRole.id },
-        include: { staff: true }
+      const existingCO: any = await dynamicDb.User.findOne({
+        tenantId,
+        roleId: coRole._id || coRole.id
       });
 
       if (existingCO) {
-        // Update existing CO
         if (existingCO.email !== email) {
-          const newEmailConflict = await prisma.user.findUnique({ where: { email } });
+          const newEmailConflict = await dynamicDb.User.findOne({ email }).lean();
           if (newEmailConflict) {
             return res.status(400).json({ success: false, message: 'This email is already in use by another user.' });
           }
         }
-        await prisma.user.update({
-          where: { id: existingCO.id },
-          data: { firstName: data.name, mobile: data.mobile, email }
+        await dynamicDb.User.findByIdAndUpdate(existingCO._id || existingCO.id, {
+          $set: { firstName: data.name, mobile: data.mobile, email }
         });
-        if (existingCO.staff) {
-          await prisma.staff.update({
-            where: { userId: existingCO.id },
-            data: {
-              name: data.name, email, mobile: data.mobile,
+
+        await dynamicDb.Staff.findOneAndUpdate(
+          { userId: existingCO._id || existingCO.id },
+          {
+            $set: {
+              name: data.name,
+              email,
+              mobile: data.mobile,
               nismNumber: data.nismNumber,
               nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
-              nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : undefined
-            }
-          });
-        } else {
-          await prisma.staff.create({
-            data: {
-              userId: existingCO.id,
+              ...(req.file ? { nismUpload: `/uploads/staff/${req.file.filename}` } : {})
+            },
+            $setOnInsert: {
+              userId: existingCO._id || existingCO.id,
               employeeId: 'EMP-CO-' + Math.floor(100 + Math.random() * 900),
-              name: data.name, email, mobile: data.mobile,
-              nismNumber: data.nismNumber,
-              nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
-              nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : undefined,
               status: 'ACTIVE'
             }
-          });
-        }
+          },
+          { upsert: true, returnDocument: 'after' }
+        );
       } else {
-        // No existing CO – create new user
-        const newUser = await prisma.user.create({
-          data: {
-            tenantId, roleId: coRole.id, email,
-            firstName: data.name, lastName: '(CO)',
-            mobile: data.mobile, passwordHash, status: 'ACTIVE'
-          }
+        const newUser: any = await dynamicDb.User.create({
+          tenantId,
+          roleId: coRole._id || coRole.id,
+          email,
+          firstName: data.name,
+          lastName: '(CO)',
+          mobile: data.mobile,
+          passwordHash,
+          status: 'ACTIVE'
         });
-        await prisma.staff.create({
-          data: {
-            userId: newUser.id,
-            employeeId: 'EMP-CO-' + Math.floor(100 + Math.random() * 900),
-            name: data.name, email, mobile: data.mobile,
-            nismNumber: data.nismNumber,
-            nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
-            nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : undefined,
-            status: 'ACTIVE'
-          }
+        await dynamicDb.Staff.create({
+          userId: newUser._id || newUser.id,
+          employeeId: 'EMP-CO-' + Math.floor(100 + Math.random() * 900),
+          name: data.name,
+          email,
+          mobile: data.mobile,
+          nismNumber: data.nismNumber,
+          nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
+          nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : null,
+          status: 'ACTIVE'
         });
       }
     } else if (step === 'POLICY') {
-      const updatedTenant = await prisma.tenant.update({
-        where: { id: tenantId },
-        data: {
-          internalPolicyUrl: data.internalPolicyUrl || '/uploads/policies/default_policy.pdf'
-        }
-      });
+      const updatedTenant = await dynamicDb.Tenant.findByIdAndUpdate(
+        tenantId,
+        {
+          $set: {
+            internalPolicyUrl: data.internalPolicyUrl || '/uploads/policies/default_policy.pdf'
+          }
+        },
+        { returnDocument: 'after', lean: true }
+      );
       await logAudit({
         tenantId,
         userId: req.user!.id,
@@ -444,7 +450,6 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
   if (!mobile || !mobileRegex.test(mobile)) {
     return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
   }
-  // If role is OTHER (selected directly), treat it as PERSON_ASSOCIATED internally
   const effectivePersonAssociatedType = roleName === 'OTHER' ? 'OTHER' : personAssociatedType;
   let effectiveRoleName = roleName === 'OTHER' ? 'PERSON_ASSOCIATED' : roleName;
 
@@ -477,23 +482,21 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    // Check NISM uniqueness
     if (nismNumber && nismNumber.trim().length > 0) {
-      const existingNism = await prisma.staff.findFirst({
-        where: { nismNumber: nismNumber.trim() }
-      });
+      const existingNism = await dynamicDb.Staff.findOne({
+        nismNumber: nismNumber.trim()
+      }).lean();
       if (existingNism) {
         return res.status(400).json({ success: false, message: 'Duplicate NISM Certificate Number. This number is already in use.' });
       }
     }
 
-    // Check email uniqueness
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await dynamicDb.User.findOne({ email }).lean();
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'User with this email already exists.' });
     }
 
-    const targetRole = await prisma.role.findUnique({ where: { name: effectiveRoleName } });
+    const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
     if (!targetRole) {
       return res.status(400).json({ success: false, message: `Role '${effectiveRoleName}' not found.` });
     }
@@ -502,60 +505,48 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(randomPassword, salt);
 
-    const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          tenantId,
-          roleId: targetRole.id,
-          firstName: name.split(' ')[0],
-          lastName: name.split(' ').slice(1).join(' ') || 'Staff',
-          email,
-          mobile,
-          passwordHash,
-          status: 'ACTIVE'
-        }
-      });
-
-      const staff = await tx.staff.create({
-        data: {
-          userId: user.id,
-          employeeId: 'EMP' + Math.floor(1000 + Math.random() * 9000),
-          name,
-          email,
-          mobile,
-          dob: dob ? new Date(dob) : null,
-          joiningDate: joiningDate ? new Date(joiningDate) : null,
-          nismNumber,
-          nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : null,
-          nismValidity: nismValidity ? new Date(nismValidity) : null,
-          status: 'ACTIVE'
-        }
-      });
-
-      if (['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(effectiveRoleName)) {
-        await tx.personAssociated.create({
-          data: {
-            staffId: staff.id,
-            roleType: effectivePersonAssociatedType || 'SALES',
-            customRole: effectivePersonAssociatedType === 'OTHER' ? customRole : null
-          }
-        });
-      }
-
-      return { user, staff };
+    const user: any = await dynamicDb.User.create({
+      tenantId,
+      roleId: targetRole._id || targetRole.id,
+      firstName: name.split(' ')[0],
+      lastName: name.split(' ').slice(1).join(' ') || 'Staff',
+      email,
+      mobile,
+      passwordHash,
+      status: 'ACTIVE'
     });
+
+    const staff: any = await dynamicDb.Staff.create({
+      userId: user._id || user.id,
+      employeeId: 'EMP' + Math.floor(1000 + Math.random() * 900),
+      name,
+      email,
+      mobile,
+      dob: dob ? new Date(dob) : null,
+      joiningDate: joiningDate ? new Date(joiningDate) : null,
+      nismNumber,
+      nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : null,
+      nismValidity: nismValidity ? new Date(nismValidity) : null,
+      status: 'ACTIVE'
+    });
+
+    if (['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(effectiveRoleName)) {
+      await dynamicDb.PersonAssociated.create({
+        staffId: staff._id || staff.id,
+        roleType: effectivePersonAssociatedType || 'SALES',
+        customRole: effectivePersonAssociatedType === 'OTHER' ? customRole : null
+      });
+    }
 
     // Log Notification log for SMTP
-    await prisma.notificationLog.create({
-      data: {
-        tenantId,
-        recipient: email,
-        channel: 'EMAIL',
-        title: 'Staff Account Created',
-        message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${email}, Password: ${randomPassword}`,
-        status: 'SENT'
-      }
-    });
+    await dynamicDb.NotificationLog.create({
+      tenantId,
+      recipient: email,
+      channel: 'EMAIL',
+      title: 'Staff Account Created',
+      message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${email}, Password: ${randomPassword}`,
+      status: 'SENT'
+    }).catch(() => {});
 
     // Write audit log
     await logAudit({
@@ -563,7 +554,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       userId: req.user!.id,
       action: 'CREATE',
       module: 'STAFF',
-      newValue: result.staff,
+      newValue: staff,
       ipAddress: req.ip
     });
 
@@ -572,9 +563,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
 
     // Get login URL
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-    
-    // Fetch tenant name
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
 
     // Send Welcome Email
     try {
@@ -589,14 +578,13 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       });
     } catch (emailError: any) {
       console.error('Failed to send welcome email:', emailError.message);
-      // We don't throw here because the user is already created in the DB successfully
     }
 
     return res.status(201).json({
       success: true,
       message: 'Staff created successfully',
       data: {
-        staff: result.staff,
+        staff,
         generatedPassword: randomPassword
       }
     });
@@ -612,22 +600,34 @@ export const getStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const staffMembers = await prisma.staff.findMany({
-      where: {
-        user: { tenantId } // Fetch all staff including active, inactive, and soft-deleted
-      },
-      include: {
-        user: {
-          include: { role: true }
-        },
-        personAssociated: true
-      },
-      orderBy: {
-        user: {
-          createdAt: 'desc'
-        }
-      }
+    const users: any[] = await dynamicDb.User.find({ tenantId })
+      .populate('roleId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const userIds = users.map((u: any) => u._id || u.id);
+    const staffList: any[] = await dynamicDb.Staff.find({ userId: { $in: userIds } }).lean();
+    const staffIds = staffList.map((s: any) => s._id || s.id);
+    const personAssocs: any[] = await dynamicDb.PersonAssociated.find({ staffId: { $in: staffIds } }).lean();
+
+    const paMap = new Map(personAssocs.map((p: any) => [String(p.staffId), p]));
+    const userMap = new Map(users.map((u: any) => [String(u._id || u.id), u]));
+
+    const staffMembers = staffList.map((s: any) => {
+      const user = userMap.get(String(s.userId));
+      const pa = paMap.get(String(s._id || s.id));
+      return {
+        ...s,
+        id: String(s._id || s.id),
+        user: user ? {
+          ...user,
+          id: String(user._id || user.id),
+          role: user.roleId
+        } : null,
+        personAssociated: pa || null
+      };
     });
+
     return res.status(200).json({ success: true, data: staffMembers });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -655,7 +655,6 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   if (!mobile || !mobileRegex.test(mobile)) {
     return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
   }
-  // If role is OTHER (selected directly), treat it as PERSON_ASSOCIATED internally
   const effectivePersonAssociatedType = roleName === 'OTHER' ? 'OTHER' : personAssociatedType;
   let effectiveRoleName = roleName === 'OTHER' ? 'PERSON_ASSOCIATED' : roleName;
 
@@ -673,7 +672,7 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     if (!nismValidity || new Date(nismValidity) <= new Date()) {
       return res.status(400).json({ success: false, message: 'NISM validity expiry date is required and must be in the future.' });
     }
-    const currentStaff = await prisma.staff.findUnique({ where: { id } });
+    const currentStaff: any = await dynamicDb.Staff.findById(id).lean();
     if (!currentStaff?.nismUpload && !req.file) {
       return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory.' });
     }
@@ -689,117 +688,82 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const staff = await prisma.staff.findFirst({
-      where: { id, user: { tenantId } },
-      include: { user: true }
-    });
-
+    const staff: any = await dynamicDb.Staff.findById(id).lean();
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
     }
 
-    // Check NISM uniqueness
+    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
+    if (!staffUser || staffUser.tenantId !== tenantId) {
+      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    }
+
     if (nismNumber && nismNumber.trim().length > 0) {
-      const existingNism = await prisma.staff.findFirst({
-        where: {
-          nismNumber: nismNumber.trim(),
-          NOT: { id }
-        }
-      });
+      const existingNism = await dynamicDb.Staff.findOne({
+        nismNumber: nismNumber.trim(),
+        _id: { $ne: id }
+      }).lean();
       if (existingNism) {
         return res.status(400).json({ success: false, message: 'Duplicate NISM Certificate Number. This number is already in use.' });
       }
     }
 
-    const oldStaffVal = await prisma.staff.findUnique({
-      where: { id },
-      include: { user: { include: { role: true } }, personAssociated: true }
-    });
+    const updateUserData: any = {
+      firstName: name.split(' ')[0],
+      lastName: name.split(' ').slice(1).join(' ') || 'Staff',
+      mobile
+    };
 
-    // Update staff and user in transaction
-    const updated = await prisma.$transaction(async (tx) => {
-      // 1. Update user details
-      const updateUserData: any = {
-        firstName: name.split(' ')[0],
-        lastName: name.split(' ').slice(1).join(' ') || 'Staff',
-        mobile
-      };
+    if (email !== staff.email) {
+      const emailExists = await dynamicDb.User.findOne({ email, _id: { $ne: staff.userId } }).lean();
+      if (emailExists) throw new Error('Email already in use by another user.');
+      updateUserData.email = email;
+    }
 
-      // Check if email changed and is unique
-      if (email !== staff.email) {
-        const emailExists = await tx.user.findFirst({ where: { email, NOT: { id: staff.userId } } });
-        if (emailExists) throw new Error('Email already in use by another user.');
-        updateUserData.email = email;
-      }
+    await dynamicDb.User.findByIdAndUpdate(staff.userId, { $set: updateUserData });
 
-      // Check if role changed
-      if (effectiveRoleName) {
-        const role = await tx.role.findUnique({ where: { name: effectiveRoleName } });
-        if (!role) throw new Error(`Role '${effectiveRoleName}' not found.`);
-        if (role.id !== staff.user.roleId) {
-          throw new Error('Changing staff role is not allowed.');
-        }
-        updateUserData.roleId = role.id;
-      }
+    const updateStaffData: any = {
+      name,
+      email: updateUserData.email || staff.email,
+      mobile,
+      dob: dob ? new Date(dob) : null,
+      joiningDate: joiningDate ? new Date(joiningDate) : null,
+      nismNumber,
+      nismValidity: nismValidity ? new Date(nismValidity) : null
+    };
 
-      const user = await tx.user.update({
-        where: { id: staff.userId },
-        data: updateUserData
+    if (req.file) {
+      updateStaffData.nismUpload = `/uploads/staff/${req.file.filename}`;
+    }
+
+    const updatedStaff = await dynamicDb.Staff.findByIdAndUpdate(
+      id,
+      { $set: updateStaffData },
+      { returnDocument: 'after', lean: true }
+    );
+
+    await dynamicDb.PersonAssociated.deleteMany({ staffId: id });
+
+    if (['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(effectiveRoleName)) {
+      await dynamicDb.PersonAssociated.create({
+        staffId: id,
+        roleType: effectivePersonAssociatedType || 'SALES',
+        customRole: effectivePersonAssociatedType === 'OTHER' ? customRole : null
       });
+    }
 
-      // 2. Update staff details
-      const updateStaffData: any = {
-        name,
-        email: updateUserData.email || staff.email,
-        mobile,
-        dob: dob ? new Date(dob) : null,
-        joiningDate: joiningDate ? new Date(joiningDate) : null,
-        nismNumber,
-        nismValidity: nismValidity ? new Date(nismValidity) : null
-      };
-
-      if (req.file) {
-        updateStaffData.nismUpload = `/uploads/staff/${req.file.filename}`;
-      }
-
-      const updatedStaff = await tx.staff.update({
-        where: { id },
-        data: updateStaffData
-      });
-
-      // 3. Handle role-specific associations
-      // Delete existing personAssociated if role changed from PERSON_ASSOCIATED or was updated
-      await tx.personAssociated.deleteMany({ where: { staffId: staff.id } });
-
-      if (['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(effectiveRoleName)) {
-        await tx.personAssociated.create({
-          data: {
-            staffId: staff.id,
-            roleType: effectivePersonAssociatedType || 'SALES',
-            customRole: effectivePersonAssociatedType === 'OTHER' ? customRole : null
-          }
-        });
-      }
-
-      return updatedStaff;
-    });
-
-    const newStaffVal = await prisma.staff.findUnique({
-      where: { id },
-      include: { user: { include: { role: true } }, personAssociated: true }
-    });
+    const newStaffVal = await dynamicDb.Staff.findById(id).lean();
 
     await logAudit({
       tenantId,
       userId: req.user!.id,
       action: 'UPDATE',
       module: 'STAFF',
-      oldValue: oldStaffVal,
+      oldValue: staff,
       newValue: newStaffVal,
       ipAddress: req.ip
     });
 
-    // Run compliance verification sweep for staff NISM validity
     await checkComplianceForTenant(tenantId);
 
     return res.status(200).json({
@@ -821,28 +785,26 @@ export const toggleStaffStatus = async (req: AuthenticatedRequest, res: Response
   }
 
   try {
-    const staff = await prisma.staff.findFirst({
-      where: { id, user: { tenantId } }
-    });
-
+    const staff: any = await dynamicDb.Staff.findById(id).lean();
     if (!staff) {
+      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    }
+
+    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
+    if (!staffUser || staffUser.tenantId !== tenantId) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
     }
 
     const newStatus = staff.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
 
-    const result = await prisma.$transaction(async (tx) => {
-      const updatedStaff = await tx.staff.update({
-        where: { id },
-        data: { status: newStatus }
-      });
+    const updatedStaff = await dynamicDb.Staff.findByIdAndUpdate(
+      id,
+      { $set: { status: newStatus } },
+      { returnDocument: 'after', lean: true }
+    );
 
-      await tx.user.update({
-        where: { id: staff.userId },
-        data: { status: newStatus }
-      });
-
-      return updatedStaff;
+    await dynamicDb.User.findByIdAndUpdate(staff.userId, {
+      $set: { status: newStatus }
     });
 
     await logAudit({
@@ -851,17 +813,16 @@ export const toggleStaffStatus = async (req: AuthenticatedRequest, res: Response
       action: 'UPDATE',
       module: 'STAFF',
       oldValue: staff,
-      newValue: result,
+      newValue: updatedStaff,
       ipAddress: req.ip
     });
 
-    // Run compliance verification sweep for staff NISM validity
     await checkComplianceForTenant(tenantId);
 
     return res.status(200).json({
       success: true,
       message: `Staff status updated to ${newStatus}`,
-      data: result
+      data: updatedStaff
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -877,25 +838,19 @@ export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const staff = await prisma.staff.findFirst({
-      where: { id, user: { tenantId } }
-    });
-
+    const staff: any = await dynamicDb.Staff.findById(id).lean();
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
     }
 
+    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
+    if (!staffUser || staffUser.tenantId !== tenantId) {
+      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    }
+
     const now = new Date();
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: staff.userId },
-        data: { deletedAt: now }
-      });
-      await tx.staff.update({
-        where: { id },
-        data: { status: 'INACTIVE' }
-      });
-    });
+    await dynamicDb.User.findByIdAndUpdate(staff.userId, { $set: { deletedAt: now } });
+    await dynamicDb.Staff.findByIdAndUpdate(id, { $set: { status: 'INACTIVE' } });
 
     await logAudit({
       tenantId,
@@ -907,7 +862,6 @@ export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
       ipAddress: req.ip
     });
 
-    // Run compliance verification sweep for staff NISM validity
     await checkComplianceForTenant(tenantId);
 
     return res.status(200).json({
@@ -928,23 +882,21 @@ export const restoreStaff = async (req: AuthenticatedRequest, res: Response) => 
   }
 
   try {
-    const staff = await prisma.staff.findFirst({
-      where: { id, user: { tenantId, NOT: { deletedAt: null } } }
-    });
-
+    const staff: any = await dynamicDb.Staff.findById(id).lean();
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Deleted staff member not found.' });
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: staff.userId },
-        data: { deletedAt: null, status: 'ACTIVE' }
-      });
-      await tx.staff.update({
-        where: { id },
-        data: { status: 'ACTIVE' }
-      });
+    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
+    if (!staffUser || staffUser.tenantId !== tenantId || !staffUser.deletedAt) {
+      return res.status(404).json({ success: false, message: 'Deleted staff member not found.' });
+    }
+
+    await dynamicDb.User.findByIdAndUpdate(staff.userId, {
+      $set: { deletedAt: null, status: 'ACTIVE' }
+    });
+    await dynamicDb.Staff.findByIdAndUpdate(id, {
+      $set: { status: 'ACTIVE' }
     });
 
     await logAudit({
@@ -957,7 +909,6 @@ export const restoreStaff = async (req: AuthenticatedRequest, res: Response) => 
       ipAddress: req.ip
     });
 
-    // Run compliance verification sweep for staff NISM validity
     await checkComplianceForTenant(tenantId);
 
     return res.status(200).json({
@@ -979,91 +930,140 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
 
   try {
     const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    let clients;
+    let filterQuery: any = { tenantId };
 
-    if (isFullAdmin) {
-      clients = await prisma.client.findMany({
-        where: { user: { tenantId } },
-        include: {
-          user: { include: { role: true } },
-          profile: true,
-          subscriptions: { include: { plan: true }, orderBy: { createdAt: 'desc' },  },
-          agreements: true,
-          documents: true,
-          complianceAlerts: true
-        },
-        orderBy: { user: { createdAt: 'desc' } }
-      });
-    } else {
-      // Check permissions
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_CLIENTS' } }
-      });
-      const hasViewOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_OWN_CLIENTS' } }
-      });
+    if (!isFullAdmin) {
+      const userRole = await dynamicDb.Role.findOne({ name: req.user!.role }).lean();
+      const roleId = userRole?._id || userRole?.id;
+
+      const hasViewAll = await dynamicDb.RolePermission.findOne({
+        roleId,
+        permissionId: { $in: (await dynamicDb.Permission.find({ code: 'VIEW_ALL_CLIENTS' }).lean()).map((p: any) => p._id || p.id) }
+      }).lean();
+
+      const hasViewOwn = await dynamicDb.RolePermission.findOne({
+        roleId,
+        permissionId: { $in: (await dynamicDb.Permission.find({ code: 'VIEW_OWN_CLIENTS' }).lean()).map((p: any) => p._id || p.id) }
+      }).lean();
 
       if (!hasViewAll && !hasViewOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to view clients.' });
       }
 
-      const rawClients = await prisma.client.findMany({
-        where: {
-          user: { tenantId },
-          ...(hasViewAll ? {} : { createdById: req.user!.id })
-        },
-        include: {
-          user: { include: { role: true } },
-          profile: true,
-          subscriptions: { include: { plan: true }, orderBy: { createdAt: 'desc' } },
-          agreements: true,
-          documents: true,
-          complianceAlerts: true
-        },
-        orderBy: { user: { createdAt: 'desc' } }
-      });
-
-      const creatorIds = [...new Set(rawClients.map(c => c.createdById).filter(Boolean))] as string[];
-      const creatorUsers = creatorIds.length > 0 ? await prisma.user.findMany({
-        where: { id: { in: creatorIds } },
-        select: { id: true, firstName: true, lastName: true, role: { select: { name: true } } }
-      }) : [];
-
-      const creatorMap = new Map(creatorUsers.map(u => [
-        u.id, 
-        {
-          name: `${u.firstName} ${u.lastName}`.trim(),
-          roleName: u.role?.name || 'STAFF'
-        }
-      ]));
-
-      clients = rawClients.map(c => {
-        let createdByInfo = { type: 'SELF', label: 'Self Signup', name: 'Self Signup', role: 'CLIENT' };
-        if (c.createdById) {
-          const creator = creatorMap.get(c.createdById);
-          if (creator) {
-            const rName = (creator.roleName || '').toUpperCase();
-            const isRoleAdmin = rName === 'ADMIN' || rName === 'SUPER_ADMIN' || rName === 'SUPER ADMIN';
-            createdByInfo = {
-              type: isRoleAdmin ? 'ADMIN' : 'STAFF',
-              label: isRoleAdmin ? `Admin (${creator.name})` : `Staff (${creator.name})`,
-              name: creator.name,
-              role: creator.roleName
-            };
-          } else {
-            createdByInfo = { type: 'STAFF', label: 'Admin/Staff', name: 'Admin/Staff', role: 'STAFF' };
-          }
-        }
-        return {
-          ...c,
-          createdByInfo
-        };
-      });
+      if (!hasViewAll) {
+        filterQuery.createdById = req.user!.id;
+      }
     }
 
-    const hasViewSensitive = isFullAdmin || await prisma.rolePermission.findFirst({
-      where: { role: { name: req.user!.role }, permission: { code: 'VIEW_SENSITIVE_DATA' } }
+    const rawClients: any[] = await dynamicDb.Client.find(filterQuery)
+      .populate('userId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const clientIds = rawClients.map((c: any) => c._id || c.id);
+    const profiles = await dynamicDb.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
+    const profileMap = new Map(profiles.map((p: any) => [String(p.clientId), p]));
+
+    const subscriptions = await dynamicDb.Subscription.find({ clientId: { $in: clientIds } })
+      .populate('planId')
+      .sort({ createdAt: -1 })
+      .lean();
+    const subMap = new Map<string, any[]>();
+    for (const sub of subscriptions) {
+      const cId = String(sub.clientId);
+      if (!subMap.has(cId)) subMap.set(cId, []);
+      subMap.get(cId)!.push(sub);
+    }
+
+    const agreements = await dynamicDb.Agreement.find({ clientId: { $in: clientIds } }).lean();
+    const agMap = new Map<string, any[]>();
+    for (const ag of agreements) {
+      const cId = String(ag.clientId);
+      if (!agMap.has(cId)) agMap.set(cId, []);
+      agMap.get(cId)!.push(ag);
+    }
+
+    const documents = await dynamicDb.ClientDocument.find({ clientId: { $in: clientIds } }).lean();
+    const docMap = new Map<string, any[]>();
+    for (const doc of documents) {
+      const cId = String(doc.clientId);
+      if (!docMap.has(cId)) docMap.set(cId, []);
+      docMap.get(cId)!.push(doc);
+    }
+
+    const alerts = await dynamicDb.ComplianceAlert.find({ clientId: { $in: clientIds } }).lean();
+    const alertMap = new Map<string, any[]>();
+    for (const al of alerts) {
+      const cId = String(al.clientId);
+      if (!alertMap.has(cId)) alertMap.set(cId, []);
+      alertMap.get(cId)!.push(al);
+    }
+
+    const creatorIds = [...new Set(rawClients.map((c: any) => c.createdById).filter(Boolean))] as string[];
+    const creatorUsers = creatorIds.length > 0 ? await dynamicDb.User.find({
+      _id: { $in: creatorIds }
+    }).populate('roleId').lean() : [];
+
+    const creatorMap = new Map(creatorUsers.map((u: any) => [
+      String(u._id || u.id),
+      {
+        name: `${u.firstName || ''} ${u.lastName || ''}`.trim(),
+        roleName: u.roleId?.name || 'STAFF'
+      }
+    ]));
+
+    let clients = rawClients.map((c: any) => {
+      const cIdStr = String(c._id || c.id);
+      let createdByInfo = { type: 'SELF', label: 'Self Signup', name: 'Self Signup', role: 'CLIENT' };
+      if (c.createdById) {
+        const creator = creatorMap.get(String(c.createdById));
+        if (creator) {
+          const rName = (creator.roleName || '').toUpperCase();
+          const isRoleAdmin = rName === 'ADMIN' || rName === 'SUPER_ADMIN' || rName === 'SUPER ADMIN';
+          createdByInfo = {
+            type: isRoleAdmin ? 'ADMIN' : 'STAFF',
+            label: isRoleAdmin ? `Admin (${creator.name})` : `Staff (${creator.name})`,
+            name: creator.name,
+            role: creator.roleName
+          };
+        } else {
+          createdByInfo = { type: 'STAFF', label: 'Admin/Staff', name: 'Admin/Staff', role: 'STAFF' };
+        }
+      }
+
+      const clientSubs = (subMap.get(cIdStr) || []).map((s: any) => ({
+        ...s,
+        id: String(s._id || s.id),
+        plan: s.planId ? {
+          ...s.planId,
+          id: String(s.planId._id || s.planId.id)
+        } : null
+      }));
+
+      return {
+        ...c,
+        id: cIdStr,
+        user: c.userId ? {
+          ...c.userId,
+          id: String(c.userId._id || c.userId.id)
+        } : null,
+        profile: profileMap.get(cIdStr) || null,
+        subscriptions: clientSubs,
+        agreements: agMap.get(cIdStr) || [],
+        documents: docMap.get(cIdStr) || [],
+        complianceAlerts: alertMap.get(cIdStr) || [],
+        createdByInfo
+      };
     });
+
+    const hasViewSensitive = isFullAdmin || await (async () => {
+      const userRole = await dynamicDb.Role.findOne({ name: req.user!.role }).lean();
+      if (!userRole) return false;
+      const perm = await dynamicDb.Permission.findOne({ code: 'VIEW_SENSITIVE_DATA' }).lean();
+      if (!perm) return false;
+      const rp = await dynamicDb.RolePermission.findOne({ roleId: userRole._id || userRole.id, permissionId: perm._id || perm.id }).lean();
+      return !!rp;
+    })();
 
     if (!hasViewSensitive) {
       clients = clients.map((c: any) => ({
@@ -1092,25 +1092,74 @@ export const getAdminDeletedClients = async (req: AuthenticatedRequest, res: Res
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const clients = await prisma.client.findMany({
-      where: { user: { tenantId, deletedAt: { not: null } } },
-      include: {
-        user: { select: { status: true, lastLogin: true, createdAt: true, deletedAt: true, deletedBy: true } },
-        profile: true,
-        subscriptions: { include: { plan: true }, orderBy: { createdAt: 'desc' } },
-        agreements: true,
-        documents: true
-      },
-      orderBy: { user: { deletedAt: 'desc' } }
-    });
+    const deletedUsers = await dynamicDb.User.find({
+      tenantId,
+      deletedAt: { $ne: null }
+    }).lean();
+    const userIds = deletedUsers.map((u: any) => u._id || u.id);
+
+    const clients: any[] = await dynamicDb.Client.find({
+      userId: { $in: userIds }
+    }).sort({ updatedAt: -1 }).lean();
+
+    const clientIds = clients.map((c: any) => c._id || c.id);
+    const profiles = await dynamicDb.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
+    const profileMap = new Map(profiles.map((p: any) => [String(p.clientId), p]));
+
+    const subscriptions = await dynamicDb.Subscription.find({ clientId: { $in: clientIds } })
+      .populate('planId')
+      .sort({ createdAt: -1 })
+      .lean();
+    const subMap = new Map<string, any[]>();
+    for (const sub of subscriptions) {
+      const cId = String(sub.clientId);
+      if (!subMap.has(cId)) subMap.set(cId, []);
+      subMap.get(cId)!.push(sub);
+    }
+
+    const agreements = await dynamicDb.Agreement.find({ clientId: { $in: clientIds } }).lean();
+    const agMap = new Map<string, any[]>();
+    for (const ag of agreements) {
+      const cId = String(ag.clientId);
+      if (!agMap.has(cId)) agMap.set(cId, []);
+      agMap.get(cId)!.push(ag);
+    }
+
+    const documents = await dynamicDb.ClientDocument.find({ clientId: { $in: clientIds } }).lean();
+    const docMap = new Map<string, any[]>();
+    for (const doc of documents) {
+      const cId = String(doc.clientId);
+      if (!docMap.has(cId)) docMap.set(cId, []);
+      docMap.get(cId)!.push(doc);
+    }
+
+    const userMap = new Map(deletedUsers.map((u: any) => [String(u._id || u.id), u]));
+
     const isFullAdmin = req.user!.role === 'ADMIN' || req.user!.role === 'SUPER_ADMIN';
-    const hasViewSensitive = isFullAdmin || await prisma.rolePermission.findFirst({
-      where: { role: { name: req.user!.role }, permission: { code: 'VIEW_SENSITIVE_DATA' } }
+    const hasViewSensitive = isFullAdmin;
+
+    let result = clients.map((c: any) => {
+      const cIdStr = String(c._id || c.id);
+      const user = userMap.get(String(c.userId));
+      return {
+        ...c,
+        id: cIdStr,
+        user: user ? {
+          status: user.status,
+          lastLogin: user.lastLogin,
+          createdAt: user.createdAt,
+          deletedAt: user.deletedAt,
+          deletedBy: user.deletedBy
+        } : null,
+        profile: profileMap.get(cIdStr) || null,
+        subscriptions: subMap.get(cIdStr) || [],
+        agreements: agMap.get(cIdStr) || [],
+        documents: docMap.get(cIdStr) || []
+      };
     });
 
-    let result = clients;
     if (!hasViewSensitive) {
-      result = clients.map((c: any) => ({
+      result = result.map((c: any) => ({
         ...c,
         email: maskEmail(c.email),
         mobile: maskMobile(c.mobile),
@@ -1121,7 +1170,7 @@ export const getAdminDeletedClients = async (req: AuthenticatedRequest, res: Res
           panNumber: maskDocument(c.profile.panNumber),
           aadharNumber: maskDocument(c.profile.aadharNumber)
         } : c.profile
-      })) as any;
+      }));
     }
 
     return res.status(200).json({ success: true, data: result });
@@ -1136,55 +1185,33 @@ export const toggleClientStatus = async (req: AuthenticatedRequest, res: Respons
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const client = await prisma.client.findFirst({
-      where: { id, user: { tenantId } },
-      include: { user: true }
-    });
+    const client: any = await dynamicDb.Client.findById(id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasUpdate = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'EDIT_CLIENTS' } }
-      });
-      if (!hasUpdate) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to edit clients.' });
-      }
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_CLIENTS' } }
-      });
-      if (!hasViewAll) {
-        if (client.createdById !== req.user!.id) {
-          return res.status(403).json({ success: false, message: 'You can only edit clients registered by you.' });
-        }
-      }
+    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
+    if (!clientUser || clientUser.tenantId !== tenantId) {
+      return res.status(404).json({ success: false, message: 'Client not found.' });
     }
 
     const newStatus = client.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    await prisma.$transaction(async (tx) => {
-      await tx.client.update({ where: { id }, data: { status: newStatus } });
-      await tx.user.update({ where: { id: client.userId }, data: { status: newStatus } });
-    });
 
-    // Send Status Change Email
-    const clientWithTenant = await prisma.client.findUnique({
-      where: { id },
-      include: { user: { include: { tenant: true } } }
-    });
-    if (clientWithTenant) {
-      if (newStatus === 'ACTIVE') {
-        await import('../services/emailService').then(m => m.sendAccountActivatedEmail({
-          toEmail: client.user.email,
-          name: client.name,
-          companyName: clientWithTenant.user.tenant?.companyName || 'RAGCP Platform'
-        })).catch(e => console.error('[EMAIL] Failed:', e));
-      } else {
-        await import('../services/emailService').then(m => m.sendAccountDeactivatedEmail({
-          toEmail: client.user.email,
-          name: client.name,
-          companyName: clientWithTenant.user.tenant?.companyName || 'RAGCP Platform'
-        })).catch(e => console.error('[EMAIL] Failed:', e));
-      }
+    await dynamicDb.Client.findByIdAndUpdate(id, { $set: { status: newStatus } });
+    await dynamicDb.User.findByIdAndUpdate(client.userId, { $set: { status: newStatus } });
+
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+
+    if (newStatus === 'ACTIVE') {
+      await import('../services/emailService').then(m => m.sendAccountActivatedEmail({
+        toEmail: client.email,
+        name: client.name,
+        companyName: tenantObj?.companyName || 'RAGCP Platform'
+      })).catch(e => console.error('[EMAIL] Failed:', e));
+    } else {
+      await import('../services/emailService').then(m => m.sendAccountDeactivatedEmail({
+        toEmail: client.email,
+        name: client.name,
+        companyName: tenantObj?.companyName || 'RAGCP Platform'
+      })).catch(e => console.error('[EMAIL] Failed:', e));
     }
 
     return res.status(200).json({ success: true, message: `Client status updated to ${newStatus}` });
@@ -1215,27 +1242,26 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
   }
 
   try {
-    const client = await prisma.client.findFirst({
-      where: { id, user: { tenantId } },
-      include: { user: true, profile: true }
-    });
-
+    const client: any = await dynamicDb.Client.findById(id).lean();
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found.' });
     }
 
-    // Handle Masked Data Submissions
+    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
+    if (!clientUser || clientUser.tenantId !== tenantId) {
+      return res.status(404).json({ success: false, message: 'Client not found.' });
+    }
+
     let finalEmail = email;
     let finalMobile = mobile;
     let finalPan = pan;
     let finalAadhaar = aadhaar;
 
-    if (finalEmail && finalEmail.includes('*')) finalEmail = client.user.email;
-    if (finalMobile && finalMobile.includes('*')) finalMobile = client.user.mobile;
+    if (finalEmail && finalEmail.includes('*')) finalEmail = clientUser.email;
+    if (finalMobile && finalMobile.includes('*')) finalMobile = clientUser.mobile;
     if (finalPan && finalPan.includes('XXXX')) finalPan = client.pan;
     if (finalAadhaar && finalAadhaar.includes('XXXX')) finalAadhaar = client.aadhaar;
 
-    // VALIDATIONS
     if (!name || name.trim().length < 2 || !/^[a-zA-Z\s\.]+$/.test(name)) {
       return res.status(400).json({ success: false, message: 'Client name must contain only letters, dots, and spaces (min 2 chars).' });
     }
@@ -1254,102 +1280,61 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(400).json({ success: false, message: 'Please enter a valid 12-digit Aadhaar number.' });
     }
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasUpdate = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'EDIT_CLIENTS' } }
-      });
-      if (!hasUpdate) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to update clients.' });
-      }
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_CLIENTS' } }
-      });
-      if (!hasViewAll) {
-        if (client.createdById !== req.user!.id) {
-          return res.status(403).json({ success: false, message: 'You can only update clients registered by you.' });
-        }
-      }
-    }
-
-    const existingEmail = await prisma.user.findFirst({
-      where: { email: finalEmail, NOT: { id: client.userId } }
-    });
+    const existingEmail = await dynamicDb.User.findOne({ email: finalEmail, _id: { $ne: client.userId } }).lean();
     if (existingEmail) {
       return res.status(400).json({ success: false, message: 'Email already in use by another user.' });
     }
 
-    const existingMobile = await prisma.user.findFirst({
-      where: { mobile: finalMobile, NOT: { id: client.userId } }
-    });
+    const existingMobile = await dynamicDb.User.findOne({ mobile: finalMobile, _id: { $ne: client.userId } }).lean();
     if (existingMobile) {
       return res.status(400).json({ success: false, message: 'Mobile number already in use by another user.' });
     }
 
-    const existingPan = await prisma.client.findFirst({
-      where: { pan: finalPan, NOT: { id } }
-    });
+    const existingPan = await dynamicDb.Client.findOne({ pan: finalPan, _id: { $ne: id } }).lean();
     if (existingPan) {
       return res.status(400).json({ success: false, message: 'PAN already in use by another client.' });
     }
 
-    const existingAadhaar = await prisma.client.findFirst({
-      where: { aadhaar: finalAadhaar, NOT: { id } }
-    });
+    const existingAadhaar = await dynamicDb.Client.findOne({ aadhaar: finalAadhaar, _id: { $ne: id } }).lean();
     if (existingAadhaar) {
       return res.status(400).json({ success: false, message: 'Aadhaar number already in use by another client.' });
     }
 
-    const oldClientVal = await prisma.client.findUnique({
-      where: { id },
-      include: { user: { include: { role: true } }, profile: true }
+    await dynamicDb.User.findByIdAndUpdate(client.userId, {
+      $set: {
+        firstName: name.split(' ')[0],
+        lastName: name.split(' ').slice(1).join(' ') || 'Client',
+        email: finalEmail,
+        mobile: finalMobile
+      }
     });
 
-    const updated = await prisma.$transaction(async (tx) => {
-      // 1. Update user details
-      await tx.user.update({
-        where: { id: client.userId },
-        data: {
-          firstName: name.split(' ')[0],
-          lastName: name.split(' ').slice(1).join(' ') || 'Client',
-          email: finalEmail,
-          mobile: finalMobile
-        }
+    if (finalPan !== client.pan) {
+      await dynamicDb.ClientIdentityHistory.create({
+        clientId: client._id || client.id,
+        fieldName: 'PAN',
+        oldValue: client.pan,
+        newValue: finalPan,
+        changedBy: 'ADMIN',
+        remarks: 'Updated by Admin / Compliance Officer'
       });
+    }
 
-      // Log PAN change if different
-      if (finalPan !== client.pan) {
-        await tx.clientIdentityHistory.create({
-          data: {
-            clientId: client.id,
-            fieldName: 'PAN',
-            oldValue: client.pan,
-            newValue: finalPan,
-            changedBy: 'ADMIN',
-            remarks: 'Updated by Admin / Compliance Officer'
-          }
-        });
-      }
+    if (finalAadhaar !== client.aadhaar) {
+      await dynamicDb.ClientIdentityHistory.create({
+        clientId: client._id || client.id,
+        fieldName: 'AADHAAR',
+        oldValue: client.aadhaar || '',
+        newValue: finalAadhaar || '',
+        changedBy: 'ADMIN',
+        remarks: 'Updated by Admin / Compliance Officer'
+      });
+    }
 
-      // Log Aadhaar change if different
-      const oldAadhaar = client.aadhaar;
-      if (finalAadhaar !== oldAadhaar) {
-        await tx.clientIdentityHistory.create({
-          data: {
-            clientId: client.id,
-            fieldName: 'AADHAAR',
-            oldValue: oldAadhaar || '',
-            newValue: finalAadhaar || '',
-            changedBy: 'ADMIN',
-            remarks: 'Updated by Admin / Compliance Officer'
-          }
-        });
-      }
-
-      // 2. Update client details
-      const updatedClient = await tx.client.update({
-        where: { id },
-        data: {
+    const updatedClient = await dynamicDb.Client.findByIdAndUpdate(
+      id,
+      {
+        $set: {
           name,
           email: finalEmail,
           mobile: finalMobile,
@@ -1358,54 +1343,36 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
           category: category || 'INDIVIDUAL',
           occupation
         }
-      });
+      },
+      { returnDocument: 'after', lean: true }
+    );
 
-      // 3. Update or Create client profile
-      if (client.profile) {
-        await tx.clientProfile.update({
-          where: { clientId: id },
-          data: {
-            addressLine1,
-            city,
-            state,
-            zipCode
-          }
-        });
-      } else {
-        await tx.clientProfile.create({
-          data: {
-            clientId: id,
-            addressLine1,
-            city,
-            state,
-            country: 'India',
-            zipCode
-          }
-        });
-      }
+    await dynamicDb.ClientProfile.findOneAndUpdate(
+      { clientId: id },
+      {
+        $set: { addressLine1, city, state, zipCode },
+        $setOnInsert: { clientId: id, country: 'India' }
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
 
-      return updatedClient;
-    });
-
-    const newClientVal = await prisma.client.findUnique({
-      where: { id },
-      include: { user: { include: { role: true } }, profile: true }
-    });
+    const newClientVal: any = await dynamicDb.Client.findById(id).lean();
+    const newClientProfile = await dynamicDb.ClientProfile.findOne({ clientId: id }).lean();
 
     await logAudit({
       tenantId,
       userId: req.user!.id,
       action: 'UPDATE',
       module: 'CLIENTS',
-      oldValue: oldClientVal,
-      newValue: newClientVal,
+      oldValue: client,
+      newValue: { ...newClientVal, profile: newClientProfile },
       ipAddress: req.ip
     });
 
     return res.status(200).json({
       success: true,
       message: 'Client updated successfully',
-      data: newClientVal
+      data: { ...newClientVal, profile: newClientProfile }
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1421,24 +1388,21 @@ export const approveClient = async (req: AuthenticatedRequest, res: Response) =>
   }
 
   try {
-    const client = await prisma.client.findFirst({
-      where: { id, user: { tenantId } },
-      include: { user: { include: { tenant: true } } }
-    });
-
-    if (!client || client.user.status !== 'PENDING_APPROVAL') {
+    const client: any = await dynamicDb.Client.findById(id).lean();
+    if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found or not pending approval.' });
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: client.userId },
-        data: { status: 'ACTIVE', tempPassword: null }
-      });
-      await tx.client.update({
-        where: { id },
-        data: { status: 'KYC_PENDING' }
-      });
+    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
+    if (!clientUser || clientUser.tenantId !== tenantId || clientUser.status !== 'PENDING_APPROVAL') {
+      return res.status(404).json({ success: false, message: 'Client not found or not pending approval.' });
+    }
+
+    await dynamicDb.User.findByIdAndUpdate(client.userId, {
+      $set: { status: 'ACTIVE', tempPassword: null }
+    });
+    await dynamicDb.Client.findByIdAndUpdate(id, {
+      $set: { status: 'KYC_PENDING' }
     });
 
     await logAudit({
@@ -1452,16 +1416,16 @@ export const approveClient = async (req: AuthenticatedRequest, res: Response) =>
     });
 
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-    
-    // Send Welcome Email
+    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
+
     await import('../services/emailService').then(m => m.sendWelcomeEmail({
       tenantId,
-      toEmail: client.user.email,
+      toEmail: client.email,
       name: client.name,
-      password: client.user.tempPassword || 'Reset using Forgot Password',
+      password: clientUser.tempPassword || 'Reset using Forgot Password',
       role: 'CLIENT',
       loginUrl,
-      companyName: client.user.tenant?.companyName || 'RAGCP Platform'
+      companyName: tenant?.companyName || 'RAGCP Platform'
     })).catch(e => console.error('[EMAIL] Failed to send welcome email:', e));
 
     return res.status(200).json({
@@ -1482,57 +1446,36 @@ export const deleteClient = async (req: AuthenticatedRequest, res: Response) => 
   }
 
   try {
-    const client = await prisma.client.findFirst({
-      where: { id, user: { tenantId } },
-      include: { user: true }
-    });
-
-    // JS-level check: ensure user is not already soft-deleted (MongoDB null filter workaround)
-    if (!client || client.user.deletedAt !== null) {
+    const client: any = await dynamicDb.Client.findById(id).lean();
+    if (!client) {
       return res.status(404).json({ success: false, message: 'Active client not found.' });
     }
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasDelete = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'DELETE_CLIENTS' } }
-      });
-      if (!hasDelete) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to delete clients.' });
-      }
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_CLIENTS' } }
-      });
-      if (!hasViewAll) {
-        if (client.createdById !== req.user!.id) {
-          return res.status(403).json({ success: false, message: 'You can only delete clients registered by you.' });
-        }
-      }
+    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
+    if (!clientUser || clientUser.tenantId !== tenantId || clientUser.deletedAt !== null) {
+      return res.status(404).json({ success: false, message: 'Active client not found.' });
     }
 
     const now = new Date();
-    const deleteSuffix = `_deleted_${client.id}`;
+    const deleteSuffix = `_deleted_${client._id || client.id}`;
     
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: client.userId },
-        data: { 
-          deletedAt: now, 
-          deletedBy: 'ADMIN',
-          email: `${client.user.email}${deleteSuffix}`,
-          mobile: `${client.user.mobile}${deleteSuffix}`
-        }
-      });
-      await tx.client.update({
-        where: { id },
-        data: { 
-          status: 'INACTIVE',
-          email: `${client.email}${deleteSuffix}`,
-          mobile: `${client.mobile}${deleteSuffix}`,
-          pan: `${client.pan}${deleteSuffix}`,
-          aadhaar: `${client.aadhaar}${deleteSuffix}`
-        }
-      });
+    await dynamicDb.User.findByIdAndUpdate(client.userId, {
+      $set: {
+        deletedAt: now,
+        deletedBy: 'ADMIN',
+        email: `${clientUser.email}${deleteSuffix}`,
+        mobile: `${clientUser.mobile}${deleteSuffix}`
+      }
+    });
+
+    await dynamicDb.Client.findByIdAndUpdate(id, {
+      $set: {
+        status: 'INACTIVE',
+        email: `${client.email}${deleteSuffix}`,
+        mobile: `${client.mobile}${deleteSuffix}`,
+        pan: `${client.pan}${deleteSuffix}`,
+        aadhaar: `${client.aadhaar}${deleteSuffix}`
+      }
     });
 
     await logAudit({
@@ -1563,66 +1506,49 @@ export const restoreClient = async (req: AuthenticatedRequest, res: Response) =>
   }
 
   try {
-    const client = await prisma.client.findFirst({
-      where: { id, user: { tenantId } },
-      include: { user: true }
-    });
-
-    // JS-level check: must be a deleted client (user.deletedAt should be non-null)
-    if (!client || client.user.deletedAt === null) {
+    const client: any = await dynamicDb.Client.findById(id).lean();
+    if (!client) {
       return res.status(404).json({ success: false, message: 'Deleted client not found.' });
     }
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasDelete = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'DELETE_CLIENTS' } }
-      });
-      if (!hasDelete) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to restore clients.' });
-      }
+    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
+    if (!clientUser || clientUser.tenantId !== tenantId || clientUser.deletedAt === null) {
+      return res.status(404).json({ success: false, message: 'Deleted client not found.' });
     }
 
-    const deleteSuffix = `_deleted_${client.id}`;
-    const origEmail = client.user.email.replace(deleteSuffix, '');
-    const origMobile = client.user.mobile.replace(deleteSuffix, '');
+    const deleteSuffix = `_deleted_${client._id || client.id}`;
+    const origEmail = clientUser.email.replace(deleteSuffix, '');
+    const origMobile = clientUser.mobile.replace(deleteSuffix, '');
     const origPan = client.pan.replace(deleteSuffix, '');
     const origAadhaar = client.aadhaar.replace(deleteSuffix, '');
 
-    // Check duplicates against ACTIVE users
-    const dupEmail = await prisma.user.findFirst({ where: { email: origEmail } });
-    if (dupEmail && dupEmail.deletedAt === null) return res.status(400).json({ success: false, message: 'Cannot restore: Email is already in use by another active account.' });
+    const dupEmail = await dynamicDb.User.findOne({ email: origEmail, deletedAt: null }).lean();
+    if (dupEmail) return res.status(400).json({ success: false, message: 'Cannot restore: Email is already in use by another active account.' });
 
-    const dupMobile = await prisma.user.findFirst({ where: { mobile: origMobile } });
-    if (dupMobile && dupMobile.deletedAt === null) return res.status(400).json({ success: false, message: 'Cannot restore: Mobile is already in use by another active account.' });
+    const dupMobile = await dynamicDb.User.findOne({ mobile: origMobile, deletedAt: null }).lean();
+    if (dupMobile) return res.status(400).json({ success: false, message: 'Cannot restore: Mobile is already in use by another active account.' });
 
-    const dupPan = await prisma.client.findFirst({ where: { pan: origPan }, include: { user: { select: { deletedAt: true } } } });
-    if (dupPan && dupPan.user.deletedAt === null) return res.status(400).json({ success: false, message: 'Cannot restore: PAN is already in use by another active account.' });
+    const dupPan = await dynamicDb.Client.findOne({ pan: origPan }).populate('userId').lean();
+    if (dupPan && (dupPan as any).userId?.deletedAt === null) return res.status(400).json({ success: false, message: 'Cannot restore: PAN is already in use by another active account.' });
 
-    const dupAadhaar = await prisma.client.findFirst({ where: { aadhaar: origAadhaar }, include: { user: { select: { deletedAt: true } } } });
-    if (dupAadhaar && dupAadhaar.user.deletedAt === null) return res.status(400).json({ success: false, message: 'Cannot restore: Aadhaar is already in use by another active account.' });
+    await dynamicDb.User.findByIdAndUpdate(client.userId, {
+      $set: {
+        deletedAt: null,
+        deletedBy: null,
+        status: 'ACTIVE',
+        email: origEmail,
+        mobile: origMobile
+      }
+    });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: client.userId },
-        data: { 
-          deletedAt: null, 
-          deletedBy: null, 
-          status: 'ACTIVE',
-          email: origEmail,
-          mobile: origMobile
-        }
-      });
-      await tx.client.update({
-        where: { id },
-        data: { 
-          status: 'ACTIVE',
-          email: origEmail,
-          mobile: origMobile,
-          pan: origPan,
-          aadhaar: origAadhaar
-        }
-      });
+    await dynamicDb.Client.findByIdAndUpdate(id, {
+      $set: {
+        status: 'ACTIVE',
+        email: origEmail,
+        mobile: origMobile,
+        pan: origPan,
+        aadhaar: origAadhaar
+      }
     });
 
     await logAudit({
@@ -1653,10 +1579,9 @@ export const getAdminCategories = async (req: AuthenticatedRequest, res: Respons
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const categories = await prisma.planCategory.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' }
-    });
+    const categories = await dynamicDb.PlanCategory.find({ tenantId })
+      .sort({ createdAt: -1 })
+      .lean();
     return res.status(200).json({ success: true, data: categories });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1672,11 +1597,16 @@ export const createCategory = async (req: AuthenticatedRequest, res: Response) =
   if (!segments || !segments.trim()) return res.status(400).json({ success: false, message: 'Segments are required.' });
 
   try {
-    const existing = await prisma.planCategory.findFirst({ where: { tenantId, name: name.trim().toUpperCase() } });
+    const existing = await dynamicDb.PlanCategory.findOne({
+      tenantId,
+      name: name.trim().toUpperCase()
+    }).lean();
     if (existing) return res.status(400).json({ success: false, message: 'Category already exists.' });
 
-    const category = await prisma.planCategory.create({
-      data: { tenantId, name: name.trim().toUpperCase(), segments: segments.trim() }
+    const category = await dynamicDb.PlanCategory.create({
+      tenantId,
+      name: name.trim().toUpperCase(),
+      segments: segments.trim()
     });
     syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
     return res.status(201).json({ success: true, message: 'Category created successfully', data: category });
@@ -1694,13 +1624,14 @@ export const updateCategory = async (req: AuthenticatedRequest, res: Response) =
   if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Category name is required.' });
 
   try {
-    const category = await prisma.planCategory.findFirst({ where: { id, tenantId } });
+    const category = await dynamicDb.PlanCategory.findOne({ _id: id, tenantId });
     if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
 
-    const updated = await prisma.planCategory.update({
-      where: { id },
-      data: { name: name.trim().toUpperCase() }
-    });
+    const updated = await dynamicDb.PlanCategory.findByIdAndUpdate(
+      id,
+      { $set: { name: name.trim().toUpperCase() } },
+      { returnDocument: 'after', lean: true }
+    );
     syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Category updated successfully', data: updated });
   } catch (error: any) {
@@ -1714,25 +1645,21 @@ export const toggleCategoryStatus = async (req: AuthenticatedRequest, res: Respo
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const category = await prisma.planCategory.findFirst({ where: { id, tenantId } });
+    const category: any = await dynamicDb.PlanCategory.findOne({ _id: id, tenantId }).lean();
     if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
 
     const newStatus = category.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     
-    const updated = await prisma.$transaction(async (tx) => {
-      const cat = await tx.planCategory.update({
-        where: { id },
-        data: { status: newStatus }
-      });
-      
-      // Update all associated plans to match the category's new status
-      await tx.plan.updateMany({
-        where: { categoryId: id },
-        data: { status: newStatus }
-      });
-
-      return cat;
-    });
+    const updated = await dynamicDb.PlanCategory.findByIdAndUpdate(
+      id,
+      { $set: { status: newStatus } },
+      { returnDocument: 'after', lean: true }
+    );
+    
+    await dynamicDb.Plan.updateMany(
+      { categoryId: id },
+      { $set: { status: newStatus } }
+    );
 
     syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: `Category status updated to ${newStatus}`, data: updated });
@@ -1751,45 +1678,42 @@ export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN' || req.user!.role === 'RESEARCHER';
-    let plans;
+    let filterQuery: any = { tenantId, deletedAt: null };
 
-    if (isFullAdmin) {
-      plans = await prisma.plan.findMany({
-        where: { tenantId },
-        include: { category: true },
-        orderBy: { createdAt: 'desc' }
-      });
-    } else {
-      // Check permissions
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_PLANS' } }
-      });
-      const hasViewOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_OWN_PLANS' } }
-      });
-      const hasResearchAccess = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'ADD_RESEARCH' } }
-      }) || await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'OWN_RESEARCH' } }
-      });
+    if (!isFullAdmin) {
+      const userRole = await dynamicDb.Role.findOne({ name: req.user!.role }).lean();
+      const roleId = userRole?._id || userRole?.id;
 
-      if (!hasViewAll && !hasViewOwn && !hasResearchAccess) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to view plans.' });
+      const hasViewAll = await dynamicDb.RolePermission.findOne({
+        roleId,
+        permissionId: { $in: (await dynamicDb.Permission.find({ code: 'VIEW_ALL_PLANS' }).lean()).map((p: any) => p._id || p.id) }
+      }).lean();
+
+      const hasResearchAccess = await dynamicDb.RolePermission.findOne({
+        roleId,
+        permissionId: { $in: (await dynamicDb.Permission.find({ code: { $in: ['ADD_RESEARCH', 'OWN_RESEARCH'] } }).lean()).map((p: any) => p._id || p.id) }
+      }).lean();
+
+      if (!hasViewAll && !hasResearchAccess) {
+        filterQuery.createdById = req.user!.id;
       }
-
-      const showAllPlans = hasViewAll || hasResearchAccess;
-
-      plans = await prisma.plan.findMany({
-        where: {
-          tenantId,
-          ...(showAllPlans ? {} : { createdById: req.user!.id })
-        },
-        include: { category: true },
-        orderBy: { createdAt: 'desc' }
-      });
     }
 
-    return res.status(200).json({ success: true, data: plans });
+    const plans = await dynamicDb.Plan.find(filterQuery)
+      .populate('categoryId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedPlans = plans.map((p: any) => ({
+      ...p,
+      id: String(p._id || p.id),
+      category: p.categoryId ? {
+        ...p.categoryId,
+        id: String(p.categoryId._id || p.categoryId.id)
+      } : null
+    }));
+
+    return res.status(200).json({ success: true, data: formattedPlans });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -1811,34 +1735,23 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasCreate = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'CREATE_PLANS' } }
-      });
-      if (!hasCreate) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to create plans.' });
-      }
-    }
-
-    const category = await prisma.planCategory.findFirst({ where: { id: categoryId, tenantId } });
+    const category: any = await dynamicDb.PlanCategory.findOne({ _id: categoryId, tenantId }).lean();
     if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
 
-    const plan = await prisma.plan.create({
-      data: {
-        tenantId,
-        categoryId,
-        name: name.trim().toUpperCase(),
-        description: description || '',
-        price: parseFloat(price),
-        durationMonths: parseInt(durationMonths),
-        researchSegments: category.segments, // Inherit segments from category, or override if needed
-        notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
-        clientLimit: parseInt(clientLimit) || 100,
-        createdById: req.user!.id,
-        deletedAt: null
-      }
+    const plan = await dynamicDb.Plan.create({
+      tenantId,
+      categoryId,
+      name: name.trim().toUpperCase(),
+      description: description || '',
+      price: parseFloat(price),
+      durationMonths: parseInt(durationMonths),
+      researchSegments: category.segments,
+      notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
+      clientLimit: parseInt(clientLimit) || 100,
+      createdById: req.user!.id,
+      deletedAt: null
     });
+
     await logAudit({ tenantId, userId: req.user!.id, action: 'CREATE', module: 'TENANTS', newValue: plan, ipAddress: req.ip });
     syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(201).json({ success: true, message: 'Plan created successfully', data: plan });
@@ -1859,48 +1772,34 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const existing = await prisma.plan.findFirst({ where: { id, tenantId } });
+    const existing: any = await dynamicDb.Plan.findOne({ _id: id, tenantId }).lean();
     if (!existing || existing.deletedAt !== null) return res.status(404).json({ success: false, message: 'Plan not found.' });
-
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasUpdate = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'EDIT_PLANS' } }
-      });
-      if (!hasUpdate) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to edit plans.' });
-      }
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_PLANS' } }
-      });
-      if (!hasViewAll) {
-        if (existing.createdById !== req.user!.id) {
-          return res.status(403).json({ success: false, message: 'You can only edit plans created by you.' });
-        }
-      }
-    }
 
     let newSegments = existing.researchSegments;
     if (categoryId) {
-        const category = await prisma.planCategory.findFirst({ where: { id: categoryId, tenantId } });
-        if (category) {
-            newSegments = category.segments;
-        }
+      const category: any = await dynamicDb.PlanCategory.findOne({ _id: categoryId, tenantId }).lean();
+      if (category) {
+        newSegments = category.segments;
+      }
     }
 
-    const updated = await prisma.plan.update({
-      where: { id },
-      data: {
-        categoryId: categoryId || existing.categoryId,
-        name: name.trim().toUpperCase(),
-        description: description || '',
-        price: parseFloat(price),
-        durationMonths: parseInt(durationMonths) || existing.durationMonths,
-        researchSegments: newSegments,
-        notificationsAllowed: notificationsAllowed || existing.notificationsAllowed,
-        clientLimit: parseInt(clientLimit) || existing.clientLimit
-      }
-    });
+    const updated = await dynamicDb.Plan.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          categoryId: categoryId || existing.categoryId,
+          name: name.trim().toUpperCase(),
+          description: description || '',
+          price: parseFloat(price),
+          durationMonths: parseInt(durationMonths) || existing.durationMonths,
+          researchSegments: newSegments,
+          notificationsAllowed: notificationsAllowed || existing.notificationsAllowed,
+          clientLimit: parseInt(clientLimit) || existing.clientLimit
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
+
     await logAudit({ tenantId, userId: req.user!.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
     syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Plan updated successfully', data: updated });
@@ -1915,28 +1814,13 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const existing = await prisma.plan.findFirst({ where: { id, tenantId } });
+    const existing: any = await dynamicDb.Plan.findOne({ _id: id, tenantId }).lean();
     if (!existing || existing.deletedAt !== null) return res.status(404).json({ success: false, message: 'Plan not found.' });
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasDelete = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'DELETE_PLANS' } }
-      });
-      if (!hasDelete) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to delete plans.' });
-      }
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_PLANS' } }
-      });
-      if (!hasViewAll) {
-        if (existing.createdById !== req.user!.id) {
-          return res.status(403).json({ success: false, message: 'You can only delete plans created by you.' });
-        }
-      }
-    }
+    await dynamicDb.Plan.findByIdAndUpdate(id, {
+      $set: { deletedAt: new Date(), status: 'INACTIVE' }
+    });
 
-    await prisma.plan.update({ where: { id }, data: { deletedAt: new Date(), status: 'INACTIVE' } });
     await logAudit({ tenantId, userId: req.user!.id, action: 'DELETE', module: 'TENANTS', oldValue: existing, ipAddress: req.ip });
     syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Plan deleted successfully.' });
@@ -1951,20 +1835,15 @@ export const restorePlan = async (req: AuthenticatedRequest, res: Response) => {
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const existing = await prisma.plan.findFirst({ where: { id, tenantId } });
+    const existing: any = await dynamicDb.Plan.findOne({ _id: id, tenantId }).lean();
     if (!existing || existing.deletedAt === null) return res.status(404).json({ success: false, message: 'Deleted plan not found.' });
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasDelete = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'DELETE_PLANS' } }
-      });
-      if (!hasDelete) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to restore plans.' });
-      }
-    }
+    const updated = await dynamicDb.Plan.findByIdAndUpdate(
+      id,
+      { $set: { deletedAt: null, status: 'ACTIVE' } },
+      { returnDocument: 'after', lean: true }
+    );
 
-    const updated = await prisma.plan.update({ where: { id }, data: { deletedAt: null, status: 'ACTIVE' } });
     await logAudit({ tenantId, userId: req.user!.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
     syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: 'Plan restored successfully.', data: updated });
@@ -1979,29 +1858,11 @@ export const togglePlanStatus = async (req: AuthenticatedRequest, res: Response)
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const existing = await prisma.plan.findFirst({ where: { id, tenantId } });
+    const existing: any = await dynamicDb.Plan.findOne({ _id: id, tenantId }).lean();
     if (!existing || existing.deletedAt !== null) return res.status(404).json({ success: false, message: 'Plan not found.' });
 
-    const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    if (!isFullAdmin) {
-      const hasUpdate = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'EDIT_PLANS' } }
-      });
-      if (!hasUpdate) {
-        return res.status(403).json({ success: false, message: 'You do not have permission to edit plans.' });
-      }
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: req.user!.role }, permission: { code: 'VIEW_ALL_PLANS' } }
-      });
-      if (!hasViewAll) {
-        if (existing.createdById !== req.user!.id) {
-          return res.status(403).json({ success: false, message: 'You can only edit plans created by you.' });
-        }
-      }
-    }
-
     const newStatus = existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    await prisma.plan.update({ where: { id }, data: { status: newStatus } });
+    await dynamicDb.Plan.findByIdAndUpdate(id, { $set: { status: newStatus } });
     syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, message: `Plan status updated to ${newStatus}` });
   } catch (error: any) {
@@ -2013,12 +1874,19 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
-  const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, address, website, mobile } = req.body;
+  const {
+    themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort,
+    smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
+    bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName,
+    agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
+    activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey,
+    ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey,
+    address, website, mobile
+  } = req.body;
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-
   try {
-    const oldTenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const oldTenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
     if (!oldTenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
 
     const dataToUpdate: any = {};
@@ -2082,10 +1950,11 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
       dataToUpdate.internalPolicyUrl = `/uploads/branding/${files.internalPolicyPdf[0].filename}`;
     }
 
-    const updated = await prisma.tenant.update({
-      where: { id: tenantId },
-      data: dataToUpdate
-    });
+    const updated = await dynamicDb.Tenant.findByIdAndUpdate(
+      tenantId,
+      { $set: dataToUpdate },
+      { returnDocument: 'after', lean: true }
+    );
 
     await logAudit({ 
       tenantId, 
@@ -2097,8 +1966,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
       ipAddress: req.ip 
     });
 
-    // Auto-sync settings updates to remote domainUrl and dedicated MongoDB in background
-    syncTenantToRemote(tenantId, { reason: 'SETTINGS_UPDATE' }).catch(err => {
+    syncTenantToRemote(tenantId, { reason: 'SETTINGS_UPDATE' }).catch((err: any) => {
       console.warn('Background sync for tenant settings update error:', err);
     });
 
@@ -2295,74 +2163,76 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
     const limit = parseInt(req.query.limit as string) || 1000;
     const skip = (page - 1) * limit;
     
-    // Allow basic searching if needed in the future
     const search = req.query.search as string;
     let whereClause: any = { tenantId };
     
     if (search) {
-      whereClause = {
-        ...whereClause,
-        OR: [
-          { transactionRef: { contains: search } }
-        ]
-      }
+      whereClause.transactionRef = { $regex: search, $options: 'i' };
     }
 
-    const total = await prisma.payment.count({ where: whereClause });
-    const payments = await prisma.payment.findMany({
-      include: { coupon: true },
-      where: whereClause,
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit
-    });
+    const total = await dynamicDb.Payment.countDocuments(whereClause);
+    const payments = await dynamicDb.Payment.find(whereClause)
+      .populate('couponId')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
 
-    const clientIds = [...new Set(payments.map(p => p.clientId))];
-    const planIds = [...new Set(payments.map(p => p.planId).filter(Boolean))] as string[];
+    const clientIds = [...new Set(payments.map((p: any) => p.clientId))];
+    const planIds = [...new Set(payments.map((p: any) => p.planId).filter(Boolean))];
 
-    const clients = await prisma.client.findMany({
-      where: { id: { in: clientIds } },
-      include: { user: true, profile: true }
-    });
+    const clients = await dynamicDb.Client.find({ _id: { $in: clientIds } })
+      .populate('userId')
+      .lean();
+    const profiles = await dynamicDb.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
+    const profileMap = new Map(profiles.map((p: any) => [String(p.clientId), p]));
 
-    const plans = await prisma.plan.findMany({
-      where: { id: { in: planIds } }
-    });
+    const plans = await dynamicDb.Plan.find({ _id: { $in: planIds } }).lean();
 
-    const clientMap = new Map(clients.map(c => [c.id, c]));
-    const planMap = new Map(plans.map(p => [p.id, p]));
+    const clientMap = new Map(clients.map((c: any) => [
+      String(c._id || c.id),
+      {
+        ...c,
+        id: String(c._id || c.id),
+        profile: profileMap.get(String(c._id || c.id)) || null,
+        user: c.userId ? {
+          ...c.userId,
+          id: String(c.userId._id || c.userId.id)
+        } : null
+      }
+    ]));
+    const planMap = new Map(plans.map((p: any) => [String(p._id || p.id), { ...p, id: String(p._id || p.id) }]));
 
     const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
-    const hasViewSensitive = isFullAdmin || await prisma.rolePermission.findFirst({
-      where: { role: { name: req.user!.role }, permission: { code: 'VIEW_SENSITIVE_DATA' } }
-    });
+    const hasViewSensitive = isFullAdmin;
 
-    const enrichedPayments = payments.map(p => {
-      let clientObj = clientMap.get(p.clientId);
+    const enrichedPayments = payments.map((p: any) => {
+      let clientObj = clientMap.get(String(p.clientId));
       if (clientObj && !hasViewSensitive) {
         clientObj = {
           ...clientObj,
           email: maskEmail(clientObj.email) as string,
           mobile: maskMobile(clientObj.mobile) as string,
-          pan: maskDocument((clientObj as any).pan),
-          aadhaar: maskDocument((clientObj as any).aadhaar),
-          user: clientObj.user ? { ...clientObj.user, email: maskEmail((clientObj.user as any).email) } : clientObj.user,
+          pan: maskDocument(clientObj.pan),
+          aadhaar: maskDocument(clientObj.aadhaar),
+          user: clientObj.user ? { ...clientObj.user, email: maskEmail(clientObj.user.email) } : clientObj.user,
           profile: clientObj.profile ? {
             ...clientObj.profile,
-            panNumber: maskDocument((clientObj.profile as any).panNumber),
-            aadharNumber: maskDocument((clientObj.profile as any).aadharNumber)
+            panNumber: maskDocument(clientObj.profile.panNumber),
+            aadharNumber: maskDocument(clientObj.profile.aadharNumber)
           } : clientObj.profile
         } as any;
       }
 
       return {
         ...p,
+        id: String(p._id || p.id),
+        coupon: p.couponId || null,
         client: clientObj,
-        plan: p.planId ? planMap.get(p.planId) : null
+        plan: p.planId ? planMap.get(String(p.planId)) : null
       };
     });
 
-    // Sort by paymentDate if exists, else createdAt descending
     enrichedPayments.sort((a, b) => {
       const dateA = new Date(a.paymentDate || a.createdAt).getTime();
       const dateB = new Date(b.paymentDate || b.createdAt).getTime();
@@ -2389,16 +2259,27 @@ export const getTenantAuditLogs = async (req: AuthenticatedRequest, res: Respons
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const logs = await prisma.auditLog.findMany({
-      where: { tenantId },
-      include: {
-        user: {
-          select: { firstName: true, lastName: true, email: true, role: { select: { name: true } } }
-        }
-      },
-      orderBy: { timestamp: 'desc' }
-    });
-    return res.status(200).json({ success: true, data: logs });
+    const logs = await dynamicDb.AuditLog.find({ tenantId })
+      .populate({
+        path: 'userId',
+        select: 'firstName lastName email roleId',
+        populate: { path: 'roleId', select: 'name' }
+      })
+      .sort({ timestamp: -1 })
+      .lean();
+
+    const formatted = logs.map((l: any) => ({
+      ...l,
+      id: String(l._id || l.id),
+      user: l.userId ? {
+        firstName: l.userId.firstName,
+        lastName: l.userId.lastName,
+        email: l.userId.email,
+        role: l.userId.roleId ? { name: l.userId.roleId.name } : null
+      } : null
+    }));
+
+    return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -2418,34 +2299,41 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
   if (!paymentDate) return res.status(400).json({ success: false, message: 'Payment Date is required.' });
 
   try {
-    // Validate client belongs to this tenant
-    const client = await prisma.client.findFirst({
-      where: { id: clientId, user: { tenantId } },
-      include: { user: true, profile: true }
-    });
+    const client: any = await dynamicDb.Client.findById(clientId).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found in this tenant.' });
 
-    // Validate plan belongs to this tenant
-    // Note: deletedAt: null removed from Prisma query due to MongoDB null filter issue; JS-level check used instead
-    const plan = await prisma.plan.findFirst({
-      where: { id: planId, tenantId, status: 'ACTIVE' }
-    });
-    if (!plan || plan.deletedAt !== null) return res.status(404).json({ success: false, message: 'Plan not found or inactive.' });
+    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
+    if (!clientUser || clientUser.tenantId !== tenantId) {
+      return res.status(404).json({ success: false, message: 'Client not found in this tenant.' });
+    }
 
-    const assigner = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      include: { role: true, tenant: true }
-    });
-    const isAdmin = assigner?.role?.name === 'SUPER_ADMIN' || assigner?.role?.name === 'ADMIN';
+    const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
+
+    const plan: any = await dynamicDb.Plan.findOne({
+      _id: planId,
+      tenantId,
+      status: 'ACTIVE'
+    }).lean();
+
+    if (!plan || plan.deletedAt !== null) {
+      return res.status(404).json({ success: false, message: 'Plan not found or inactive.' });
+    }
+
+    const assigner: any = await dynamicDb.User.findById(req.user!.id).populate('roleId').lean();
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+
+    const isAdmin = assigner?.roleId?.name === 'SUPER_ADMIN' || assigner?.roleId?.name === 'ADMIN';
     const assignerName = `${assigner?.firstName || ''} ${assigner?.lastName || ''}`.trim();
 
     let discountAmount = 0;
-    let appliedCouponId = null;
+    let appliedCouponId: any = null;
 
     if (couponCode) {
-      const coupon = await prisma.coupon.findFirst({
-        where: { code: couponCode, tenantId, status: 'ACTIVE' }
-      });
+      const coupon: any = await dynamicDb.Coupon.findOne({
+        code: couponCode,
+        tenantId,
+        status: 'ACTIVE'
+      }).lean();
 
       if (!coupon) return res.status(404).json({ success: false, message: 'Invalid or inactive coupon code.' });
 
@@ -2453,7 +2341,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         return res.status(400).json({ success: false, message: 'Coupon code has expired.' });
       }
 
-      if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+      if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
         return res.status(400).json({ success: false, message: 'Coupon usage limit reached.' });
       }
 
@@ -2465,7 +2353,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
       }
 
-      if (coupon.categoryId && coupon.categoryId !== plan.categoryId) {
+      if (coupon.categoryId && String(coupon.categoryId) !== String(plan.categoryId)) {
         return res.status(400).json({ success: false, message: 'Coupon is not applicable to this category.' });
       }
 
@@ -2483,31 +2371,28 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       }
 
       if (discountAmount > plan.price) discountAmount = plan.price;
-      appliedCouponId = coupon.id;
+      appliedCouponId = coupon._id || coupon.id;
     }
 
     const discountedBasePrice = plan.price - discountAmount;
     let totalAmount = discountedBasePrice;
     
-    if (assigner?.tenant?.gstCalculationType === 'EXCLUSIVE') {
+    if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
       totalAmount = discountedBasePrice * 1.18;
     }
 
-    // Handle Custom Amount logic
     let finalBasePrice = discountedBasePrice;
     let finalGstAmount = totalAmount - discountedBasePrice;
     let finalTotalAmount = totalAmount;
 
     if (customAmount !== undefined && customAmount !== null) {
       finalTotalAmount = customAmount;
-      if (assigner?.tenant?.gstCalculationType === 'EXCLUSIVE') {
-        // If exclusive, the custom amount includes GST. So Base = customAmount / 1.18
+      if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
         finalBasePrice = finalTotalAmount / 1.18;
         finalGstAmount = finalTotalAmount - finalBasePrice;
       } else {
-        // If inclusive, the custom amount IS the base price (technically it includes GST within it)
         finalBasePrice = finalTotalAmount;
-        finalGstAmount = 0; // Or whatever inclusive calculation logic is standard
+        finalGstAmount = 0;
       }
     }
 
@@ -2519,85 +2404,71 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
     const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
 
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Calculate active dates (stack if same plan already exists)
-      const existingSub = await tx.subscription.findFirst({
-        where: { clientId, planId, status: 'ACTIVE', endDate: { gt: new Date() } },
-        orderBy: { endDate: 'desc' }
-      });
+    const existingSub: any = await dynamicDb.Subscription.findOne({
+      clientId,
+      planId,
+      status: 'ACTIVE',
+      endDate: { $gt: new Date() }
+    }).sort({ endDate: -1 }).lean();
 
-      let startDate = new Date();
-      if (existingSub) {
-        startDate = new Date(existingSub.endDate);
-      }
+    let startDate = new Date();
+    if (existingSub) {
+      startDate = new Date(existingSub.endDate);
+    }
 
-      const planValidityDays = customDays !== undefined ? customDays : plan.durationMonths * 30;
-      const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
+    const planValidityDays = customDays !== undefined ? customDays : plan.durationMonths * 30;
+    const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
 
-      // 2. Create new subscription
-      const subscription = await tx.subscription.create({
-        data: {
-          clientId,
-          planId,
-          startDate,
-          endDate,
-          status: 'ACTIVE',
-          amountBase: finalBasePrice,
-          amountGst: finalGstAmount,
-          amountTotal: parseFloat(finalTotalAmount.toFixed(2)),
-          isGstInclusive: assigner?.tenant?.gstCalculationType !== 'EXCLUSIVE'
-        }
-      });
-
-      // 3. Create payment record
-      const payment = await tx.payment.create({
-        data: {
-          tenantId,
-          clientId,
-          planId,
-          amount: parseFloat(finalTotalAmount.toFixed(2)),
-          paymentMode: paymentMode,
-          transactionRef: paymentRefId,
-          paymentDate: new Date(paymentDate),
-          status: 'SUCCESS',
-          remarks: finalRemark,
-          verifiedByStaffId: req.user!.id,
-          assignedByAdminName: isAdmin ? assignerName : null,
-          assignedByStaffName: !isAdmin ? assignerName : null,
-          clientCity: client.profile?.city || null,
-          clientState: client.profile?.state || null,
-          tenantState: assigner?.tenant?.state || null,
-          planValidityDays: planValidityDays,
-          paymentGatewayId: null,
-          couponId: appliedCouponId,
-          discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
-        }
-      });
-
-      if (appliedCouponId) {
-        await tx.coupon.update({
-          where: { id: appliedCouponId },
-          data: { usedCount: { increment: 1 } }
-        });
-      }
-
-      return { subscription, payment };
+    const subscription = await dynamicDb.Subscription.create({
+      clientId,
+      planId,
+      startDate,
+      endDate,
+      status: 'ACTIVE',
+      amountBase: finalBasePrice,
+      amountGst: finalGstAmount,
+      amountTotal: parseFloat(finalTotalAmount.toFixed(2)),
+      isGstInclusive: tenantObj?.gstCalculationType !== 'EXCLUSIVE'
     });
 
-    // 6. Create notification log for client
+    const payment = await dynamicDb.Payment.create({
+      tenantId,
+      clientId,
+      planId,
+      amount: parseFloat(finalTotalAmount.toFixed(2)),
+      paymentMode,
+      transactionRef: paymentRefId,
+      paymentDate: new Date(paymentDate),
+      status: 'SUCCESS',
+      remarks: finalRemark,
+      verifiedByStaffId: req.user!.id,
+      assignedByAdminName: isAdmin ? assignerName : null,
+      assignedByStaffName: !isAdmin ? assignerName : null,
+      clientCity: (clientProfile as any)?.city || null,
+      clientState: (clientProfile as any)?.state || null,
+      tenantState: tenantObj?.state || null,
+      planValidityDays,
+      paymentGatewayId: null,
+      couponId: appliedCouponId,
+      discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
+    });
+
+    if (appliedCouponId) {
+      await dynamicDb.Coupon.findByIdAndUpdate(appliedCouponId, {
+        $inc: { usedCount: 1 }
+      });
+    }
+
     const assignedDays = customDays !== undefined ? customDays : plan.durationMonths * 30;
-    await prisma.notificationLog.create({
-      data: {
-        tenantId,
-        recipient: client.email,
-        channel: 'INAPP',
-        title: 'New Plan Assigned',
-        message: `Your account has been assigned the "${plan.name}" plan by your advisor. The plan is now active and valid until ${new Date(Date.now() + assignedDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}.`,
-        status: 'SENT'
-      }
-    });
+    await dynamicDb.NotificationLog.create({
+      tenantId,
+      recipient: client.email,
+      channel: 'INAPP',
+      title: 'New Plan Assigned',
+      message: `Your account has been assigned the "${plan.name}" plan by your advisor. The plan is now active and valid until ${new Date(Date.now() + assignedDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}.`,
+      status: 'SENT'
+    }).catch(() => {});
 
-    // 7. Audit log
     await logAudit({
       tenantId,
       userId: req.user!.id,
@@ -2611,12 +2482,12 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       success: true,
       message: `Plan "${plan.name}" successfully assigned to client. Subscription is now active.`,
       data: {
-        subscription: result.subscription,
-        payment: result.payment
+        subscription,
+        payment
       }
     });
   } catch (error: any) {
-    if (error.code === 'P2002' && error.meta?.target?.includes('transactionRef')) {
+    if (error.code === 11000 && error.keyPattern?.transactionRef) {
       return res.status(400).json({ success: false, message: 'This Payment Reference ID has already been used. Please provide a unique Payment Ref ID.' });
     }
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2628,7 +2499,7 @@ export const getEmailTemplates = async (req: AuthenticatedRequest, res: Response
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const templates = await prisma.emailTemplate.findMany({ where: { tenantId } });
+    const templates = await dynamicDb.EmailTemplate.find({ tenantId }).lean();
     return res.status(200).json({ success: true, data: templates });
   } catch (err: any) {
     return res.status(500).json({ success: false, errors: [err.message] });
@@ -2643,11 +2514,14 @@ export const updateEmailTemplate = async (req: AuthenticatedRequest, res: Respon
   const { subject, body } = req.body;
 
   try {
-    const updated = await prisma.emailTemplate.upsert({
-      where: { tenantId_type: { tenantId, type } },
-      update: { subject, body },
-      create: { tenantId, type, subject, body }
-    });
+    const updated = await dynamicDb.EmailTemplate.findOneAndUpdate(
+      { tenantId, type },
+      {
+        $set: { subject, body },
+        $setOnInsert: { tenantId, type }
+      },
+      { upsert: true, returnDocument: 'after', lean: true }
+    );
     syncTenantToRemote(tenantId, { reason: 'EMAIL_TEMPLATE_UPDATE' }).catch(() => {});
     return res.status(200).json({ success: true, data: updated, message: 'Template updated successfully' });
   } catch (err: any) {
@@ -2655,19 +2529,17 @@ export const updateEmailTemplate = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
-
 export const uploadSignature = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenantId = req.user!.tenantId || req.headers['x-tenant-id'] as string;
+    const tenantId = req.user!.tenantId || (req.headers['x-tenant-id'] as string);
     if (!tenantId) throw new Error('Tenant ID required');
     if (!req.file) throw new Error('No signature file uploaded');
 
-    const updated = await prisma.tenant.update({
-      where: { id: tenantId },
-      data: {
-        coSignatureUrl: `/uploads/branding/${req.file.filename}`
-      }
-    });
+    const updated = await dynamicDb.Tenant.findByIdAndUpdate(
+      tenantId,
+      { $set: { coSignatureUrl: `/uploads/branding/${req.file.filename}` } },
+      { returnDocument: 'after', lean: true }
+    );
 
     syncTenantToRemote(tenantId, { reason: 'SIGNATURE_UPDATE' }).catch(() => {});
 
@@ -2681,12 +2553,11 @@ export const uploadSignature = async (req: AuthenticatedRequest, res: Response) 
 const getDateFilter = (req: AuthenticatedRequest) => {
   const { range, startDate, endDate } = req.query;
   if (range === 'date' && startDate && endDate) {
-    // Add 23:59:59 to endDate to include the entire day
     const end = new Date(endDate as string);
     end.setHours(23, 59, 59, 999);
     return {
-      gte: new Date(startDate as string),
-      lte: end
+      $gte: new Date(startDate as string),
+      $lte: end
     };
   }
   return undefined;
@@ -2714,16 +2585,12 @@ export const exportInvoicesZip = async (req: AuthenticatedRequest, res: Response
   
   try {
     const dateFilter = getDateFilter(req);
-    const payments = await prisma.payment.findMany({
-      where: {
-        tenantId,
-        status: 'SUCCESS',
-        ...(dateFilter ? { createdAt: dateFilter } : {})
-      }
-    });
+    const filterQuery: any = { tenantId, status: 'SUCCESS' };
+    if (dateFilter) filterQuery.createdAt = dateFilter;
 
+    const payments: any[] = await dynamicDb.Payment.find(filterQuery).lean();
     const clientIds = payments.map(p => p.clientId);
-    const clients = await prisma.client.findMany({ where: { id: { in: clientIds } } });
+    const clients: any[] = await dynamicDb.Client.find({ _id: { $in: clientIds } }).lean();
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="Invoices.zip"');
@@ -2733,13 +2600,13 @@ export const exportInvoicesZip = async (req: AuthenticatedRequest, res: Response
     
     for (const payment of payments) {
       try {
-        const client = clients.find(c => c.id === payment.clientId);
+        const client = clients.find(c => String(c._id || c.id) === String(payment.clientId));
         const pan = client?.pan || 'UNKNOWN_PAN';
-        const dateStr = payment.createdAt.toISOString().split('T')[0];
-        const pdfBuffer = await generateInvoicePdf(payment.id);
+        const dateStr = new Date(payment.createdAt).toISOString().split('T')[0];
+        const pdfBuffer = await generateInvoicePdf(String(payment._id || payment.id));
         archive.append(pdfBuffer, { name: `${pan}_Invoice_${dateStr}.pdf` });
       } catch (err) {
-        console.error(`Failed to generate invoice for payment ${payment.id}`, err);
+        console.error(`Failed to generate invoice for payment ${payment._id || payment.id}`, err);
       }
     }
     
@@ -2757,15 +2624,14 @@ export const exportAgreementsZip = async (req: AuthenticatedRequest, res: Respon
   
   try {
     const dateFilter = getDateFilter(req);
-    const clients = await prisma.client.findMany({
-      where: { user: { tenantId } },
-      include: {
-        agreements: {
-          where: dateFilter ? { signedAt: dateFilter } : {}
-        },
-        user: true
-      }
-    });
+    const clients: any[] = await dynamicDb.Client.find({ tenantId }).lean();
+    const clientIds = clients.map((c: any) => c._id || c.id);
+
+    const agQuery: any = { clientId: { $in: clientIds } };
+    if (dateFilter) agQuery.signedAt = dateFilter;
+
+    const agreements: any[] = await dynamicDb.Agreement.find(agQuery).lean();
+    const clientMap = new Map(clients.map((c: any) => [String(c._id || c.id), c]));
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="Agreements.zip"');
@@ -2773,14 +2639,13 @@ export const exportAgreementsZip = async (req: AuthenticatedRequest, res: Respon
     const archive = new (archiver as any).ZipArchive({ zlib: { level: 9 } });
     archive.pipe(res);
     
-    for (const client of clients) {
-      for (const agreement of client.agreements) {
-        if (agreement.agreementUrl) {
-          const filePath = path.join(__dirname, '../../public', agreement.agreementUrl);
-          if (fs.existsSync(filePath)) {
-            const dateStr = agreement.signedAt.toISOString().split('T')[0];
-            archive.file(filePath, { name: `${client.pan}_Agreement_${dateStr}.pdf` });
-          }
+    for (const agreement of agreements) {
+      const client = clientMap.get(String(agreement.clientId));
+      if (agreement.agreementUrl) {
+        const filePath = path.join(__dirname, '../../public', agreement.agreementUrl);
+        if (fs.existsSync(filePath)) {
+          const dateStr = new Date(agreement.signedAt || agreement.createdAt).toISOString().split('T')[0];
+          archive.file(filePath, { name: `${client?.pan || 'CLIENT'}_Agreement_${dateStr}.pdf` });
         }
       }
     }
@@ -2799,14 +2664,14 @@ export const exportKRAZip = async (req: AuthenticatedRequest, res: Response) => 
   
   try {
     const dateFilter = getDateFilter(req);
-    const clients = await prisma.client.findMany({
-      where: { user: { tenantId } },
-      include: {
-        documents: {
-          where: dateFilter ? { uploadedAt: dateFilter } : {}
-        }
-      }
-    });
+    const clients: any[] = await dynamicDb.Client.find({ tenantId }).lean();
+    const clientIds = clients.map((c: any) => c._id || c.id);
+
+    const docQuery: any = { clientId: { $in: clientIds } };
+    if (dateFilter) docQuery.uploadedAt = dateFilter;
+
+    const documents: any[] = await dynamicDb.ClientDocument.find(docQuery).lean();
+    const clientMap = new Map(clients.map((c: any) => [String(c._id || c.id), c]));
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="KRA_Documents.zip"');
@@ -2814,15 +2679,14 @@ export const exportKRAZip = async (req: AuthenticatedRequest, res: Response) => 
     const archive = new (archiver as any).ZipArchive({ zlib: { level: 9 } });
     archive.pipe(res);
     
-    for (const client of clients) {
-      for (const doc of client.documents) {
-        if (doc.fileUrl) {
-          const filePath = path.join(__dirname, '../../public', doc.fileUrl);
-          if (fs.existsSync(filePath)) {
-            const ext = path.extname(doc.fileUrl) || '.pdf';
-            const dateStr = doc.uploadedAt.toISOString().split('T')[0];
-            archive.file(filePath, { name: `${client.pan}_${doc.docType}_${dateStr}${ext}` });
-          }
+    for (const doc of documents) {
+      const client = clientMap.get(String(doc.clientId));
+      if (doc.fileUrl) {
+        const filePath = path.join(__dirname, '../../public', doc.fileUrl);
+        if (fs.existsSync(filePath)) {
+          const ext = path.extname(doc.fileUrl) || '.pdf';
+          const dateStr = new Date(doc.uploadedAt || doc.createdAt).toISOString().split('T')[0];
+          archive.file(filePath, { name: `${client?.pan || 'CLIENT'}_${doc.docType}_${dateStr}${ext}` });
         }
       }
     }
@@ -2841,47 +2705,72 @@ export const exportClientsCSV = async (req: AuthenticatedRequest, res: Response)
   
   try {
     const dateFilter = getDateFilter(req);
-    const clients = await prisma.client.findMany({
-      where: { 
-        user: { 
-          tenantId,
-          deletedAt: null 
-        },
-        ...(dateFilter ? { user: { tenantId, deletedAt: null, createdAt: dateFilter } } : {})
-      },
-      include: { 
-        user: true, 
-        profile: true,
-        subscriptions: { where: { status: 'ACTIVE' }, include: { plan: true } },
-        agreements: true,
-        complianceAlerts: true
-      },
-      orderBy: { user: { createdAt: 'desc' } }
-    });
+    const filterQuery: any = { tenantId };
+    if (dateFilter) filterQuery.createdAt = dateFilter;
 
-    const creatorIds = [...new Set(clients.map(c => c.createdById).filter(Boolean))] as string[];
-    const creatorUsers = creatorIds.length > 0 ? await prisma.user.findMany({
-      where: { id: { in: creatorIds } },
-      select: { id: true, firstName: true, lastName: true, role: { select: { name: true } } }
-    }) : [];
+    const clients: any[] = await dynamicDb.Client.find(filterQuery)
+      .populate('userId')
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const creatorMap = new Map(creatorUsers.map(u => [
-      u.id, 
-      `${u.firstName} ${u.lastName}`.trim() + ` (${u.role?.name || 'Staff'})`
+    const clientIds = clients.map((c: any) => c._id || c.id);
+    const profiles = await dynamicDb.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
+    const profileMap = new Map(profiles.map((p: any) => [String(p.clientId), p]));
+
+    const subscriptions = await dynamicDb.Subscription.find({ clientId: { $in: clientIds }, status: 'ACTIVE' })
+      .populate('planId')
+      .lean();
+    const subMap = new Map<string, any[]>();
+    for (const sub of subscriptions) {
+      const cId = String(sub.clientId);
+      if (!subMap.has(cId)) subMap.set(cId, []);
+      subMap.get(cId)!.push(sub);
+    }
+
+    const agreements = await dynamicDb.Agreement.find({ clientId: { $in: clientIds } }).lean();
+    const agMap = new Map<string, any[]>();
+    for (const ag of agreements) {
+      const cId = String(ag.clientId);
+      if (!agMap.has(cId)) agMap.set(cId, []);
+      agMap.get(cId)!.push(ag);
+    }
+
+    const alerts = await dynamicDb.ComplianceAlert.find({ clientId: { $in: clientIds } }).lean();
+    const alertMap = new Map<string, any[]>();
+    for (const al of alerts) {
+      const cId = String(al.clientId);
+      if (!alertMap.has(cId)) alertMap.set(cId, []);
+      alertMap.get(cId)!.push(al);
+    }
+
+    const creatorIds = [...new Set(clients.map((c: any) => c.createdById).filter(Boolean))] as string[];
+    const creatorUsers = creatorIds.length > 0 ? await dynamicDb.User.find({
+      _id: { $in: creatorIds }
+    }).populate('roleId').lean() : [];
+
+    const creatorMap = new Map(creatorUsers.map((u: any) => [
+      String(u._id || u.id),
+      `${u.firstName} ${u.lastName}`.trim() + ` (${u.roleId?.name || 'Staff'})`
     ]));
 
-    const csvData = clients.map(c => {
-      const isKraFailed = c.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED');
+    const csvData = clients.map((c: any) => {
+      const cIdStr = String(c._id || c.id);
+      const user = c.userId || {};
+      const clientAlerts = alertMap.get(cIdStr) || [];
+      const isKraFailed = clientAlerts.some((a: any) => a.alertType === 'KYC_FAILED');
       const kraStatus = isKraFailed ? 'FAILED' : (c.status && c.status !== 'PENDING_ONBOARDING' && c.status !== 'KYC_PENDING' && c.status !== 'KYC_FAILED') ? 'VERIFIED' : 'PENDING';
-      const isEsignSigned = c.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE');
+      const isEsignSigned = (agMap.get(cIdStr) || []).some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE');
 
       let sourceStr = 'Self Signup';
       if (c.createdById) {
-        sourceStr = creatorMap.get(c.createdById) || 'Added by Staff/Admin';
+        sourceStr = creatorMap.get(String(c.createdById)) || 'Added by Staff/Admin';
       }
 
+      const prof = profileMap.get(cIdStr);
+      const clientSubs = subMap.get(cIdStr) || [];
+
       return {
-        'Client ID': c.id,
+        'Client ID': cIdStr,
         'Name': c.name,
         'Email': c.email,
         'Mobile': c.mobile,
@@ -2889,14 +2778,14 @@ export const exportClientsCSV = async (req: AuthenticatedRequest, res: Response)
         'Aadhaar': c.aadhaar,
         'Category': c.category,
         'Occupation': c.occupation || 'N/A',
-        'City': c.profile?.city || 'N/A',
-        'State': c.profile?.state || 'N/A',
-        'Joined Date': c.user.createdAt ? new Date(c.user.createdAt).toLocaleDateString('en-IN') : 'N/A',
-        'Status': c.user.status || c.status,
+        'City': prof?.city || 'N/A',
+        'State': prof?.state || 'N/A',
+        'Joined Date': user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-IN') : 'N/A',
+        'Status': user.status || c.status,
         'KRA Status': kraStatus,
         'eSign Status': isEsignSigned ? 'SIGNED' : 'PENDING',
         'Added By / Source': sourceStr,
-        'Active Plan': c.subscriptions.length > 0 ? c.subscriptions[0].plan.name : 'None'
+        'Active Plan': clientSubs.length > 0 && clientSubs[0].planId ? clientSubs[0].planId.name : 'None'
       };
     });
 
@@ -2914,28 +2803,36 @@ export const exportDeletedClientsCSV = async (req: AuthenticatedRequest, res: Re
   
   try {
     const dateFilter = getDateFilter(req);
-    const deletedUsers = await prisma.user.findMany({
-      where: { 
-        tenantId, 
-        role: { name: 'CLIENT' },
-        deletedAt: { not: null },
-        ...(dateFilter ? { deletedAt: dateFilter } : {})
-      },
-      include: { client: true }
-    });
+    const clientRole = await dynamicDb.Role.findOne({ name: 'CLIENT' }).lean();
+    const roleId = clientRole?._id || clientRole?.id;
 
-    const csvData = deletedUsers.map(u => ({
-      'User ID': u.id,
-      'Client ID': u.client?.id || '',
-      'Name': `${u.firstName} ${u.lastName}`,
-      'Email': u.email,
-      'Mobile': u.mobile,
-      'PAN': u.client?.pan || '',
-      'Aadhaar': u.client?.aadhaar || '',
-      'Joined Date': u.createdAt.toISOString(),
-      'Deleted At': u.deletedAt?.toISOString() || '',
-      'Deleted By': u.deletedBy || ''
-    }));
+    const userFilter: any = {
+      tenantId,
+      roleId,
+      deletedAt: { $ne: null }
+    };
+    if (dateFilter) userFilter.deletedAt = dateFilter;
+
+    const deletedUsers = await dynamicDb.User.find(userFilter).lean();
+    const userIds = deletedUsers.map((u: any) => u._id || u.id);
+    const clients = await dynamicDb.Client.find({ userId: { $in: userIds } }).lean();
+    const clientMap = new Map(clients.map((c: any) => [String(c.userId), c]));
+
+    const csvData = deletedUsers.map((u: any) => {
+      const client = clientMap.get(String(u._id || u.id));
+      return {
+        'User ID': String(u._id || u.id),
+        'Client ID': client ? String(client._id || client.id) : '',
+        'Name': `${u.firstName || ''} ${u.lastName || ''}`.trim(),
+        'Email': u.email,
+        'Mobile': u.mobile,
+        'PAN': client?.pan || '',
+        'Aadhaar': client?.aadhaar || '',
+        'Joined Date': u.createdAt ? new Date(u.createdAt).toISOString() : '',
+        'Deleted At': u.deletedAt ? new Date(u.deletedAt).toISOString() : '',
+        'Deleted By': u.deletedBy || ''
+      };
+    });
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="Deleted_Clients.csv"');
@@ -2951,24 +2848,21 @@ export const exportPaymentsCSV = async (req: AuthenticatedRequest, res: Response
   
   try {
     const dateFilter = getDateFilter(req);
-    const payments = await prisma.payment.findMany({
-      where: { 
-        tenantId,
-        ...(dateFilter ? { createdAt: dateFilter } : {})
-      },
-      include: { 
-        tenant: { include: { plans: true } }
-      }
-    });
+    const payFilter: any = { tenantId };
+    if (dateFilter) payFilter.createdAt = dateFilter;
 
-    const clientIds = payments.map(p => p.clientId);
-    const clients = await prisma.client.findMany({ where: { id: { in: clientIds } } });
+    const payments: any[] = await dynamicDb.Payment.find(payFilter)
+      .populate('planId')
+      .lean();
 
-    const csvData = payments.map(p => {
-      const plan = p.tenant.plans.find((pl: any) => pl.id === p.planId);
-      const client = clients.find(c => c.id === p.clientId);
+    const clientIds = payments.map((p: any) => p.clientId);
+    const clients: any[] = await dynamicDb.Client.find({ _id: { $in: clientIds } }).lean();
+    const clientMap = new Map(clients.map((c: any) => [String(c._id || c.id), c]));
+
+    const csvData = payments.map((p: any) => {
+      const client = clientMap.get(String(p.clientId));
       return {
-        'Payment ID': p.id,
+        'Payment ID': String(p._id || p.id),
         'Client Name': client?.name || 'Unknown',
         'Client Email': client?.email || 'Unknown',
         'Client Mobile': client?.mobile || 'Unknown',
@@ -2976,8 +2870,8 @@ export const exportPaymentsCSV = async (req: AuthenticatedRequest, res: Response
         'Payment Mode': p.paymentMode,
         'Transaction Ref': p.transactionRef,
         'Status': p.status,
-        'Plan Name': plan ? plan.name : 'Unknown',
-        'Payment Date': p.createdAt.toISOString()
+        'Plan Name': p.planId?.name || 'Unknown',
+        'Payment Date': p.createdAt ? new Date(p.createdAt).toISOString() : ''
       };
     });
 
@@ -2995,15 +2889,16 @@ export const exportResearchReportsZip = async (req: AuthenticatedRequest, res: R
   
   try {
     const dateFilter = getDateFilter(req);
-    const signals = await prisma.signal.findMany({
-      where: { 
-        tenantId,
-        reportUrl: { not: null },
-        ...(dateFilter ? { createdAt: dateFilter } : {})
-      },
-      include: { stock: true },
-      orderBy: { createdAt: 'desc' }
-    });
+    const sigFilter: any = {
+      tenantId,
+      reportUrl: { $ne: null }
+    };
+    if (dateFilter) sigFilter.createdAt = dateFilter;
+
+    const signals: any[] = await dynamicDb.Signal.find(sigFilter)
+      .populate('stockId')
+      .sort({ createdAt: -1 })
+      .lean();
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="Research_Reports.zip"');
@@ -3013,12 +2908,11 @@ export const exportResearchReportsZip = async (req: AuthenticatedRequest, res: R
     
     for (const signal of signals) {
       if (signal.reportUrl) {
-        // reportUrl is typically "/uploads/research/..."
         const filePath = path.join(__dirname, '../../..', signal.reportUrl);
         if (fs.existsSync(filePath)) {
-          const dateStr = signal.createdAt.toISOString().split('T')[0];
-          const symbol = signal.stock?.symbol || 'UNKNOWN';
-          const uniqueId = signal.id.slice(0, 6);
+          const dateStr = new Date(signal.createdAt).toISOString().split('T')[0];
+          const symbol = signal.stockId?.symbol || 'UNKNOWN';
+          const uniqueId = String(signal._id || signal.id).slice(0, 6);
           const ext = path.extname(signal.reportUrl) || '.pdf';
           archive.file(filePath, { name: `${dateStr}_${symbol}_${uniqueId}_Research${ext}` });
         }
@@ -3039,33 +2933,24 @@ export const getClientCommunications = async (req: AuthenticatedRequest, res: Re
     const tenantId = req.user?.tenantId;
     if (!tenantId) return res.status(400).json({ success: false, message: 'No tenant' });
 
-    // Fetch the client and their user relation to check tenantId
-    const client = await prisma.client.findUnique({
-      where: { id },
-      include: { user: true }
-    });
-
-    if (!client || client.user.tenantId !== tenantId) {
+    const client: any = await dynamicDb.Client.findById(id).populate('userId').lean();
+    if (!client || (client.userId && client.userId.tenantId !== tenantId)) {
       return res.status(404).json({ success: false, message: 'Client not found' });
     }
 
-    // Collect possible recipients
     const recipients: string[] = [];
     if (client.email) recipients.push(client.email);
     if (client.mobile) recipients.push(client.mobile);
-    if (client.user?.email && client.user.email !== client.email) recipients.push(client.user.email);
+    if (client.userId?.email && client.userId.email !== client.email) recipients.push(client.userId.email);
 
     if (recipients.length === 0) {
       return res.status(200).json({ success: true, data: [] });
     }
 
-    const logs = await prisma.notificationLog.findMany({
-      where: {
-        tenantId,
-        recipient: { in: recipients }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    const logs = await dynamicDb.NotificationLog.find({
+      tenantId,
+      recipient: { $in: recipients }
+    }).sort({ createdAt: -1 }).lean();
 
     return res.status(200).json({ success: true, data: logs });
   } catch (error: any) {

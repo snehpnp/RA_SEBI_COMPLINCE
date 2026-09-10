@@ -2,7 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runWithTenantContext = runWithTenantContext;
 exports.getTenantContext = getTenantContext;
-exports.getActiveTenantPrisma = getActiveTenantPrisma;
+exports.getActiveTenantConnection = getActiveTenantConnection;
+exports.getActiveTenantModels = getActiveTenantModels;
 const async_hooks_1 = require("async_hooks");
 const tenantStorage = new async_hooks_1.AsyncLocalStorage();
 /**
@@ -18,8 +19,14 @@ function getTenantContext() {
     return tenantStorage.getStore();
 }
 /**
- * Retrieves the active Prisma Client (Tenant-specific or undefined)
+ * Retrieves the active Tenant Mongoose Connection (Tenant-specific or undefined)
  */
-function getActiveTenantPrisma() {
-    return tenantStorage.getStore()?.prisma;
+function getActiveTenantConnection() {
+    return tenantStorage.getStore()?.connection;
+}
+/**
+ * Retrieves the active Tenant Mongoose Models
+ */
+function getActiveTenantModels() {
+    return tenantStorage.getStore()?.models;
 }

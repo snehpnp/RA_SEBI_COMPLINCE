@@ -1,7 +1,21 @@
-import prisma from '../config/db';
+import {
+  Tenant,
+  User,
+  Plan,
+  PlanCategory,
+  ComplianceRequirement,
+  ComplianceAudit,
+  SystemSetting,
+  Resource,
+  AdminPermission,
+  EmailTemplate,
+  CustomPage
+} from '../config/db';
 import * as crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
+import { centralModels } from './tenantConnectionManager';
 import { provisionTenantDatabase } from './tenantProvisionService';
 
 export interface SyncOptions {
@@ -37,29 +51,29 @@ export async function syncTenantToRemote(
   tenantId: string,
   options?: SyncOptions
 ): Promise<SyncDispatchResult> {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    include: {
-      users: {
-        where: {
-          OR: [
-            { role: { name: 'ADMIN' } },
-            { role: { name: 'SUPER_ADMIN' } }
-          ]
-        }
-      },
-      adminPermissions: true,
-      emailTemplates: true,
-      customPages: true
-    }
-  });
+  if (!tenantId || tenantId === 'undefined' || !mongoose.Types.ObjectId.isValid(tenantId)) {
+    return {
+      success: false,
+      tenantId: tenantId || 'unknown',
+      companyName: 'Unknown',
+      message: `Invalid company ID provided: ${tenantId}`
+    };
+  }
+
+  let tenant: any = await centralModels.AllCompany.findById(tenantId).lean();
+  if (!tenant) {
+    tenant = await centralModels.Tenant.findById(tenantId).lean();
+  }
+  if (!tenant) {
+    tenant = await centralModels.AllCompany.findOne({ _id: tenantId }).lean();
+  }
 
   if (!tenant) {
     return {
       success: false,
       tenantId,
       companyName: 'Unknown',
-      message: `Tenant with ID ${tenantId} not found.`
+      message: `Company with ID ${tenantId} not found.`
     };
   }
 
@@ -67,26 +81,36 @@ export async function syncTenantToRemote(
   let apiKey = tenant.tenantApiKey;
   if (!apiKey) {
     apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
-    await prisma.tenant.update({
-      where: { id: tenant.id },
-      data: { tenantApiKey: apiKey }
-    });
+    await centralModels.AllCompany.findByIdAndUpdate(tenant._id || tenant.id, { tenantApiKey: apiKey }).catch(() => {});
+    await centralModels.Tenant.findByIdAndUpdate(tenant._id || tenant.id, { tenantApiKey: apiKey }).catch(() => {});
     tenant.tenantApiKey = apiKey;
   }
 
-  let adminUser = tenant.users && tenant.users.length > 0 ? tenant.users[0] : null;
-  if (!adminUser) {
-    adminUser = await prisma.user.findFirst({
-      where: { tenantId }
-    });
-  }
+  const [adminUser, adminPermissions, emailTemplates, customPages, plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
+    centralModels.User.findOne({
+      $or: [
+        { tenantId },
+        { tenantId: tenant._id },
+        { email: tenant.email }
+      ]
+    }).populate('role').lean(),
+    centralModels.AdminPermission.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+    centralModels.EmailTemplate.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+    centralModels.CustomPage.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+    centralModels.Plan.find({ $or: [{ tenantId }, { tenantId: tenant._id }], deletedAt: null }).lean().catch(() => []),
+    centralModels.PlanCategory.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+    centralModels.ComplianceRequirement.find({}).sort({ serialNo: 1 }).lean().catch(() => []),
+    centralModels.ComplianceAudit.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+    centralModels.SystemSetting.find({}).lean().catch(() => []),
+    centralModels.Resource.find({}).lean().catch(() => [])
+  ]);
 
   const effectiveStatus = tenant.status === 'SUSPENDED'
     ? 'SUSPENDED'
     : (tenant.status === 'DELETED' ? 'DELETED' : (adminUser?.status || 'ACTIVE'));
 
   const adminPayload = {
-    id: adminUser?.id,
+    id: (adminUser as any)?._id?.toString() || (adminUser as any)?.id,
     email: adminUser?.email || tenant.email,
     firstName: adminUser?.firstName || tenant.companyName,
     lastName: adminUser?.lastName || 'Admin',
@@ -96,19 +120,9 @@ export async function syncTenantToRemote(
     status: effectiveStatus
   };
 
-  // Fetch all related collections for dynamic sync
-  const [plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
-    prisma.plan.findMany({ where: { tenantId, deletedAt: null } }).catch(() => []),
-    prisma.planCategory.findMany({ where: { tenantId } }).catch(() => []),
-    prisma.complianceRequirement.findMany({ orderBy: { serialNo: 'asc' } }).catch(() => []),
-    prisma.complianceAudit.findMany({ where: { tenantId } }).catch(() => []),
-    prisma.systemSetting.findMany().catch(() => []),
-    prisma.resource.findMany().catch(() => [])
-  ]);
-
   // Read physical files for resources to sync binary content
   const uploadRoot = path.join(__dirname, '../../../uploads');
-  const resources = rawResources.map((r) => {
+  const resources = rawResources.map((r: any) => {
     let fileBase64: string | null = null;
     try {
       const fileName = path.basename(r.fileUrl);
@@ -131,7 +145,7 @@ export async function syncTenantToRemote(
     }
 
     return {
-      id: r.id,
+      id: r._id ? r._id.toString() : r.id,
       title: r.title,
       category: r.category,
       fileUrl: r.fileUrl,
@@ -143,9 +157,10 @@ export async function syncTenantToRemote(
 
   const tenantPayload = {
     ...tenant,
+    id: tenant._id ? tenant._id.toString() : tenant.id,
     tenantApiKey: apiKey,
-    customPages: tenant.customPages || [],
-    emailTemplates: tenant.emailTemplates || [],
+    customPages: customPages || [],
+    emailTemplates: emailTemplates || [],
     plans,
     planCategories,
     complianceRequirements,
@@ -159,9 +174,9 @@ export async function syncTenantToRemote(
     action: options?.reason || 'UPDATE',
     tenant: tenantPayload,
     adminUser: adminPayload,
-    permissions: tenant.adminPermissions || [],
-    emailTemplates: tenant.emailTemplates || [],
-    customPages: tenant.customPages || [],
+    permissions: adminPermissions || [],
+    emailTemplates: emailTemplates || [],
+    customPages: customPages || [],
     plans,
     planCategories,
     complianceRequirements,
@@ -198,7 +213,7 @@ export async function syncTenantToRemote(
       for (const endpoint of candidateEndpoints) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+          const timeoutId = setTimeout(() => controller.abort(), 2500); // 2.5s timeout per candidate endpoint
 
           const response = await fetch(endpoint, {
             method: 'POST',
@@ -230,67 +245,28 @@ export async function syncTenantToRemote(
           endpointUsed: endpointSuccess,
           message: successData.message || `Successfully synced to ${rawDomain} via API!`
         };
-      } else {
-        domainSyncResult = {
-          success: false,
-          message: `Remote server at ${rawDomain} could not be reached or returned error: ${lastErr?.message || 'Offline'}`,
-          error: lastErr
-        };
       }
     }
     return domainSyncResult;
   };
 
-  const dbPromise = async () => {
-    let dbSyncResult: any = null;
-    if (tenant.mongoDbUrl && tenant.mongoDbUrl.trim()) {
-      try {
-        const result = await provisionTenantDatabase(
-          tenant.mongoDbUrl.trim(),
-          tenantPayload,
-          adminPayload,
-          tenant.adminPermissions
-        );
-        dbSyncResult = result;
-      } catch (dbErr: any) {
-        dbSyncResult = {
-          success: false,
-          message: `Dedicated MongoDB sync failed: ${dbErr.message}`,
-          error: dbErr.message
-        };
-      }
-    }
-    return dbSyncResult;
-  };
+  const domainSyncResult = await syncPromise();
 
-  const [domainSyncResult, dbSyncResult] = await Promise.all([syncPromise(), dbPromise()]);
-
-  const hasDb = Boolean(tenant.mongoDbUrl && tenant.mongoDbUrl.trim());
   const hasDomain = Boolean(targetDomainRaw);
+  const overallSuccess = hasDomain ? Boolean(domainSyncResult?.success) : true;
 
-  const overallSuccess = (hasDb && dbSyncResult?.success) ||
-                         (hasDomain && domainSyncResult?.success) ||
-                         (!hasDb && !hasDomain);
-
-  const messages: string[] = [];
-  if (dbSyncResult) {
-    messages.push(dbSyncResult.message);
-  }
+  let finalMessage = 'Tenant updated in master database successfully.';
   if (domainSyncResult) {
-    messages.push(domainSyncResult.message);
-  }
-  if (messages.length === 0) {
-    messages.push('Tenant updated in master database successfully.');
+    finalMessage = domainSyncResult.message;
   }
 
   return {
     success: overallSuccess,
-    tenantId: tenant.id,
+    tenantId: tenant._id ? tenant._id.toString() : tenant.id,
     companyName: tenant.companyName,
     domainUrl: tenant.domainUrl || tenant.website,
     domainSyncResult,
-    dbSyncResult,
-    message: messages.join(' | ')
+    message: finalMessage
   };
 }
 
@@ -301,14 +277,11 @@ export async function syncTenantToRemote(
 export async function syncAllTenantsToRemote(
   options?: { reason?: string }
 ): Promise<{ total: number; successCount: number; failedCount: number; results: SyncDispatchResult[] }> {
-  const tenants = await prisma.tenant.findMany({
-    where: {
-      status: { not: 'DELETED' }
-    },
-    select: { id: true, companyName: true, domainUrl: true, website: true, mongoDbUrl: true }
-  });
+  const tenants: any[] = await Tenant.find({
+    status: { $ne: 'DELETED' }
+  }).select('id companyName domainUrl website mongoDbUrl').lean();
 
-  const promises = tenants.map(t => syncTenantToRemote(t.id, { reason: options?.reason || 'GLOBAL_UPDATE' }));
+  const promises = tenants.map(t => syncTenantToRemote(t._id ? t._id.toString() : t.id, { reason: options?.reason || 'GLOBAL_UPDATE' }));
   const results = await Promise.allSettled(promises);
 
   const successResults: SyncDispatchResult[] = [];

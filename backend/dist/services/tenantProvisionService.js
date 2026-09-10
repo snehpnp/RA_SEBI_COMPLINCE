@@ -36,7 +36,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.provisionAllTenantCollections = provisionAllTenantCollections;
 exports.syncTenantDedicatedMongoDirect = syncTenantDedicatedMongoDirect;
 exports.provisionTenantDatabase = provisionTenantDatabase;
-const client_1 = require("@prisma/client");
 const mongodb_1 = require("mongodb");
 const bcrypt = __importStar(require("bcryptjs"));
 const fs = __importStar(require("fs"));
@@ -44,21 +43,9 @@ const path = __importStar(require("path"));
 const stateService_1 = require("./stateService");
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 /**
- * Provisions ALL collections and baseline records required for a Tenant:
- * 1. Standard Roles
- * 2. Standard Permissions
- * 3. Role-Permission mappings
- * 4. Tenant Profile & Configs
- * 5. Admin User Account & Role Binding
- * 6. Admin Module Permissions (10 Modules)
- * 7. Mandatory Legal & Compliance Custom Pages (8 Pages + Dynamic Updates)
- * 8. Default System Email Templates (4 Templates + Dynamic Updates)
- * 9. Compliance Requirements & Initialized Compliance Audits
- * 10. Indian States & GST Codes
- * 11. Starter Plan Category & Plan (with dynamic updates)
- * 12. Global System Settings / Branding
+ * Provisions ALL collections and baseline records required for a Tenant using Mongoose ITenantModels.
  */
-async function provisionAllTenantCollections(targetPrisma, tenantData, adminUserData, customPermissions) {
+async function provisionAllTenantCollections(targetModels, tenantData, adminUserData, customPermissions) {
     // 1. Seed standard Roles
     const roles = [
         { name: 'SUPER_ADMIN', description: 'System Owner' },
@@ -71,12 +58,8 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
     ];
     const roleMap = {};
     for (const role of roles) {
-        const createdRole = await targetPrisma.role.upsert({
-            where: { name: role.name },
-            update: {},
-            create: role
-        });
-        roleMap[role.name] = createdRole.id;
+        const createdRole = await targetModels.Role.findOneAndUpdate({ name: role.name }, { $set: role }, { upsert: true, returnDocument: 'after' });
+        roleMap[role.name] = createdRole._id.toString();
     }
     // 2. Seed standard Permissions
     const permissions = [
@@ -101,12 +84,8 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
     ];
     const permMap = {};
     for (const perm of permissions) {
-        const createdPerm = await targetPrisma.permission.upsert({
-            where: { code: perm.code },
-            update: {},
-            create: perm
-        });
-        permMap[perm.code] = createdPerm.id;
+        const createdPerm = await targetModels.Permission.findOneAndUpdate({ code: perm.code }, { $set: perm }, { upsert: true, returnDocument: 'after' });
+        permMap[perm.code] = createdPerm._id.toString();
     }
     // 3. Bind RolePermissions (ADMIN & SUPER_ADMIN get all permissions)
     const fullAdminRoles = ['SUPER_ADMIN', 'ADMIN'];
@@ -116,59 +95,41 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
             continue;
         for (const permCode of Object.keys(permMap)) {
             const pId = permMap[permCode];
-            await targetPrisma.rolePermission.upsert({
-                where: { roleId_permissionId: { roleId: rId, permissionId: pId } },
-                update: {},
-                create: { roleId: rId, permissionId: pId }
-            });
+            await targetModels.RolePermission.findOneAndUpdate({ roleId: rId, permissionId: pId }, { $set: { roleId: rId, permissionId: pId } }, { upsert: true, returnDocument: 'after' });
         }
     }
-    // Specific permissions for Principal Officer
+    // Specific permissions for PO, CO, Researcher
     const poId = roleMap['PRINCIPAL_OFFICER'];
     if (poId) {
         const poPerms = ['CREATE', 'READ', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'PUBLISH', 'EXPORT', 'DOWNLOAD', 'ACCESS_DASHBOARD', 'ACCESS_STAFF', 'ACCESS_RESEARCH'];
         for (const permCode of poPerms) {
             const pId = permMap[permCode];
             if (pId) {
-                await targetPrisma.rolePermission.upsert({
-                    where: { roleId_permissionId: { roleId: poId, permissionId: pId } },
-                    update: {},
-                    create: { roleId: poId, permissionId: pId }
-                });
+                await targetModels.RolePermission.findOneAndUpdate({ roleId: poId, permissionId: pId }, { $set: { roleId: poId, permissionId: pId } }, { upsert: true, returnDocument: 'after' });
             }
         }
     }
-    // Specific permissions for Compliance Officer
     const coId = roleMap['COMPLIANCE_OFFICER'];
     if (coId) {
         const coPerms = ['CREATE', 'READ', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'PUBLISH', 'EXPORT', 'DOWNLOAD', 'ACCESS_DASHBOARD', 'ACCESS_COMPLIANCE'];
         for (const permCode of coPerms) {
             const pId = permMap[permCode];
             if (pId) {
-                await targetPrisma.rolePermission.upsert({
-                    where: { roleId_permissionId: { roleId: coId, permissionId: pId } },
-                    update: {},
-                    create: { roleId: coId, permissionId: pId }
-                });
+                await targetModels.RolePermission.findOneAndUpdate({ roleId: coId, permissionId: pId }, { $set: { roleId: coId, permissionId: pId } }, { upsert: true, returnDocument: 'after' });
             }
         }
     }
-    // Specific permissions for Researcher
     const researcherId = roleMap['RESEARCHER'];
     if (researcherId) {
         const researcherPerms = ['CREATE', 'READ', 'UPDATE', 'PUBLISH', 'DOWNLOAD', 'ACCESS_RESEARCH'];
         for (const permCode of researcherPerms) {
             const pId = permMap[permCode];
             if (pId) {
-                await targetPrisma.rolePermission.upsert({
-                    where: { roleId_permissionId: { roleId: researcherId, permissionId: pId } },
-                    update: {},
-                    create: { roleId: researcherId, permissionId: pId }
-                });
+                await targetModels.RolePermission.findOneAndUpdate({ roleId: researcherId, permissionId: pId }, { $set: { roleId: researcherId, permissionId: pId } }, { upsert: true, returnDocument: 'after' });
             }
         }
     }
-    // 4. Safe Parsing of Tenant Payload
+    // 4. Upsert Tenant
     const certValidity = tenantData.certificateValidity && !isNaN(new Date(tenantData.certificateValidity).getTime())
         ? new Date(tenantData.certificateValidity)
         : null;
@@ -244,50 +205,12 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
         faviconUrl: tenantData.faviconUrl || null,
         internalPolicyUrl: tenantData.internalPolicyUrl || null
     };
-    // Resilient tenant upsert to handle cases where @prisma/client has not been re-generated yet
-    async function safeTenantUpsert(prismaClient, whereClause, payload, explicitId) {
-        const currentPayload = { ...payload };
-        const maxRetries = 25;
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            try {
-                const createData = explicitId ? { id: explicitId, ...currentPayload } : { ...currentPayload };
-                return await prismaClient.tenant.upsert({
-                    where: whereClause,
-                    update: currentPayload,
-                    create: createData
-                });
-            }
-            catch (err) {
-                const errMsg = err?.message || String(err);
-                if (errMsg.includes('Unknown argument')) {
-                    const matches = Array.from(errMsg.matchAll(/Unknown argument `([^`]+)`/g));
-                    if (matches && matches.length > 0) {
-                        let strippedAny = false;
-                        for (const match of matches) {
-                            const fieldName = match[1];
-                            if (fieldName && fieldName in currentPayload) {
-                                delete currentPayload[fieldName];
-                                strippedAny = true;
-                            }
-                        }
-                        if (strippedAny) {
-                            continue;
-                        }
-                    }
-                }
-                throw err;
-            }
-        }
-    }
-    let targetTenant;
-    if (tenantData.id) {
-        targetTenant = await safeTenantUpsert(targetPrisma, { id: tenantData.id }, tenantPayload, tenantData.id);
-    }
-    else {
-        targetTenant = await safeTenantUpsert(targetPrisma, { email: tenantData.email }, tenantPayload);
-    }
-    const tenantId = targetTenant.id;
-    // 5. Ensure Admin Password Hash
+    const tenantFilter = tenantData.id
+        ? { _id: tenantData.id }
+        : { email: tenantData.email };
+    const targetTenant = await targetModels.Tenant.findOneAndUpdate(tenantFilter, { $set: tenantPayload }, { upsert: true, returnDocument: 'after' });
+    const tenantId = targetTenant._id ? targetTenant._id.toString() : targetTenant.id;
+    // 5. Upsert Admin User
     let finalPasswordHash = adminUserData.passwordHash;
     if (!finalPasswordHash && adminUserData.password) {
         finalPasswordHash = await bcrypt.hash(adminUserData.password, 10);
@@ -305,94 +228,39 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
     const adminEmail = adminUserData.email.toLowerCase().trim();
     let targetUser = null;
     if (adminUserData.id) {
-        targetUser = await targetPrisma.user.findUnique({
-            where: { id: adminUserData.id },
-            include: { role: true }
-        }).catch(() => null);
-        if (targetUser && (targetUser.role?.name === 'SUPER_ADMIN' || targetUser.roleId === superAdminRoleId)) {
-            targetUser = null; // NEVER overwrite SUPER_ADMIN
+        targetUser = await targetModels.User.findById(adminUserData.id).lean();
+        if (targetUser && (targetUser.roleId?.toString() === superAdminRoleId)) {
+            targetUser = null;
         }
     }
     if (!targetUser && adminEmail) {
-        targetUser = await targetPrisma.user.findUnique({
-            where: { email: adminEmail },
-            include: { role: true }
-        }).catch(() => null);
-        if (targetUser && (targetUser.role?.name === 'SUPER_ADMIN' || targetUser.roleId === superAdminRoleId)) {
-            targetUser = null; // NEVER overwrite SUPER_ADMIN
+        targetUser = await targetModels.User.findOne({ email: adminEmail }).lean();
+        if (targetUser && (targetUser.roleId?.toString() === superAdminRoleId)) {
+            targetUser = null;
         }
-    }
-    if (!targetUser && tenantId) {
-        targetUser = await targetPrisma.user.findFirst({
-            where: {
-                tenantId,
-                roleId: adminRoleId,
-                role: { name: { not: 'SUPER_ADMIN' } }
-            },
-            include: { role: true }
-        }).catch(() => null);
     }
     const effectiveStatus = targetTenant.status === 'SUSPENDED'
         ? 'SUSPENDED'
         : (targetTenant.status === 'DELETED' ? 'DELETED' : (adminUserData.status || 'ACTIVE'));
+    const userPayload = {
+        tenantId,
+        roleId: adminRoleId,
+        firstName: adminUserData.firstName || targetTenant.companyName,
+        lastName: adminUserData.lastName || 'Admin',
+        email: adminEmail,
+        mobile: adminUserData.mobile || targetTenant.mobile,
+        passwordHash: finalPasswordHash || '',
+        tempPassword: adminUserData.tempPassword || null,
+        status: effectiveStatus
+    };
     let createdAdminUser;
     if (targetUser) {
-        const userUpdatePayload = {
-            tenantId,
-            roleId: adminRoleId,
-            firstName: adminUserData.firstName || targetTenant.companyName,
-            lastName: adminUserData.lastName || '',
-            email: adminEmail,
-            mobile: adminUserData.mobile || targetTenant.mobile,
-            status: effectiveStatus
-        };
-        if (finalPasswordHash && finalPasswordHash.trim()) {
-            userUpdatePayload.passwordHash = finalPasswordHash.trim();
-        }
-        if (adminUserData.tempPassword !== undefined) {
-            userUpdatePayload.tempPassword = adminUserData.tempPassword || null;
-        }
-        createdAdminUser = await targetPrisma.user.update({
-            where: { id: targetUser.id },
-            data: userUpdatePayload
-        });
+        createdAdminUser = await targetModels.User.findByIdAndUpdate(targetUser._id, { $set: userPayload }, { returnDocument: 'after' });
     }
     else {
-        createdAdminUser = await targetPrisma.user.create({
-            data: {
-                ...(adminUserData.id ? { id: adminUserData.id } : {}),
-                tenantId,
-                roleId: adminRoleId,
-                firstName: adminUserData.firstName || targetTenant.companyName,
-                lastName: adminUserData.lastName || 'Admin',
-                email: adminEmail,
-                mobile: adminUserData.mobile || targetTenant.mobile,
-                passwordHash: finalPasswordHash || '',
-                tempPassword: adminUserData.tempPassword || null,
-                status: effectiveStatus
-            }
-        });
+        createdAdminUser = await targetModels.User.create(userPayload);
     }
-    if (targetTenant.status === 'SUSPENDED') {
-        await targetPrisma.user.updateMany({
-            where: { tenantId },
-            data: {
-                status: 'SUSPENDED',
-                tokenVersion: { increment: 1 },
-                currentSessionId: null
-            }
-        });
-    }
-    else if (targetTenant.status === 'DELETED') {
-        await targetPrisma.user.updateMany({
-            where: { tenantId },
-            data: {
-                status: 'DELETED',
-                deletedAt: new Date()
-            }
-        });
-    }
-    // 6. Seed / Update Admin Permissions (10 Modules)
+    // 6. Admin Permissions (10 Modules)
     const defaultModules = [
         'CLIENTS',
         'RESEARCH_REPORTS',
@@ -405,62 +273,25 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
         'AI_FEATURES',
         'EXPORT_DATA'
     ];
-    if (customPermissions && Array.isArray(customPermissions) && customPermissions.length > 0) {
-        for (const p of customPermissions) {
-            await targetPrisma.adminPermission.upsert({
-                where: {
-                    tenantId_module: {
-                        tenantId,
-                        module: p.module
-                    }
-                },
-                update: {
-                    canView: p.canView ?? true,
-                    canCreate: p.canCreate ?? true,
-                    canEdit: p.canEdit ?? true,
-                    canDelete: p.canDelete ?? true,
-                    canExport: p.canExport ?? true,
-                    isEnabled: p.isEnabled ?? true,
-                    customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits
-                },
-                create: {
-                    tenantId,
-                    module: p.module,
-                    canView: p.canView ?? true,
-                    canCreate: p.canCreate ?? true,
-                    canEdit: p.canEdit ?? true,
-                    canDelete: p.canDelete ?? true,
-                    canExport: p.canExport ?? true,
-                    isEnabled: p.isEnabled ?? true,
-                    customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits
-                }
-            });
-        }
+    const permsToSync = customPermissions && customPermissions.length > 0
+        ? customPermissions
+        : defaultModules.map((m) => ({ module: m, canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true, isEnabled: true }));
+    for (const p of permsToSync) {
+        await targetModels.AdminPermission.findOneAndUpdate({ tenantId, module: p.module }, {
+            $set: {
+                tenantId,
+                module: p.module,
+                canView: p.canView ?? true,
+                canCreate: p.canCreate ?? true,
+                canEdit: p.canEdit ?? true,
+                canDelete: p.canDelete ?? true,
+                canExport: p.canExport ?? true,
+                isEnabled: p.isEnabled ?? true,
+                customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits
+            }
+        }, { upsert: true, returnDocument: 'after' });
     }
-    else {
-        for (const moduleName of defaultModules) {
-            await targetPrisma.adminPermission.upsert({
-                where: {
-                    tenantId_module: {
-                        tenantId,
-                        module: moduleName
-                    }
-                },
-                update: {},
-                create: {
-                    tenantId,
-                    module: moduleName,
-                    canView: true,
-                    canCreate: true,
-                    canEdit: true,
-                    canDelete: true,
-                    canExport: true,
-                    isEnabled: true
-                }
-            });
-        }
-    }
-    // 7. Seed / Sync Mandatory & Dynamic Custom Pages
+    // 7. Custom Pages
     const defaultPages = [
         { title: 'Complaint Status', slug: 'complaint-status', type: 'CONTENT', content: '<h3>Monthly Complaint Status</h3><p>Status of investor complaints received and resolved per SEBI guidelines.</p>', isSystem: true },
         { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', content: '<h3>Refund Policy</h3><p>Details regarding fee refunds and advisory subscription cancellations.</p>', isSystem: true },
@@ -475,22 +306,8 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
     for (const page of pagesToSync) {
         if (!page.slug)
             continue;
-        await targetPrisma.customPage.upsert({
-            where: {
-                tenantId_slug: {
-                    tenantId,
-                    slug: page.slug
-                }
-            },
-            update: {
-                title: page.title,
-                type: page.type || 'CONTENT',
-                content: page.content || null,
-                externalUrl: page.externalUrl || null,
-                isSystem: page.isSystem ?? true,
-                status: page.status || 'ACTIVE'
-            },
-            create: {
+        await targetModels.CustomPage.findOneAndUpdate({ tenantId, slug: page.slug }, {
+            $set: {
                 tenantId,
                 title: page.title,
                 slug: page.slug,
@@ -500,405 +317,124 @@ async function provisionAllTenantCollections(targetPrisma, tenantData, adminUser
                 isSystem: page.isSystem ?? true,
                 status: page.status || 'ACTIVE'
             }
-        });
+        }, { upsert: true, returnDocument: 'after' });
     }
-    // 8. Seed / Sync System Email Templates
+    // 8. Email Templates
     const defaultTemplates = [
-        {
-            type: 'WELCOME',
-            subject: `Welcome to ${targetTenant.companyName}`,
-            body: `Dear {{clientName}},\n\nWelcome to ${targetTenant.companyName}! Your advisory account is registered.\n\nBest regards,\n${targetTenant.companyName}`
-        },
-        {
-            type: 'CHANGE_PASSWORD',
-            subject: 'Password Reset Request',
-            body: `Dear {{userName}},\n\nYour password reset request has been received. Please use your temporary credentials to log in.\n\nBest regards,\n${targetTenant.companyName}`
-        },
-        {
-            type: 'KYC_AGREEMENT',
-            subject: 'Advisory Service Agreement & KYC Confirmation',
-            body: `Dear {{clientName}},\n\nYour KYC verification and Research Advisory Agreement have been successfully recorded.\n\nBest regards,\n${targetTenant.companyName}`
-        },
-        {
-            type: 'INVOICE',
-            subject: `Tax Invoice - ${targetTenant.companyName}`,
-            body: `Dear {{clientName}},\n\nPlease find attached the tax invoice for your research advisory subscription.\n\nBest regards,\n${targetTenant.companyName}`
-        }
+        { type: 'WELCOME', subject: `Welcome to ${targetTenant.companyName}`, body: `Dear {{clientName}},\n\nWelcome to ${targetTenant.companyName}! Your advisory account is registered.\n\nBest regards,\n${targetTenant.companyName}` },
+        { type: 'CHANGE_PASSWORD', subject: 'Password Reset Request', body: `Dear {{userName}},\n\nYour password reset request has been received. Please use your temporary credentials to log in.\n\nBest regards,\n${targetTenant.companyName}` },
+        { type: 'KYC_AGREEMENT', subject: 'Advisory Service Agreement & KYC Confirmation', body: `Dear {{clientName}},\n\nYour KYC verification and Research Advisory Agreement have been successfully recorded.\n\nBest regards,\n${targetTenant.companyName}` },
+        { type: 'INVOICE', subject: `Tax Invoice - ${targetTenant.companyName}`, body: `Dear {{clientName}},\n\nPlease find attached the tax invoice for your research advisory subscription.\n\nBest regards,\n${targetTenant.companyName}` }
     ];
     const templatesToSync = tenantData.emailTemplates && tenantData.emailTemplates.length > 0 ? tenantData.emailTemplates : defaultTemplates;
     for (const t of templatesToSync) {
         if (!t.type)
             continue;
-        await targetPrisma.emailTemplate.upsert({
-            where: {
-                tenantId_type: {
-                    tenantId,
-                    type: t.type
-                }
-            },
-            update: {
-                subject: t.subject,
-                body: t.body
-            },
-            create: {
+        await targetModels.EmailTemplate.findOneAndUpdate({ tenantId, type: t.type }, {
+            $set: {
                 tenantId,
                 type: t.type,
                 subject: t.subject,
                 body: t.body
             }
-        });
+        }, { upsert: true, returnDocument: 'after' });
     }
-    // 9. Seed / Sync Compliance Requirements & Initialize Compliance Audits
+    // 9. Compliance Requirements & Audits
     try {
-        const rulesToSync = tenantData.complianceRequirements && tenantData.complianceRequirements.length > 0
-            ? tenantData.complianceRequirements
-            : null;
-        if (rulesToSync) {
-            for (const rule of rulesToSync) {
-                const existingRule = await targetPrisma.complianceRequirement.findFirst({
-                    where: { serialNo: rule.serialNo }
-                });
-                if (existingRule) {
-                    await targetPrisma.complianceRequirement.update({
-                        where: { id: existingRule.id },
-                        data: {
-                            requirement: rule.requirement,
-                            frequency: rule.frequency,
-                            frequencyType: rule.frequencyType || 'CONTINUOUS',
-                            severityLevel: rule.severityLevel || 'HIGH',
-                            penaltyAmount: rule.penaltyAmount || null,
-                            isActive: rule.isActive ?? true
-                        }
-                    });
-                }
-                else {
-                    await targetPrisma.complianceRequirement.create({
-                        data: {
-                            serialNo: rule.serialNo,
-                            requirement: rule.requirement,
-                            frequency: rule.frequency,
-                            frequencyType: rule.frequencyType || 'CONTINUOUS',
-                            severityLevel: rule.severityLevel || 'HIGH',
-                            penaltyAmount: rule.penaltyAmount || null,
-                            isActive: rule.isActive ?? true
-                        }
-                    });
-                }
-            }
-        }
-        else {
-            const rulesPath = path.join(__dirname, '../../prisma/rules.json');
+        let rulesToSync = tenantData.complianceRequirements;
+        if (!rulesToSync || rulesToSync.length === 0) {
+            const rulesPath = path.join(__dirname, '../seeds/rules.json');
             if (fs.existsSync(rulesPath)) {
-                const rawRules = fs.readFileSync(rulesPath, 'utf8');
-                const seedRules = JSON.parse(rawRules);
-                for (const rule of seedRules) {
-                    const existingRule = await targetPrisma.complianceRequirement.findFirst({
-                        where: { serialNo: rule.serialNo }
-                    });
-                    if (existingRule) {
-                        await targetPrisma.complianceRequirement.update({
-                            where: { id: existingRule.id },
-                            data: {
-                                requirement: rule.requirement,
-                                frequency: rule.frequency,
-                                severityLevel: rule.severityLevel || 'HIGH',
-                                penaltyAmount: rule.penaltyAmount || null,
-                                isActive: true
-                            }
-                        });
-                    }
-                    else {
-                        await targetPrisma.complianceRequirement.create({
-                            data: {
-                                serialNo: rule.serialNo,
-                                requirement: rule.requirement,
-                                frequency: rule.frequency,
-                                frequencyType: rule.frequencyType || 'CONTINUOUS',
-                                severityLevel: rule.severityLevel || 'HIGH',
-                                penaltyAmount: rule.penaltyAmount || null,
-                                isActive: true
-                            }
-                        });
-                    }
+                try {
+                    rulesToSync = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
                 }
+                catch { }
             }
         }
-    }
-    catch (err) {
-        console.warn('Compliance rules seed note:', err);
-    }
-    // Seed / Sync Compliance Audits for this Tenant
-    try {
-        if (tenantData.complianceAudits && tenantData.complianceAudits.length > 0) {
-            for (const audit of tenantData.complianceAudits) {
-                if (!audit.requirementId)
-                    continue;
-                const existingAudit = await targetPrisma.complianceAudit.findFirst({
-                    where: {
-                        tenantId,
-                        requirementId: audit.requirementId,
-                        dueDate: new Date(audit.dueDate)
+        if (rulesToSync && rulesToSync.length > 0) {
+            for (const rule of rulesToSync) {
+                await targetModels.ComplianceRequirement.findOneAndUpdate({ serialNo: rule.serialNo }, {
+                    $set: {
+                        serialNo: rule.serialNo,
+                        requirement: rule.requirement,
+                        frequency: rule.frequency,
+                        frequencyType: rule.frequencyType || 'CONTINUOUS',
+                        severityLevel: rule.severityLevel || 'HIGH',
+                        penaltyAmount: rule.penaltyAmount || null,
+                        isActive: rule.isActive ?? true
                     }
+                }, { upsert: true, returnDocument: 'after' });
+            }
+        }
+        const activeRequirements = await targetModels.ComplianceRequirement.find({ isActive: true }).lean();
+        const now = new Date();
+        for (const req of activeRequirements) {
+            const period = (0, complianceDateHelper_1.getCompliancePeriod)(req.frequencyType, now, targetTenant.createdAt || now);
+            const reqId = req._id ? req._id.toString() : req.id;
+            const existingAudit = await targetModels.ComplianceAudit.findOne({
+                tenantId,
+                requirementId: reqId,
+                dueDate: { $gte: period.startDate, $lte: period.dueDate }
+            }).lean();
+            if (!existingAudit) {
+                await targetModels.ComplianceAudit.create({
+                    tenantId,
+                    requirementId: reqId,
+                    status: 'PENDING',
+                    dueDate: period.dueDate
                 });
-                if (existingAudit) {
-                    await targetPrisma.complianceAudit.update({
-                        where: { id: existingAudit.id },
-                        data: {
-                            status: audit.status || 'PENDING',
-                            officerRemarks: audit.officerRemarks || null,
-                            resolvedAt: audit.resolvedAt ? new Date(audit.resolvedAt) : null
-                        }
-                    });
-                }
-                else {
-                    await targetPrisma.complianceAudit.create({
-                        data: {
-                            tenantId,
-                            requirementId: audit.requirementId,
-                            status: audit.status || 'PENDING',
-                            dueDate: new Date(audit.dueDate),
-                            officerRemarks: audit.officerRemarks || null,
-                            resolvedAt: audit.resolvedAt ? new Date(audit.resolvedAt) : null
-                        }
-                    });
-                }
             }
         }
-        else {
-            const activeRequirements = await targetPrisma.complianceRequirement.findMany({
-                where: { isActive: true }
+    }
+    catch (auditErr) {
+        console.warn('Compliance audit sync note:', auditErr);
+    }
+    // 10. Seed Indian States
+    await (0, stateService_1.ensureStates)(targetModels.State).catch(() => { });
+    // 11. Plan Category & Plans
+    try {
+        const categoryCount = await targetModels.PlanCategory.countDocuments({ tenantId });
+        if (categoryCount === 0) {
+            const defaultCategory = await targetModels.PlanCategory.create({
+                tenantId,
+                name: 'Equity & Derivatives',
+                segments: 'EQUITY,DERIVATIVE',
+                status: 'ACTIVE'
             });
-            const now = new Date();
-            for (const req of activeRequirements) {
-                const period = (0, complianceDateHelper_1.getCompliancePeriod)(req.frequencyType, now, targetTenant.createdAt);
-                const existingAudit = await targetPrisma.complianceAudit.findFirst({
-                    where: {
-                        tenantId,
-                        requirementId: req.id,
-                        dueDate: { gte: period.startDate, lte: period.dueDate }
-                    }
-                });
-                if (!existingAudit) {
-                    await targetPrisma.complianceAudit.create({
-                        data: {
-                            tenantId,
-                            requirementId: req.id,
-                            status: 'PENDING',
-                            dueDate: period.dueDate
-                        }
-                    });
-                }
-            }
+            await targetModels.Plan.create({
+                tenantId,
+                categoryId: defaultCategory._id,
+                name: 'Standard Advisory Plan',
+                description: 'Comprehensive equity recommendations and research reports with SEBI compliant disclosures.',
+                price: 5000.0,
+                durationMonths: 1,
+                researchSegments: 'EQUITY,DERIVATIVE',
+                notificationsAllowed: 'EMAIL,INAPP',
+                clientLimit: 100,
+                status: 'ACTIVE'
+            });
         }
     }
-    catch (auditSeedErr) {
-        console.warn('Compliance audit sync note:', auditSeedErr);
+    catch (planErr) {
+        console.warn('Plan sync note:', planErr);
     }
-    // 10. Seed Indian States & GST Codes
-    await (0, stateService_1.ensureStates)(targetPrisma).catch(() => { });
-    // 11. Seed / Sync Plan Categories & Plans
-    try {
-        if (tenantData.planCategories && tenantData.planCategories.length > 0) {
-            const categoryMap = {};
-            for (const cat of tenantData.planCategories) {
-                const existingCat = await targetPrisma.planCategory.findFirst({
-                    where: { tenantId, name: cat.name }
-                });
-                if (existingCat) {
-                    const updated = await targetPrisma.planCategory.update({
-                        where: { id: existingCat.id },
-                        data: {
-                            segments: cat.segments || 'EQUITY',
-                            status: cat.status || 'ACTIVE'
-                        }
-                    });
-                    categoryMap[cat.id] = updated.id;
-                    categoryMap[cat.name] = updated.id;
+    // 12. System Settings
+    if (tenantData.systemSettings && tenantData.systemSettings.length > 0) {
+        for (const setting of tenantData.systemSettings) {
+            if (!setting.key)
+                continue;
+            await targetModels.SystemSetting.findOneAndUpdate({ key: setting.key }, {
+                $set: {
+                    key: setting.key,
+                    value: typeof setting.value === 'object' ? JSON.stringify(setting.value) : String(setting.value)
                 }
-                else {
-                    const created = await targetPrisma.planCategory.create({
-                        data: {
-                            tenantId,
-                            name: cat.name,
-                            segments: cat.segments || 'EQUITY',
-                            status: cat.status || 'ACTIVE'
-                        }
-                    });
-                    categoryMap[cat.id] = created.id;
-                    categoryMap[cat.name] = created.id;
-                }
-            }
-            if (tenantData.plans && tenantData.plans.length > 0) {
-                for (const pl of tenantData.plans) {
-                    const targetCatId = categoryMap[pl.categoryId] || Object.values(categoryMap)[0];
-                    if (!targetCatId)
-                        continue;
-                    const existingPlan = await targetPrisma.plan.findFirst({
-                        where: { tenantId, name: pl.name }
-                    });
-                    if (existingPlan) {
-                        await targetPrisma.plan.update({
-                            where: { id: existingPlan.id },
-                            data: {
-                                categoryId: targetCatId,
-                                description: pl.description || '',
-                                price: parseFloat(pl.price) || 0,
-                                durationMonths: parseInt(pl.durationMonths) || 1,
-                                researchSegments: pl.researchSegments || 'EQUITY',
-                                notificationsAllowed: pl.notificationsAllowed || 'EMAIL,INAPP',
-                                clientLimit: parseInt(pl.clientLimit) || 100,
-                                status: pl.status || 'ACTIVE'
-                            }
-                        });
-                    }
-                    else {
-                        await targetPrisma.plan.create({
-                            data: {
-                                tenantId,
-                                categoryId: targetCatId,
-                                name: pl.name,
-                                description: pl.description || '',
-                                price: parseFloat(pl.price) || 0,
-                                durationMonths: parseInt(pl.durationMonths) || 1,
-                                researchSegments: pl.researchSegments || 'EQUITY',
-                                notificationsAllowed: pl.notificationsAllowed || 'EMAIL,INAPP',
-                                clientLimit: parseInt(pl.clientLimit) || 100,
-                                status: pl.status || 'ACTIVE'
-                            }
-                        });
-                    }
-                }
-            }
+            }, { upsert: true, returnDocument: 'after' });
         }
-        else {
-            const categoryCount = await targetPrisma.planCategory.count({ where: { tenantId } });
-            if (categoryCount === 0) {
-                const defaultCategory = await targetPrisma.planCategory.create({
-                    data: {
-                        tenantId,
-                        name: 'Equity & Derivatives',
-                        segments: 'EQUITY,DERIVATIVE',
-                        status: 'ACTIVE'
-                    }
-                });
-                await targetPrisma.plan.create({
-                    data: {
-                        tenantId,
-                        categoryId: defaultCategory.id,
-                        name: 'Standard Advisory Plan',
-                        description: 'Comprehensive equity recommendations and research reports with SEBI compliant disclosures.',
-                        price: 5000.0,
-                        durationMonths: 1,
-                        researchSegments: 'EQUITY,DERIVATIVE',
-                        notificationsAllowed: 'EMAIL,INAPP',
-                        clientLimit: 100,
-                        status: 'ACTIVE'
-                    }
-                });
-            }
-        }
-    }
-    catch (planSeedErr) {
-        console.warn('Starter plan sync note:', planSeedErr);
-    }
-    // 12. Seed / Sync Global System Settings (Branding, Global Configurations)
-    try {
-        if (tenantData.systemSettings && tenantData.systemSettings.length > 0) {
-            for (const setting of tenantData.systemSettings) {
-                if (!setting.key)
-                    continue;
-                await targetPrisma.systemSetting.upsert({
-                    where: { key: setting.key },
-                    update: {
-                        value: typeof setting.value === 'object' ? JSON.stringify(setting.value) : String(setting.value)
-                    },
-                    create: {
-                        key: setting.key,
-                        value: typeof setting.value === 'object' ? JSON.stringify(setting.value) : String(setting.value)
-                    }
-                });
-            }
-        }
-    }
-    catch (settingErr) {
-        console.warn('System settings sync note:', settingErr);
-    }
-    // 13. Seed / Sync Global Resources & Physical Files
-    try {
-        const uploadRoot = path.join(__dirname, '../../../uploads');
-        const resourceDir = path.join(uploadRoot, 'resources');
-        if (!fs.existsSync(resourceDir)) {
-            fs.mkdirSync(resourceDir, { recursive: true });
-        }
-        if (tenantData.resources && tenantData.resources.length > 0) {
-            const activeIds = [];
-            for (const res of tenantData.resources) {
-                if (!res.title || !res.fileUrl)
-                    continue;
-                const resId = res.id ? (typeof res.id === 'object' ? res.id.toString() : String(res.id)) : undefined;
-                if (!resId)
-                    continue;
-                activeIds.push(resId);
-                // If base64 file data provided, save physical file on disk
-                if (res.fileBase64) {
-                    try {
-                        const fileName = path.basename(res.fileUrl);
-                        const targetFilePath = path.join(resourceDir, fileName);
-                        fs.writeFileSync(targetFilePath, Buffer.from(res.fileBase64, 'base64'));
-                    }
-                    catch (writeErr) {
-                        console.warn('[SYNC] Error writing resource file to disk:', writeErr);
-                    }
-                }
-                await targetPrisma.resource.upsert({
-                    where: { id: resId },
-                    update: {
-                        title: res.title,
-                        category: res.category || 'OTHER',
-                        fileUrl: res.fileUrl,
-                        fileName: res.fileName || res.title,
-                    },
-                    create: {
-                        id: resId,
-                        title: res.title,
-                        category: res.category || 'OTHER',
-                        fileUrl: res.fileUrl,
-                        fileName: res.fileName || res.title,
-                        uploadedAt: res.uploadedAt ? new Date(res.uploadedAt) : new Date()
-                    }
-                });
-            }
-            // Cleanup deleted resources from remote database and disk
-            try {
-                const localResources = await targetPrisma.resource.findMany({}).catch(() => []);
-                for (const localRes of localResources) {
-                    if (!activeIds.includes(String(localRes.id))) {
-                        const fileName = path.basename(localRes.fileUrl);
-                        const targetFilePath = path.join(resourceDir, fileName);
-                        if (fs.existsSync(targetFilePath)) {
-                            try {
-                                fs.unlinkSync(targetFilePath);
-                            }
-                            catch { }
-                        }
-                        await targetPrisma.resource.delete({ where: { id: localRes.id } }).catch(() => { });
-                    }
-                }
-            }
-            catch (cleanErr) {
-                console.warn('[SYNC] Error cleaning up deleted resources:', cleanErr);
-            }
-        }
-    }
-    catch (resErr) {
-        console.warn('Global resources sync note:', resErr);
     }
     return { tenant: targetTenant, adminUser: createdAdminUser };
 }
 /**
  * Direct native MongoDB synchronizer for tenant dedicated database.
- * Connects via native MongoClient, which is resilient, fast, and does not require
- * Prisma dynamic client reloading. Updates/upserts all 11 collections directly.
  */
 async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserData, customPermissions) {
     const client = new mongodb_1.MongoClient(mongoDbUrl, {
@@ -907,9 +443,9 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
     });
     try {
         await client.connect();
-        const db = client.db(); // Uses database name from URI
+        const db = client.db();
         const tenantId = tenantData.id || new mongodb_1.ObjectId().toString();
-        // 1. Roles
+        // Roles
         const roles = [
             { name: 'SUPER_ADMIN', description: 'System Owner' },
             { name: 'ADMIN', description: 'RA Company Owner' },
@@ -926,7 +462,7 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 roleMap[r.name] = res._id.toString();
             }
         }
-        // 2. Permissions
+        // Permissions
         const permissions = [
             { code: 'CREATE', name: 'Create Records' },
             { code: 'READ', name: 'Read Records' },
@@ -954,7 +490,7 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 permMap[p.code] = res._id.toString();
             }
         }
-        // 3. RolePermissions (ADMIN gets all)
+        // RolePermissions
         const adminRoleId = roleMap['ADMIN'];
         if (adminRoleId) {
             for (const pCode of Object.keys(permMap)) {
@@ -962,7 +498,7 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 await db.collection('RolePermission').updateOne({ roleId: adminRoleId, permissionId: pId }, { $set: { roleId: adminRoleId, permissionId: pId, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
             }
         }
-        // 4. Tenant Profile & Config
+        // Tenant
         const tenantDoc = {
             companyName: tenantData.companyName,
             companyType: tenantData.companyType || 'INDIVIDUAL',
@@ -1047,7 +583,7 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             });
             targetTenant = { _id: inserted.insertedId, ...tenantDoc };
         }
-        // 5. Admin User
+        // Admin User
         const adminEmail = (adminUserData.email || tenantData.email).toLowerCase().trim();
         let finalPasswordHash = adminUserData.passwordHash;
         if (!finalPasswordHash && (adminUserData.tempPassword || adminUserData.password)) {
@@ -1079,293 +615,9 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 createdAt: new Date()
             });
         }
-        // 6. Admin Permissions (10 Modules)
-        const defaultModules = ['CLIENTS', 'RESEARCH_REPORTS', 'SIGNALS', 'COMPLIANCE', 'BILLING', 'KYC', 'COUPONS', 'CUSTOM_PAGES', 'AI_FEATURES', 'EXPORT_DATA'];
-        const permsToSync = (customPermissions && customPermissions.length > 0) ? customPermissions : defaultModules.map(m => ({ module: m, canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true, isEnabled: true }));
-        for (const p of permsToSync) {
-            await db.collection('AdminPermission').updateOne({ tenantId, module: p.module }, {
-                $set: {
-                    tenantId,
-                    module: p.module,
-                    canView: p.canView ?? true,
-                    canCreate: p.canCreate ?? true,
-                    canEdit: p.canEdit ?? true,
-                    canDelete: p.canDelete ?? true,
-                    canExport: p.canExport ?? true,
-                    isEnabled: p.isEnabled ?? true,
-                    customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits || null,
-                    updatedAt: new Date()
-                },
-                $setOnInsert: { createdAt: new Date() }
-            }, { upsert: true });
-        }
-        // 7. Custom Pages
-        const defaultPages = [
-            { title: 'Complaint Status', slug: 'complaint-status', type: 'CONTENT', content: '<h3>Monthly Complaint Status</h3><p>Status of investor complaints received and resolved per SEBI guidelines.</p>', isSystem: true },
-            { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', content: '<h3>Refund Policy</h3><p>Details regarding fee refunds and advisory subscription cancellations.</p>', isSystem: true },
-            { title: 'Disclosure', slug: 'disclosure', type: 'CONTENT', content: '<h3>SEBI Disclosures</h3><p>Mandatory disclosures regarding research analyst activities, ownership, and conflicts of interest.</p>', isSystem: true },
-            { title: 'Disclaimer', slug: 'disclaimer', type: 'CONTENT', content: '<h3>Disclaimer</h3><p>Investment in securities market are subject to market risks. Read all scheme related documents carefully before investing.</p>', isSystem: true },
-            { title: 'Grievance Redressal Process', slug: 'grievance-redressal-process', type: 'CONTENT', content: '<h3>Grievance Redressal Mechanism</h3><p>Step-by-step procedure for lodging and escalating complaints.</p>', isSystem: true },
-            { title: 'Investor Charter', slug: 'investor-charter', type: 'CONTENT', content: '<h3>Investor Charter</h3><p>Investor rights, responsibilities, and code of conduct under SEBI Research Analyst Regulations.</p>', isSystem: true },
-            { title: 'Terms & Conditions', slug: 'terms-and-conditions', type: 'CONTENT', content: '<h3>Terms of Service</h3><p>Terms and conditions governing use of research and advisory services.</p>', isSystem: true },
-            { title: 'Privacy Policy', slug: 'privacy-policy', type: 'CONTENT', content: '<h3>Privacy Policy</h3><p>Information on data collection, privacy, and confidentiality practices.</p>', isSystem: true }
-        ];
-        const pagesToSync = tenantData.customPages && tenantData.customPages.length > 0 ? tenantData.customPages : defaultPages;
-        for (const page of pagesToSync) {
-            if (!page.slug)
-                continue;
-            await db.collection('CustomPage').updateOne({ tenantId, slug: page.slug }, {
-                $set: {
-                    tenantId,
-                    title: page.title,
-                    slug: page.slug,
-                    type: page.type || 'CONTENT',
-                    content: page.content || null,
-                    externalUrl: page.externalUrl || null,
-                    isSystem: page.isSystem ?? true,
-                    status: page.status || 'ACTIVE',
-                    updatedAt: new Date()
-                },
-                $setOnInsert: { createdAt: new Date() }
-            }, { upsert: true });
-        }
-        // 8. Email Templates
-        const defaultTemplates = [
-            { type: 'WELCOME', subject: `Welcome to ${tenantData.companyName}`, body: `Dear {{clientName}},\n\nWelcome to ${tenantData.companyName}! Your advisory account is registered.\n\nBest regards,\n${tenantData.companyName}` },
-            { type: 'CHANGE_PASSWORD', subject: 'Password Reset Request', body: `Dear {{userName}},\n\nYour password reset request has been received. Please use your temporary credentials to log in.\n\nBest regards,\n${tenantData.companyName}` },
-            { type: 'KYC_AGREEMENT', subject: 'Advisory Service Agreement & KYC Confirmation', body: `Dear {{clientName}},\n\nYour KYC verification and Research Advisory Agreement have been successfully recorded.\n\nBest regards,\n${tenantData.companyName}` },
-            { type: 'INVOICE', subject: `Tax Invoice - ${tenantData.companyName}`, body: `Dear {{clientName}},\n\nPlease find attached the tax invoice for your research advisory subscription.\n\nBest regards,\n${tenantData.companyName}` }
-        ];
-        const templatesToSync = tenantData.emailTemplates && tenantData.emailTemplates.length > 0 ? tenantData.emailTemplates : defaultTemplates;
-        for (const t of templatesToSync) {
-            if (!t.type)
-                continue;
-            await db.collection('EmailTemplate').updateOne({ tenantId, type: t.type }, {
-                $set: {
-                    tenantId,
-                    type: t.type,
-                    subject: t.subject,
-                    body: t.body,
-                    updatedAt: new Date()
-                },
-                $setOnInsert: { createdAt: new Date() }
-            }, { upsert: true });
-        }
-        // 9. Compliance Requirements (ALL SEBI RULES)
-        let rulesToSync = tenantData.complianceRequirements;
-        if (!rulesToSync || rulesToSync.length === 0) {
-            const rulesPath = path.join(__dirname, '../../prisma/rules.json');
-            if (fs.existsSync(rulesPath)) {
-                try {
-                    rulesToSync = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
-                }
-                catch { }
-            }
-        }
-        const requirementIdMap = {};
-        if (rulesToSync && rulesToSync.length > 0) {
-            for (const rule of rulesToSync) {
-                const serialNo = Number(rule.serialNo);
-                const res = await db.collection('ComplianceRequirement').findOneAndUpdate({ serialNo }, {
-                    $set: {
-                        serialNo,
-                        requirement: rule.requirement,
-                        frequency: rule.frequency,
-                        frequencyType: rule.frequencyType || 'CONTINUOUS',
-                        severityLevel: rule.severityLevel || 'HIGH',
-                        penaltyAmount: rule.penaltyAmount !== undefined ? rule.penaltyAmount : null,
-                        isActive: typeof rule.isActive === 'boolean' ? rule.isActive : true,
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
-                }, { upsert: true, returnDocument: 'after' });
-                if (res && res._id) {
-                    requirementIdMap[serialNo] = res._id.toString();
-                }
-            }
-        }
-        // 10. Compliance Audits for this Tenant
-        try {
-            const activeRules = await db.collection('ComplianceRequirement').find({ isActive: true }).toArray();
-            const now = new Date();
-            for (const reqRule of activeRules) {
-                const period = (0, complianceDateHelper_1.getCompliancePeriod)(reqRule.frequencyType || 'CONTINUOUS', now, targetTenant?.createdAt || now);
-                const reqId = reqRule._id.toString();
-                const existingAudit = await db.collection('ComplianceAudit').findOne({
-                    tenantId,
-                    requirementId: reqId,
-                    dueDate: { $gte: period.startDate, $lte: period.dueDate }
-                });
-                if (!existingAudit) {
-                    await db.collection('ComplianceAudit').insertOne({
-                        tenantId,
-                        requirementId: reqId,
-                        status: 'PENDING',
-                        dueDate: period.dueDate,
-                        createdAt: new Date(),
-                        updatedAt: new Date()
-                    });
-                }
-            }
-        }
-        catch (auditErr) {
-            console.warn('Dedicated Mongo ComplianceAudit note:', auditErr);
-        }
-        // 11. Plan Category & Plans
-        try {
-            const categoryMap = {};
-            const categoriesToSync = tenantData.planCategories && tenantData.planCategories.length > 0
-                ? tenantData.planCategories
-                : [{ name: 'Equity & Derivatives', segments: 'EQUITY,DERIVATIVE', status: 'ACTIVE' }];
-            for (const cat of categoriesToSync) {
-                const catRes = await db.collection('PlanCategory').findOneAndUpdate({ tenantId, name: cat.name }, {
-                    $set: {
-                        tenantId,
-                        name: cat.name,
-                        segments: cat.segments || 'EQUITY,DERIVATIVE',
-                        status: cat.status || 'ACTIVE',
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
-                }, { upsert: true, returnDocument: 'after' });
-                if (catRes && catRes._id) {
-                    categoryMap[cat.name] = catRes._id.toString();
-                    if (cat.id)
-                        categoryMap[cat.id] = catRes._id.toString();
-                }
-            }
-            const defaultCatId = Object.values(categoryMap)[0];
-            const plansToSync = tenantData.plans && tenantData.plans.length > 0
-                ? tenantData.plans
-                : defaultCatId ? [{
-                        categoryId: defaultCatId,
-                        name: 'Standard Advisory Plan',
-                        description: 'Comprehensive equity recommendations and research reports with SEBI compliant disclosures.',
-                        price: 5000.0,
-                        durationMonths: 1,
-                        researchSegments: 'EQUITY,DERIVATIVE',
-                        notificationsAllowed: 'EMAIL,INAPP',
-                        clientLimit: 100,
-                        status: 'ACTIVE'
-                    }] : [];
-            for (const pl of plansToSync) {
-                const targetCatId = categoryMap[pl.categoryId] || defaultCatId;
-                if (!targetCatId)
-                    continue;
-                await db.collection('Plan').updateOne({ tenantId, name: pl.name }, {
-                    $set: {
-                        tenantId,
-                        categoryId: targetCatId,
-                        name: pl.name,
-                        description: pl.description || '',
-                        price: parseFloat(String(pl.price || 0)),
-                        durationMonths: parseInt(String(pl.durationMonths || 1)),
-                        researchSegments: pl.researchSegments || 'EQUITY,DERIVATIVE',
-                        notificationsAllowed: pl.notificationsAllowed || 'EMAIL,INAPP',
-                        clientLimit: parseInt(String(pl.clientLimit || 100)),
-                        status: pl.status || 'ACTIVE',
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
-                }, { upsert: true });
-            }
-        }
-        catch (planErr) {
-            console.warn('Dedicated Mongo Plan note:', planErr);
-        }
-        // 12. Indian States & GST Codes
-        try {
-            const { INDIAN_STATES } = require('./stateService');
-            if (INDIAN_STATES && Array.isArray(INDIAN_STATES)) {
-                for (const st of INDIAN_STATES) {
-                    await db.collection('State').updateOne({ name: st.name }, {
-                        $set: { name: st.name, gstCode: st.gstCode, isActive: true },
-                        $setOnInsert: { createdAt: new Date() }
-                    }, { upsert: true });
-                }
-            }
-        }
-        catch (stateErr) {
-            console.warn('Dedicated Mongo State note:', stateErr);
-        }
-        // 13. System Settings (Branding & Global Configurations)
-        if (tenantData.systemSettings && tenantData.systemSettings.length > 0) {
-            for (const setting of tenantData.systemSettings) {
-                if (!setting.key)
-                    continue;
-                await db.collection('SystemSetting').updateOne({ key: setting.key }, {
-                    $set: {
-                        key: setting.key,
-                        value: typeof setting.value === 'object' ? JSON.stringify(setting.value) : String(setting.value),
-                        updatedAt: new Date()
-                    },
-                    $setOnInsert: { createdAt: new Date() }
-                }, { upsert: true });
-            }
-        }
-        // 14. Global Resources
-        if (tenantData.resources) {
-            const activeObjectIds = [];
-            for (const res of tenantData.resources) {
-                if (!res.title || !res.fileUrl)
-                    continue;
-                const rawId = res.id || res._id;
-                const resId = rawId && mongodb_1.ObjectId.isValid(String(rawId)) ? new mongodb_1.ObjectId(String(rawId)) : new mongodb_1.ObjectId();
-                activeObjectIds.push(resId);
-                await db.collection('Resource').updateOne({ _id: resId }, {
-                    $set: {
-                        title: res.title,
-                        category: res.category || 'OTHER',
-                        fileUrl: res.fileUrl,
-                        fileName: res.fileName || res.title,
-                        uploadedAt: res.uploadedAt ? new Date(res.uploadedAt) : new Date()
-                    }
-                }, { upsert: true });
-            }
-            // Cleanup deleted resources from remote MongoDB collection
-            if (activeObjectIds.length > 0) {
-                await db.collection('Resource').deleteMany({
-                    _id: { $nin: activeObjectIds }
-                }).catch(() => { });
-            }
-            else if (tenantData.resources.length === 0) {
-                await db.collection('Resource').deleteMany({}).catch(() => { });
-            }
-        }
-        // 15. Ensure all core operational collections exist with proper collections initialized
-        const operationalCollections = [
-            'Client',
-            'ClientProfile',
-            'ClientDocument',
-            'Staff',
-            'Stock',
-            'Signal',
-            'SignalMessage',
-            'ResearchReport',
-            'Payment',
-            'Subscription',
-            'Agreement',
-            'Complaint',
-            'Coupon',
-            'TenantDocumentHistory',
-            'SupportTicket',
-            'TicketMessage',
-            'AuditLog',
-            'NotificationLog',
-            'Penalty'
-        ];
-        for (const colName of operationalCollections) {
-            try {
-                const existing = await db.listCollections({ name: colName }).toArray();
-                if (existing.length === 0) {
-                    await db.createCollection(colName).catch(() => { });
-                }
-            }
-            catch { }
-        }
         return {
             success: true,
-            message: `Dedicated MongoDB database provisioned and synced successfully for ${tenantData.companyName}. Admin user ${adminEmail} is active with all collections synchronized.`,
+            message: `Dedicated MongoDB database provisioned successfully for ${tenantData.companyName}.`,
             tenantId,
             companyName: tenantData.companyName,
             adminEmail,
@@ -1387,42 +639,5 @@ async function provisionTenantDatabase(mongoDbUrl, tenantData, adminUserData, cu
             message: 'Invalid MongoDB connection string. Must start with mongodb:// or mongodb+srv://'
         };
     }
-    try {
-        return await syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserData, customPermissions);
-    }
-    catch (directErr) {
-        console.warn('Native MongoDB sync attempt note, falling back to Prisma:', directErr.message);
-        let targetPrisma = null;
-        try {
-            targetPrisma = new client_1.PrismaClient({
-                datasources: {
-                    db: {
-                        url: mongoDbUrl
-                    }
-                }
-            });
-            const { tenant, adminUser } = await provisionAllTenantCollections(targetPrisma, tenantData, adminUserData, customPermissions);
-            return {
-                success: true,
-                message: `Tenant database provisioned successfully via Prisma. Admin user ${adminUser.email} is ready.`,
-                tenantId: tenant.id,
-                companyName: tenant.companyName,
-                adminEmail: adminUser.email,
-                adminUserId: adminUser.id
-            };
-        }
-        catch (error) {
-            console.error('Failed to provision tenant database at:', mongoDbUrl, error);
-            return {
-                success: false,
-                message: `Database provisioning failed: ${error.message}`,
-                error: error.message
-            };
-        }
-        finally {
-            if (targetPrisma) {
-                await targetPrisma.$disconnect().catch(() => { });
-            }
-        }
-    }
+    return await syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserData, customPermissions);
 }

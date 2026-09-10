@@ -1,11 +1,20 @@
-import { PrismaClient } from '@prisma/client';
+import mongoose, { Connection } from 'mongoose';
+import { ITenantModels, registerTenantModels } from '../models';
 
-// Dedicated Central DB Prisma Client
-export const centralPrisma = new PrismaClient({
-  log: ['error', 'warn']
+const defaultCentralUrl =
+  process.env.DATABASE_URL ||
+  'mongodb://sebi:Sebi%40123@192.168.1.203:27017/sebi-compliance?authSource=sebi-compliance&replicaSet=rs0';
+
+// Dedicated Central DB Mongoose Connection
+export const centralConnection: Connection = mongoose.createConnection(defaultCentralUrl, {
+  maxPoolSize: 20,
+  serverSelectionTimeoutMS: 5000
 });
 
-interface CachedTenantMeta {
+// Central Models
+export const centralModels: ITenantModels = registerTenantModels(centralConnection);
+
+export interface CachedTenantMeta {
   id: string;
   companyName: string;
   domainUrl: string | null;
@@ -16,8 +25,14 @@ interface CachedTenantMeta {
   cachedAt: number;
 }
 
+export interface TenantConnectionResult {
+  connection: Connection;
+  models: ITenantModels;
+  meta: CachedTenantMeta;
+}
+
 class TenantConnectionManager {
-  private clientPool = new Map<string, PrismaClient>();
+  private connectionPool = new Map<string, { connection: Connection; models: ITenantModels }>();
   private tenantMetaCache = new Map<string, CachedTenantMeta>();
   private domainToIdMap = new Map<string, string>();
   private readonly CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
@@ -26,7 +41,6 @@ class TenantConnectionManager {
    * Constructs a dedicated MongoDB connection URI for a tenant based on the cluster configuration
    */
   public buildTenantMongoUri(dbName: string, customBaseUrl?: string): string {
-    const defaultCentralUrl = process.env.DATABASE_URL || 'mongodb://sebi:Sebi%40123@192.168.1.203:27017/sebi-compliance?authSource=sebi-compliance&replicaSet=rs0';
     const baseUrl = (customBaseUrl && customBaseUrl.trim()) ? customBaseUrl.trim() : defaultCentralUrl;
 
     // Replace the database name part directly without touching password encoding
@@ -55,40 +69,39 @@ class TenantConnectionManager {
   /**
    * Resolves tenant metadata by ID or Domain from Central DB with caching
    */
-  public async resolveTenantMeta(identifier: string): Promise<CachedTenantMeta | null> {
-    const trimmed = identifier.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  public async resolveTenantMeta(identifier: string | any): Promise<CachedTenantMeta | null> {
+    if (!identifier) return null;
+    const strIdentifier = (typeof identifier === 'string' ? identifier : identifier.toString()).trim();
+    if (!strIdentifier) return null;
+    const trimmed = strIdentifier.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     const now = Date.now();
 
     // Check domain mapping
-    const mappedId = this.domainToIdMap.get(trimmed) || identifier;
+    const mappedId = this.domainToIdMap.get(trimmed) || strIdentifier;
     const cached = this.tenantMetaCache.get(mappedId);
     if (cached && now - cached.cachedAt < this.CACHE_TTL_MS) {
       return cached;
     }
 
-    const isObjectId = /^[0-9a-fA-F]{24}$/.test(identifier.trim());
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(strIdentifier);
 
     // Query Central DB: First check AllCompany catalog, then Tenant
     let allComp: any = null;
     try {
       if (isObjectId) {
-        allComp = await centralPrisma.allCompany.findFirst({
-          where: {
-            OR: [
-              { tenantId: identifier.trim() },
-              { id: identifier.trim() }
-            ]
-          }
-        });
+        allComp = await centralModels.AllCompany.findOne({
+          $or: [
+            { tenantId: strIdentifier },
+            { _id: strIdentifier }
+          ]
+        }).lean();
       } else {
-        allComp = await centralPrisma.allCompany.findFirst({
-          where: {
-            OR: [
-              { domainUrl: { contains: trimmed, mode: 'insensitive' } },
-              { email: trimmed }
-            ]
-          }
-        });
+        allComp = await centralModels.AllCompany.findOne({
+          $or: [
+            { domainUrl: new RegExp(trimmed, 'i') },
+            { email: trimmed }
+          ]
+        }).lean();
       }
     } catch {
       allComp = null;
@@ -98,18 +111,14 @@ class TenantConnectionManager {
     if (!allComp) {
       try {
         if (isObjectId) {
-          tenantRecord = await centralPrisma.tenant.findUnique({
-            where: { id: identifier.trim() }
-          });
+          tenantRecord = await centralModels.Tenant.findById(strIdentifier).lean();
         } else {
-          tenantRecord = await centralPrisma.tenant.findFirst({
-            where: {
-              OR: [
-                { domainUrl: { contains: trimmed, mode: 'insensitive' } },
-                { email: trimmed }
-              ]
-            }
-          });
+          tenantRecord = await centralModels.Tenant.findOne({
+            $or: [
+              { domainUrl: new RegExp(trimmed, 'i') },
+              { email: trimmed }
+            ]
+          }).lean();
         }
       } catch {
         tenantRecord = null;
@@ -120,13 +129,13 @@ class TenantConnectionManager {
       return null;
     }
 
-    const tenantId = allComp?.tenantId || tenantRecord?.id;
+    const tenantId = (allComp?.tenantId || tenantRecord?._id || tenantRecord?.id)?.toString();
     const companyName = allComp?.companyName || tenantRecord?.companyName;
     const domainUrl = allComp?.domainUrl || tenantRecord?.domainUrl;
     const dbName = allComp?.dbName || tenantRecord?.dbName || this.sanitizeTenantDbName(companyName, tenantId);
     const mongoDbUrl = allComp?.mongoDbUrl || tenantRecord?.mongoDbUrl || this.buildTenantMongoUri(dbName);
     const status = allComp?.status || tenantRecord?.status || 'ACTIVE';
-    const createdById = allComp?.createdById || tenantRecord?.createdById || null;
+    const createdById = (allComp?.createdById || tenantRecord?.createdById)?.toString() || null;
 
     const meta: CachedTenantMeta = {
       id: tenantId,
@@ -149,92 +158,54 @@ class TenantConnectionManager {
   }
 
   /**
-   * Returns an active PrismaClient instance connected to the tenant's dedicated database
+   * Returns an active Mongoose connection & models (always points to central DB in API-first architecture)
    */
-  public async getTenantPrisma(identifier: string): Promise<{ prisma: PrismaClient; meta: CachedTenantMeta } | null> {
+  public async getTenantConnection(identifier: string | any): Promise<TenantConnectionResult | null> {
     const meta = await this.resolveTenantMeta(identifier);
     if (!meta) {
       return null;
     }
 
-    if (!meta.mongoDbUrl || meta.mongoDbUrl.includes('/sebi-compliance')) {
-      return { prisma: centralPrisma, meta };
-    }
-
-    const cacheKey = meta.mongoDbUrl;
-    let client = this.clientPool.get(cacheKey);
-
-    if (!client) {
-      try {
-        const dedicatedClient = new PrismaClient({
-          datasources: {
-            db: {
-              url: meta.mongoDbUrl
-            }
-          },
-          log: ['error', 'warn']
-        });
-
-        // Test read access on the target database
-        await dedicatedClient.role.findFirst();
-        client = dedicatedClient;
-        this.clientPool.set(cacheKey, client);
-      } catch (connErr: any) {
-        // If MongoDB cluster restricts multi-database access for current user, fallback to Central DB
-        client = centralPrisma;
-      }
-    }
-
-    return { prisma: client || centralPrisma, meta };
+    return { connection: centralConnection, models: centralModels, meta };
   }
 
   /**
-   * Direct PrismaClient for a raw MongoDB URL
+   * Direct connection & models for a MongoDB URL (returns central connection & models)
    */
-  public getPrismaByUri(mongoDbUrl: string): PrismaClient {
-    let client = this.clientPool.get(mongoDbUrl);
-    if (!client) {
-      client = new PrismaClient({
-        datasources: {
-          db: {
-            url: mongoDbUrl
-          }
-        },
-        log: ['error', 'warn']
-      });
-      this.clientPool.set(mongoDbUrl, client);
-    }
-    return client;
+  public getConnectionByUri(_mongoDbUrl: string): { connection: Connection; models: ITenantModels } {
+    return { connection: centralConnection, models: centralModels };
   }
 
   /**
-   * Evicts a tenant from cache and closes connections on deletion or update
+   * Evicts a tenant from cache and closes connection on deletion or update
    */
-  public async evictTenant(tenantId: string): Promise<void> {
-    const meta = this.tenantMetaCache.get(tenantId);
+  public async evictTenant(tenantId: string | any): Promise<void> {
+    const strId = tenantId ? tenantId.toString().trim() : '';
+    if (!strId) return;
+    const meta = this.tenantMetaCache.get(strId);
     if (meta) {
-      this.tenantMetaCache.delete(tenantId);
+      this.tenantMetaCache.delete(strId);
       if (meta.domainUrl) {
         const cleanDomain = meta.domainUrl.toLowerCase().trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
         this.domainToIdMap.delete(cleanDomain);
       }
-      if (meta.mongoDbUrl && this.clientPool.has(meta.mongoDbUrl)) {
-        const client = this.clientPool.get(meta.mongoDbUrl);
-        this.clientPool.delete(meta.mongoDbUrl);
-        await client?.$disconnect().catch(() => {});
+      if (meta.mongoDbUrl && this.connectionPool.has(meta.mongoDbUrl)) {
+        const poolItem = this.connectionPool.get(meta.mongoDbUrl);
+        this.connectionPool.delete(meta.mongoDbUrl);
+        await poolItem?.connection.close().catch(() => {});
       }
     }
   }
 
   /**
-   * Cleanly disconnects all tenant Prisma clients
+   * Cleanly disconnects all tenant Mongoose connections
    */
   public async disconnectAll(): Promise<void> {
-    for (const [key, client] of this.clientPool.entries()) {
-      await client.$disconnect().catch(() => {});
-    }
-    this.clientPool.clear();
-    await centralPrisma.$disconnect().catch(() => {});
+    this.connectionPool.forEach(async (poolItem) => {
+      await poolItem.connection.close().catch(() => {});
+    });
+    this.connectionPool.clear();
+    await centralConnection.close().catch(() => {});
   }
 }
 

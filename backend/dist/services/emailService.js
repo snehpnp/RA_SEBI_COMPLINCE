@@ -9,7 +9,8 @@ exports.sendWelcomeEmail = sendWelcomeEmail;
 exports.sendForgotPasswordEmail = sendForgotPasswordEmail;
 exports.sendTestEmail = sendTestEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = require("../config/db");
+const pdfService_1 = require("./pdfService");
 /**
  * Generic email sender using tenant's configured SMTP settings.
  * If SMTP is not configured, logs a warning and skips silently.
@@ -20,7 +21,7 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
             console.warn('[EMAIL] No tenantId provided. Skipping email to:', to);
             return false;
         }
-        const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
+        const tenant = await db_1.Tenant.findById(tenantId).lean();
         if (!tenant || !tenant.smtpHost || !tenant.smtpUser || !tenant.smtpPassword) {
             console.warn('[EMAIL] SMTP not configured for tenant:', tenantId, '. Skipping email to:', to);
             return false;
@@ -31,9 +32,9 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
             secure: (tenant.smtpPort || 587) === 465,
             auth: {
                 user: tenant.smtpUser,
-                pass: tenant.smtpPassword,
+                pass: tenant.smtpPassword
             },
-            tls: { rejectUnauthorized: false },
+            tls: { rejectUnauthorized: false }
         });
         const fromName = tenant.smtpFrom || tenant.companyName || 'RAGCP Platform';
         const fromEmail = tenant.smtpUser;
@@ -42,18 +43,16 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
             to,
             subject,
             html,
-            attachments,
+            attachments
         });
         // Log to NotificationLog
-        await db_1.default.notificationLog.create({
-            data: {
-                tenantId,
-                recipient: to,
-                channel: 'EMAIL',
-                title: subject,
-                message: html.replace(/<[^>]*>/g, '').slice(0, 500),
-                status: 'SENT',
-            },
+        await db_1.NotificationLog.create({
+            tenantId,
+            recipient: to,
+            channel: 'EMAIL',
+            title: subject,
+            message: html.replace(/<[^>]*>/g, '').slice(0, 500),
+            status: 'SENT'
         });
         return true;
     }
@@ -62,15 +61,13 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
         // Log failure
         if (tenantId) {
             try {
-                await db_1.default.notificationLog.create({
-                    data: {
-                        tenantId,
-                        recipient: to,
-                        channel: 'EMAIL',
-                        title: subject,
-                        message: `Failed: ${err.message}`,
-                        status: 'FAILED',
-                    },
+                await db_1.NotificationLog.create({
+                    tenantId,
+                    recipient: to,
+                    channel: 'EMAIL',
+                    title: subject,
+                    message: `Failed: ${err.message}`,
+                    status: 'FAILED'
                 });
             }
             catch { }
@@ -78,7 +75,6 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
         return false;
     }
 }
-const pdfService_1 = require("./pdfService");
 /**
  * Welcome email sent to newly onboarded Staff or Client.
  */
@@ -232,7 +228,7 @@ async function sendForgotPasswordEmail(opts) {
  * Send a test email to verify SMTP configuration.
  */
 async function sendTestEmail(tenantId, toEmail) {
-    const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
+    const tenant = await db_1.Tenant.findById(tenantId).lean();
     if (!tenant?.smtpHost || !tenant?.smtpUser || !tenant?.smtpPassword) {
         return { success: false, message: 'SMTP is not fully configured. Please fill in all SMTP fields first.' };
     }

@@ -916,6 +916,10 @@ function SuperAdminDashboardContent() {
   };
 
   const handleManualSyncApi = async (tenantId: string, targetUrl?: string) => {
+    if (!tenantId || tenantId === 'undefined') {
+      triggerAlert('Invalid company ID for API synchronization.');
+      return;
+    }
     setIsSyncingApi(true);
     setApiSyncResultMsg(null);
     try {

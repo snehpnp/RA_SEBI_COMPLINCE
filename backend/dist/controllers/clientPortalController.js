@@ -10,15 +10,24 @@ const auditService_1 = require("../services/auditService");
 const getSubscriptions = async (req, res) => {
     const { tenantId, id: userId } = req.user;
     try {
-        const client = await db_1.default.client.findUnique({ where: { userId } });
+        const client = await db_1.default.Client.findOne({ userId }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found.' });
-        const subscriptions = await db_1.default.subscription.findMany({
-            where: { clientId: client.id },
-            include: { plan: true },
-            orderBy: { createdAt: 'desc' }
-        });
-        return res.status(200).json({ success: true, data: subscriptions });
+        const subscriptions = await db_1.default.Subscription.find({
+            clientId: client._id || client.id
+        })
+            .populate('planId')
+            .sort({ createdAt: -1 })
+            .lean();
+        const formatted = subscriptions.map((s) => ({
+            ...s,
+            id: String(s._id || s.id),
+            plan: s.planId ? {
+                ...s.planId,
+                id: String(s.planId._id || s.planId.id)
+            } : null
+        }));
+        return res.status(200).json({ success: true, data: formatted });
     }
     catch (error) {
         return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
@@ -29,15 +38,22 @@ exports.getSubscriptions = getSubscriptions;
 const getPaymentHistory = async (req, res) => {
     const { tenantId, id: userId } = req.user;
     try {
-        const client = await db_1.default.client.findUnique({ where: { userId } });
+        const client = await db_1.default.Client.findOne({ userId }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found.' });
-        const payments = await db_1.default.payment.findMany({
-            include: { coupon: true },
-            where: { clientId: client.id, tenantId },
-            orderBy: { createdAt: 'desc' }
-        });
-        return res.status(200).json({ success: true, data: payments });
+        const payments = await db_1.default.Payment.find({
+            clientId: client._id || client.id,
+            tenantId
+        })
+            .populate('couponId')
+            .sort({ createdAt: -1 })
+            .lean();
+        const formatted = payments.map((p) => ({
+            ...p,
+            id: String(p._id || p.id),
+            coupon: p.couponId || null
+        }));
+        return res.status(200).json({ success: true, data: formatted });
     }
     catch (error) {
         return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
@@ -49,43 +65,30 @@ const updateProfile = async (req, res) => {
     const { tenantId, id: userId } = req.user;
     const { addressLine1, city, state, zipCode, occupation, name, mobile } = req.body;
     try {
-        const client = await db_1.default.client.findUnique({ where: { userId }, include: { profile: true } });
+        const client = await db_1.default.Client.findOne({ userId }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found.' });
-        // Update Client basic details
-        await db_1.default.client.update({
-            where: { id: client.id },
-            data: {
-                occupation,
-                ...(name && { name }),
-                ...(mobile && { mobile })
-            }
-        });
-        // Also update User if name provided
+        const clientUpdate = {};
+        if (occupation !== undefined)
+            clientUpdate.occupation = occupation;
+        if (name)
+            clientUpdate.name = name;
+        if (mobile)
+            clientUpdate.mobile = mobile;
+        if (Object.keys(clientUpdate).length > 0) {
+            await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
+                $set: clientUpdate
+            });
+        }
         if (name) {
-            await db_1.default.user.update({
-                where: { id: userId },
-                data: { firstName: name }
+            await db_1.default.User.findByIdAndUpdate(userId, {
+                $set: { firstName: name }
             });
         }
-        // Update or Create Client Profile
-        if (client.profile) {
-            await db_1.default.clientProfile.update({
-                where: { id: client.profile.id },
-                data: { addressLine1, city, state, zipCode }
-            });
-        }
-        else {
-            await db_1.default.clientProfile.create({
-                data: {
-                    clientId: client.id,
-                    addressLine1,
-                    city,
-                    state,
-                    zipCode
-                }
-            });
-        }
+        await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, {
+            $set: { addressLine1, city, state, zipCode },
+            $setOnInsert: { clientId: client._id || client.id, country: 'India' }
+        }, { upsert: true, returnDocument: 'after' });
         await (0, auditService_1.logAudit)({
             tenantId,
             userId,
@@ -104,16 +107,15 @@ exports.updateProfile = updateProfile;
 const getNotifications = async (req, res) => {
     const { tenantId, id: userId, email } = req.user;
     try {
-        const notifications = await db_1.default.notificationLog.findMany({
-            where: {
-                tenantId,
-                OR: [
-                    { recipient: email },
-                    { recipient: userId }
-                ]
-            },
-            orderBy: { createdAt: 'desc' }
-        });
+        const notifications = await db_1.default.NotificationLog.find({
+            tenantId,
+            $or: [
+                { recipient: email },
+                { recipient: userId }
+            ]
+        })
+            .sort({ createdAt: -1 })
+            .lean();
         return res.status(200).json({ success: true, data: notifications });
     }
     catch (error) {

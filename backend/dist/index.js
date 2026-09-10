@@ -15,9 +15,8 @@ const helmet_1 = __importDefault(require("helmet"));
 const path_1 = __importDefault(require("path"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const api_1 = __importDefault(require("./routes/api"));
-const db_1 = __importDefault(require("./config/db"));
+const db_1 = require("./config/db");
 const cronService_1 = require("./services/cronService");
-const stateService_1 = require("./services/stateService");
 const third_party_api_1 = require("./third-party-api");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
@@ -31,6 +30,18 @@ app.use((0, cors_1.default)({
 }));
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
+// Request Logger Middleware (Prints all incoming API calls to console)
+app.use((req, res, next) => {
+    const start = Date.now();
+    const url = req.originalUrl || req.url;
+    res.on('finish', () => {
+        const duration = Date.now() - start;
+        const status = res.statusCode;
+        const statusColor = status >= 400 ? '❌' : '✅';
+        console.log(`${statusColor} [${req.method}] ${url} -> ${status} (${duration}ms)`);
+    });
+    next();
+});
 // Serve Uploads as Static Folder
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../../uploads')));
 const tenantResolver_1 = __importDefault(require("./middlewares/tenantResolver"));
@@ -43,7 +54,9 @@ app.get('/clients', third_party_api_1.getThirdPartyClients);
 // Health check endpoint
 app.get('/health', async (req, res) => {
     try {
-        await db_1.default.$runCommandRaw({ ping: 1 });
+        if (db_1.centralConnection.db) {
+            await db_1.centralConnection.db.admin().ping();
+        }
         res.status(200).json({ success: true, message: 'Server is healthy and connected to MongoDB.' });
     }
     catch (error) {
@@ -64,58 +77,57 @@ app.use((err, req, res, next) => {
     });
 });
 // Background Cron Jobs
-// Run daily compliance check (Deposit levels, SEBI/NISM exipires, missing agreements)
+// Run daily compliance check (Deposit levels, SEBI/NISM expires, missing agreements)
 node_cron_1.default.schedule('0 0 * * *', async () => {
     try {
-        const tenants = await db_1.default.tenant.findMany({ where: { status: 'ACTIVE', deletedAt: null } });
+        const tenants = await db_1.Tenant.find({ status: 'ACTIVE', deletedAt: null }).lean();
         for (const tenant of tenants) {
             // Calculate Active Clients Count
-            const activeClientsCount = await db_1.default.client.count({
-                where: { user: { tenantId: tenant.id }, status: 'ACTIVE' }
+            const activeClientsCount = await db_1.Client.countDocuments({
+                tenantId: tenant._id || tenant.id,
+                status: 'ACTIVE'
             });
             // 1. DEPOSIT Sweep
             const requiredDeposit = activeClientsCount * 1000;
             if (tenant.depositAmount < requiredDeposit) {
                 const description = `Daily automated swept compliance alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current deposit: Rs. ${tenant.depositAmount}.`;
-                const exists = await db_1.default.complianceAlert.findFirst({
-                    where: { tenantId: tenant.id, alertType: 'DEPOSIT_LOW', status: 'OPEN' }
-                });
+                const exists = await db_1.ComplianceAlert.findOne({
+                    tenantId: tenant._id || tenant.id,
+                    alertType: 'DEPOSIT_LOW',
+                    status: 'OPEN'
+                }).lean();
                 if (!exists) {
-                    await db_1.default.complianceAlert.create({
-                        data: {
-                            tenantId: tenant.id,
-                            alertType: 'DEPOSIT_LOW',
-                            severity: 'HIGH',
-                            description
-                        }
+                    await db_1.ComplianceAlert.create({
+                        tenantId: tenant._id || tenant.id,
+                        alertType: 'DEPOSIT_LOW',
+                        severity: 'HIGH',
+                        description
                     });
                 }
             }
             // 2. CERTIFICATE EXPIRES Sweep (SEBI)
             if (tenant.certificateValidity) {
-                const daysLeft = Math.ceil((tenant.certificateValidity.getTime() - Date.now()) / (1000 * 3600 * 24));
+                const certDate = new Date(tenant.certificateValidity);
+                const daysLeft = Math.ceil((certDate.getTime() - Date.now()) / (1000 * 3600 * 24));
                 if (daysLeft <= 90) {
                     const description = `Daily swept alert: SEBI Certificate validity expires in ${daysLeft} days.`;
-                    const exists = await db_1.default.complianceAlert.findFirst({
-                        where: { tenantId: tenant.id, alertType: 'CERTIFICATE_EXPIRY', status: 'OPEN' }
-                    });
+                    const exists = await db_1.ComplianceAlert.findOne({
+                        tenantId: tenant._id || tenant.id,
+                        alertType: 'CERTIFICATE_EXPIRY',
+                        status: 'OPEN'
+                    }).lean();
                     if (!exists) {
-                        await db_1.default.complianceAlert.create({
-                            data: {
-                                tenantId: tenant.id,
-                                alertType: 'CERTIFICATE_EXPIRY',
-                                severity: daysLeft <= 15 ? 'HIGH' : 'MEDIUM',
-                                description
-                            }
+                        await db_1.ComplianceAlert.create({
+                            tenantId: tenant._id || tenant.id,
+                            alertType: 'CERTIFICATE_EXPIRY',
+                            severity: daysLeft <= 15 ? 'HIGH' : 'MEDIUM',
+                            description
                         });
                     }
                     else {
-                        await db_1.default.complianceAlert.update({
-                            where: { id: exists.id },
-                            data: {
-                                severity: daysLeft <= 15 ? 'HIGH' : 'MEDIUM',
-                                description
-                            }
+                        await db_1.ComplianceAlert.findByIdAndUpdate(exists._id, {
+                            severity: daysLeft <= 15 ? 'HIGH' : 'MEDIUM',
+                            description
                         });
                     }
                 }
@@ -126,104 +138,8 @@ node_cron_1.default.schedule('0 0 * * *', async () => {
         console.error('Error running automated daily compliance cron:', error);
     }
 });
-// Seed default permissions and bind to ADMIN / SUPER_ADMIN
-const ensurePermissions = async () => {
-    try {
-        const newPerms = [
-            { code: 'CREATE_PLANS', name: 'Create Plans' },
-            { code: 'EDIT_PLANS', name: 'Edit Plans' },
-            { code: 'DELETE_PLANS', name: 'Delete Plans' },
-            { code: 'VIEW_ALL_PLANS', name: 'View All Plans' },
-            { code: 'VIEW_OWN_PLANS', name: 'View Own Created Plans' },
-            { code: 'CREATE_CLIENTS', name: 'Create Clients' },
-            { code: 'EDIT_CLIENTS', name: 'Edit Clients' },
-            { code: 'DELETE_CLIENTS', name: 'Delete Clients' },
-            { code: 'VIEW_ALL_CLIENTS', name: 'View All Clients' },
-            { code: 'VIEW_OWN_CLIENTS', name: 'View Own Created Clients' },
-            { code: 'ACCESS_TICKETS', name: 'Access Tickets Desk' },
-            { code: 'VIEW_ALL_TICKETS', name: 'View All Tickets' },
-            { code: 'VIEW_OWN_TICKETS', name: 'View Own Client Tickets' },
-            { code: 'ACCESS_RESEARCH', name: 'Signal & Research Desk Tab Access' },
-            { code: 'VIEW_RESEARCH', name: 'View Only Research' },
-            { code: 'ADD_RESEARCH', name: 'Add Research' },
-            { code: 'OWN_RESEARCH', name: 'Own Research' },
-            { code: 'VIEW_SENSITIVE_DATA', name: 'View Sensitive Client Details (Unmask)' },
-            { code: 'EXPORT_DATA', name: 'Export Data to CSV' },
-            { code: 'ACCESS_SETTINGS', name: 'Access Platform Settings' },
-            { code: 'ACCESS_ROLES', name: 'Manage Staff Roles & Permissions' },
-        ];
-        for (const perm of newPerms) {
-            await db_1.default.permission.upsert({
-                where: { code: perm.code },
-                update: {},
-                create: perm
-            });
-        }
-        // Seed missing system roles (SALES, MARKETING)
-        const rolesToSeed = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT', 'SALES', 'MARKETING'];
-        for (const r of rolesToSeed) {
-            await db_1.default.role.upsert({
-                where: { name: r },
-                update: {},
-                create: {
-                    name: r,
-                    description: `System Role: ${r.replace('_', ' ')}`
-                }
-            });
-        }
-        // Auto-bind to ADMIN & SUPER_ADMIN
-        const admins = await db_1.default.role.findMany({
-            where: { name: { in: ['SUPER_ADMIN', 'ADMIN'] } }
-        });
-        const allDbPerms = await db_1.default.permission.findMany();
-        for (const adminRole of admins) {
-            for (const perm of allDbPerms) {
-                await db_1.default.rolePermission.upsert({
-                    where: {
-                        roleId_permissionId: {
-                            roleId: adminRole.id,
-                            permissionId: perm.id
-                        }
-                    },
-                    update: {},
-                    create: {
-                        roleId: adminRole.id,
-                        permissionId: perm.id
-                    }
-                });
-            }
-        }
-        // Auto-bind some permissions to CO & PO
-        const complianceRoles = await db_1.default.role.findMany({
-            where: { name: { in: ['COMPLIANCE_OFFICER', 'PRINCIPAL_OFFICER'] } }
-        });
-        const compliancePerms = allDbPerms.filter(p => ['VIEW_SENSITIVE_DATA', 'EXPORT_DATA'].includes(p.code));
-        for (const cr of complianceRoles) {
-            for (const perm of compliancePerms) {
-                await db_1.default.rolePermission.upsert({
-                    where: {
-                        roleId_permissionId: {
-                            roleId: cr.id,
-                            permissionId: perm.id
-                        }
-                    },
-                    update: {},
-                    create: {
-                        roleId: cr.id,
-                        permissionId: perm.id
-                    }
-                });
-            }
-        }
-    }
-    catch (err) {
-        console.error('Failed to seed granular permissions:', err.message);
-    }
-};
 // Start Server
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
-    await ensurePermissions();
-    await (0, stateService_1.ensureStates)(db_1.default);
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
 });

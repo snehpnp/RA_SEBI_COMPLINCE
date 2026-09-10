@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
@@ -7,10 +7,9 @@ import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 export const getTenantPermissions = async (req: AuthenticatedRequest, res: Response) => {
   const { tenantId } = req.params;
   try {
-    const permissions = await prisma.adminPermission.findMany({
-      where: { tenantId },
-      orderBy: { module: 'asc' }
-    });
+    const permissions = await dynamicDb.AdminPermission.find({ tenantId })
+      .sort({ module: 1 })
+      .lean();
 
     return res.status(200).json({
       success: true,
@@ -30,39 +29,28 @@ export const updateTenantPermissions = async (req: AuthenticatedRequest, res: Re
   }
 
   try {
-    const updated = await prisma.$transaction(
-      permissions.map((p: any) =>
-        prisma.adminPermission.upsert({
-          where: {
-            tenantId_module: {
-              tenantId,
-              module: p.module
-            }
+    const updated = await Promise.all(
+      permissions.map(async (p: any) => {
+        const updateData = {
+          canView: p.canView ?? true,
+          canCreate: p.canCreate ?? true,
+          canEdit: p.canEdit ?? true,
+          canDelete: p.canDelete ?? true,
+          canExport: p.canExport ?? true,
+          isEnabled: p.isEnabled ?? true,
+          customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits,
+          updatedBy: req.user?.id
+        };
+
+        return await dynamicDb.AdminPermission.findOneAndUpdate(
+          { tenantId, module: p.module },
+          {
+            $set: updateData,
+            $setOnInsert: { tenantId, module: p.module }
           },
-          update: {
-            canView: p.canView ?? true,
-            canCreate: p.canCreate ?? true,
-            canEdit: p.canEdit ?? true,
-            canDelete: p.canDelete ?? true,
-            canExport: p.canExport ?? true,
-            isEnabled: p.isEnabled ?? true,
-            customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits,
-            updatedBy: req.user?.id
-          },
-          create: {
-            tenantId,
-            module: p.module,
-            canView: p.canView ?? true,
-            canCreate: p.canCreate ?? true,
-            canEdit: p.canEdit ?? true,
-            canDelete: p.canDelete ?? true,
-            canExport: p.canExport ?? true,
-            isEnabled: p.isEnabled ?? true,
-            customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits,
-            updatedBy: req.user?.id
-          }
-        })
-      )
+          { upsert: true, returnDocument: 'after', lean: true }
+        );
+      })
     );
 
     if (req.user?.id) {

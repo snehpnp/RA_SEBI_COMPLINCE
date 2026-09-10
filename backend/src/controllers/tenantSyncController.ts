@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
 import { provisionAllTenantCollections } from '../services/tenantProvisionService';
 
 /**
@@ -54,9 +54,9 @@ export const bootstrapTenant = async (req: Request, res: Response) => {
       tenantApiKey: apiKey || tenant.tenantApiKey || null
     };
 
-    // Execute comprehensive provisioning of all 11 collections on the local DB
+    // Execute comprehensive provisioning of all collections on the local DB
     const result = await provisionAllTenantCollections(
-      prisma,
+      dynamicDb,
       tenantData,
       adminUser,
       permissions
@@ -67,12 +67,12 @@ export const bootstrapTenant = async (req: Request, res: Response) => {
       action: action || 'SYNC',
       message: `Tenant "${result.tenant.companyName}" successfully synchronized on domain database. All collections updated and Admin user "${result.adminUser.email}" is ready.`,
       data: {
-        tenantId: result.tenant.id,
+        tenantId: String(result.tenant._id || result.tenant.id),
         companyName: result.tenant.companyName,
         status: result.tenant.status,
         domainUrl: result.tenant.domainUrl,
         adminEmail: result.adminUser.email,
-        adminUserId: result.adminUser.id,
+        adminUserId: String(result.adminUser._id || result.adminUser.id),
         tempPassword: result.adminUser.tempPassword
       }
     });
@@ -108,28 +108,19 @@ export const getTenantSyncConfig = async (req: Request, res: Response) => {
       });
     }
 
-    let tenant = null;
+    let tenant: any = null;
 
     if (apiKey) {
-      tenant = await prisma.tenant.findFirst({
-        where: { tenantApiKey: apiKey },
-        include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
-      });
+      tenant = await dynamicDb.Tenant.findOne({ tenantApiKey: apiKey }).lean();
     } else if (domainHeader) {
-      tenant = await prisma.tenant.findFirst({
-        where: {
-          OR: [
-            { domainUrl: { contains: domainHeader, mode: 'insensitive' } },
-            { website: { contains: domainHeader, mode: 'insensitive' } }
-          ]
-        },
-        include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
-      });
+      tenant = await dynamicDb.Tenant.findOne({
+        $or: [
+          { domainUrl: { $regex: domainHeader, $options: 'i' } },
+          { website: { $regex: domainHeader, $options: 'i' } }
+        ]
+      }).lean();
     } else if (tenantIdQuery) {
-      tenant = await prisma.tenant.findUnique({
-        where: { id: tenantIdQuery },
-        include: { users: { where: { role: { name: 'ADMIN' } } }, adminPermissions: true }
-      });
+      tenant = await dynamicDb.Tenant.findById(tenantIdQuery).lean();
     }
 
     if (!tenant) {
@@ -139,12 +130,24 @@ export const getTenantSyncConfig = async (req: Request, res: Response) => {
       });
     }
 
-    const adminUser = tenant.users && tenant.users[0] ? tenant.users[0] : null;
+    const tenantIdStr = String(tenant._id || tenant.id);
+    const adminRole = await dynamicDb.Role.findOne({ name: 'ADMIN' }).lean();
+    let adminUser: any = null;
+    if (adminRole) {
+      adminUser = await dynamicDb.User.findOne({
+        tenantId: tenantIdStr,
+        roleId: adminRole._id || adminRole.id
+      }).lean();
+    }
+
+    const adminPermissions = await dynamicDb.AdminPermission.find({
+      tenantId: tenantIdStr
+    }).lean();
 
     return res.status(200).json({
       success: true,
       data: {
-        tenantId: tenant.id,
+        tenantId: tenantIdStr,
         companyName: tenant.companyName,
         panelName: tenant.panelName || `${tenant.companyName} Portal`,
         domainUrl: tenant.domainUrl,
@@ -155,9 +158,9 @@ export const getTenantSyncConfig = async (req: Request, res: Response) => {
         logoUrl: tenant.logoUrl,
         faviconUrl: tenant.faviconUrl,
         activePaymentGateway: tenant.activePaymentGateway,
-        permissions: tenant.adminPermissions,
+        permissions: adminPermissions,
         adminUser: adminUser ? {
-          id: adminUser.id,
+          id: String(adminUser._id || adminUser.id),
           email: adminUser.email,
           firstName: adminUser.firstName,
           lastName: adminUser.lastName,

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'async_hooks';
-import { PrismaClient } from '@prisma/client';
+import { Connection } from 'mongoose';
+import { ITenantModels } from '../models';
 
 export interface TenantContext {
   tenantId?: string | null;
@@ -7,7 +8,8 @@ export interface TenantContext {
   dbName?: string | null;
   mongoDbUrl?: string | null;
   isCentral?: boolean;
-  prisma?: PrismaClient;
+  connection?: Connection;
+  models?: ITenantModels;
 }
 
 const tenantStorage = new AsyncLocalStorage<TenantContext>();
@@ -27,8 +29,15 @@ export function getTenantContext(): TenantContext | undefined {
 }
 
 /**
- * Retrieves the active Prisma Client (Tenant-specific or undefined)
+ * Retrieves the active Tenant Mongoose Connection (Tenant-specific or undefined)
  */
-export function getActiveTenantPrisma(): PrismaClient | undefined {
-  return tenantStorage.getStore()?.prisma;
+export function getActiveTenantConnection(): Connection | undefined {
+  return tenantStorage.getStore()?.connection;
+}
+
+/**
+ * Retrieves the active Tenant Mongoose Models
+ */
+export function getActiveTenantModels(): ITenantModels | undefined {
+  return tenantStorage.getStore()?.models;
 }

@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { centralModels } from '../services/tenantConnectionManager';
 
-const prisma = new PrismaClient();
-
-const states = [
+export const states = [
   { name: 'Andaman and Nicobar Islands', gstCode: '35' },
   { name: 'Andhra Pradesh', gstCode: '37' },
   { name: 'Arunachal Pradesh', gstCode: '12' },
@@ -41,23 +39,23 @@ const states = [
   { name: 'West Bengal', gstCode: '19' },
 ];
 
-async function main() {
- 
+export async function seedStates() {
+  console.log('Seeding States into Central DB...');
   for (const state of states) {
-    await prisma.state.upsert({
-      where: { name: state.name },
-      update: { gstCode: state.gstCode },
-      create: { name: state.name, gstCode: state.gstCode },
-    });
+    await centralModels.State.findOneAndUpdate(
+      { name: state.name },
+      { $set: { gstCode: state.gstCode } },
+      { upsert: true, returnDocument: 'after' }
+    );
   }
-  console.log('States seeding completed.');
+  console.log(`Seeded ${states.length} Indian States successfully.`);
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
- 
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (require.main === module) {
+  seedStates()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+}

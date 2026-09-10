@@ -10,10 +10,9 @@ const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const getTenantPermissions = async (req, res) => {
     const { tenantId } = req.params;
     try {
-        const permissions = await db_1.default.adminPermission.findMany({
-            where: { tenantId },
-            orderBy: { module: 'asc' }
-        });
+        const permissions = await db_1.default.AdminPermission.find({ tenantId })
+            .sort({ module: 1 })
+            .lean();
         return res.status(200).json({
             success: true,
             data: permissions
@@ -31,14 +30,8 @@ const updateTenantPermissions = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Permissions array is required.' });
     }
     try {
-        const updated = await db_1.default.$transaction(permissions.map((p) => db_1.default.adminPermission.upsert({
-            where: {
-                tenantId_module: {
-                    tenantId,
-                    module: p.module
-                }
-            },
-            update: {
+        const updated = await Promise.all(permissions.map(async (p) => {
+            const updateData = {
                 canView: p.canView ?? true,
                 canCreate: p.canCreate ?? true,
                 canEdit: p.canEdit ?? true,
@@ -47,20 +40,12 @@ const updateTenantPermissions = async (req, res) => {
                 isEnabled: p.isEnabled ?? true,
                 customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits,
                 updatedBy: req.user?.id
-            },
-            create: {
-                tenantId,
-                module: p.module,
-                canView: p.canView ?? true,
-                canCreate: p.canCreate ?? true,
-                canEdit: p.canEdit ?? true,
-                canDelete: p.canDelete ?? true,
-                canExport: p.canExport ?? true,
-                isEnabled: p.isEnabled ?? true,
-                customLimits: typeof p.customLimits === 'object' ? JSON.stringify(p.customLimits) : p.customLimits,
-                updatedBy: req.user?.id
-            }
-        })));
+            };
+            return await db_1.default.AdminPermission.findOneAndUpdate({ tenantId, module: p.module }, {
+                $set: updateData,
+                $setOnInsert: { tenantId, module: p.module }
+            }, { upsert: true, returnDocument: 'after', lean: true });
+        }));
         if (req.user?.id) {
             await (0, auditService_1.logAudit)({
                 tenantId,
