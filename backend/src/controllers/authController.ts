@@ -2,7 +2,8 @@ import nodemailer from 'nodemailer';
 
 import { Request, Response } from 'express';
 import * as crypto from 'crypto';
-import prisma from '../config/db';
+import prisma, { centralPrisma } from '../config/db';
+import tenantConnectionManager from '../services/tenantConnectionManager';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { logAudit } from '../services/auditService';
@@ -24,7 +25,7 @@ export const login = async (req: Request, res: Response) => {
   }
 
   try {
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email },
       include: {
         role: {
@@ -39,6 +40,36 @@ export const login = async (req: Request, res: Response) => {
         tenant: true
       }
     });
+
+    // Fallback: If user wasn't found in current context (e.g. portal login without domain header), locate tenant
+    if (!user) {
+      const tenantMatch: any = await centralPrisma.allCompany.findFirst({
+        where: { email: email.toLowerCase().trim() }
+      }).catch(() => null) || await centralPrisma.tenant.findFirst({
+        where: { email: email.toLowerCase().trim() }
+      }).catch(() => null);
+
+      if (tenantMatch) {
+        const resolved = await tenantConnectionManager.getTenantPrisma(tenantMatch.tenantId || tenantMatch.id);
+        if (resolved) {
+          user = await resolved.prisma.user.findUnique({
+            where: { email },
+            include: {
+              role: {
+                include: {
+                  permissions: {
+                    include: {
+                      permission: true
+                    }
+                  }
+                }
+              },
+              tenant: true
+            }
+          });
+        }
+      }
+    }
 
     if (!user || user.deletedAt || user.status === 'DELETED') {
       if (user && (user.deletedAt || user.status === 'DELETED')) {

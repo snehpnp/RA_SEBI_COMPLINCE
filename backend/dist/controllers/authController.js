@@ -39,7 +39,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.verifyOtp = exports.requestOtp = exports.logout = exports.changePassword = exports.getPublicTenants = exports.getMe = exports.resetPassword = exports.forgotPassword = exports.refreshToken = exports.login = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const crypto = __importStar(require("crypto"));
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = __importStar(require("../config/db"));
+const tenantConnectionManager_1 = __importDefault(require("../services/tenantConnectionManager"));
 const bcrypt = __importStar(require("bcryptjs"));
 const jwt = __importStar(require("jsonwebtoken"));
 const auditService_1 = require("../services/auditService");
@@ -56,7 +57,7 @@ const login = async (req, res) => {
         });
     }
     try {
-        const user = await db_1.default.user.findUnique({
+        let user = await db_1.default.user.findUnique({
             where: { email },
             include: {
                 role: {
@@ -71,6 +72,34 @@ const login = async (req, res) => {
                 tenant: true
             }
         });
+        // Fallback: If user wasn't found in current context (e.g. portal login without domain header), locate tenant
+        if (!user) {
+            const tenantMatch = await db_1.centralPrisma.allCompany.findFirst({
+                where: { email: email.toLowerCase().trim() }
+            }).catch(() => null) || await db_1.centralPrisma.tenant.findFirst({
+                where: { email: email.toLowerCase().trim() }
+            }).catch(() => null);
+            if (tenantMatch) {
+                const resolved = await tenantConnectionManager_1.default.getTenantPrisma(tenantMatch.tenantId || tenantMatch.id);
+                if (resolved) {
+                    user = await resolved.prisma.user.findUnique({
+                        where: { email },
+                        include: {
+                            role: {
+                                include: {
+                                    permissions: {
+                                        include: {
+                                            permission: true
+                                        }
+                                    }
+                                }
+                            },
+                            tenant: true
+                        }
+                    });
+                }
+            }
+        }
         if (!user || user.deletedAt || user.status === 'DELETED') {
             if (user && (user.deletedAt || user.status === 'DELETED')) {
                 const adminMsg = user.role.name === 'ADMIN' ? 'Your company has been removed. Please contact super admin.' : 'Your company has been removed. Please contact admin.';

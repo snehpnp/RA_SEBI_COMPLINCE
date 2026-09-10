@@ -33,6 +33,9 @@ app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
 // Serve Uploads as Static Folder
 app.use('/uploads', express_1.default.static(path_1.default.join(__dirname, '../../uploads')));
+const tenantResolver_1 = __importDefault(require("./middlewares/tenantResolver"));
+// Mount Dynamic Tenant Resolver Middleware
+app.use(tenantResolver_1.default);
 // Routes mapping
 app.use('/api/v1', api_1.default);
 app.use('/third-party-api', third_party_api_1.thirdPartyRoutes);

@@ -1,0 +1,108 @@
+import { Request, Response, NextFunction } from 'express';
+import * as jwt from 'jsonwebtoken';
+import { runWithTenantContext } from '../config/tenantContext';
+import { tenantConnectionManager, centralPrisma } from '../services/tenantConnectionManager';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+
+export interface TenantRequest extends Request {
+  tenant?: any;
+  tenantId?: string | null;
+  tenantPrisma?: any;
+}
+
+/**
+ * Global Middleware: Automatically resolves the Tenant Database from Domain, Headers, or JWT.
+ * Sets the active Tenant Prisma Client in AsyncLocalStorage context for 100% transparent isolation.
+ */
+export async function tenantResolverMiddleware(req: TenantRequest, res: Response, next: NextFunction) {
+  const path = req.path || '';
+
+  // 1. SuperAdmin management routes always execute in Central DB context
+  if (path.startsWith('/api/super-admin')) {
+    return runWithTenantContext(
+      { isCentral: true, prisma: centralPrisma },
+      () => next()
+    );
+  }
+
+  // 2. Extract tenant identifier candidates
+  let tenantIdentifier: string | null = null;
+
+  // Header candidates
+  const headerTenantId = req.headers['x-tenant-id'] as string;
+  const headerDomainUrl = req.headers['x-domain-url'] as string;
+  if (headerTenantId) {
+    tenantIdentifier = headerTenantId;
+  } else if (headerDomainUrl) {
+    tenantIdentifier = headerDomainUrl;
+  }
+
+  // Domain / Host candidates
+  if (!tenantIdentifier) {
+    const origin = (req.headers.origin || req.headers.referer) as string | undefined;
+    if (origin) {
+      const match = origin.match(/^https?:\/\/([^/:]+)/);
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+        tenantIdentifier = match[1];
+      }
+    }
+  }
+
+  if (!tenantIdentifier && req.hostname && req.hostname !== 'localhost' && req.hostname !== '127.0.0.1') {
+    tenantIdentifier = req.hostname;
+  }
+
+  // JWT token candidate
+  if (!tenantIdentifier && req.headers.authorization) {
+    try {
+      const token = req.headers.authorization.split(' ')[1];
+      if (token) {
+        const decoded: any = jwt.decode(token);
+        if (decoded && decoded.role === 'SUPER_ADMIN') {
+          return runWithTenantContext(
+            { isCentral: true, prisma: centralPrisma },
+            () => next()
+          );
+        }
+        if (decoded && decoded.tenantId) {
+          tenantIdentifier = decoded.tenantId;
+        }
+      }
+    } catch {}
+  }
+
+  // 3. If a tenant was identified, resolve its dedicated database connection
+  if (tenantIdentifier) {
+    try {
+      const resolved = await tenantConnectionManager.getTenantPrisma(tenantIdentifier);
+      if (resolved) {
+        req.tenant = resolved.meta;
+        req.tenantId = resolved.meta.id;
+        req.tenantPrisma = resolved.prisma;
+
+        return runWithTenantContext(
+          {
+            tenantId: resolved.meta.id,
+            domainUrl: resolved.meta.domainUrl,
+            dbName: resolved.meta.dbName,
+            mongoDbUrl: resolved.meta.mongoDbUrl,
+            prisma: resolved.prisma,
+            isCentral: false
+          },
+          () => next()
+        );
+      }
+    } catch (err: any) {
+      console.error(`Error resolving tenant for identifier '${tenantIdentifier}':`, err.message);
+    }
+  }
+
+  // 4. Default fallback: Central DB context
+  return runWithTenantContext(
+    { isCentral: true, prisma: centralPrisma },
+    () => next()
+  );
+}
+
+export default tenantResolverMiddleware;

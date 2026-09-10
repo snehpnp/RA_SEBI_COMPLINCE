@@ -85,6 +85,7 @@ model Tenant {
   mongoDbUrl          String?
   dbName              String?
   tenantApiKey        String?
+  createdById         String?   @db.ObjectId
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -111,6 +112,42 @@ model Tenant {
   coupons                Coupon[]
   customPages            CustomPage[]
   complaintReports       ComplaintMonthlyReport[]
+}
+
+model AllCompany {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId            String    @unique @db.ObjectId
+  companyName         String
+  companyType         String    @default("INDIVIDUAL")
+  raType              String    @default("FULL_TIME") // FULL_TIME, PART_TIME
+  sebiRegistration    String
+  bseEnrollment       String?
+  email               String
+  mobile              String
+  address             String?
+  pan                 String?
+  gst                 String?
+  website             String?
+  ownerName           String    @default("Admin User")
+  certificateUrl      String?
+  certificateValidity DateTime?
+  nismCertificateUrl  String?
+  nismValidity        DateTime?
+  status              String    @default("ACTIVE") // PENDING_PROFILE, ACTIVE, SUSPENDED, DELETED
+  previousStatus      String?
+  depositAmount       Float     @default(0.0)
+  state               String?
+  panelName           String?
+  domainUrl           String?
+  mongoDbUrl          String
+  dbName              String
+  tenantApiKey        String?
+  createdById         String?   @db.ObjectId
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  @@map("all_companies")
 }
 
 model Coupon {

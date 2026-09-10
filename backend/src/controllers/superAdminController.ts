@@ -1,11 +1,13 @@
 import { Response } from 'express';
 import { MongoClient } from 'mongodb';
-import prisma from '../config/db';
+import prisma, { centralPrisma } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { provisionAllTenantCollections, provisionTenantDatabase } from '../services/tenantProvisionService';
+import { tenantProvisionEngine } from '../services/tenantProvisionEngine';
+import { tenantConnectionManager } from '../services/tenantConnectionManager';
 import { syncTenantToRemote, syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 import { ensureStates, detectStateFromGst, detectStateFromText, INDIAN_STATES } from '../services/stateService';
 import * as jwt from 'jsonwebtoken';
@@ -61,52 +63,24 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
   const effectiveState = state || detectStateFromGst(gst) || detectStateFromText(address) || null;
 
   try {
-    // Check duplicates in Tenant table
+    // Check duplicates in Central DB all_companies
     let existingTenants: any[] = [];
     try {
-      existingTenants = await prisma.tenant.findMany({
+      existingTenants = await centralPrisma.allCompany.findMany({
         where: {
           OR: [
             { email },
             { sebiRegistration },
-            { pan },
+            ...(pan ? [{ pan }] : []),
             { mobile },
             ...(gst ? [{ gst }] : []),
             ...(bseEnrollment ? [{ bseEnrollment }] : []),
             ...(domainUrl ? [{ domainUrl }] : [])
-          ] as any
-        }
-      });
-    } catch (findErr: any) {
-      // Fallback if client has older generated Prisma schema without domainUrl in TenantWhereInput
-      existingTenants = await prisma.tenant.findMany({
-        where: {
-          OR: [
-            { email },
-            { sebiRegistration },
-            { pan },
-            { mobile },
-            ...(gst ? [{ gst }] : []),
-            ...(bseEnrollment ? [{ bseEnrollment }] : [])
           ]
         }
       });
-      if (domainUrl) {
-        try {
-          const domainCheck = await prisma.tenant.findMany({
-            where: { domainUrl } as any
-          });
-          if (domainCheck && domainCheck.length > 0) {
-            domainCheck.forEach((t: any) => {
-              if (!existingTenants.some((et: any) => et.id === t.id)) {
-                existingTenants.push(t);
-              }
-            });
-          }
-        } catch {
-          // Ignore if domainUrl query is not supported by current prisma client
-        }
-      }
+    } catch {
+      existingTenants = [];
     }
 
     if (existingTenants.length > 0) {
@@ -114,7 +88,7 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
       existingTenants.forEach(tenant => {
         if (tenant.email === email) duplicates.push('Email');
         if (tenant.sebiRegistration === sebiRegistration) duplicates.push('SEBI Registration');
-        if (tenant.pan === pan) duplicates.push('PAN');
+        if (pan && tenant.pan === pan) duplicates.push('PAN');
         if (tenant.mobile === mobile) duplicates.push('Mobile');
         if (gst && tenant.gst === gst) duplicates.push('GST');
         if (bseEnrollment && tenant.bseEnrollment === bseEnrollment) duplicates.push('BSE Enrollment');
@@ -133,7 +107,7 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
     // Check duplicates in User table
     const existingUser = await prisma.user.findUnique({
       where: { email: adminEmailToUse }
-    });
+    }).catch(() => null);
 
     if (existingUser) {
       return res.status(400).json({
@@ -209,18 +183,30 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
       status: 'ACTIVE'
     };
 
-    // 2. Provision Tenant, Admin User, Roles, Permissions, Custom Pages, Email Templates, Plans & Compliance in DB
-    const { tenant: createdTenant, adminUser: createdAdminUser } = await provisionAllTenantCollections(
-      prisma,
+    // 2. Automated Multi-Tenant Database & Collection Provisioning Engine
+    const provisionResult = await tenantProvisionEngine.provisionTenantFull(
       tenantPayload,
-      adminUserPayload
+      adminUserPayload,
+      req.user?.id
     );
+
+    if (!provisionResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: provisionResult.message,
+        errors: provisionResult.errors || [provisionResult.message]
+      });
+    }
+
+    const createdTenant = await centralPrisma.allCompany.findUnique({
+      where: { tenantId: provisionResult.tenantId }
+    });
 
     // Record document history if certificate files were uploaded
     if (certificateUrl && files?.sebiCertificate?.[0]) {
-      await prisma.tenantDocumentHistory.create({
+      await centralPrisma.tenantDocumentHistory.create({
         data: {
-          tenantId: createdTenant.id,
+          tenantId: provisionResult.tenantId,
           docType: 'SEBI_CERTIFICATE',
           fileUrl: certificateUrl,
           fileName: files.sebiCertificate[0].originalname || files.sebiCertificate[0].filename
@@ -228,9 +214,9 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
       }).catch(() => {});
     }
     if (nismCertificateUrl && files?.nismCertificate?.[0]) {
-      await prisma.tenantDocumentHistory.create({
+      await centralPrisma.tenantDocumentHistory.create({
         data: {
-          tenantId: createdTenant.id,
+          tenantId: provisionResult.tenantId,
           docType: 'NISM_CERTIFICATE',
           fileUrl: nismCertificateUrl,
           fileName: files.nismCertificate[0].originalname || files.nismCertificate[0].filename
@@ -238,10 +224,10 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
       }).catch(() => {});
     }
 
-    // Automatically dispatch sync to remote domainUrl API and dedicated MongoDB
+    // Automatically dispatch sync if remote domainUrl API is configured
     let syncResult: any = null;
     try {
-      syncResult = await syncTenantToRemote(createdTenant.id, {
+      syncResult = await syncTenantToRemote(provisionResult.tenantId, {
         reason: 'CREATE',
         adminPassword: rawAdminPassword
       });
@@ -249,14 +235,14 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
       console.warn('Auto-sync dispatch warning during tenant creation:', syncErr?.message || syncErr);
     }
 
-    // Write SMTP notification log
-    await prisma.notificationLog.create({
+    // Write SMTP notification log in Central DB
+    await centralPrisma.notificationLog.create({
       data: {
-        tenantId: createdTenant.id,
+        tenantId: provisionResult.tenantId,
         recipient: adminEmailToUse,
         channel: 'EMAIL',
-        title: 'Company Registration & Account Credentials',
-        message: `Welcome ${companyName}! Your company is registered on RAGCP. Credentials: Username: ${adminEmailToUse}, Password: ${rawAdminPassword}. Please complete your profile wizard upon login.`,
+        title: 'Company Registration & Dedicated Database Created',
+        message: `Welcome ${companyName}! Your dedicated database (${provisionResult.dbName}) is provisioned with all collections on RAGCP. Admin credentials: Username: ${adminEmailToUse}, Password: ${rawAdminPassword}. Domain: ${domainUrl || 'Configured'}.`,
         status: 'SENT'
       }
     }).catch(() => {});
@@ -266,21 +252,26 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
       userId: req.user!.id,
       action: 'CREATE',
       module: 'TENANTS',
-      newValue: { ...createdTenant, adminEmail: adminEmailToUse, syncResult },
+      newValue: { ...createdTenant, adminEmail: adminEmailToUse, dbName: provisionResult.dbName, syncResult },
       ipAddress: req.ip
     }).catch(() => {});
 
     return res.status(201).json({
       success: true,
-      message: `Company Tenant onboarded successfully. All collections and baseline data initialized.${syncResult?.domainSyncResult?.success ? ' Synced to domain URL database.' : ''}`,
+      message: `Company '${companyName}' onboarded successfully. Dedicated database '${provisionResult.dbName}' provisioned with all collections and Admin account.`,
       data: {
         tenant: createdTenant,
+        database: {
+          dbName: provisionResult.dbName,
+          mongoDbUrl: provisionResult.mongoDbUrl,
+          domainUrl: provisionResult.domainUrl
+        },
         adminUser: {
-          id: createdAdminUser.id,
-          email: createdAdminUser.email,
-          firstName: createdAdminUser.firstName,
-          lastName: createdAdminUser.lastName,
-          mobile: createdAdminUser.mobile,
+          id: provisionResult.adminUserId,
+          email: provisionResult.adminEmail,
+          firstName: adminFirstName,
+          lastName: adminLastName,
+          mobile: adminMobileToUse,
           role: 'ADMIN',
           tempPassword: rawAdminPassword,
           generatedPassword: rawAdminPassword,
@@ -314,10 +305,10 @@ export const getTenantDocumentHistory = async (req: AuthenticatedRequest, res: R
 
 export const getTenants = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenants = await prisma.tenant.findMany({
+    const companies = await centralPrisma.allCompany.findMany({
       orderBy: { createdAt: 'desc' }
     });
-    return res.status(200).json({ success: true, data: tenants });
+    return res.status(200).json({ success: true, data: companies });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -332,27 +323,41 @@ export const toggleTenantStatus = async (req: AuthenticatedRequest, res: Respons
   }
 
   try {
-    const oldTenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!oldTenant) {
+    const oldCompany = await centralPrisma.allCompany.findFirst({
+      where: { OR: [{ tenantId: id }, { id }] }
+    });
+    if (!oldCompany) {
       return res.status(404).json({ success: false, message: 'Tenant company not found' });
     }
 
-    const updatedTenant = await prisma.tenant.update({
-      where: { id },
+    const updatedCompany = await centralPrisma.allCompany.update({
+      where: { id: oldCompany.id },
       data: { status }
     });
 
-    // Update ALL users of this tenant and revoke all active JWT sessions
-    await prisma.user.updateMany({
-      where: { tenantId: id },
-      data: {
-        status: status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
-        tokenVersion: { increment: 1 },
-        currentSessionId: null
-      }
-    });
+    // Update company's dedicated database
+    try {
+      const resolved = await tenantConnectionManager.getTenantPrisma(id);
+      if (resolved) {
+        await resolved.prisma.tenant.updateMany({
+          data: { status }
+        }).catch(() => {});
 
-    // Auto-sync status change to remote domainUrl API and dedicated MongoDB in background
+        await resolved.prisma.user.updateMany({
+          data: {
+            status: status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
+            tokenVersion: { increment: 1 },
+            currentSessionId: null
+          }
+        }).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn('Sync status to tenant DB warning:', err.message);
+    }
+
+    await tenantConnectionManager.evictTenant(id);
+
+    // Auto-sync status change to remote domainUrl API if configured
     syncTenantToRemote(id, { reason: 'STATUS_CHANGE' }).catch(syncErr => {
       console.warn('Auto-sync status change warning:', syncErr);
     });
@@ -361,15 +366,15 @@ export const toggleTenantStatus = async (req: AuthenticatedRequest, res: Respons
       userId: req.user!.id,
       action: 'UPDATE',
       module: 'TENANTS',
-      oldValue: oldTenant,
-      newValue: updatedTenant,
+      oldValue: oldCompany,
+      newValue: updatedCompany,
       ipAddress: req.ip
     }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: `Company status changed to ${status}. Panel access has been ${status === 'SUSPENDED' ? 'disabled immediately' : 'reactivated'}. Changes dispatched to domain database.`,
-      data: updatedTenant
+      message: `Company status changed to ${status}. Panel access has been ${status === 'SUSPENDED' ? 'disabled immediately' : 'reactivated'}.`,
+      data: updatedCompany
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -380,26 +385,37 @@ export const deleteTenant = async (req: AuthenticatedRequest, res: Response) => 
   const { id } = req.params;
 
   try {
-    const oldTenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!oldTenant) {
+    const oldCompany = await centralPrisma.allCompany.findFirst({
+      where: { OR: [{ tenantId: id }, { id }] }
+    });
+    if (!oldCompany) {
       return res.status(404).json({ success: false, message: 'Tenant company not found' });
     }
 
-    // Save the current status before deleting so we can restore it later
-    const statusBeforeDelete = oldTenant.status !== 'DELETED' ? oldTenant.status : (oldTenant.previousStatus || 'ACTIVE');
-
-    const updatedTenant = await prisma.tenant.update({
-      where: { id },
-      data: { status: 'DELETED', deletedAt: new Date(), previousStatus: statusBeforeDelete }
+    const updatedCompany = await centralPrisma.allCompany.update({
+      where: { id: oldCompany.id },
+      data: { status: 'DELETED' }
     });
 
-    // Mark ALL users of this tenant as DELETED
-    await prisma.user.updateMany({
-      where: { tenantId: id },
-      data: { status: 'DELETED', deletedAt: new Date() }
-    });
+    // Mark users and tenant as DELETED in company's dedicated DB
+    try {
+      const resolved = await tenantConnectionManager.getTenantPrisma(id);
+      if (resolved) {
+        await resolved.prisma.tenant.updateMany({
+          data: { status: 'DELETED', deletedAt: new Date() }
+        }).catch(() => {});
 
-    // Auto-sync soft delete to remote domainUrl API and dedicated MongoDB in background
+        await resolved.prisma.user.updateMany({
+          data: { status: 'DELETED', deletedAt: new Date() }
+        }).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn('Sync soft-delete to tenant DB warning:', err.message);
+    }
+
+    await tenantConnectionManager.evictTenant(id);
+
+    // Auto-sync soft delete to remote domainUrl API if configured
     syncTenantToRemote(id, { reason: 'DELETE' }).catch(syncErr => {
       console.warn('Auto-sync soft-delete warning:', syncErr);
     });
@@ -408,15 +424,15 @@ export const deleteTenant = async (req: AuthenticatedRequest, res: Response) => 
       userId: req.user!.id,
       action: 'SOFT_DELETE',
       module: 'TENANTS',
-      oldValue: oldTenant,
-      newValue: updatedTenant,
+      oldValue: oldCompany,
+      newValue: updatedCompany,
       ipAddress: req.ip
     }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: 'Company successfully deleted (soft delete). Status dispatched to domain database.',
-      data: updatedTenant
+      message: 'Company successfully deleted (soft delete).',
+      data: updatedCompany
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -427,34 +443,37 @@ export const restoreTenant = async (req: AuthenticatedRequest, res: Response) =>
   const { id } = req.params;
 
   try {
-    const oldTenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!oldTenant) {
+    const oldCompany = await centralPrisma.allCompany.findFirst({
+      where: { OR: [{ tenantId: id }, { id }] }
+    });
+    if (!oldCompany) {
       return res.status(404).json({ success: false, message: 'Tenant company not found' });
     }
 
-    // Restore to the status the company had BEFORE it was deleted
-    const restoreToStatus = oldTenant.previousStatus || 'ACTIVE';
-
-    const updatedTenant = await prisma.tenant.update({
-      where: { id },
-      data: { status: restoreToStatus, deletedAt: null, previousStatus: null }
+    const updatedCompany = await centralPrisma.allCompany.update({
+      where: { id: oldCompany.id },
+      data: { status: 'ACTIVE' }
     });
 
-    // Restore users: if company restores to SUSPENDED, only restore admin/staff (not to ACTIVE);
-    // if restoring to ACTIVE, restore everyone to ACTIVE
-    if (restoreToStatus === 'SUSPENDED') {
-      await prisma.user.updateMany({
-        where: { tenantId: id, deletedAt: { not: null } },
-        data: { status: 'ACTIVE', deletedAt: null }
-      });
-    } else {
-      await prisma.user.updateMany({
-        where: { tenantId: id },
-        data: { status: 'ACTIVE', deletedAt: null }
-      });
+    // Restore users and tenant in company's dedicated DB
+    try {
+      const resolved = await tenantConnectionManager.getTenantPrisma(id);
+      if (resolved) {
+        await resolved.prisma.tenant.updateMany({
+          data: { status: 'ACTIVE', deletedAt: null }
+        }).catch(() => {});
+
+        await resolved.prisma.user.updateMany({
+          data: { status: 'ACTIVE', deletedAt: null }
+        }).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn('Sync restore to tenant DB warning:', err.message);
     }
 
-    // Auto-sync restore to remote domainUrl API and dedicated MongoDB in background
+    await tenantConnectionManager.evictTenant(id);
+
+    // Auto-sync restore to remote domainUrl API if configured
     syncTenantToRemote(id, { reason: 'RESTORE' }).catch(syncErr => {
       console.warn('Auto-sync restore warning:', syncErr);
     });
@@ -463,15 +482,15 @@ export const restoreTenant = async (req: AuthenticatedRequest, res: Response) =>
       userId: req.user!.id,
       action: 'RESTORE',
       module: 'TENANTS',
-      oldValue: oldTenant,
-      newValue: updatedTenant,
+      oldValue: oldCompany,
+      newValue: updatedCompany,
       ipAddress: req.ip
     }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: `Company successfully restored to ${restoreToStatus} status. Changes dispatched to domain database.`,
-      data: updatedTenant
+      message: 'Company successfully restored to ACTIVE status.',
+      data: updatedCompany
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -487,7 +506,7 @@ export const permanentDeleteTenant = async (req: AuthenticatedRequest, res: Resp
       return res.status(400).json({ success: false, message: 'Password is required to confirm permanent deletion' });
     }
 
-    const superAdmin = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    const superAdmin = await centralPrisma.user.findUnique({ where: { id: req.user!.id } });
     if (!superAdmin) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
@@ -497,27 +516,36 @@ export const permanentDeleteTenant = async (req: AuthenticatedRequest, res: Resp
       return res.status(400).json({ success: false, message: 'Incorrect password' });
     }
 
-    const oldTenant = await prisma.tenant.findUnique({ where: { id } });
-    if (!oldTenant) {
+    const oldCompany = await centralPrisma.allCompany.findFirst({
+      where: { OR: [{ tenantId: id }, { id }] }
+    });
+    if (!oldCompany) {
       return res.status(404).json({ success: false, message: 'Tenant company not found' });
     }
 
-    // This will cascade delete everything linked to this tenant
-    await prisma.tenant.delete({
-      where: { id }
+    // Delete from all_companies in Central DB
+    await centralPrisma.allCompany.delete({
+      where: { id: oldCompany.id }
     });
+
+    // Drop the dedicated MongoDB database
+    if (oldCompany.mongoDbUrl) {
+      await tenantProvisionEngine.dropTenantDatabase(oldCompany.mongoDbUrl).catch(() => {});
+    }
+
+    await tenantConnectionManager.evictTenant(id);
 
     await logAudit({
       userId: req.user!.id,
       action: 'HARD_DELETE',
       module: 'TENANTS',
-      oldValue: oldTenant,
+      oldValue: oldCompany,
       ipAddress: req.ip
-    });
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,
-      message: 'Company permanently deleted'
+      message: 'Company permanently deleted and database removed.'
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -605,76 +633,91 @@ export const getAuditLogs = async (req: AuthenticatedRequest, res: Response) => 
 
 export const getGlobalTelemetry = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const allTenants = await prisma.tenant.findMany({
-      select: { id: true, companyName: true, status: true, deletedAt: true }
-    });
+    const allTenants = await centralPrisma.allCompany.findMany({
+      select: { id: true, tenantId: true, companyName: true, status: true, deletedAt: true }
+    }).catch(() => []);
+
     const validTenants = allTenants.filter(t => !t.deletedAt && t.status !== 'DELETED');
-    const tenantIds = validTenants.map(t => t.id);
+    const tenantIds = validTenants.map(t => t.tenantId || t.id);
 
     const totalCompanies = validTenants.length;
     const activeCompanies = validTenants.filter(t => t.status === 'ACTIVE').length;
     const suspendedCompanies = validTenants.filter(t => t.status === 'SUSPENDED').length;
     const pendingCompanies = validTenants.filter(t => t.status === 'PENDING_PROFILE').length;
 
-    // Fetch all clients across active/non-deleted tenants
-    const allClients = await prisma.client.findMany({
-      include: {
-        user: {
-          select: { id: true, status: true, deletedAt: true, tenantId: true }
-        }
-      }
-    });
+    // Fetch clients count safely
+    let totalClients = 0;
+    let activeClients = 0;
+    let pendingClients = 0;
+    try {
+      const allClients = await prisma.client.findMany({
+        select: { id: true, status: true }
+      });
+      totalClients = allClients.length;
+      activeClients = allClients.filter(c => c.status === 'ACTIVE').length;
+      pendingClients = allClients.filter(c => c.status !== 'ACTIVE').length;
+    } catch {
+      // Safe fallback
+    }
 
-    const validClients = allClients.filter(c => c.user && !c.user.deletedAt && c.user.tenantId && tenantIds.includes(c.user.tenantId));
-    const totalClients = validClients.length;
-    const activeClients = validClients.filter(c => c.status === 'ACTIVE').length;
-    const pendingClients = validClients.filter(c => c.status !== 'ACTIVE').length;
+    // Fetch staff count safely
+    let totalStaff = 0;
+    let activeStaff = 0;
+    try {
+      const allStaff = await prisma.staff.findMany({
+        select: { id: true, status: true }
+      });
+      totalStaff = allStaff.length;
+      activeStaff = allStaff.filter(s => s.status === 'ACTIVE').length;
+    } catch {
+      // Safe fallback
+    }
 
-    // Fetch all staff across active/non-deleted tenants
-    const allStaff = await prisma.staff.findMany({
-      include: {
-        user: {
-          select: { id: true, status: true, deletedAt: true, tenantId: true }
-        }
-      }
-    });
-    const validStaff = allStaff.filter(s => s.user && !s.user.deletedAt && s.user.tenantId && tenantIds.includes(s.user.tenantId));
-    const totalStaff = validStaff.length;
-    const activeStaff = validStaff.filter(s => s.status === 'ACTIVE').length;
-
-    // Fetch alerts count
-    const activeAlerts = await prisma.complianceAlert.count({
-      where: { tenantId: { in: tenantIds }, status: 'OPEN' }
-    });
-    const totalAlerts = await prisma.complianceAlert.count({
-      where: { tenantId: { in: tenantIds } }
-    });
-    const resolvedAlerts = await prisma.complianceAlert.count({
-      where: { tenantId: { in: tenantIds }, status: 'RESOLVED' }
-    });
+    // Fetch alerts count safely
+    let activeAlerts = 0;
+    let totalAlerts = 0;
+    let resolvedAlerts = 0;
+    try {
+      activeAlerts = await prisma.complianceAlert.count({ where: { status: 'OPEN' } });
+      totalAlerts = await prisma.complianceAlert.count();
+      resolvedAlerts = await prisma.complianceAlert.count({ where: { status: 'RESOLVED' } });
+    } catch {
+      // Safe fallback
+    }
 
     // Audit logs count
-    const auditLogsCount = await prisma.auditLog.count();
+    let auditLogsCount = 0;
+    try {
+      auditLogsCount = await prisma.auditLog.count();
+    } catch {
+      // Safe fallback
+    }
 
     // Compliance audits count
-    const totalAudits = await prisma.complianceAudit.count({
-      where: { tenantId: { in: tenantIds } }
-    });
-    const pendingAudits = await prisma.complianceAudit.count({
-      where: { tenantId: { in: tenantIds }, status: { in: ['PENDING', 'OVERDUE'] } }
-    });
-    const completedAudits = await prisma.complianceAudit.count({
-      where: { tenantId: { in: tenantIds }, status: 'COMPLETED' }
-    });
+    let totalAudits = 0;
+    let pendingAudits = 0;
+    let completedAudits = 0;
+    try {
+      totalAudits = await prisma.complianceAudit.count();
+      pendingAudits = await prisma.complianceAudit.count({ where: { status: { in: ['PENDING', 'OVERDUE'] } } });
+      completedAudits = await prisma.complianceAudit.count({ where: { status: 'COMPLETED' } });
+    } catch {
+      // Safe fallback
+    }
 
     // Plans count
-    const allPlans = await prisma.plan.findMany({
-      where: { tenantId: { in: tenantIds } },
-      select: { id: true, status: true, deletedAt: true }
-    });
-    const validPlans = allPlans.filter(p => !p.deletedAt);
-    const totalPlans = validPlans.length;
-    const activePlans = validPlans.filter(p => p.status === 'ACTIVE').length;
+    let totalPlans = 0;
+    let activePlans = 0;
+    try {
+      const allPlans = await prisma.plan.findMany({
+        select: { id: true, status: true, deletedAt: true }
+      });
+      const validPlans = allPlans.filter(p => !p.deletedAt);
+      totalPlans = validPlans.length;
+      activePlans = validPlans.filter(p => p.status === 'ACTIVE').length;
+    } catch {
+      // Safe fallback
+    }
 
     return res.status(200).json({
       success: true,
@@ -708,35 +751,62 @@ export const getGlobalTelemetry = async (req: AuthenticatedRequest, res: Respons
 export const getTenantDetails = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   try {
-    const tenant = await prisma.tenant.findUnique({
-      where: { id },
-      include: {
-        users: {
-          include: { role: true, staff: { include: { personAssociated: true } } }
-        }
-      }
-    });
-
-    if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+    let company: any = null;
+    if (isObjectId) {
+      company = await centralPrisma.allCompany.findFirst({
+        where: { OR: [{ tenantId: id.trim() }, { id: id.trim() }] }
+      });
+    } else {
+      company = await centralPrisma.allCompany.findFirst({
+        where: { domainUrl: { contains: id.trim(), mode: 'insensitive' } }
+      });
     }
 
-    const admin = tenant.users.find(u => u.role?.name === 'ADMIN');
-    const officers = tenant.users.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role?.name));
-    const allStaff = tenant.users.filter(u => u.role?.name !== 'CLIENT').map(u => ({
-      id: u.staff?.id || u.id,
-      userId: u.id,
-      name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
-      email: u.staff?.email || u.email,
-      mobile: u.staff?.mobile || u.mobile,
-      role: u.role?.name || 'STAFF',
-      status: u.staff?.status || u.status || 'ACTIVE'
-    }));
+    let tenantData: any = company;
+    let admin: any = null;
+    let officers: any[] = [];
+    let allStaff: any[] = [];
+
+    // Try to get live details from tenant's dedicated database
+    try {
+      const resolved = await tenantConnectionManager.getTenantPrisma(company?.tenantId || id);
+      if (resolved) {
+        const liveTenant = await resolved.prisma.tenant.findFirst({
+          include: {
+            users: {
+              include: { role: true, staff: { include: { personAssociated: true } } }
+            }
+          }
+        }).catch(() => null);
+
+        if (liveTenant) {
+          tenantData = { ...company, ...liveTenant };
+          admin = liveTenant.users?.find(u => u.role?.name === 'ADMIN');
+          officers = liveTenant.users?.filter(u => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.role?.name)) || [];
+          allStaff = liveTenant.users?.filter(u => u.role?.name !== 'CLIENT').map(u => ({
+            id: u.staff?.id || u.id,
+            userId: u.id,
+            name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+            email: u.staff?.email || u.email,
+            mobile: u.staff?.mobile || u.mobile,
+            role: u.role?.name || 'STAFF',
+            status: u.staff?.status || u.status || 'ACTIVE'
+          })) || [];
+        }
+      }
+    } catch {
+      // Use company details from all_companies
+    }
+
+    if (!tenantData) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
 
     return res.status(200).json({
       success: true,
       data: {
-        tenant,
+        tenant: tenantData,
         admin,
         officers,
         allStaff
@@ -1001,6 +1071,71 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
         }
       });
     }
+
+    // Sync to Central all_companies catalog
+    await centralPrisma.allCompany.upsert({
+      where: { tenantId: id },
+      update: {
+        companyName: updatedTenant.companyName,
+        domainUrl: updatedTenant.domainUrl || null,
+        ownerName: updatedTenant.ownerName,
+        email: updatedTenant.email,
+        mobile: updatedTenant.mobile,
+        sebiRegistration: updatedTenant.sebiRegistration,
+        status: updatedTenant.status
+      },
+      create: {
+        tenantId: id,
+        companyName: updatedTenant.companyName,
+        domainUrl: updatedTenant.domainUrl || null,
+        dbName: updatedTenant.dbName || tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id),
+        mongoDbUrl: updatedTenant.mongoDbUrl || tenantConnectionManager.buildTenantMongoUri(updatedTenant.dbName || tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id)),
+        ownerName: updatedTenant.ownerName,
+        email: updatedTenant.email,
+        mobile: updatedTenant.mobile,
+        sebiRegistration: updatedTenant.sebiRegistration,
+        status: updatedTenant.status
+      }
+    }).catch(() => {});
+
+    // Sync updates directly to the dedicated Tenant Database
+    try {
+      const resolved = await tenantConnectionManager.getTenantPrisma(id);
+      if (resolved) {
+        await resolved.prisma.tenant.updateMany({
+          data: {
+            companyName: updatedTenant.companyName,
+            domainUrl: updatedTenant.domainUrl,
+            ownerName: updatedTenant.ownerName,
+            email: updatedTenant.email,
+            mobile: updatedTenant.mobile,
+            address: updatedTenant.address,
+            pan: updatedTenant.pan,
+            gst: updatedTenant.gst,
+            website: updatedTenant.website,
+            status: updatedTenant.status
+          }
+        }).catch(() => {});
+
+        if (adminUser) {
+          await resolved.prisma.user.updateMany({
+            where: { email: adminUser.email },
+            data: {
+              firstName: adminUser.firstName,
+              lastName: adminUser.lastName,
+              mobile: adminUser.mobile,
+              status: adminUser.status,
+              ...(adminUser.passwordHash ? { passwordHash: adminUser.passwordHash, tempPassword: adminUser.tempPassword } : {})
+            }
+          }).catch(() => {});
+        }
+      }
+    } catch (dbErr: any) {
+      console.warn('Sync to dedicated tenant DB warning:', dbErr.message);
+    }
+
+    // Invalidate cached connection metadata so changes take effect immediately
+    await tenantConnectionManager.evictTenant(id);
 
     // Auto-sync company & admin updates to remote domainUrl API and dedicated MongoDB in background
     syncTenantToRemote(id, {

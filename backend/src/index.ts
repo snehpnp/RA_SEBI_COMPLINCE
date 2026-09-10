@@ -34,6 +34,11 @@ app.use(express.urlencoded({ extended: true }));
 // Serve Uploads as Static Folder
 app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
+import tenantResolverMiddleware from './middlewares/tenantResolver';
+
+// Mount Dynamic Tenant Resolver Middleware
+app.use(tenantResolverMiddleware);
+
 // Routes mapping
 app.use('/api/v1', router);
 app.use('/third-party-api', thirdPartyRoutes);
