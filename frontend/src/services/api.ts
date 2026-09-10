@@ -588,6 +588,10 @@ class ApiClient {
     }).then(r => r.json());
   }
 
+  async getPaymentGatewayStatus() {
+    return this.request('/payment/gateway-status');
+  }
+
   async initiateCCAvenuePayment(payload: { planId: string, couponCode?: string }) {
     return this.request('/payment/ccavenue/initiate', {
       method: 'POST',

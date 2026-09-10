@@ -37,6 +37,7 @@ exports.Client = exports.ClientSchema = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const _schemaOptions_1 = require("./_schemaOptions");
 exports.ClientSchema = new mongoose_1.Schema({
+    tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', default: null },
     userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     name: { type: String, required: true },
     email: { type: String, required: true },

@@ -1,64 +1,260 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendComplaintNotificationEmail = exports.sendAccountDeactivatedEmail = exports.sendAccountActivatedEmail = void 0;
+exports.resolveSmtpCredentials = resolveSmtpCredentials;
 exports.sendEmail = sendEmail;
+exports.sendOtpEmail = sendOtpEmail;
 exports.sendWelcomeEmail = sendWelcomeEmail;
 exports.sendForgotPasswordEmail = sendForgotPasswordEmail;
 exports.sendTestEmail = sendTestEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
-const db_1 = require("../config/db");
+const db_1 = __importStar(require("../config/db"));
 const pdfService_1 = require("./pdfService");
 /**
- * Generic email sender using tenant's configured SMTP settings.
- * If SMTP is not configured, logs a warning and skips silently.
+ * Resolves SMTP credentials from the Database (Tenant, AllCompany, SystemSetting)
+ * before falling back to .env.
+ */
+async function resolveSmtpCredentials(tenantId) {
+    let tenantDoc = null;
+    let source = '';
+    const isValidCred = (doc) => {
+        return Boolean(doc &&
+            typeof doc.smtpHost === 'string' && doc.smtpHost.trim() !== '' &&
+            typeof doc.smtpUser === 'string' && doc.smtpUser.trim() !== '' &&
+            typeof doc.smtpPassword === 'string' && doc.smtpPassword.trim() !== '');
+    };
+    // 1. If tenantId is provided, query dynamicDb and centralModels Tenant / AllCompany
+    if (tenantId) {
+        try {
+            const doc = await db_1.default.Tenant.findById(tenantId).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'dynamicDb.Tenant(findById)';
+            }
+        }
+        catch { }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.centralModels.Tenant.findById(tenantId).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'centralModels.Tenant(findById)';
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.default.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'dynamicDb.Tenant(findOne)';
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.centralModels.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'centralModels.Tenant(findOne)';
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.centralModels.AllCompany.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'centralModels.AllCompany(findOne)';
+                }
+            }
+            catch { }
+        }
+    }
+    // 2. Query any active Tenant in dynamicDb or centralModels that has SMTP credentials
+    if (!tenantDoc) {
+        try {
+            const doc = await db_1.default.Tenant.findOne({
+                smtpHost: { $nin: [null, ''] },
+                smtpUser: { $nin: [null, ''] },
+                smtpPassword: { $nin: [null, ''] }
+            }).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'dynamicDb.Tenant(anyActive)';
+            }
+        }
+        catch { }
+    }
+    if (!tenantDoc) {
+        try {
+            const doc = await db_1.centralModels.Tenant.findOne({
+                smtpHost: { $nin: [null, ''] },
+                smtpUser: { $nin: [null, ''] },
+                smtpPassword: { $nin: [null, ''] }
+            }).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'centralModels.Tenant(anyActive)';
+            }
+        }
+        catch { }
+    }
+    // 3. Query AllCompany in centralModels
+    if (!tenantDoc) {
+        try {
+            const doc = await db_1.centralModels.AllCompany.findOne({
+                smtpHost: { $nin: [null, ''] },
+                smtpUser: { $nin: [null, ''] },
+                smtpPassword: { $nin: [null, ''] }
+            }).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'centralModels.AllCompany(anyActive)';
+            }
+        }
+        catch { }
+    }
+    // 4. Query SystemSetting (keys: GLOBAL_SMTP, SMTP_CONFIG, SMTP_SETTINGS, SMTP) in dynamicDb and centralModels
+    const smtpSettingKeys = ['GLOBAL_SMTP', 'SMTP_CONFIG', 'SMTP_SETTINGS', 'SMTP', 'EMAIL_CONFIG'];
+    if (!tenantDoc) {
+        for (const key of smtpSettingKeys) {
+            try {
+                const setting = await db_1.default.SystemSetting.findOne({ key }).lean();
+                if (setting?.value) {
+                    const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+                    if (isValidCred(parsed)) {
+                        tenantDoc = parsed;
+                        source = `dynamicDb.SystemSetting(${key})`;
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+    if (!tenantDoc) {
+        for (const key of smtpSettingKeys) {
+            try {
+                const setting = await db_1.centralModels.SystemSetting.findOne({ key }).lean();
+                if (setting?.value) {
+                    const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+                    if (isValidCred(parsed)) {
+                        tenantDoc = parsed;
+                        source = `centralModels.SystemSetting(${key})`;
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+    // 5. If credentials found in DB, return them
+    if (tenantDoc && tenantDoc.smtpHost && tenantDoc.smtpUser && tenantDoc.smtpPassword) {
+        const port = parseInt(tenantDoc.smtpPort || '587');
+        console.log(`[SMTP-RESOLVER] ✅ Using Database SMTP Credentials (${source}): Host=${tenantDoc.smtpHost}, Port=${port}, User=${tenantDoc.smtpUser}`);
+        return {
+            host: tenantDoc.smtpHost.trim(),
+            port,
+            secure: port === 465,
+            user: tenantDoc.smtpUser.trim(),
+            pass: tenantDoc.smtpPassword.trim(),
+            fromName: tenantDoc.smtpFrom || tenantDoc.companyName || 'RAGCP Platform',
+            fromEmail: tenantDoc.smtpUser.trim()
+        };
+    }
+    console.warn('[SMTP-RESOLVER] ⚠️ No SMTP credentials configured in Database. Please configure Email & SMTP in Admin Settings.');
+    return null;
+}
+/**
+ * Generic email sender using resolved SMTP settings from Database.
  */
 async function sendEmail(tenantId, to, subject, html, attachments) {
     try {
-        if (!tenantId) {
-            console.warn('[EMAIL] No tenantId provided. Skipping email to:', to);
-            return false;
-        }
-        const tenant = await db_1.Tenant.findById(tenantId).lean();
-        if (!tenant || !tenant.smtpHost || !tenant.smtpUser || !tenant.smtpPassword) {
-            console.warn('[EMAIL] SMTP not configured for tenant:', tenantId, '. Skipping email to:', to);
+        const smtp = await resolveSmtpCredentials(tenantId);
+        if (!smtp) {
+            console.warn('[EMAIL] No SMTP credentials found in Database or Environment. Skipping email to:', to);
             return false;
         }
         const transporter = nodemailer_1.default.createTransport({
-            host: tenant.smtpHost,
-            port: tenant.smtpPort || 587,
-            secure: (tenant.smtpPort || 587) === 465,
+            host: smtp.host,
+            port: smtp.port,
+            secure: smtp.secure,
             auth: {
-                user: tenant.smtpUser,
-                pass: tenant.smtpPassword
+                user: smtp.user,
+                pass: smtp.pass
             },
             tls: { rejectUnauthorized: false }
         });
-        const fromName = tenant.smtpFrom || tenant.companyName || 'RAGCP Platform';
-        const fromEmail = tenant.smtpUser;
         await transporter.sendMail({
-            from: `"${fromName}" <${fromEmail}>`,
+            from: `"${smtp.fromName}" <${smtp.fromEmail}>`,
             to,
             subject,
             html,
             attachments
         });
+        console.log(`[EMAIL] Email sent to ${to} using DB SMTP (${smtp.user} @ ${smtp.host}:${smtp.port})`);
         // Log to NotificationLog
-        await db_1.NotificationLog.create({
-            tenantId,
-            recipient: to,
-            channel: 'EMAIL',
-            title: subject,
-            message: html.replace(/<[^>]*>/g, '').slice(0, 500),
-            status: 'SENT'
-        });
+        try {
+            await db_1.NotificationLog.create({
+                tenantId: tenantId || null,
+                recipient: to,
+                channel: 'EMAIL',
+                title: subject,
+                message: html.replace(/<[^>]*>/g, '').slice(0, 500),
+                status: 'SENT'
+            });
+        }
+        catch { }
         return true;
     }
     catch (err) {
         console.error('[EMAIL] Failed to send email to:', to, '| Error:', err.message);
-        // Log failure
         if (tenantId) {
             try {
                 await db_1.NotificationLog.create({
@@ -74,6 +270,24 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
         }
         return false;
     }
+}
+/**
+ * Send OTP Verification Email
+ */
+async function sendOtpEmail(opts) {
+    const { tenantId, toEmail, otp, companyName } = opts;
+    const subject = `Your OTP for ${companyName || 'RAGCP'} Registration: ${otp}`;
+    const html = `
+    <div style="font-family: Arial, sans-serif; padding: 24px; max-width: 580px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+      <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.5;">You have requested to verify your email address on <strong>${companyName || 'RAGCP Platform'}</strong>. Please use the following One-Time Password (OTP) to complete your registration:</p>
+      <div style="background-color: #f1f5f9; padding: 18px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px dashed #cbd5e1;">
+        <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #2563eb; font-family: monospace;">${otp}</span>
+      </div>
+      <p style="color: #64748b; font-size: 13px; margin-bottom: 0;">⏳ This OTP is valid for 10 minutes. If you did not request this verification, please ignore this email.</p>
+    </div>
+  `;
+    return sendEmail(tenantId, toEmail, subject, html);
 }
 /**
  * Welcome email sent to newly onboarded Staff or Client.
@@ -228,15 +442,15 @@ async function sendForgotPasswordEmail(opts) {
  * Send a test email to verify SMTP configuration.
  */
 async function sendTestEmail(tenantId, toEmail) {
-    const tenant = await db_1.Tenant.findById(tenantId).lean();
-    if (!tenant?.smtpHost || !tenant?.smtpUser || !tenant?.smtpPassword) {
-        return { success: false, message: 'SMTP is not fully configured. Please fill in all SMTP fields first.' };
+    const smtp = await resolveSmtpCredentials(tenantId);
+    if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+        return { success: false, message: 'SMTP is not fully configured. Please enter Host, Port, User, and Password first.' };
     }
     const html = `
     <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#1e293b;padding:32px;border-radius:12px;border:1px solid #334155">
       <h2 style="color:#6366f1;margin:0 0 16px">✅ SMTP Test Successful!</h2>
       <p style="color:#cbd5e1">Your SMTP configuration is working correctly.</p>
-      <p style="color:#64748b;font-size:12px;margin:16px 0 0">Server: ${tenant.smtpHost}:${tenant.smtpPort || 587}</p>
+      <p style="color:#64748b;font-size:12px;margin:16px 0 0">Server: ${smtp.host}:${smtp.port} | Sender: ${smtp.user}</p>
     </div>`;
     const sent = await sendEmail(tenantId, toEmail, '✅ SMTP Test — RAGCP Platform', html);
     return sent

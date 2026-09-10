@@ -37,7 +37,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-const db_1 = __importDefault(require("../config/db"));
+const mongoose_1 = __importDefault(require("mongoose"));
+const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const auditService_1 = require("../services/auditService");
 const emailService_1 = require("../services/emailService");
@@ -109,10 +110,84 @@ const getDashboardStats = async (req, res) => {
 exports.getDashboardStats = getDashboardStats;
 // Helper to calculate profile completeness score
 const calculateCompleteness = async (tenantId) => {
-    const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+    let tenant = null;
+    if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+        tenant = await db_1.default.Tenant.findById(tenantId).lean();
+    }
+    if (!tenant && tenantId) {
+        tenant = await db_1.default.Tenant.findOne({
+            $or: [{ id: tenantId }, { tenantId: tenantId }]
+        }).lean();
+    }
+    if (!tenant && tenantId) {
+        tenant = await db_1.centralModels.AllCompany.findOne({
+            $or: [
+                ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
+                { tenantId: tenantId }
+            ]
+        }).lean();
+    }
+    if (!tenant) {
+        tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+    }
     if (!tenant)
-        return 0;
-    const users = await db_1.default.User.find({ tenantId })
+        return { score: 0, details: { organization: false, principalOfficer: false, complianceOfficer: false, grievance: false, internalPolicy: false }, data: null };
+    // Fallback SMTP lookup if dynamic tenant document lacks SMTP fields
+    if (!tenant.smtpHost || !tenant.smtpUser) {
+        try {
+            const centralTenant = await db_1.centralModels.Tenant.findById(tenant._id || tenant.id || tenantId).lean();
+            if (centralTenant?.smtpHost && centralTenant?.smtpUser) {
+                tenant.smtpHost = centralTenant.smtpHost;
+                tenant.smtpPort = centralTenant.smtpPort;
+                tenant.smtpUser = centralTenant.smtpUser;
+                tenant.smtpPassword = centralTenant.smtpPassword;
+                tenant.smtpFrom = centralTenant.smtpFrom;
+            }
+        }
+        catch { }
+    }
+    if (!tenant.smtpHost || !tenant.smtpUser) {
+        try {
+            const allComp = await db_1.centralModels.AllCompany.findOne({
+                $or: [
+                    ...(tenant._id ? [{ _id: tenant._id }] : []),
+                    ...(tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
+                    { tenantId: tenantId }
+                ]
+            }).lean();
+            if (allComp?.smtpHost && allComp?.smtpUser) {
+                tenant.smtpHost = allComp.smtpHost;
+                tenant.smtpPort = allComp.smtpPort;
+                tenant.smtpUser = allComp.smtpUser;
+                tenant.smtpPassword = allComp.smtpPassword;
+                tenant.smtpFrom = allComp.smtpFrom;
+            }
+        }
+        catch { }
+    }
+    if (!tenant.smtpHost || !tenant.smtpUser) {
+        try {
+            const setting = await db_1.centralModels.SystemSetting.findOne({ key: 'GLOBAL_SMTP' }).lean();
+            if (setting?.value) {
+                const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+                if (parsed.smtpHost && parsed.smtpUser) {
+                    tenant.smtpHost = parsed.smtpHost;
+                    tenant.smtpPort = parsed.smtpPort;
+                    tenant.smtpUser = parsed.smtpUser;
+                    tenant.smtpPassword = parsed.smtpPassword;
+                    tenant.smtpFrom = parsed.smtpFrom;
+                }
+            }
+        }
+        catch { }
+    }
+    const resolvedTenantId = String(tenant._id || tenant.id || tenant.tenantId || tenantId);
+    const users = await db_1.default.User.find({
+        $or: [
+            { tenantId: resolvedTenantId },
+            { tenantId }
+        ]
+    })
         .populate('roleId')
         .lean();
     const userIds = users.map((u) => u._id || u.id);
@@ -240,7 +315,26 @@ const saveProfileStep = async (req, res) => {
         }
     }
     try {
-        const oldTenant = await db_1.default.Tenant.findById(tenantId).lean();
+        let oldTenant = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            oldTenant = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!oldTenant && tenantId) {
+            oldTenant = await db_1.default.Tenant.findOne({
+                $or: [{ id: tenantId }, { tenantId: tenantId }]
+            }).lean();
+        }
+        if (!oldTenant) {
+            oldTenant = await db_1.centralModels.AllCompany.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
+                    { tenantId: tenantId }
+                ]
+            }).lean();
+        }
+        if (!oldTenant) {
+            oldTenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
         if (!oldTenant) {
             return res.status(404).json({
                 success: false,
@@ -873,33 +967,126 @@ const getAdminClients = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const isFullAdmin = req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN';
-        let filterQuery = { tenantId };
+        let hasViewAll = isFullAdmin;
+        let hasViewOwn = isFullAdmin;
         if (!isFullAdmin) {
             const userRole = await db_1.default.Role.findOne({ name: req.user.role }).lean();
             const roleId = userRole?._id || userRole?.id;
-            const hasViewAll = await db_1.default.RolePermission.findOne({
-                roleId,
-                permissionId: { $in: (await db_1.default.Permission.find({ code: 'VIEW_ALL_CLIENTS' }).lean()).map((p) => p._id || p.id) }
-            }).lean();
-            const hasViewOwn = await db_1.default.RolePermission.findOne({
-                roleId,
-                permissionId: { $in: (await db_1.default.Permission.find({ code: 'VIEW_OWN_CLIENTS' }).lean()).map((p) => p._id || p.id) }
-            }).lean();
+            const viewAllPerm = await db_1.default.Permission.findOne({ code: 'VIEW_ALL_CLIENTS' }).lean();
+            const viewOwnPerm = await db_1.default.Permission.findOne({ code: 'VIEW_OWN_CLIENTS' }).lean();
+            if (viewAllPerm) {
+                const rpAll = await db_1.default.RolePermission.findOne({
+                    roleId,
+                    permissionId: viewAllPerm._id || viewAllPerm.id
+                }).lean();
+                if (rpAll)
+                    hasViewAll = true;
+            }
+            if (viewOwnPerm) {
+                const rpOwn = await db_1.default.RolePermission.findOne({
+                    roleId,
+                    permissionId: viewOwnPerm._id || viewOwnPerm.id
+                }).lean();
+                if (rpOwn)
+                    hasViewOwn = true;
+            }
             if (!hasViewAll && !hasViewOwn) {
                 return res.status(403).json({ success: false, message: 'You do not have permission to view clients.' });
             }
-            if (!hasViewAll) {
-                filterQuery.createdById = req.user.id;
-            }
         }
-        const rawClients = await db_1.default.Client.find(filterQuery)
+        // 1. Find all roles representing CLIENT / USER / CUSTOMER / INVESTOR
+        const clientRoles = await db_1.default.Role.find({
+            name: { $regex: /^(client|user|customer|investor)$/i }
+        }).lean();
+        const clientRoleIds = clientRoles.map((r) => r._id || r.id);
+        // 2. Build tenant filter for active users
+        const tenantUserFilter = {
+            $or: [
+                { tenantId: tenantId },
+                ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+            ],
+            deletedAt: null
+        };
+        if (!isFullAdmin && !hasViewAll && hasViewOwn) {
+            tenantUserFilter.createdById = req.user.id;
+        }
+        // Query all matching users in tenant
+        const users = await db_1.default.User.find({
+            ...tenantUserFilter,
+            $or: [
+                { roleId: { $in: clientRoleIds } },
+                { role: { $regex: /^(client|user|customer|investor)$/i } }
+            ]
+        }).populate('roleId').sort({ createdAt: -1 }).lean();
+        const userIds = users.map((u) => u._id || u.id);
+        const userMap = new Map(users.map((u) => [String(u._id || u.id), u]));
+        // 3. Find Client documents linked to these users or this tenant
+        const clientQuery = {
+            $or: [
+                { userId: { $in: userIds } },
+                { tenantId: tenantId },
+                ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+            ]
+        };
+        if (!isFullAdmin && !hasViewAll && hasViewOwn) {
+            clientQuery.createdById = req.user.id;
+        }
+        const rawClients = await db_1.default.Client.find(clientQuery)
             .populate('userId')
             .sort({ createdAt: -1 })
             .lean();
-        const clientIds = rawClients.map((c) => c._id || c.id);
-        const profiles = await db_1.default.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
-        const profileMap = new Map(profiles.map((p) => [String(p.clientId), p]));
-        const subscriptions = await db_1.default.Subscription.find({ clientId: { $in: clientIds } })
+        // Map existing Client records by userId
+        const clientByUserId = new Map();
+        for (const c of rawClients) {
+            const uIdStr = String(c.userId?._id || c.userId?.id || c.userId || '');
+            if (uIdStr) {
+                clientByUserId.set(uIdStr, c);
+            }
+        }
+        // 4. Ensure every User with CLIENT/USER role is included in client list
+        const combinedClients = [...rawClients];
+        for (const u of users) {
+            const uIdStr = String(u._id || u.id);
+            if (!clientByUserId.has(uIdStr)) {
+                const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || u.email || 'Client';
+                const synthClient = {
+                    _id: u._id,
+                    id: uIdStr,
+                    userId: u,
+                    name: fullName,
+                    email: u.email,
+                    mobile: u.mobile || '',
+                    dob: u.dob || null,
+                    pan: u.pan || 'N/A',
+                    aadhaar: u.aadhaar || 'N/A',
+                    category: u.category || 'INDIVIDUAL',
+                    occupation: u.occupation || 'other',
+                    status: u.status || 'ACTIVE',
+                    kraVerified: false,
+                    createdById: u.createdById || null,
+                    createdAt: u.createdAt,
+                    updatedAt: u.updatedAt
+                };
+                combinedClients.push(synthClient);
+                clientByUserId.set(uIdStr, synthClient);
+            }
+        }
+        const allClientIds = combinedClients.map((c) => c._id || c.id);
+        const allUserIds = combinedClients.map((c) => String(c.userId?._id || c.userId?.id || c.userId || c._id || c.id));
+        const allLookupIds = [...new Set([...allClientIds, ...allUserIds])];
+        // Profiles
+        const profiles = await db_1.default.ClientProfile.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
+        const profileMap = new Map();
+        for (const p of profiles) {
+            if (p.clientId)
+                profileMap.set(String(p.clientId), p);
+        }
+        // Subscriptions
+        const subscriptions = await db_1.default.Subscription.find({
+            clientId: { $in: allLookupIds }
+        })
             .populate('planId')
             .sort({ createdAt: -1 })
             .lean();
@@ -910,7 +1097,10 @@ const getAdminClients = async (req, res) => {
                 subMap.set(cId, []);
             subMap.get(cId).push(sub);
         }
-        const agreements = await db_1.default.Agreement.find({ clientId: { $in: clientIds } }).lean();
+        // Agreements
+        const agreements = await db_1.default.Agreement.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
         const agMap = new Map();
         for (const ag of agreements) {
             const cId = String(ag.clientId);
@@ -918,7 +1108,10 @@ const getAdminClients = async (req, res) => {
                 agMap.set(cId, []);
             agMap.get(cId).push(ag);
         }
-        const documents = await db_1.default.ClientDocument.find({ clientId: { $in: clientIds } }).lean();
+        // Documents
+        const documents = await db_1.default.ClientDocument.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
         const docMap = new Map();
         for (const doc of documents) {
             const cId = String(doc.clientId);
@@ -926,7 +1119,10 @@ const getAdminClients = async (req, res) => {
                 docMap.set(cId, []);
             docMap.get(cId).push(doc);
         }
-        const alerts = await db_1.default.ComplianceAlert.find({ clientId: { $in: clientIds } }).lean();
+        // Compliance Alerts
+        const alerts = await db_1.default.ComplianceAlert.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
         const alertMap = new Map();
         for (const al of alerts) {
             const cId = String(al.clientId);
@@ -934,7 +1130,8 @@ const getAdminClients = async (req, res) => {
                 alertMap.set(cId, []);
             alertMap.get(cId).push(al);
         }
-        const creatorIds = [...new Set(rawClients.map((c) => c.createdById).filter(Boolean))];
+        // Creators
+        const creatorIds = [...new Set(combinedClients.map((c) => c.createdById).filter(Boolean))];
         const creatorUsers = creatorIds.length > 0 ? await db_1.default.User.find({
             _id: { $in: creatorIds }
         }).populate('roleId').lean() : [];
@@ -945,11 +1142,14 @@ const getAdminClients = async (req, res) => {
                 roleName: u.roleId?.name || 'STAFF'
             }
         ]));
-        let clients = rawClients.map((c) => {
+        let clients = combinedClients.map((c) => {
             const cIdStr = String(c._id || c.id);
+            const uIdStr = String(c.userId?._id || c.userId?.id || c.userId || cIdStr);
+            const uObj = (c.userId && typeof c.userId === 'object' && c.userId.email) ? c.userId : userMap.get(uIdStr);
             let createdByInfo = { type: 'SELF', label: 'Self Signup', name: 'Self Signup', role: 'CLIENT' };
-            if (c.createdById) {
-                const creator = creatorMap.get(String(c.createdById));
+            const creatorId = c.createdById || uObj?.createdById;
+            if (creatorId) {
+                const creator = creatorMap.get(String(creatorId));
                 if (creator) {
                     const rName = (creator.roleName || '').toUpperCase();
                     const isRoleAdmin = rName === 'ADMIN' || rName === 'SUPER_ADMIN' || rName === 'SUPER ADMIN';
@@ -964,7 +1164,7 @@ const getAdminClients = async (req, res) => {
                     createdByInfo = { type: 'STAFF', label: 'Admin/Staff', name: 'Admin/Staff', role: 'STAFF' };
                 }
             }
-            const clientSubs = (subMap.get(cIdStr) || []).map((s) => ({
+            const clientSubs = (subMap.get(cIdStr) || subMap.get(uIdStr) || []).map((s) => ({
                 ...s,
                 id: String(s._id || s.id),
                 plan: s.planId ? {
@@ -972,18 +1172,24 @@ const getAdminClients = async (req, res) => {
                     id: String(s.planId._id || s.planId.id)
                 } : null
             }));
+            const userDisplayName = uObj ? `${uObj.firstName || ''} ${uObj.lastName || ''}`.trim() || uObj.email : c.name;
             return {
                 ...c,
                 id: cIdStr,
-                user: c.userId ? {
-                    ...c.userId,
-                    id: String(c.userId._id || c.userId.id)
+                name: c.name || userDisplayName,
+                email: c.email || uObj?.email,
+                mobile: c.mobile || uObj?.mobile,
+                status: c.status || uObj?.status || 'ACTIVE',
+                user: uObj ? {
+                    ...uObj,
+                    id: String(uObj._id || uObj.id),
+                    role: uObj.roleId
                 } : null,
-                profile: profileMap.get(cIdStr) || null,
+                profile: profileMap.get(cIdStr) || profileMap.get(uIdStr) || null,
                 subscriptions: clientSubs,
-                agreements: agMap.get(cIdStr) || [],
-                documents: docMap.get(cIdStr) || [],
-                complianceAlerts: alertMap.get(cIdStr) || [],
+                agreements: agMap.get(cIdStr) || agMap.get(uIdStr) || [],
+                documents: docMap.get(cIdStr) || docMap.get(uIdStr) || [],
+                complianceAlerts: alertMap.get(cIdStr) || alertMap.get(uIdStr) || [],
                 createdByInfo
             };
         });
@@ -1024,18 +1230,63 @@ const getAdminDeletedClients = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const deletedUsers = await db_1.default.User.find({
-            tenantId,
-            deletedAt: { $ne: null }
+        const clientRoles = await db_1.default.Role.find({
+            name: { $regex: /^(client|user|customer|investor)$/i }
         }).lean();
+        const clientRoleIds = clientRoles.map((r) => r._id || r.id);
+        const deletedUsers = await db_1.default.User.find({
+            $and: [
+                {
+                    $or: [
+                        { tenantId: tenantId },
+                        ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+                    ]
+                },
+                { deletedAt: { $ne: null } },
+                {
+                    $or: [
+                        { roleId: { $in: clientRoleIds } },
+                        { role: { $regex: /^(client|user|customer|investor)$/i } }
+                    ]
+                }
+            ]
+        }).populate('roleId').lean();
         const userIds = deletedUsers.map((u) => u._id || u.id);
-        const clients = await db_1.default.Client.find({
+        const rawClients = await db_1.default.Client.find({
             userId: { $in: userIds }
         }).sort({ updatedAt: -1 }).lean();
-        const clientIds = clients.map((c) => c._id || c.id);
-        const profiles = await db_1.default.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
+        const clientByUserId = new Map(rawClients.map((c) => [String(c.userId), c]));
+        const userMap = new Map(deletedUsers.map((u) => [String(u._id || u.id), u]));
+        const combinedClients = [...rawClients];
+        for (const u of deletedUsers) {
+            const uIdStr = String(u._id || u.id);
+            if (!clientByUserId.has(uIdStr)) {
+                const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Client';
+                const synthClient = {
+                    _id: u._id,
+                    id: uIdStr,
+                    userId: u._id,
+                    name: fullName,
+                    email: u.email,
+                    mobile: u.mobile || '',
+                    pan: u.pan || 'N/A',
+                    aadhaar: u.aadhaar || 'N/A',
+                    status: 'INACTIVE',
+                    createdAt: u.createdAt,
+                    updatedAt: u.updatedAt
+                };
+                combinedClients.push(synthClient);
+            }
+        }
+        const allClientIds = combinedClients.map((c) => c._id || c.id);
+        const allLookupIds = [...new Set([...allClientIds, ...userIds])];
+        const profiles = await db_1.default.ClientProfile.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
         const profileMap = new Map(profiles.map((p) => [String(p.clientId), p]));
-        const subscriptions = await db_1.default.Subscription.find({ clientId: { $in: clientIds } })
+        const subscriptions = await db_1.default.Subscription.find({
+            clientId: { $in: allLookupIds }
+        })
             .populate('planId')
             .sort({ createdAt: -1 })
             .lean();
@@ -1046,7 +1297,9 @@ const getAdminDeletedClients = async (req, res) => {
                 subMap.set(cId, []);
             subMap.get(cId).push(sub);
         }
-        const agreements = await db_1.default.Agreement.find({ clientId: { $in: clientIds } }).lean();
+        const agreements = await db_1.default.Agreement.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
         const agMap = new Map();
         for (const ag of agreements) {
             const cId = String(ag.clientId);
@@ -1054,7 +1307,9 @@ const getAdminDeletedClients = async (req, res) => {
                 agMap.set(cId, []);
             agMap.get(cId).push(ag);
         }
-        const documents = await db_1.default.ClientDocument.find({ clientId: { $in: clientIds } }).lean();
+        const documents = await db_1.default.ClientDocument.find({
+            clientId: { $in: allLookupIds }
+        }).lean();
         const docMap = new Map();
         for (const doc of documents) {
             const cId = String(doc.clientId);
@@ -1062,26 +1317,27 @@ const getAdminDeletedClients = async (req, res) => {
                 docMap.set(cId, []);
             docMap.get(cId).push(doc);
         }
-        const userMap = new Map(deletedUsers.map((u) => [String(u._id || u.id), u]));
         const isFullAdmin = req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN';
         const hasViewSensitive = isFullAdmin;
-        let result = clients.map((c) => {
+        let result = combinedClients.map((c) => {
             const cIdStr = String(c._id || c.id);
-            const user = userMap.get(String(c.userId));
+            const uIdStr = String(c.userId?._id || c.userId?.id || c.userId || cIdStr);
+            const user = userMap.get(uIdStr);
             return {
                 ...c,
                 id: cIdStr,
                 user: user ? {
+                    ...user,
                     status: user.status,
                     lastLogin: user.lastLogin,
                     createdAt: user.createdAt,
                     deletedAt: user.deletedAt,
                     deletedBy: user.deletedBy
                 } : null,
-                profile: profileMap.get(cIdStr) || null,
-                subscriptions: subMap.get(cIdStr) || [],
-                agreements: agMap.get(cIdStr) || [],
-                documents: docMap.get(cIdStr) || []
+                profile: profileMap.get(cIdStr) || profileMap.get(uIdStr) || null,
+                subscriptions: subMap.get(cIdStr) || subMap.get(uIdStr) || [],
+                agreements: agMap.get(cIdStr) || agMap.get(uIdStr) || [],
+                documents: docMap.get(cIdStr) || docMap.get(uIdStr) || []
             };
         });
         if (!hasViewSensitive) {
@@ -1111,28 +1367,41 @@ const toggleClientStatus = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const client = await db_1.default.Client.findById(id).lean();
-        if (!client)
-            return res.status(404).json({ success: false, message: 'Client not found.' });
-        const clientUser = await db_1.default.User.findById(client.userId).lean();
-        if (!clientUser || clientUser.tenantId !== tenantId) {
+        let client = await db_1.default.Client.findById(id).lean();
+        let clientUser = null;
+        if (client) {
+            clientUser = await db_1.default.User.findById(client.userId).lean();
+        }
+        else {
+            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (client) {
+                clientUser = await db_1.default.User.findById(client.userId).lean();
+            }
+            else {
+                clientUser = await db_1.default.User.findById(id).lean();
+            }
+        }
+        if (!clientUser || String(clientUser.tenantId) !== String(tenantId)) {
             return res.status(404).json({ success: false, message: 'Client not found.' });
         }
-        const newStatus = client.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-        await db_1.default.Client.findByIdAndUpdate(id, { $set: { status: newStatus } });
-        await db_1.default.User.findByIdAndUpdate(client.userId, { $set: { status: newStatus } });
+        const currentStatus = clientUser.status || client?.status || 'ACTIVE';
+        const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        if (client?._id) {
+            await db_1.default.Client.findByIdAndUpdate(client._id, { $set: { status: newStatus } });
+        }
+        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, { $set: { status: newStatus } });
         const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
         if (newStatus === 'ACTIVE') {
             await Promise.resolve().then(() => __importStar(require('../services/emailService'))).then(m => m.sendAccountActivatedEmail({
-                toEmail: client.email,
-                name: client.name,
+                toEmail: client?.email || clientUser.email,
+                name: client?.name || `${clientUser.firstName || ''} ${clientUser.lastName || ''}`.trim(),
                 companyName: tenantObj?.companyName || 'RAGCP Platform'
             })).catch(e => console.error('[EMAIL] Failed:', e));
         }
         else {
             await Promise.resolve().then(() => __importStar(require('../services/emailService'))).then(m => m.sendAccountDeactivatedEmail({
-                toEmail: client.email,
-                name: client.name,
+                toEmail: client?.email || clientUser.email,
+                name: client?.name || `${clientUser.firstName || ''} ${clientUser.lastName || ''}`.trim(),
                 companyName: tenantObj?.companyName || 'RAGCP Platform'
             })).catch(e => console.error('[EMAIL] Failed:', e));
         }
@@ -1151,12 +1420,38 @@ const updateClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const client = await db_1.default.Client.findById(id).lean();
-        if (!client) {
-            return res.status(404).json({ success: false, message: 'Client not found.' });
+        let client = await db_1.default.Client.findById(id).lean();
+        let clientUser = null;
+        let actualClientId = id;
+        if (client) {
+            clientUser = await db_1.default.User.findById(client.userId).lean();
         }
-        const clientUser = await db_1.default.User.findById(client.userId).lean();
-        if (!clientUser || clientUser.tenantId !== tenantId) {
+        else {
+            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (client) {
+                clientUser = await db_1.default.User.findById(client.userId).lean();
+                actualClientId = client._id || client.id;
+            }
+            else {
+                clientUser = await db_1.default.User.findById(id).lean();
+                if (clientUser) {
+                    const newC = await db_1.default.Client.create({
+                        tenantId,
+                        userId: clientUser._id || clientUser.id,
+                        name: `${clientUser.firstName || ''} ${clientUser.lastName || ''}`.trim() || clientUser.name || clientUser.email,
+                        email: clientUser.email,
+                        mobile: clientUser.mobile,
+                        pan: pan || 'N/A',
+                        aadhaar: aadhaar || 'N/A',
+                        category: category || 'INDIVIDUAL',
+                        status: clientUser.status || 'ACTIVE'
+                    });
+                    client = newC.toObject ? newC.toObject() : newC;
+                    actualClientId = client._id || client.id;
+                }
+            }
+        }
+        if (!clientUser || String(clientUser.tenantId) !== String(tenantId)) {
             return res.status(404).json({ success: false, message: 'Client not found.' });
         }
         let finalEmail = email;
@@ -1168,9 +1463,9 @@ const updateClient = async (req, res) => {
         if (finalMobile && finalMobile.includes('*'))
             finalMobile = clientUser.mobile;
         if (finalPan && finalPan.includes('XXXX'))
-            finalPan = client.pan;
+            finalPan = client?.pan || '';
         if (finalAadhaar && finalAadhaar.includes('XXXX'))
-            finalAadhaar = client.aadhaar;
+            finalAadhaar = client?.aadhaar || '';
         if (!name || name.trim().length < 2 || !/^[a-zA-Z\s\.]+$/.test(name)) {
             return res.status(400).json({ success: false, message: 'Client name must contain only letters, dots, and spaces (min 2 chars).' });
         }
@@ -1182,29 +1477,33 @@ const updateClient = async (req, res) => {
         if (!finalMobile || !mobileRegex.test(finalMobile)) {
             return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
         }
-        if (!finalPan || !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(finalPan)) {
+        if (finalPan && finalPan !== 'N/A' && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(finalPan)) {
             return res.status(400).json({ success: false, message: 'Please enter a valid 10-character PAN.' });
         }
-        if (!finalAadhaar || !/^[0-9]{12}$/.test(finalAadhaar)) {
+        if (finalAadhaar && finalAadhaar !== 'N/A' && !/^[0-9]{12}$/.test(finalAadhaar)) {
             return res.status(400).json({ success: false, message: 'Please enter a valid 12-digit Aadhaar number.' });
         }
-        const existingEmail = await db_1.default.User.findOne({ email: finalEmail, _id: { $ne: client.userId } }).lean();
+        const existingEmail = await db_1.default.User.findOne({ email: finalEmail, _id: { $ne: clientUser._id } }).lean();
         if (existingEmail) {
             return res.status(400).json({ success: false, message: 'Email already in use by another user.' });
         }
-        const existingMobile = await db_1.default.User.findOne({ mobile: finalMobile, _id: { $ne: client.userId } }).lean();
+        const existingMobile = await db_1.default.User.findOne({ mobile: finalMobile, _id: { $ne: clientUser._id } }).lean();
         if (existingMobile) {
             return res.status(400).json({ success: false, message: 'Mobile number already in use by another user.' });
         }
-        const existingPan = await db_1.default.Client.findOne({ pan: finalPan, _id: { $ne: id } }).lean();
-        if (existingPan) {
-            return res.status(400).json({ success: false, message: 'PAN already in use by another client.' });
+        if (finalPan && finalPan !== 'N/A') {
+            const existingPan = await db_1.default.Client.findOne({ pan: finalPan, _id: { $ne: actualClientId } }).lean();
+            if (existingPan) {
+                return res.status(400).json({ success: false, message: 'PAN already in use by another client.' });
+            }
         }
-        const existingAadhaar = await db_1.default.Client.findOne({ aadhaar: finalAadhaar, _id: { $ne: id } }).lean();
-        if (existingAadhaar) {
-            return res.status(400).json({ success: false, message: 'Aadhaar number already in use by another client.' });
+        if (finalAadhaar && finalAadhaar !== 'N/A') {
+            const existingAadhaar = await db_1.default.Client.findOne({ aadhaar: finalAadhaar, _id: { $ne: actualClientId } }).lean();
+            if (existingAadhaar) {
+                return res.status(400).json({ success: false, message: 'Aadhaar number already in use by another client.' });
+            }
         }
-        await db_1.default.User.findByIdAndUpdate(client.userId, {
+        await db_1.default.User.findByIdAndUpdate(clientUser._id, {
             $set: {
                 firstName: name.split(' ')[0],
                 lastName: name.split(' ').slice(1).join(' ') || 'Client',
@@ -1212,19 +1511,19 @@ const updateClient = async (req, res) => {
                 mobile: finalMobile
             }
         });
-        if (finalPan !== client.pan) {
+        if (client && finalPan !== client.pan) {
             await db_1.default.ClientIdentityHistory.create({
-                clientId: client._id || client.id,
+                clientId: actualClientId,
                 fieldName: 'PAN',
-                oldValue: client.pan,
+                oldValue: client.pan || '',
                 newValue: finalPan,
                 changedBy: 'ADMIN',
                 remarks: 'Updated by Admin / Compliance Officer'
             });
         }
-        if (finalAadhaar !== client.aadhaar) {
+        if (client && finalAadhaar !== client.aadhaar) {
             await db_1.default.ClientIdentityHistory.create({
-                clientId: client._id || client.id,
+                clientId: actualClientId,
                 fieldName: 'AADHAAR',
                 oldValue: client.aadhaar || '',
                 newValue: finalAadhaar || '',
@@ -1232,7 +1531,7 @@ const updateClient = async (req, res) => {
                 remarks: 'Updated by Admin / Compliance Officer'
             });
         }
-        const updatedClient = await db_1.default.Client.findByIdAndUpdate(id, {
+        const updatedClient = await db_1.default.Client.findByIdAndUpdate(actualClientId, {
             $set: {
                 name,
                 email: finalEmail,
@@ -1243,12 +1542,12 @@ const updateClient = async (req, res) => {
                 occupation
             }
         }, { returnDocument: 'after', lean: true });
-        await db_1.default.ClientProfile.findOneAndUpdate({ clientId: id }, {
+        await db_1.default.ClientProfile.findOneAndUpdate({ clientId: actualClientId }, {
             $set: { addressLine1, city, state, zipCode },
-            $setOnInsert: { clientId: id, country: 'India' }
+            $setOnInsert: { clientId: actualClientId, country: 'India' }
         }, { upsert: true, returnDocument: 'after' });
-        const newClientVal = await db_1.default.Client.findById(id).lean();
-        const newClientProfile = await db_1.default.ClientProfile.findOne({ clientId: id }).lean();
+        const newClientVal = await db_1.default.Client.findById(actualClientId).lean();
+        const newClientProfile = await db_1.default.ClientProfile.findOne({ clientId: actualClientId }).lean();
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
@@ -1276,20 +1575,33 @@ const approveClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const client = await db_1.default.Client.findById(id).lean();
-        if (!client) {
+        let client = await db_1.default.Client.findById(id).lean();
+        let clientUser = null;
+        let actualClientId = id;
+        if (client) {
+            clientUser = await db_1.default.User.findById(client.userId).lean();
+        }
+        else {
+            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (client) {
+                clientUser = await db_1.default.User.findById(client.userId).lean();
+                actualClientId = client._id || client.id;
+            }
+            else {
+                clientUser = await db_1.default.User.findById(id).lean();
+            }
+        }
+        if (!clientUser || String(clientUser.tenantId) !== String(tenantId) || clientUser.status !== 'PENDING_APPROVAL') {
             return res.status(404).json({ success: false, message: 'Client not found or not pending approval.' });
         }
-        const clientUser = await db_1.default.User.findById(client.userId).lean();
-        if (!clientUser || clientUser.tenantId !== tenantId || clientUser.status !== 'PENDING_APPROVAL') {
-            return res.status(404).json({ success: false, message: 'Client not found or not pending approval.' });
-        }
-        await db_1.default.User.findByIdAndUpdate(client.userId, {
+        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
             $set: { status: 'ACTIVE', tempPassword: null }
         });
-        await db_1.default.Client.findByIdAndUpdate(id, {
-            $set: { status: 'KYC_PENDING' }
-        });
+        if (client?._id) {
+            await db_1.default.Client.findByIdAndUpdate(client._id, {
+                $set: { status: 'KYC_PENDING' }
+            });
+        }
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
@@ -1303,8 +1615,8 @@ const approveClient = async (req, res) => {
         const tenant = await db_1.default.Tenant.findById(tenantId).lean();
         await Promise.resolve().then(() => __importStar(require('../services/emailService'))).then(m => m.sendWelcomeEmail({
             tenantId,
-            toEmail: client.email,
-            name: client.name,
+            toEmail: clientUser.email,
+            name: client?.name || `${clientUser.firstName || ''} ${clientUser.lastName || ''}`.trim(),
             password: clientUser.tempPassword || 'Reset using Forgot Password',
             role: 'CLIENT',
             loginUrl,
@@ -1327,17 +1639,28 @@ const deleteClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const client = await db_1.default.Client.findById(id).lean();
-        if (!client) {
-            return res.status(404).json({ success: false, message: 'Active client not found.' });
+        let client = await db_1.default.Client.findById(id).lean();
+        let clientUser = null;
+        let actualClientId = id;
+        if (client) {
+            clientUser = await db_1.default.User.findById(client.userId).lean();
         }
-        const clientUser = await db_1.default.User.findById(client.userId).lean();
-        if (!clientUser || clientUser.tenantId !== tenantId || clientUser.deletedAt !== null) {
+        else {
+            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (client) {
+                clientUser = await db_1.default.User.findById(client.userId).lean();
+                actualClientId = client._id || client.id;
+            }
+            else {
+                clientUser = await db_1.default.User.findById(id).lean();
+            }
+        }
+        if (!clientUser || String(clientUser.tenantId) !== String(tenantId) || clientUser.deletedAt !== null) {
             return res.status(404).json({ success: false, message: 'Active client not found.' });
         }
         const now = new Date();
-        const deleteSuffix = `_deleted_${client._id || client.id}`;
-        await db_1.default.User.findByIdAndUpdate(client.userId, {
+        const deleteSuffix = `_deleted_${actualClientId}`;
+        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
             $set: {
                 deletedAt: now,
                 deletedBy: 'ADMIN',
@@ -1345,22 +1668,24 @@ const deleteClient = async (req, res) => {
                 mobile: `${clientUser.mobile}${deleteSuffix}`
             }
         });
-        await db_1.default.Client.findByIdAndUpdate(id, {
-            $set: {
-                status: 'INACTIVE',
-                email: `${client.email}${deleteSuffix}`,
-                mobile: `${client.mobile}${deleteSuffix}`,
-                pan: `${client.pan}${deleteSuffix}`,
-                aadhaar: `${client.aadhaar}${deleteSuffix}`
-            }
-        });
+        if (client?._id) {
+            await db_1.default.Client.findByIdAndUpdate(client._id, {
+                $set: {
+                    status: 'INACTIVE',
+                    email: `${client.email}${deleteSuffix}`,
+                    mobile: `${client.mobile}${deleteSuffix}`,
+                    pan: `${client.pan}${deleteSuffix}`,
+                    aadhaar: `${client.aadhaar}${deleteSuffix}`
+                }
+            });
+        }
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
             action: 'DELETE',
             module: 'CLIENTS',
-            oldValue: client,
-            newValue: { ...client, deletedAt: now, status: 'INACTIVE' },
+            oldValue: client || clientUser,
+            newValue: { ...(client || clientUser), deletedAt: now, status: 'INACTIVE' },
             ipAddress: req.ip
         });
         return res.status(200).json({
@@ -1380,29 +1705,42 @@ const restoreClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const client = await db_1.default.Client.findById(id).lean();
-        if (!client) {
+        let client = await db_1.default.Client.findById(id).lean();
+        let clientUser = null;
+        let actualClientId = id;
+        if (client) {
+            clientUser = await db_1.default.User.findById(client.userId).lean();
+        }
+        else {
+            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (client) {
+                clientUser = await db_1.default.User.findById(client.userId).lean();
+                actualClientId = client._id || client.id;
+            }
+            else {
+                clientUser = await db_1.default.User.findById(id).lean();
+            }
+        }
+        if (!clientUser || String(clientUser.tenantId) !== String(tenantId) || clientUser.deletedAt === null) {
             return res.status(404).json({ success: false, message: 'Deleted client not found.' });
         }
-        const clientUser = await db_1.default.User.findById(client.userId).lean();
-        if (!clientUser || clientUser.tenantId !== tenantId || clientUser.deletedAt === null) {
-            return res.status(404).json({ success: false, message: 'Deleted client not found.' });
-        }
-        const deleteSuffix = `_deleted_${client._id || client.id}`;
+        const deleteSuffix = `_deleted_${actualClientId}`;
         const origEmail = clientUser.email.replace(deleteSuffix, '');
         const origMobile = clientUser.mobile.replace(deleteSuffix, '');
-        const origPan = client.pan.replace(deleteSuffix, '');
-        const origAadhaar = client.aadhaar.replace(deleteSuffix, '');
+        const origPan = (client?.pan || '').replace(deleteSuffix, '');
+        const origAadhaar = (client?.aadhaar || '').replace(deleteSuffix, '');
         const dupEmail = await db_1.default.User.findOne({ email: origEmail, deletedAt: null }).lean();
         if (dupEmail)
             return res.status(400).json({ success: false, message: 'Cannot restore: Email is already in use by another active account.' });
         const dupMobile = await db_1.default.User.findOne({ mobile: origMobile, deletedAt: null }).lean();
         if (dupMobile)
             return res.status(400).json({ success: false, message: 'Cannot restore: Mobile is already in use by another active account.' });
-        const dupPan = await db_1.default.Client.findOne({ pan: origPan }).populate('userId').lean();
-        if (dupPan && dupPan.userId?.deletedAt === null)
-            return res.status(400).json({ success: false, message: 'Cannot restore: PAN is already in use by another active account.' });
-        await db_1.default.User.findByIdAndUpdate(client.userId, {
+        if (origPan && origPan !== 'N/A') {
+            const dupPan = await db_1.default.Client.findOne({ pan: origPan }).populate('userId').lean();
+            if (dupPan && dupPan.userId?.deletedAt === null)
+                return res.status(400).json({ success: false, message: 'Cannot restore: PAN is already in use by another active account.' });
+        }
+        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
             $set: {
                 deletedAt: null,
                 deletedBy: null,
@@ -1411,22 +1749,24 @@ const restoreClient = async (req, res) => {
                 mobile: origMobile
             }
         });
-        await db_1.default.Client.findByIdAndUpdate(id, {
-            $set: {
-                status: 'ACTIVE',
-                email: origEmail,
-                mobile: origMobile,
-                pan: origPan,
-                aadhaar: origAadhaar
-            }
-        });
+        if (client?._id) {
+            await db_1.default.Client.findByIdAndUpdate(client._id, {
+                $set: {
+                    status: 'ACTIVE',
+                    email: origEmail,
+                    mobile: origMobile,
+                    pan: origPan,
+                    aadhaar: origAadhaar
+                }
+            });
+        }
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
-            action: 'UPDATE',
+            action: 'RESTORE',
             module: 'CLIENTS',
-            oldValue: client,
-            newValue: { ...client, deletedAt: null, status: 'ACTIVE' },
+            oldValue: { deletedAt: clientUser.deletedAt },
+            newValue: { deletedAt: null, status: 'ACTIVE' },
             ipAddress: req.ip
         });
         return res.status(200).json({
@@ -1721,7 +2061,26 @@ const updateTenantSettings = async (req, res) => {
     const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, address, website, mobile } = req.body;
     const files = req.files;
     try {
-        const oldTenant = await db_1.default.Tenant.findById(tenantId).lean();
+        let oldTenant = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            oldTenant = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!oldTenant && tenantId) {
+            oldTenant = await db_1.default.Tenant.findOne({
+                $or: [{ id: tenantId }, { tenantId: tenantId }]
+            }).lean();
+        }
+        if (!oldTenant && tenantId) {
+            oldTenant = await db_1.centralModels.AllCompany.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
+                    { tenantId: tenantId }
+                ]
+            }).lean();
+        }
+        if (!oldTenant) {
+            oldTenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
         if (!oldTenant)
             return res.status(404).json({ success: false, message: 'Tenant not found' });
         const dataToUpdate = {};
@@ -1744,7 +2103,7 @@ const updateTenantSettings = async (req, res) => {
         if (mobile !== undefined)
             dataToUpdate.mobile = mobile;
         if (smtpHost !== undefined)
-            dataToUpdate.smtpHost = smtpHost;
+            dataToUpdate.smtpHost = smtpHost ? smtpHost.trim() : null;
         if (bankAccountName !== undefined)
             dataToUpdate.bankAccountName = bankAccountName;
         if (bankAccountNo !== undefined)
@@ -1794,13 +2153,18 @@ const updateTenantSettings = async (req, res) => {
         if (stripeSecretKey !== undefined)
             dataToUpdate.stripeSecretKey = stripeSecretKey;
         if (smtpPort !== undefined)
-            dataToUpdate.smtpPort = parseInt(smtpPort, 10) || null;
+            dataToUpdate.smtpPort = smtpPort ? (parseInt(smtpPort, 10) || 587) : null;
         if (smtpUser !== undefined)
-            dataToUpdate.smtpUser = smtpUser;
-        if (smtpPassword !== undefined)
-            dataToUpdate.smtpPassword = smtpPassword;
-        if (smtpFrom !== undefined)
-            dataToUpdate.smtpFrom = smtpFrom;
+            dataToUpdate.smtpUser = smtpUser ? smtpUser.trim() : null;
+        if (smtpPassword !== undefined && smtpPassword.trim() !== '') {
+            dataToUpdate.smtpPassword = smtpPassword.trim();
+        }
+        if (smtpFrom !== undefined) {
+            dataToUpdate.smtpFrom = smtpFrom ? smtpFrom.trim() : null;
+        }
+        else if (dataToUpdate.smtpUser || oldTenant?.smtpUser) {
+            dataToUpdate.smtpFrom = dataToUpdate.smtpUser || oldTenant?.smtpUser;
+        }
         if (kycFirst !== undefined)
             dataToUpdate.kycFirst = kycFirst === 'true' || kycFirst === true;
         if (welcomeEmailText !== undefined)
@@ -1825,20 +2189,67 @@ const updateTenantSettings = async (req, res) => {
         if (files?.internalPolicyPdf && files.internalPolicyPdf.length > 0) {
             dataToUpdate.internalPolicyUrl = `/uploads/branding/${files.internalPolicyPdf[0].filename}`;
         }
-        const updated = await db_1.default.Tenant.findByIdAndUpdate(tenantId, { $set: dataToUpdate }, { returnDocument: 'after', lean: true });
+        const targetTenantDocId = oldTenant?._id || oldTenant?.id || tenantId;
+        let updated = null;
+        if (targetTenantDocId && mongoose_1.default.Types.ObjectId.isValid(targetTenantDocId)) {
+            updated = await db_1.default.Tenant.findByIdAndUpdate(targetTenantDocId, { $set: dataToUpdate }, { returnDocument: 'after', lean: true, new: true });
+        }
+        if (!updated && tenantId) {
+            updated = await db_1.default.Tenant.findOneAndUpdate({ $or: [{ id: tenantId }, { tenantId }, ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : [])] }, { $set: dataToUpdate }, { returnDocument: 'after', lean: true, new: true });
+        }
+        if (!updated) {
+            updated = await db_1.default.Tenant.findOneAndUpdate({ deletedAt: null }, { $set: dataToUpdate }, { returnDocument: 'after', lean: true, new: true });
+        }
+        // Also update Central DB AllCompany and Tenant
+        await db_1.centralModels.AllCompany.findOneAndUpdate({ $or: [{ tenantId: tenantId }, ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []), ...(oldTenant?._id ? [{ _id: oldTenant._id }] : [])] }, { $set: dataToUpdate }, { new: true }).catch(() => { });
+        await db_1.centralModels.Tenant.findOneAndUpdate({ $or: [{ tenantId: tenantId }, ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []), ...(oldTenant?._id ? [{ _id: oldTenant._id }] : [])] }, { $set: dataToUpdate }, { new: true }).catch(() => { });
+        // Save/Sync to SystemSetting GLOBAL_SMTP so any service can resolve it immediately
+        if (dataToUpdate.smtpHost || dataToUpdate.smtpUser || (oldTenant?.smtpHost && dataToUpdate.smtpPassword)) {
+            const finalSmtpConfig = {
+                smtpHost: dataToUpdate.smtpHost !== undefined ? dataToUpdate.smtpHost : oldTenant?.smtpHost,
+                smtpPort: dataToUpdate.smtpPort !== undefined ? dataToUpdate.smtpPort : (oldTenant?.smtpPort || 587),
+                smtpUser: dataToUpdate.smtpUser !== undefined ? dataToUpdate.smtpUser : oldTenant?.smtpUser,
+                smtpPassword: dataToUpdate.smtpPassword || oldTenant?.smtpPassword,
+                smtpFrom: dataToUpdate.smtpFrom || dataToUpdate.smtpUser || oldTenant?.smtpFrom || oldTenant?.smtpUser
+            };
+            await db_1.centralModels.SystemSetting.findOneAndUpdate({ key: 'GLOBAL_SMTP' }, { $set: { value: JSON.stringify(finalSmtpConfig) }, $setOnInsert: { key: 'GLOBAL_SMTP' } }, { upsert: true }).catch(() => { });
+            await db_1.default.SystemSetting.findOneAndUpdate({ key: 'GLOBAL_SMTP' }, { $set: { value: JSON.stringify(finalSmtpConfig) }, $setOnInsert: { key: 'GLOBAL_SMTP' } }, { upsert: true }).catch(() => { });
+        }
+        // Sync Global Branding setting if applicable
+        if (dataToUpdate.logoUrl) {
+            try {
+                const existingSetting = await db_1.centralModels.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean();
+                let brandingData = {};
+                if (existingSetting?.value) {
+                    try {
+                        brandingData = JSON.parse(existingSetting.value);
+                    }
+                    catch { }
+                }
+                brandingData.logoUrl = dataToUpdate.logoUrl;
+                if (dataToUpdate.companyName)
+                    brandingData.appName = dataToUpdate.companyName;
+                await db_1.centralModels.SystemSetting.findOneAndUpdate({ key: 'GLOBAL_BRANDING' }, { key: 'GLOBAL_BRANDING', value: JSON.stringify(brandingData) }, { upsert: true }).catch(() => { });
+            }
+            catch { }
+        }
         await (0, auditService_1.logAudit)({
-            tenantId,
+            tenantId: String(tenantId),
             userId: req.user.id,
             action: 'UPDATE',
             module: 'TENANTS',
             oldValue: oldTenant,
             newValue: updated,
             ipAddress: req.ip
-        });
-        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'SETTINGS_UPDATE' }).catch((err) => {
+        }).catch(() => { });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(String(tenantId), { reason: 'SETTINGS_UPDATE' }).catch((err) => {
             console.warn('Background sync for tenant settings update error:', err);
         });
-        return res.status(200).json({ success: true, message: 'Settings updated and synchronized successfully', data: updated });
+        return res.status(200).json({
+            success: true,
+            message: 'Settings and logo updated successfully',
+            data: updated || { ...oldTenant, ...dataToUpdate }
+        });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -2507,17 +2918,71 @@ const exportClientsCSV = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant' });
     try {
         const dateFilter = getDateFilter(req);
-        const filterQuery = { tenantId };
+        // 1. Find client roles
+        const clientRoles = await db_1.default.Role.find({
+            name: { $regex: /^(client|user|customer|investor)$/i }
+        }).lean();
+        const clientRoleIds = clientRoles.map((r) => r._id || r.id);
+        const userFilter = {
+            $and: [
+                {
+                    $or: [
+                        { tenantId: tenantId },
+                        ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+                    ]
+                },
+                { deletedAt: null },
+                {
+                    $or: [
+                        { roleId: { $in: clientRoleIds } },
+                        { role: { $regex: /^(client|user|customer|investor)$/i } }
+                    ]
+                }
+            ]
+        };
         if (dateFilter)
-            filterQuery.createdAt = dateFilter;
-        const clients = await db_1.default.Client.find(filterQuery)
-            .populate('userId')
-            .sort({ createdAt: -1 })
-            .lean();
-        const clientIds = clients.map((c) => c._id || c.id);
-        const profiles = await db_1.default.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
-        const profileMap = new Map(profiles.map((p) => [String(p.clientId), p]));
-        const subscriptions = await db_1.default.Subscription.find({ clientId: { $in: clientIds }, status: 'ACTIVE' })
+            userFilter.createdAt = dateFilter;
+        const users = await db_1.default.User.find(userFilter).populate('roleId').sort({ createdAt: -1 }).lean();
+        const userIds = users.map((u) => u._id || u.id);
+        const userMap = new Map(users.map((u) => [String(u._id || u.id), u]));
+        const rawClients = await db_1.default.Client.find({
+            $or: [
+                { userId: { $in: userIds } },
+                { tenantId: tenantId },
+                ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+            ]
+        }).populate('userId').sort({ createdAt: -1 }).lean();
+        const clientByUserId = new Map(rawClients.map((c) => [String(c.userId?._id || c.userId?.id || c.userId || ''), c]));
+        const combinedClients = [...rawClients];
+        for (const u of users) {
+            const uIdStr = String(u._id || u.id);
+            if (!clientByUserId.has(uIdStr)) {
+                const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || 'Client';
+                const synthClient = {
+                    _id: u._id,
+                    id: uIdStr,
+                    userId: u,
+                    name: fullName,
+                    email: u.email,
+                    mobile: u.mobile || '',
+                    pan: u.pan || 'N/A',
+                    aadhaar: u.aadhaar || 'N/A',
+                    category: u.category || 'INDIVIDUAL',
+                    occupation: u.occupation || 'other',
+                    status: u.status || 'ACTIVE',
+                    kraVerified: false,
+                    createdById: u.createdById || null,
+                    createdAt: u.createdAt,
+                    updatedAt: u.updatedAt
+                };
+                combinedClients.push(synthClient);
+            }
+        }
+        const allClientIds = combinedClients.map((c) => c._id || c.id);
+        const allLookupIds = [...new Set([...allClientIds, ...userIds])];
+        const profiles = await db_1.default.ClientProfile.find({ clientId: { $in: allLookupIds } }).lean();
+        const profileMap = new Map(profiles.map((p) => [String(p.clientId || p.userId), p]));
+        const subscriptions = await db_1.default.Subscription.find({ clientId: { $in: allLookupIds }, status: 'ACTIVE' })
             .populate('planId')
             .lean();
         const subMap = new Map();
@@ -2527,7 +2992,7 @@ const exportClientsCSV = async (req, res) => {
                 subMap.set(cId, []);
             subMap.get(cId).push(sub);
         }
-        const agreements = await db_1.default.Agreement.find({ clientId: { $in: clientIds } }).lean();
+        const agreements = await db_1.default.Agreement.find({ clientId: { $in: allLookupIds } }).lean();
         const agMap = new Map();
         for (const ag of agreements) {
             const cId = String(ag.clientId);
@@ -2535,7 +3000,7 @@ const exportClientsCSV = async (req, res) => {
                 agMap.set(cId, []);
             agMap.get(cId).push(ag);
         }
-        const alerts = await db_1.default.ComplianceAlert.find({ clientId: { $in: clientIds } }).lean();
+        const alerts = await db_1.default.ComplianceAlert.find({ clientId: { $in: allLookupIds } }).lean();
         const alertMap = new Map();
         for (const al of alerts) {
             const cId = String(al.clientId);
@@ -2543,35 +3008,37 @@ const exportClientsCSV = async (req, res) => {
                 alertMap.set(cId, []);
             alertMap.get(cId).push(al);
         }
-        const creatorIds = [...new Set(clients.map((c) => c.createdById).filter(Boolean))];
+        const creatorIds = [...new Set(combinedClients.map((c) => c.createdById).filter(Boolean))];
         const creatorUsers = creatorIds.length > 0 ? await db_1.default.User.find({
             _id: { $in: creatorIds }
         }).populate('roleId').lean() : [];
         const creatorMap = new Map(creatorUsers.map((u) => [
             String(u._id || u.id),
-            `${u.firstName} ${u.lastName}`.trim() + ` (${u.roleId?.name || 'Staff'})`
+            `${u.firstName || ''} ${u.lastName || ''}`.trim() + ` (${u.roleId?.name || 'Staff'})`
         ]));
-        const csvData = clients.map((c) => {
+        const csvData = combinedClients.map((c) => {
             const cIdStr = String(c._id || c.id);
-            const user = c.userId || {};
-            const clientAlerts = alertMap.get(cIdStr) || [];
+            const uIdStr = String(c.userId?._id || c.userId?.id || c.userId || cIdStr);
+            const user = (c.userId && typeof c.userId === 'object' && c.userId.email) ? c.userId : (userMap.get(uIdStr) || {});
+            const clientAlerts = alertMap.get(cIdStr) || alertMap.get(uIdStr) || [];
             const isKraFailed = clientAlerts.some((a) => a.alertType === 'KYC_FAILED');
             const kraStatus = isKraFailed ? 'FAILED' : (c.status && c.status !== 'PENDING_ONBOARDING' && c.status !== 'KYC_PENDING' && c.status !== 'KYC_FAILED') ? 'VERIFIED' : 'PENDING';
-            const isEsignSigned = (agMap.get(cIdStr) || []).some((a) => a.status === 'SIGNED' || a.status === 'ACTIVE');
+            const isEsignSigned = (agMap.get(cIdStr) || agMap.get(uIdStr) || []).some((a) => a.status === 'SIGNED' || a.status === 'ACTIVE');
             let sourceStr = 'Self Signup';
-            if (c.createdById) {
-                sourceStr = creatorMap.get(String(c.createdById)) || 'Added by Staff/Admin';
+            const creatorId = c.createdById || user.createdById;
+            if (creatorId) {
+                sourceStr = creatorMap.get(String(creatorId)) || 'Added by Staff/Admin';
             }
-            const prof = profileMap.get(cIdStr);
-            const clientSubs = subMap.get(cIdStr) || [];
+            const prof = profileMap.get(cIdStr) || profileMap.get(uIdStr);
+            const clientSubs = subMap.get(cIdStr) || subMap.get(uIdStr) || [];
             return {
                 'Client ID': cIdStr,
-                'Name': c.name,
-                'Email': c.email,
-                'Mobile': c.mobile,
-                'PAN': c.pan,
-                'Aadhaar': c.aadhaar,
-                'Category': c.category,
+                'Name': c.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+                'Email': c.email || user.email,
+                'Mobile': c.mobile || user.mobile,
+                'PAN': c.pan || user.pan || 'N/A',
+                'Aadhaar': c.aadhaar || user.aadhaar || 'N/A',
+                'Category': c.category || 'INDIVIDUAL',
                 'Occupation': c.occupation || 'N/A',
                 'City': prof?.city || 'N/A',
                 'State': prof?.state || 'N/A',
@@ -2598,12 +3065,26 @@ const exportDeletedClientsCSV = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant' });
     try {
         const dateFilter = getDateFilter(req);
-        const clientRole = await db_1.default.Role.findOne({ name: 'CLIENT' }).lean();
-        const roleId = clientRole?._id || clientRole?.id;
+        const clientRoles = await db_1.default.Role.find({
+            name: { $regex: /^(client|user|customer|investor)$/i }
+        }).lean();
+        const clientRoleIds = clientRoles.map((r) => r._id || r.id);
         const userFilter = {
-            tenantId,
-            roleId,
-            deletedAt: { $ne: null }
+            $and: [
+                {
+                    $or: [
+                        { tenantId: tenantId },
+                        ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+                    ]
+                },
+                { deletedAt: { $ne: null } },
+                {
+                    $or: [
+                        { roleId: { $in: clientRoleIds } },
+                        { role: { $regex: /^(client|user|customer|investor)$/i } }
+                    ]
+                }
+            ]
         };
         if (dateFilter)
             userFilter.deletedAt = dateFilter;
@@ -2616,11 +3097,11 @@ const exportDeletedClientsCSV = async (req, res) => {
             return {
                 'User ID': String(u._id || u.id),
                 'Client ID': client ? String(client._id || client.id) : '',
-                'Name': `${u.firstName || ''} ${u.lastName || ''}`.trim(),
+                'Name': `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
                 'Email': u.email,
                 'Mobile': u.mobile,
-                'PAN': client?.pan || '',
-                'Aadhaar': client?.aadhaar || '',
+                'PAN': client?.pan || u.pan || '',
+                'Aadhaar': client?.aadhaar || u.aadhaar || '',
                 'Joined Date': u.createdAt ? new Date(u.createdAt).toISOString() : '',
                 'Deleted At': u.deletedAt ? new Date(u.deletedAt).toISOString() : '',
                 'Deleted By': u.deletedBy || ''

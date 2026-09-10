@@ -6,6 +6,7 @@ import {
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '../../contexts/BrandingContext';
+import ContactAdminModal from './ContactAdminModal';
 
 interface OnboardingWizardProps {
   profile: any;
@@ -18,7 +19,15 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const { appName, logoUrl } = useBranding();
   const currentUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {};
 
-
+  // Contact Admin Modal State
+  const [showContactAdminModal, setShowContactAdminModal] = useState(false);
+  const [contactAdminData, setContactAdminData] = useState<{
+    adminContact?: any;
+    plan?: any;
+    finalPrice?: string | number;
+    appliedCoupon?: any;
+    customMessage?: string;
+  }>({});
 
   // Settings
   const kycFirst = profile?.user?.tenant?.kycFirst !== false; // Default true
@@ -294,7 +303,31 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const handleSelectPlan = async (planId: string) => {
     setLoading(true);
     try {
-      const activeGateway = profile?.user?.tenant?.activePaymentGateway || 'CCAVENUE';
+      const selectedPlan = availablePlans.find(p => (p.id || p._id) === planId);
+
+      // STEP 1: API call to check payment gateway credentials configured by Admin
+      let gatewayStatusRes: any = null;
+      try {
+        gatewayStatusRes = await api.getPaymentGatewayStatus();
+      } catch (err) {
+        console.warn('Payment gateway status check encountered an error:', err);
+      }
+
+      if (gatewayStatusRes && gatewayStatusRes.isConfigured === false) {
+        // Payment gateway is NOT configured with credentials by Admin -> Open Contact Admin Modal
+        setContactAdminData({
+          adminContact: gatewayStatusRes.adminContact || profile?.user?.tenant,
+          plan: selectedPlan || { id: planId, name: 'Selected Plan' },
+          finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
+          appliedCoupon: appliedCoupon,
+          customMessage: gatewayStatusRes.message || 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+        });
+        setShowContactAdminModal(true);
+        setLoading(false);
+        return;
+      }
+
+      const activeGateway = (gatewayStatusRes?.activeGateway || profile?.user?.tenant?.activePaymentGateway || 'RAZORPAY').toUpperCase();
 
       if (activeGateway === 'RAZORPAY') {
         const res = await api.initiateRazorpayPayment({
@@ -350,6 +383,18 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           rzp.open();
           setLoading(false);
         } else {
+          if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
+            setContactAdminData({
+              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              plan: selectedPlan || { id: planId, name: 'Selected Plan' },
+              finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
+              appliedCoupon: appliedCoupon,
+              customMessage: res.message
+            });
+            setShowContactAdminModal(true);
+            setLoading(false);
+            return;
+          }
           throw new Error(res.message || 'Failed to initiate Razorpay payment');
         }
 
@@ -380,11 +425,35 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           document.body.appendChild(form);
           form.submit();
         } else {
+          if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
+            setContactAdminData({
+              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              plan: selectedPlan || { id: planId, name: 'Selected Plan' },
+              finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
+              appliedCoupon: appliedCoupon,
+              customMessage: res.message
+            });
+            setShowContactAdminModal(true);
+            setLoading(false);
+            return;
+          }
           throw new Error(res.message || 'Failed to initiate payment');
         }
       }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to select plan');
+      if (err.message && (err.message.toLowerCase().includes('contact the administrator') || err.message.toLowerCase().includes('not configured'))) {
+        const selectedPlan = availablePlans.find(p => (p.id || p._id) === planId);
+        setContactAdminData({
+          adminContact: profile?.user?.tenant,
+          plan: selectedPlan || { id: planId, name: 'Selected Plan' },
+          finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
+          appliedCoupon: appliedCoupon,
+          customMessage: err.message
+        });
+        setShowContactAdminModal(true);
+      } else {
+        toast.error(err.message || 'Failed to select plan');
+      }
       setLoading(false);
     }
   };
@@ -675,6 +744,18 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
           {renderStepContent(STEPS[currentStep].id)}
         </div>
       </div>
+
+      {/* Contact Admin Modal for unconfigured gateways */}
+      <ContactAdminModal
+        isOpen={showContactAdminModal}
+        onClose={() => setShowContactAdminModal(false)}
+        plan={contactAdminData.plan}
+        finalPrice={contactAdminData.finalPrice}
+        appliedCoupon={contactAdminData.appliedCoupon}
+        adminContact={contactAdminData.adminContact}
+        userProfile={profile}
+        customMessage={contactAdminData.customMessage}
+      />
     </div>
   );
 }

@@ -37,14 +37,14 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // Resolve URLs: paths starting with /uploads/ need the backend base URL
         const BACKEND = base_ra_url;
 
-        const resolveUrl = (url: string, fallback: string) => {
+        const resolveUrl = (url: string | undefined | null, fallback: string = '') => {
           if (!url) return fallback;
           if (url.startsWith('/uploads/')) return BACKEND + url;
           return url;
         };
 
         const newBranding = {
-          appName: res.data.data.appName || defaultBranding.appName,
+          appName: res.data.data.appName !== undefined ? res.data.data.appName : defaultBranding.appName,
           logoUrl: resolveUrl(res.data.data.logoUrl, defaultBranding.logoUrl),
           loginLogoUrl: resolveUrl(res.data.data.loginLogoUrl, defaultBranding.loginLogoUrl),
           faviconUrl: resolveUrl(res.data.data.faviconUrl, defaultBranding.faviconUrl),

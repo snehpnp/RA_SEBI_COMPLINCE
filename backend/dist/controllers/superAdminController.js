@@ -32,14 +32,17 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCompanyStaff = exports.getCompanyClients = exports.testMongoConnection = exports.verifyDomainUrl = exports.syncAllTenantsApi = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const mongodb_1 = require("mongodb");
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const crypto = __importStar(require("crypto"));
 const auditService_1 = require("../services/auditService");
-const tenantProvisionService_1 = require("../services/tenantProvisionService");
 const tenantProvisionEngine_1 = require("../services/tenantProvisionEngine");
 const tenantConnectionManager_1 = require("../services/tenantConnectionManager");
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
@@ -295,7 +298,12 @@ const getTenants = async (req, res) => {
         const companies = await db_1.centralModels.AllCompany.find({})
             .sort({ createdAt: -1 })
             .lean();
-        return res.status(200).json({ success: true, data: companies });
+        const mapped = companies.map((c) => ({
+            ...c,
+            id: c._id ? c._id.toString() : c.id,
+            _id: c._id ? c._id.toString() : c.id
+        }));
+        return res.status(200).json({ success: true, data: mapped });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -317,23 +325,6 @@ const toggleTenantStatus = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
         const updatedCompany = await db_1.centralModels.AllCompany.findByIdAndUpdate(oldCompany._id || oldCompany.id, { $set: { status } }, { returnDocument: 'after', lean: true });
-        // Update company's dedicated database
-        try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
-            if (resolved) {
-                await resolved.models.Tenant.updateMany({}, { $set: { status } }).catch(() => { });
-                await resolved.models.User.updateMany({}, {
-                    $set: {
-                        status: status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
-                        currentSessionId: null
-                    },
-                    $inc: { tokenVersion: 1 }
-                }).catch(() => { });
-            }
-        }
-        catch (err) {
-            console.warn('Sync status to tenant DB warning:', err.message);
-        }
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync status change to remote domainUrl API if configured
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'STATUS_CHANGE' }).catch((syncErr) => {
@@ -369,17 +360,6 @@ const deleteTenant = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
         const updatedCompany = await db_1.centralModels.AllCompany.findByIdAndUpdate(oldCompany._id || oldCompany.id, { $set: { status: 'DELETED' } }, { returnDocument: 'after', lean: true });
-        // Mark users and tenant as DELETED in company's dedicated DB
-        try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
-            if (resolved) {
-                await resolved.models.Tenant.updateMany({}, { $set: { status: 'DELETED', deletedAt: new Date() } }).catch(() => { });
-                await resolved.models.User.updateMany({}, { $set: { status: 'DELETED', deletedAt: new Date() } }).catch(() => { });
-            }
-        }
-        catch (err) {
-            console.warn('Sync soft-delete to tenant DB warning:', err.message);
-        }
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync soft delete to remote domainUrl API if configured
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'DELETE' }).catch((syncErr) => {
@@ -415,17 +395,6 @@ const restoreTenant = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         }
         const updatedCompany = await db_1.centralModels.AllCompany.findByIdAndUpdate(oldCompany._id || oldCompany.id, { $set: { status: 'ACTIVE' } }, { returnDocument: 'after', lean: true });
-        // Restore users and tenant in company's dedicated DB
-        try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
-            if (resolved) {
-                await resolved.models.Tenant.updateMany({}, { $set: { status: 'ACTIVE', deletedAt: null } }).catch(() => { });
-                await resolved.models.User.updateMany({}, { $set: { status: 'ACTIVE', deletedAt: null } }).catch(() => { });
-            }
-        }
-        catch (err) {
-            console.warn('Sync restore to tenant DB warning:', err.message);
-        }
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync restore to remote domainUrl API if configured
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'RESTORE' }).catch((syncErr) => {
@@ -683,31 +652,33 @@ const getTenantDetails = async (req, res) => {
         let admin = null;
         let officers = [];
         let allStaff = [];
-        // Try to get live details from tenant's dedicated database
+        // Get live details from Central Database
         try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(company?.tenantId || id);
-            if (resolved) {
-                const liveTenant = await resolved.models.Tenant.findOne({}).lean();
-                const users = await resolved.models.User.find({}).populate('roleId').lean();
-                const staffRecords = await resolved.models.Staff.find({}).populate('personAssociated').lean();
-                const staffMap = new Map(staffRecords.map((s) => [String(s.userId), s]));
-                if (liveTenant) {
-                    tenantData = { ...company, ...liveTenant };
-                    admin = users.find((u) => u.roleId?.name === 'ADMIN');
-                    officers = users.filter((u) => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.roleId?.name)) || [];
-                    allStaff = users.filter((u) => u.roleId?.name !== 'CLIENT').map((u) => {
-                        const st = staffMap.get(String(u._id || u.id));
-                        return {
-                            id: st ? String(st._id || st.id) : String(u._id || u.id),
-                            userId: String(u._id || u.id),
-                            name: st?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
-                            email: st?.email || u.email,
-                            mobile: st?.mobile || u.mobile,
-                            role: u.roleId?.name || 'STAFF',
-                            status: st?.status || u.status || 'ACTIVE'
-                        };
-                    }) || [];
-                }
+            const liveTenant = await db_1.centralModels.Tenant.findOne({
+                $or: isObjectId ? [{ _id: id.trim() }, { id: id.trim() }] : [{ email: company?.email }]
+            }).lean();
+            const users = await db_1.centralModels.User.find({
+                $or: isObjectId ? [{ tenantId: id.trim() }] : [{ email: company?.email }]
+            }).populate('roleId').lean();
+            const userIds = users.map((u) => u._id || u.id);
+            const staffRecords = await db_1.centralModels.Staff.find({ userId: { $in: userIds } }).lean();
+            const staffMap = new Map(staffRecords.map((s) => [String(s.userId), s]));
+            if (liveTenant) {
+                tenantData = { ...company, ...liveTenant };
+                admin = users.find((u) => u.roleId?.name === 'ADMIN');
+                officers = users.filter((u) => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.roleId?.name)) || [];
+                allStaff = users.filter((u) => u.roleId?.name !== 'CLIENT').map((u) => {
+                    const st = staffMap.get(String(u._id || u.id));
+                    return {
+                        id: st ? String(st._id || st.id) : String(u._id || u.id),
+                        userId: String(u._id || u.id),
+                        name: st?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+                        email: st?.email || u.email,
+                        mobile: st?.mobile || u.mobile,
+                        role: u.roleId?.name || 'STAFF',
+                        status: st?.status || u.status || 'ACTIVE'
+                    };
+                }) || [];
             }
         }
         catch {
@@ -943,43 +914,9 @@ const updateTenantDetails = async (req, res) => {
                 mongoDbUrl: updatedTenant.mongoDbUrl || tenantConnectionManager_1.tenantConnectionManager.buildTenantMongoUri(updatedTenant.dbName || tenantConnectionManager_1.tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id))
             }
         }, { upsert: true, returnDocument: 'after' }).catch(() => { });
-        // Sync updates directly to the dedicated Tenant Database
-        try {
-            const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
-            if (resolved) {
-                await resolved.models.Tenant.updateMany({}, {
-                    $set: {
-                        companyName: updatedTenant.companyName,
-                        domainUrl: updatedTenant.domainUrl,
-                        ownerName: updatedTenant.ownerName,
-                        email: updatedTenant.email,
-                        mobile: updatedTenant.mobile,
-                        address: updatedTenant.address,
-                        pan: updatedTenant.pan,
-                        gst: updatedTenant.gst,
-                        website: updatedTenant.website,
-                        status: updatedTenant.status
-                    }
-                }).catch(() => { });
-                if (adminUser) {
-                    await resolved.models.User.updateMany({ email: adminUser.email }, {
-                        $set: {
-                            firstName: adminUser.firstName,
-                            lastName: adminUser.lastName,
-                            mobile: adminUser.mobile,
-                            status: adminUser.status,
-                            ...(adminUser.passwordHash ? { passwordHash: adminUser.passwordHash, tempPassword: adminUser.tempPassword } : {})
-                        }
-                    }).catch(() => { });
-                }
-            }
-        }
-        catch (dbErr) {
-            console.warn('Sync to dedicated tenant DB warning:', dbErr.message);
-        }
         // Invalidate cached connection metadata so changes take effect immediately
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
-        // Auto-sync company & admin updates to remote domainUrl API and dedicated MongoDB in background
+        // Auto-sync company & admin updates to remote domainUrl API
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, {
             reason: 'UPDATE',
             adminPassword
@@ -1273,55 +1210,31 @@ exports.updateComplianceRule = updateComplianceRule;
 const provisionTenantDb = async (req, res) => {
     const { id } = req.params;
     try {
-        const tenant = await db_1.default.Tenant.findById(id).lean();
+        const tenant = await db_1.default.Tenant.findById(id).lean() ||
+            await db_1.centralModels.AllCompany.findOne({
+                $or: mongoose_1.default.Types.ObjectId.isValid(id) ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+            }).lean();
         if (!tenant) {
-            return res.status(404).json({ success: false, message: 'Tenant company not found' });
+            return res.status(404).json({ success: false, message: 'Tenant not found' });
         }
-        if (!tenant.mongoDbUrl || !tenant.mongoDbUrl.trim()) {
-            return res.status(400).json({
-                success: false,
-                message: 'No MongoDB Connection URL configured for this company. Please set MongoDB Connection URL first in Edit Company.'
-            });
-        }
-        const adminRole = await db_1.default.Role.findOne({ name: 'ADMIN' }).lean();
-        const adminUser = await db_1.default.User.findOne({
-            tenantId: id,
-            ...(adminRole ? { roleId: adminRole._id || adminRole.id } : {})
-        }).lean();
-        if (!adminUser) {
-            return res.status(404).json({ success: false, message: 'No Admin user found for this company.' });
-        }
-        const connRes = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(id);
-        if (!connRes) {
-            return res.status(500).json({ success: false, message: 'Could not connect to tenant database' });
-        }
-        const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(connRes.models, tenant, {
-            id: String(adminUser._id || adminUser.id),
-            email: adminUser.email,
-            passwordHash: adminUser.passwordHash,
-            tempPassword: adminUser.tempPassword,
-            firstName: adminUser.firstName,
-            lastName: adminUser.lastName,
-            mobile: adminUser.mobile,
-            status: adminUser.status || (tenant.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE')
-        });
+        const syncRes = await (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, { reason: 'PROVISION_DB' });
         await (0, auditService_1.logAudit)({
             userId: req.user.id,
             action: 'UPDATE',
             module: 'TENANTS',
-            newValue: { ...tenant, dbProvisionedAt: new Date() },
+            newValue: { ...tenant, dbProvisionedAt: new Date(), syncRes },
             ipAddress: req.ip
         }).catch(() => { });
         return res.status(200).json({
-            success: true,
-            message: 'Tenant database provisioned successfully.',
-            data: result
+            success: syncRes.success,
+            message: syncRes.message || 'Tenant panel synchronized successfully via API.',
+            data: syncRes
         });
     }
     catch (error) {
         return res.status(500).json({
             success: false,
-            message: 'Failed to provision tenant database: ' + error.message,
+            message: 'Failed to provision/sync tenant: ' + error.message,
             errors: [error.message]
         });
     }
@@ -1330,6 +1243,13 @@ exports.provisionTenantDb = provisionTenantDb;
 const syncTenantApi = async (req, res) => {
     const { id } = req.params;
     const { targetUrl } = req.body;
+    if (!id || id === 'undefined' || !mongoose_1.default.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Invalid company ID provided for API synchronization.',
+            errors: ['Invalid company ID']
+        });
+    }
     try {
         const result = await (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, {
             targetUrl,
@@ -1582,10 +1502,11 @@ const getCompanyClients = async (req, res) => {
                 }
             }
         }
-        // 2. Fallback to Local Platform Database
-        const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(tenantIdStr);
-        const dbModels = resolved ? resolved.models : db_1.default;
-        const localClients = await dbModels.Client.find({})
+        // 2. Fallback to Central Master Database
+        const dbModels = db_1.centralModels;
+        const localClients = await dbModels.Client.find({
+            $or: [{ tenantId: tenantIdStr }, { tenantId: id.trim() }]
+        })
             .populate('userId', 'email mobile firstName lastName status createdAt lastLogin')
             .sort({ createdAt: -1 })
             .lean();
@@ -1751,11 +1672,12 @@ const getCompanyStaff = async (req, res) => {
                 }
             }
         }
-        // 2. Fallback to Local Platform Database
-        const resolved = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(tenantIdStr);
-        const dbModels = resolved ? resolved.models : db_1.default;
+        // 2. Fallback to Central Master Database
+        const dbModels = db_1.centralModels;
         const clientRole = await dbModels.Role.findOne({ name: 'CLIENT' }).lean();
-        const filterQuery = { tenantId: tenantIdStr };
+        const filterQuery = {
+            $or: [{ tenantId: tenantIdStr }, { tenantId: id.trim() }]
+        };
         if (clientRole) {
             filterQuery.roleId = { $ne: clientRole._id || clientRole.id };
         }

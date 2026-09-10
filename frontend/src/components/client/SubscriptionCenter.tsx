@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { CreditCard, CheckCircle2, Star, Zap, Shield, ChevronRight, Loader2 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
+import ContactAdminModal from './ContactAdminModal';
 
 export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { profile?: any, onTriggerOnboarding?: () => void }) {
   const [activeTab, setActiveTab] = useState<'active' | 'browse'>('active');
@@ -18,7 +19,16 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
-  
+
+  // Contact Admin Modal State
+  const [showContactAdminModal, setShowContactAdminModal] = useState(false);
+  const [contactAdminData, setContactAdminData] = useState<{
+    adminContact?: any;
+    plan?: any;
+    finalPrice?: string | number;
+    appliedCoupon?: any;
+    customMessage?: string;
+  }>({});
 
   const handleApplyCoupon = async () => {
     if (!couponCode) return;
@@ -76,8 +86,32 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
       if (gstType === 'EXCLUSIVE') {
         price = price * 1.18; // Add 18% GST
       }
+      const formattedPrice = price.toFixed(2);
 
-      const activeGateway = profile?.user?.tenant?.activePaymentGateway || 'CCAVENUE';
+      // STEP 1: API call to check payment gateway credentials configured by Admin
+      let gatewayStatusRes: any = null;
+      try {
+        gatewayStatusRes = await api.getPaymentGatewayStatus();
+      } catch (err) {
+        console.warn('Payment gateway status check encountered an error:', err);
+      }
+
+      if (gatewayStatusRes && gatewayStatusRes.isConfigured === false) {
+        // Payment gateway is NOT configured with credentials by Admin -> Open Contact Admin Modal
+        setContactAdminData({
+          adminContact: gatewayStatusRes.adminContact || profile?.user?.tenant,
+          plan: checkoutPlan,
+          finalPrice: formattedPrice,
+          appliedCoupon: appliedCoupon,
+          customMessage: gatewayStatusRes.message || 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+        });
+        setCheckoutPlan(null);
+        setShowContactAdminModal(true);
+        setLoading(false);
+        return;
+      }
+
+      const activeGateway = (gatewayStatusRes?.activeGateway || profile?.user?.tenant?.activePaymentGateway || 'RAZORPAY').toUpperCase();
 
       if (activeGateway === 'RAZORPAY') {
         const res = await api.initiateRazorpayPayment({
@@ -105,7 +139,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                   planId: checkoutPlan.id || checkoutPlan._id,
                   couponCode: appliedCoupon ? appliedCoupon.code : undefined
                 });
-              
+
                 if (verifyRes.success) {
                   toast.success('Payment successful!');
                   window.location.href = '/client?payment=success';
@@ -133,6 +167,18 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
           });
           rzp.open();
         } else {
+          if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
+            setContactAdminData({
+              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              plan: checkoutPlan,
+              finalPrice: formattedPrice,
+              appliedCoupon: appliedCoupon,
+              customMessage: res.message
+            });
+            setCheckoutPlan(null);
+            setShowContactAdminModal(true);
+            return;
+          }
           throw new Error(res.message || 'Failed to initiate Razorpay payment');
         }
       } else {
@@ -162,11 +208,35 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
           document.body.appendChild(form);
           form.submit();
         } else {
+          if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
+            setContactAdminData({
+              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              plan: checkoutPlan,
+              finalPrice: formattedPrice,
+              appliedCoupon: appliedCoupon,
+              customMessage: res.message
+            });
+            setCheckoutPlan(null);
+            setShowContactAdminModal(true);
+            return;
+          }
           throw new Error(res.message || 'Failed to initiate payment');
         }
       }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to process payment');
+      if (err.message && (err.message.toLowerCase().includes('contact the administrator') || err.message.toLowerCase().includes('not configured'))) {
+        setContactAdminData({
+          adminContact: profile?.user?.tenant,
+          plan: checkoutPlan,
+          finalPrice: undefined,
+          appliedCoupon: appliedCoupon,
+          customMessage: err.message
+        });
+        setCheckoutPlan(null);
+        setShowContactAdminModal(true);
+      } else {
+        toast.error(err.message || 'Failed to process payment');
+      }
     } finally {
       setLoading(false);
     }
@@ -496,8 +566,22 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
               </div>
             </div>
           )}
+
+          {/* Contact Admin Modal for unconfigured gateways */}
+          <ContactAdminModal
+            isOpen={showContactAdminModal}
+            onClose={() => setShowContactAdminModal(false)}
+            plan={contactAdminData.plan}
+            finalPrice={contactAdminData.finalPrice}
+            appliedCoupon={contactAdminData.appliedCoupon}
+            adminContact={contactAdminData.adminContact}
+            userProfile={profile}
+            customMessage={contactAdminData.customMessage}
+          />
         </div>
       )}
     </div>
   );
 }
+
+  

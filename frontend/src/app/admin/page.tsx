@@ -12,6 +12,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
+import { base_ra_url } from '@/utils/config';
 import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
@@ -397,7 +398,7 @@ function AdminDashboardContent() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const { appName, logoUrl: appLogo } = useBranding();
+  const { appName, logoUrl: appLogo, refreshBranding } = useBranding();
   const router = useRouter();
 
   // Dashboard & Auth states
@@ -919,6 +920,7 @@ function AdminDashboardContent() {
   const [termsPdf, setTermsPdf] = useState(null);
   const [internalPolicyPdf, setInternalPolicyPdf] = useState(null);
   const [logoFile, setLogoFile] = useState<any>(null);
+  const [tenantLogoUrl, setTenantLogoUrl] = useState<string>('');
   const [privacyPdf, setPrivacyPdf] = useState(null);
   const [termsPdfUrl, setTermsPdfUrl] = useState('');
   const [privacyPdfUrl, setPrivacyPdfUrl] = useState('');
@@ -1140,7 +1142,7 @@ function AdminDashboardContent() {
     try {
       const tab = activeTabRef.current;
 
-      if (initStep) {
+      if (initStep || tab === 'settings') {
         try {
           const comp = await api.getProfileCompleteness();
           if (comp.success) {
@@ -1149,6 +1151,7 @@ function AdminDashboardContent() {
 
             const t = comp.data.data;
             if (t) {
+              if (t.logoUrl) setTenantLogoUrl(t.logoUrl);
               if (t.address) setOrgAddress(t.address);
               if (t.website) setOrgWebsite(t.website);
               if (t.mobile) setOrgMobile(t.mobile);
@@ -1612,8 +1615,8 @@ function AdminDashboardContent() {
 
 
   const handleTestSmtp = async () => {
-    if (!smtpHost || !smtpPort || !smtpUser || !smtpPassword || !testSmtpEmail) {
-      toast.error('Please fill all SMTP details and the Test Email Address');
+    if (!testSmtpEmail || !testSmtpEmail.trim()) {
+      toast.error('Please enter the Test Email Address to receive the test email');
       return;
     }
     setIsTestingSmtp(true);
@@ -1623,10 +1626,10 @@ function AdminDashboardContent() {
         port: smtpPort,
         user: smtpUser,
         password: smtpPassword,
-        testEmail: testSmtpEmail
+        testEmail: testSmtpEmail.trim()
       });
       if (data.success) {
-        toast.success(data.message || 'Test email sent successfully!');
+        toast.success(data.message || 'Test email sent successfully! Please check your inbox.');
       } else {
         toast.error(data.message || 'Failed to send test email');
       }
@@ -1653,11 +1656,13 @@ function AdminDashboardContent() {
       if (internalPolicyPdf) formData.append('internalPolicyPdf', internalPolicyPdf);
       if (logoFile) formData.append('logo', logoFile);
       if (privacyPdf) formData.append('privacyPdf', privacyPdf);
-      if (smtpHost) formData.append('smtpHost', smtpHost);
-      if (smtpPort) formData.append('smtpPort', smtpPort);
-      if (smtpUser) formData.append('smtpUser', smtpUser);
-      if (smtpPassword) formData.append('smtpPassword', smtpPassword);
-      if (smtpFrom) formData.append('smtpFrom', smtpFrom);
+      formData.append('smtpHost', (smtpHost || '').trim());
+      formData.append('smtpPort', (smtpPort || '').toString().trim());
+      formData.append('smtpUser', (smtpUser || '').trim());
+      if (smtpPassword && smtpPassword.trim()) {
+        formData.append('smtpPassword', smtpPassword.trim());
+      }
+      formData.append('smtpFrom', (smtpFrom || smtpUser || '').trim());
       if (bankAccountName) formData.append('bankAccountName', bankAccountName);
       if (bankAccountNo) formData.append('bankAccountNo', bankAccountNo);
       if (bankAccountType) formData.append('bankAccountType', bankAccountType);
@@ -1683,18 +1688,28 @@ function AdminDashboardContent() {
 
       const data = await api.updateTenantSettings(formData);
       if (data.success) {
-        toast('Settings saved!');
+        toast.success('Settings and logo saved successfully!');
         if (data.data) {
+          if (data.data.logoUrl) {
+            setTenantLogoUrl(data.data.logoUrl);
+          }
+          if (data.data.smtpHost) setSmtpHost(data.data.smtpHost);
+          if (data.data.smtpPort) setSmtpPort(data.data.smtpPort.toString());
+          if (data.data.smtpUser) setSmtpUser(data.data.smtpUser);
+          if (data.data.smtpPassword) setSmtpPassword(data.data.smtpPassword);
+          if (data.data.smtpFrom) setSmtpFrom(data.data.smtpFrom);
           setUser((prevUser: any) => {
             const updatedUser = { ...prevUser, tenant: data.data };
             localStorage.setItem('user', JSON.stringify(updatedUser));
             return updatedUser;
           });
         }
-        loadData();
+        setLogoFile(null);
+        if (refreshBranding) await refreshBranding();
+        await loadData(true);
       }
-      else { toast(data.message); }
-    } catch (err: any) { toast(err.message); }
+      else { toast.error(data.message || 'Failed to save settings'); }
+    } catch (err: any) { toast.error(err.message || 'Failed to save settings'); }
   };
 
   const handleVerifyPaymentGateway = async () => {
@@ -7536,14 +7551,45 @@ function AdminDashboardContent() {
 
                               <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Company Logo</label>
                               <div className="flex items-start gap-6">
-                                {(logoFile || appLogo) && (
+                                {(logoFile || tenantLogoUrl || appLogo) && (
                                   <div className="shrink-0 p-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-                                    <img src={logoFile ? URL.createObjectURL(logoFile) : appLogo} alt="Company Logo" className="h-16 w-auto object-contain max-w-[120px]" />
+                                    <img
+                                      src={
+                                        logoFile
+                                          ? URL.createObjectURL(logoFile)
+                                          : tenantLogoUrl
+                                          ? (tenantLogoUrl.startsWith('http') ? tenantLogoUrl : `${base_ra_url}${tenantLogoUrl}`)
+                                          : appLogo
+                                      }
+                                      alt="Company Logo"
+                                      className="h-16 w-auto object-contain max-w-[140px]"
+                                    />
                                   </div>
                                 )}
-                                <div className="flex-1">
-                                  <input type="file" accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] as any)} className="w-full max-w-md text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                  <p className="text-xs text-slate-500 mt-2">Appears on Research Reports & Invoices.</p>
+                                <div className="flex-1 space-y-2">
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                                    onChange={e => {
+                                      if (e.target.files && e.target.files[0]) {
+                                        setLogoFile(e.target.files[0]);
+                                      }
+                                    }}
+                                    className="w-full max-w-md text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 cursor-pointer"
+                                  />
+                                  <p className="text-xs text-slate-500">Appears on Research Reports, Client Portal & Invoices (PNG, JPG, SVG, WebP).</p>
+                                  {logoFile && (
+                                    <div className="flex items-center space-x-2 text-xs text-emerald-600 font-semibold">
+                                      <span>✓ New file selected: {logoFile.name} (Click "Save Settings" below to apply)</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setLogoFile(null)}
+                                        className="text-red-500 hover:underline font-bold ml-2"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -7954,10 +8000,13 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Username (Email)</label>
                                   <input type="email" value={smtpUser} onChange={e => setSmtpUser(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. you@gmail.com" />
                                 </div>
-
                                 <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Password (App Password)</label>
                                   <input type="password" value={smtpPassword} onChange={e => setSmtpPassword(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Enter password to update" />
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Sender Name / From Header (Optional)</label>
+                                  <input type="text" value={smtpFrom} onChange={e => setSmtpFrom(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. RAGCP Support or leave blank to use Username" />
                                 </div>
                               </div>
 

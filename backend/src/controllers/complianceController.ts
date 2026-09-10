@@ -12,7 +12,7 @@ export const checkComplianceForTenant = async (tenantId: string) => {
 
   // DO NOT run compliance checks for tenants that haven't finished onboarding
   const completeness = await calculateCompleteness(tenantId);
-  if (completeness === 0 || completeness.score < 100) {
+  if (!completeness || completeness.score < 100) {
     return []; // Return empty alerts, skipping all checks
   }
 

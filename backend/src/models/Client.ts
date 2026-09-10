@@ -4,6 +4,7 @@ import { baseSchemaOptions } from './_schemaOptions';
 export interface IClient extends Document {
   _id: Types.ObjectId;
   id: string;
+  tenantId?: Types.ObjectId | null;
   userId: Types.ObjectId;
   name: string;
   email: string;
@@ -22,6 +23,7 @@ export interface IClient extends Document {
 
 export const ClientSchema = new Schema<IClient>(
   {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     name: { type: String, required: true },
     email: { type: String, required: true },

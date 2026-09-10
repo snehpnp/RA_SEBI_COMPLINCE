@@ -42,45 +42,61 @@ const db_1 = require("../config/db");
 const crypto = __importStar(require("crypto"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-const tenantProvisionService_1 = require("./tenantProvisionService");
+const mongoose_1 = __importDefault(require("mongoose"));
+const tenantConnectionManager_1 = require("./tenantConnectionManager");
 /**
  * Dispatches synchronization for a specific tenant to its configured domainUrl API
  * and/or its dedicated MongoDB database.
  */
 async function syncTenantToRemote(tenantId, options) {
-    const tenant = await db_1.Tenant.findById(tenantId).lean();
+    if (!tenantId || tenantId === 'undefined' || !mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+        return {
+            success: false,
+            tenantId: tenantId || 'unknown',
+            companyName: 'Unknown',
+            message: `Invalid company ID provided: ${tenantId}`
+        };
+    }
+    let tenant = await tenantConnectionManager_1.centralModels.AllCompany.findById(tenantId).lean();
+    if (!tenant) {
+        tenant = await tenantConnectionManager_1.centralModels.Tenant.findById(tenantId).lean();
+    }
+    if (!tenant) {
+        tenant = await tenantConnectionManager_1.centralModels.AllCompany.findOne({ _id: tenantId }).lean();
+    }
     if (!tenant) {
         return {
             success: false,
             tenantId,
             companyName: 'Unknown',
-            message: `Tenant with ID ${tenantId} not found.`
+            message: `Company with ID ${tenantId} not found.`
         };
     }
     // Ensure tenantApiKey exists
     let apiKey = tenant.tenantApiKey;
     if (!apiKey) {
         apiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
-        await db_1.Tenant.findByIdAndUpdate(tenant._id || tenant.id, { tenantApiKey: apiKey });
+        await tenantConnectionManager_1.centralModels.AllCompany.findByIdAndUpdate(tenant._id || tenant.id, { tenantApiKey: apiKey }).catch(() => { });
+        await tenantConnectionManager_1.centralModels.Tenant.findByIdAndUpdate(tenant._id || tenant.id, { tenantApiKey: apiKey }).catch(() => { });
         tenant.tenantApiKey = apiKey;
     }
     const [adminUser, adminPermissions, emailTemplates, customPages, plans, planCategories, complianceRequirements, complianceAudits, systemSettings, rawResources] = await Promise.all([
-        db_1.User.findOne({
-            tenantId,
+        tenantConnectionManager_1.centralModels.User.findOne({
             $or: [
-                { role: 'ADMIN' },
-                { roleId: { $ne: null } }
+                { tenantId },
+                { tenantId: tenant._id },
+                { email: tenant.email }
             ]
         }).populate('role').lean(),
-        db_1.AdminPermission.find({ tenantId }).lean().catch(() => []),
-        db_1.EmailTemplate.find({ tenantId }).lean().catch(() => []),
-        db_1.CustomPage.find({ tenantId }).lean().catch(() => []),
-        db_1.Plan.find({ tenantId, deletedAt: null }).lean().catch(() => []),
-        db_1.PlanCategory.find({ tenantId }).lean().catch(() => []),
-        db_1.ComplianceRequirement.find({}).sort({ serialNo: 1 }).lean().catch(() => []),
-        db_1.ComplianceAudit.find({ tenantId }).lean().catch(() => []),
-        db_1.SystemSetting.find({}).lean().catch(() => []),
-        db_1.Resource.find({}).lean().catch(() => [])
+        tenantConnectionManager_1.centralModels.AdminPermission.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.EmailTemplate.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.CustomPage.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.Plan.find({ $or: [{ tenantId }, { tenantId: tenant._id }], deletedAt: null }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.PlanCategory.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.ComplianceRequirement.find({}).sort({ serialNo: 1 }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.ComplianceAudit.find({ $or: [{ tenantId }, { tenantId: tenant._id }] }).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.SystemSetting.find({}).lean().catch(() => []),
+        tenantConnectionManager_1.centralModels.Resource.find({}).lean().catch(() => [])
     ]);
     const effectiveStatus = tenant.status === 'SUSPENDED'
         ? 'SUSPENDED'
@@ -179,7 +195,7 @@ async function syncTenantToRemote(tenantId, options) {
             for (const endpoint of candidateEndpoints) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+                    const timeoutId = setTimeout(() => controller.abort(), 2500); // 2.5s timeout per candidate endpoint
                     const response = await fetch(endpoint, {
                         method: 'POST',
                         headers: {
@@ -211,48 +227,15 @@ async function syncTenantToRemote(tenantId, options) {
                     message: successData.message || `Successfully synced to ${rawDomain} via API!`
                 };
             }
-            else {
-                domainSyncResult = {
-                    success: false,
-                    message: `Remote server at ${rawDomain} could not be reached or returned error: ${lastErr?.message || 'Offline'}`,
-                    error: lastErr
-                };
-            }
         }
         return domainSyncResult;
     };
-    const dbPromise = async () => {
-        let dbSyncResult = null;
-        if (tenant.mongoDbUrl && tenant.mongoDbUrl.trim()) {
-            try {
-                const result = await (0, tenantProvisionService_1.provisionTenantDatabase)(tenant.mongoDbUrl.trim(), tenantPayload, adminPayload, adminPermissions);
-                dbSyncResult = result;
-            }
-            catch (dbErr) {
-                dbSyncResult = {
-                    success: false,
-                    message: `Dedicated MongoDB sync failed: ${dbErr.message}`,
-                    error: dbErr.message
-                };
-            }
-        }
-        return dbSyncResult;
-    };
-    const [domainSyncResult, dbSyncResult] = await Promise.all([syncPromise(), dbPromise()]);
-    const hasDb = Boolean(tenant.mongoDbUrl && tenant.mongoDbUrl.trim());
+    const domainSyncResult = await syncPromise();
     const hasDomain = Boolean(targetDomainRaw);
-    const overallSuccess = (hasDb && dbSyncResult?.success) ||
-        (hasDomain && domainSyncResult?.success) ||
-        (!hasDb && !hasDomain);
-    const messages = [];
-    if (dbSyncResult) {
-        messages.push(dbSyncResult.message);
-    }
+    const overallSuccess = hasDomain ? Boolean(domainSyncResult?.success) : true;
+    let finalMessage = 'Tenant updated in master database successfully.';
     if (domainSyncResult) {
-        messages.push(domainSyncResult.message);
-    }
-    if (messages.length === 0) {
-        messages.push('Tenant updated in master database successfully.');
+        finalMessage = domainSyncResult.message;
     }
     return {
         success: overallSuccess,
@@ -260,8 +243,7 @@ async function syncTenantToRemote(tenantId, options) {
         companyName: tenant.companyName,
         domainUrl: tenant.domainUrl || tenant.website,
         domainSyncResult,
-        dbSyncResult,
-        message: messages.join(' | ')
+        message: finalMessage
     };
 }
 /**

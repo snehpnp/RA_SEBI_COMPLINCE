@@ -37,7 +37,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
-const db_1 = __importDefault(require("../config/db"));
+const mongoose_1 = __importDefault(require("mongoose"));
+const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const auditService_1 = require("../services/auditService");
 const emailService_1 = require("../services/emailService");
@@ -129,6 +130,7 @@ const registerClient = async (req, res) => {
             tempPassword: null
         });
         const client = await db_1.default.Client.create({
+            tenantId,
             userId: user._id || user.id,
             name,
             email,
@@ -616,9 +618,55 @@ const getClientProfile = async (req, res) => {
         const agreements = await db_1.default.Agreement.find({ clientId }).lean();
         const consents = await db_1.default.Consent.find({ clientId }).lean();
         const user = await db_1.default.User.findById(req.user.id).lean();
-        const tenant = user ? await db_1.default.Tenant.findById(user.tenantId)
-            .select('agreementContent companyName sebiRegistration address activePaymentGateway kycFirst')
-            .lean() : null;
+        let tenantObj = null;
+        if (user && user.tenantId) {
+            const tenantId = user.tenantId;
+            if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+            }
+            if (!tenantObj) {
+                tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+            }
+            if (!tenantObj) {
+                tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+            }
+        }
+        if (!tenantObj) {
+            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        let isPaymentGatewayConfigured = false;
+        let tenantFormatted = null;
+        if (tenantObj) {
+            const activeGateway = (tenantObj.activePaymentGateway || 'RAZORPAY').toUpperCase();
+            if (activeGateway === 'RAZORPAY') {
+                isPaymentGatewayConfigured = !!(tenantObj.razorpayKeyId && tenantObj.razorpayKeySecret && tenantObj.razorpayKeyId.trim() && tenantObj.razorpayKeySecret.trim());
+            }
+            else if (activeGateway === 'CCAVENUE') {
+                isPaymentGatewayConfigured = !!(tenantObj.ccavenueMerchantId && tenantObj.ccavenueAccessCode && tenantObj.ccavenueWorkingKey && tenantObj.ccavenueMerchantId.trim() && tenantObj.ccavenueWorkingKey.trim());
+            }
+            else if (activeGateway === 'CASHFREE') {
+                isPaymentGatewayConfigured = !!(tenantObj.cashfreeAppId && tenantObj.cashfreeSecretKey && tenantObj.cashfreeAppId.trim() && tenantObj.cashfreeSecretKey.trim());
+            }
+            else if (activeGateway === 'STRIPE') {
+                isPaymentGatewayConfigured = !!(tenantObj.stripePublishableKey && tenantObj.stripeSecretKey && tenantObj.stripePublishableKey.trim() && tenantObj.stripeSecretKey.trim());
+            }
+            tenantFormatted = {
+                _id: tenantObj._id || tenantObj.id,
+                id: String(tenantObj._id || tenantObj.id),
+                companyName: tenantObj.companyName,
+                sebiRegistration: tenantObj.sebiRegistration,
+                address: tenantObj.address,
+                email: tenantObj.email,
+                mobile: tenantObj.mobile,
+                agreementContent: tenantObj.agreementContent,
+                activePaymentGateway: tenantObj.activePaymentGateway || 'RAZORPAY',
+                razorpayKeyId: tenantObj.razorpayKeyId || null,
+                ccavenueMerchantId: tenantObj.ccavenueMerchantId || null,
+                kycFirst: tenantObj.kycFirst !== false,
+                gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
+                isPaymentGatewayConfigured
+            };
+        }
         const formatted = {
             ...client,
             id: String(clientId),
@@ -636,7 +684,7 @@ const getClientProfile = async (req, res) => {
             user: user ? {
                 ...user,
                 id: String(user._id || user.id),
-                tenant
+                tenant: tenantFormatted
             } : null
         };
         return res.status(200).json({ success: true, data: formatted });
@@ -749,9 +797,24 @@ const initiateRazorpayPayment = async (req, res) => {
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
         const tenantId = req.user.tenantId;
-        const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
-        if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret) {
-            return res.status(400).json({ success: false, message: 'Razorpay credentials not configured for this tenant' });
+        let tenantObj = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!tenantObj && tenantId) {
+            tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+        }
+        if (!tenantObj && tenantId) {
+            tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+        }
+        if (!tenantObj) {
+            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+            });
         }
         const plan = await db_1.default.Plan.findById(planId).lean();
         if (!plan)
@@ -900,9 +963,24 @@ const initiateCCAvenuePayment = async (req, res) => {
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
         const tenantId = req.user.tenantId;
-        const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
-        if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey) {
-            return res.status(400).json({ success: false, message: 'CCAvenue credentials not configured' });
+        let tenantObj = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!tenantObj && tenantId) {
+            tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+        }
+        if (!tenantObj && tenantId) {
+            tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+        }
+        if (!tenantObj) {
+            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+            });
         }
         const plan = await db_1.default.Plan.findById(planId).lean();
         if (!plan)

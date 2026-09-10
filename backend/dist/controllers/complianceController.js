@@ -15,7 +15,7 @@ const checkComplianceForTenant = async (tenantId) => {
         throw new Error('Tenant not found.');
     // DO NOT run compliance checks for tenants that haven't finished onboarding
     const completeness = await (0, adminController_1.calculateCompleteness)(tenantId);
-    if (completeness === 0 || completeness.score < 100) {
+    if (!completeness || completeness.score < 100) {
         return []; // Return empty alerts, skipping all checks
     }
     const alertsCreated = [];

@@ -133,49 +133,20 @@ class TenantConnectionManager {
         return meta;
     }
     /**
-     * Returns an active Mongoose connection & models connected to the tenant's dedicated database
+     * Returns an active Mongoose connection & models (always points to central DB in API-first architecture)
      */
     async getTenantConnection(identifier) {
         const meta = await this.resolveTenantMeta(identifier);
         if (!meta) {
             return null;
         }
-        if (!meta.mongoDbUrl || meta.mongoDbUrl.includes('/sebi-compliance')) {
-            return { connection: exports.centralConnection, models: exports.centralModels, meta };
-        }
-        const cacheKey = meta.mongoDbUrl;
-        let poolItem = this.connectionPool.get(cacheKey);
-        if (!poolItem) {
-            try {
-                const dedicatedConnection = mongoose_1.default.createConnection(meta.mongoDbUrl, {
-                    maxPoolSize: 10,
-                    serverSelectionTimeoutMS: 5000
-                });
-                const models = (0, models_1.registerTenantModels)(dedicatedConnection);
-                poolItem = { connection: dedicatedConnection, models };
-                this.connectionPool.set(cacheKey, poolItem);
-            }
-            catch (connErr) {
-                poolItem = { connection: exports.centralConnection, models: exports.centralModels };
-            }
-        }
-        return { connection: poolItem.connection, models: poolItem.models, meta };
+        return { connection: exports.centralConnection, models: exports.centralModels, meta };
     }
     /**
-     * Direct connection & models for a raw MongoDB URL
+     * Direct connection & models for a MongoDB URL (returns central connection & models)
      */
-    getConnectionByUri(mongoDbUrl) {
-        let poolItem = this.connectionPool.get(mongoDbUrl);
-        if (!poolItem) {
-            const connection = mongoose_1.default.createConnection(mongoDbUrl, {
-                maxPoolSize: 10,
-                serverSelectionTimeoutMS: 5000
-            });
-            const models = (0, models_1.registerTenantModels)(connection);
-            poolItem = { connection, models };
-            this.connectionPool.set(mongoDbUrl, poolItem);
-        }
-        return poolItem;
+    getConnectionByUri(_mongoDbUrl) {
+        return { connection: exports.centralConnection, models: exports.centralModels };
     }
     /**
      * Evicts a tenant from cache and closes connection on deletion or update

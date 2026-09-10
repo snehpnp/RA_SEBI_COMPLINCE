@@ -4,6 +4,7 @@ import { baseSchemaOptions } from './_schemaOptions';
 export interface IAllCompany extends Document {
   _id: Types.ObjectId;
   id: string;
+  tenantId?: string | null;
   companyName: string;
   companyType: string;
   raType: string;
@@ -24,6 +25,42 @@ export interface IAllCompany extends Document {
   previousStatus?: string | null;
   depositAmount: number;
   state?: string | null;
+  logoUrl?: string | null;
+  faviconUrl?: string | null;
+  themeColor?: string | null;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpUser?: string | null;
+  smtpPassword?: string | null;
+  smtpFrom?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNo?: string | null;
+  bankAccountType?: string | null;
+  bankIfsc?: string | null;
+  bankName?: string | null;
+  bankBranch?: string | null;
+  socialMediaLinks?: string | null;
+  digioClientId?: string | null;
+  digioClientSecret?: string | null;
+  digioKycTemplateName?: string | null;
+  agreementContent?: string | null;
+  activePaymentGateway?: string | null;
+  razorpayKeyId?: string | null;
+  razorpayKeySecret?: string | null;
+  cashfreeAppId?: string | null;
+  cashfreeSecretKey?: string | null;
+  ccavenueMerchantId?: string | null;
+  ccavenueAccessCode?: string | null;
+  ccavenueWorkingKey?: string | null;
+  stripePublishableKey?: string | null;
+  stripeSecretKey?: string | null;
+  kycFirst?: boolean;
+  welcomeEmailText?: string | null;
+  termsPdfUrl?: string | null;
+  privacyPdfUrl?: string | null;
+  internalPolicyUrl?: string | null;
+  coSignatureUrl?: string | null;
+  reportDisclaimer?: string | null;
   panelName?: string | null;
   domainUrl?: string | null;
   mongoDbUrl: string;
@@ -57,6 +94,42 @@ export const AllCompanySchema = new Schema<IAllCompany>(
     previousStatus: { type: String, default: null },
     depositAmount: { type: Number, default: 0.0 },
     state: { type: String, default: null },
+    logoUrl: { type: String, default: null },
+    faviconUrl: { type: String, default: null },
+    themeColor: { type: String, default: null },
+    smtpHost: { type: String, default: null },
+    smtpPort: { type: Number, default: null },
+    smtpUser: { type: String, default: null },
+    smtpPassword: { type: String, default: null },
+    smtpFrom: { type: String, default: null },
+    bankAccountName: { type: String, default: null },
+    bankAccountNo: { type: String, default: null },
+    bankAccountType: { type: String, default: null },
+    bankIfsc: { type: String, default: null },
+    bankName: { type: String, default: null },
+    bankBranch: { type: String, default: null },
+    socialMediaLinks: { type: String, default: null },
+    digioClientId: { type: String, default: null },
+    digioClientSecret: { type: String, default: null },
+    digioKycTemplateName: { type: String, default: null },
+    agreementContent: { type: String, default: null },
+    activePaymentGateway: { type: String, default: 'RAZORPAY' },
+    razorpayKeyId: { type: String, default: null },
+    razorpayKeySecret: { type: String, default: null },
+    cashfreeAppId: { type: String, default: null },
+    cashfreeSecretKey: { type: String, default: null },
+    ccavenueMerchantId: { type: String, default: null },
+    ccavenueAccessCode: { type: String, default: null },
+    ccavenueWorkingKey: { type: String, default: null },
+    stripePublishableKey: { type: String, default: null },
+    stripeSecretKey: { type: String, default: null },
+    kycFirst: { type: Boolean, default: true },
+    welcomeEmailText: { type: String, default: null },
+    termsPdfUrl: { type: String, default: null },
+    privacyPdfUrl: { type: String, default: null },
+    internalPolicyUrl: { type: String, default: null },
+    coSignatureUrl: { type: String, default: null },
+    reportDisclaimer: { type: String, default: null },
     panelName: { type: String, default: null },
     domainUrl: { type: String, default: null },
     mongoDbUrl: { type: String, required: true },

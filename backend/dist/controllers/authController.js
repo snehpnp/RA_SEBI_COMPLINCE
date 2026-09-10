@@ -37,7 +37,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.verifyOtp = exports.requestOtp = exports.logout = exports.changePassword = exports.getPublicTenants = exports.getMe = exports.resetPassword = exports.forgotPassword = exports.refreshToken = exports.login = void 0;
-const nodemailer_1 = __importDefault(require("nodemailer"));
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../config/db");
 const tenantConnectionManager_1 = require("../services/tenantConnectionManager");
@@ -476,66 +475,55 @@ const logout = async (req, res) => {
 exports.logout = logout;
 const requestOtp = async (req, res) => {
     try {
-        const { email } = req.body;
+        const { email, tenantId: bodyTenantId } = req.body;
+        const headerTenantId = req.headers['x-tenant-id'];
+        const queryTenantId = req.query.tenantId;
+        const tenantId = bodyTenantId || headerTenantId || queryTenantId || null;
         if (!email)
             return res.status(400).json({ success: false, message: 'Email is required' });
-        const existingUser = await db_1.User.findOne({ email }).lean();
+        const cleanEmail = String(email || '').toLowerCase().trim();
+        const existingUser = await db_1.User.findOne({
+            email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+        }).lean();
         if (existingUser) {
             return res.status(400).json({ success: false, message: 'Email is already registered. Please login.' });
         }
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        await db_1.EmailVerification.findOneAndUpdate({ email }, { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }, { upsert: true, returnDocument: 'after' });
-        console.log(`OTP for ${email} is: ${otp}`);
-        try {
-            let smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-            let smtpPort = parseInt(process.env.SMTP_PORT || '587');
-            let smtpSecure = process.env.SMTP_SECURE === 'true';
-            let smtpUser = process.env.SMTP_USER;
-            let smtpPassword = process.env.SMTP_PASSWORD;
-            let smtpFrom = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@ragcp.com';
-            const { tenantId } = req.body;
-            if (tenantId) {
-                const tenant = await db_1.Tenant.findById(tenantId).lean();
-                if (tenant && tenant.smtpHost && tenant.smtpUser && tenant.smtpPassword) {
-                    smtpHost = tenant.smtpHost;
-                    smtpPort = tenant.smtpPort || 587;
-                    smtpSecure = smtpPort === 465;
-                    smtpUser = tenant.smtpUser;
-                    smtpPassword = tenant.smtpPassword;
-                    smtpFrom = tenant.smtpFrom || tenant.companyName || smtpUser;
-                }
+        await db_1.EmailVerification.findOneAndUpdate({ email: cleanEmail }, { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }, { upsert: true, returnDocument: 'after' });
+        console.log(`[OTP] Generated OTP for ${cleanEmail}: ${otp}`);
+        let companyName = 'RAGCP Platform';
+        if (tenantId) {
+            try {
+                const t = await tenantConnectionManager_1.centralModels.Tenant.findById(tenantId).lean() || await tenantConnectionManager_1.centralModels.AllCompany.findById(tenantId).lean();
+                if (t?.companyName)
+                    companyName = t.companyName;
             }
-            const transporter = nodemailer_1.default.createTransport({
-                host: smtpHost,
-                port: smtpPort,
-                secure: smtpSecure,
-                auth: {
-                    user: smtpUser,
-                    pass: smtpPassword
-                }
-            });
-            const mailOptions = {
-                from: smtpFrom,
-                to: email,
-                subject: 'Your OTP for RAGCP Client Registration',
-                html: `
-          <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 10px;">
-            <h2 style="color: #1e293b;">Verify Your Email Address</h2>
-            <p style="color: #475569; font-size: 16px;">You have requested to create a client account. Please use the following One-Time Password (OTP) to complete your registration:</p>
-            <div style="background-color: #f8fafc; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
-              <span style="font-size: 24px; font-weight: bold; letter-spacing: 5px; color: #2563eb;">${otp}</span>
-            </div>
-            <p style="color: #475569; font-size: 14px;">This OTP is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-          </div>
-        `
-            };
-            await transporter.sendMail(mailOptions);
-            console.log('OTP Email sent successfully via SMTP!');
+            catch { }
         }
-        catch (emailErr) {
-            console.error('Failed to send OTP email:', emailErr);
+        else {
+            try {
+                const t = await tenantConnectionManager_1.centralModels.Tenant.findOne({ status: 'ACTIVE' }).lean();
+                if (t?.companyName)
+                    companyName = t.companyName;
+            }
+            catch { }
         }
-        return res.json({ success: true, message: 'OTP sent successfully to your email.' });
+        const emailSent = await (0, emailService_1.sendOtpEmail)({
+            tenantId,
+            toEmail: cleanEmail,
+            otp,
+            companyName
+        });
+        if (emailSent) {
+            console.log(`[OTP] Successfully sent OTP email to ${cleanEmail} using DB SMTP`);
+        }
+        else {
+            console.warn(`[OTP] Note: SMTP could not deliver email to ${cleanEmail}, but OTP is recorded: ${otp}`);
+        }
+        return res.json({
+            success: true,
+            message: 'OTP sent successfully to your email.'
+        });
     }
     catch (err) {
         return res.status(500).json({ success: false, message: err.message });

@@ -7,6 +7,7 @@ exports.testSmtpConnection = exports.updateGlobalBranding = exports.getGlobalBra
 const db_1 = __importDefault(require("../config/db"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
+const emailService_1 = require("../services/emailService");
 const BRANDING_KEY = 'GLOBAL_BRANDING';
 const getGlobalBranding = async (req, res) => {
     try {
@@ -110,25 +111,51 @@ exports.updateGlobalBranding = updateGlobalBranding;
 const testSmtpConnection = async (req, res) => {
     try {
         const { host, port, user, password, testEmail } = req.body;
-        if (!host || !port || !user || !password || !testEmail) {
-            return res.status(400).json({ success: false, message: 'All SMTP details and Test Email are required.' });
+        let finalHost = (host || '').trim();
+        let finalPort = (port ? parseInt(port) : 0);
+        let finalUser = (user || '').trim();
+        let finalPassword = (password || '').trim();
+        const finalTestEmail = (testEmail || '').trim();
+        if (!finalTestEmail) {
+            return res.status(400).json({ success: false, message: 'Test email address is required.' });
         }
-        const transporter = nodemailer_1.default.createTransport({
-            host,
-            port: parseInt(port),
-            secure: parseInt(port) === 465,
-            auth: {
-                user,
-                pass: password
+        if (!finalHost || !finalUser || !finalPassword) {
+            const tenantId = req.user?.tenantId;
+            const resolved = await (0, emailService_1.resolveSmtpCredentials)(tenantId);
+            if (resolved) {
+                if (!finalHost)
+                    finalHost = resolved.host;
+                if (!finalPort)
+                    finalPort = resolved.port;
+                if (!finalUser)
+                    finalUser = resolved.user;
+                if (!finalPassword)
+                    finalPassword = resolved.pass;
             }
+        }
+        if (!finalHost || !finalUser || !finalPassword) {
+            return res.status(400).json({ success: false, message: 'All SMTP details (Host, Port, User, Password) and Test Email are required.' });
+        }
+        if (!finalPort)
+            finalPort = 587;
+        const transporter = nodemailer_1.default.createTransport({
+            host: finalHost,
+            port: finalPort,
+            secure: finalPort === 465,
+            auth: {
+                user: finalUser,
+                pass: finalPassword
+            },
+            tls: { rejectUnauthorized: false }
         });
         const mailOptions = {
-            from: user,
-            to: testEmail,
+            from: finalUser,
+            to: finalTestEmail,
             subject: 'Test Email from RAGCP',
             html: `<div style="font-family: Arial, sans-serif; padding: 20px;">
         <h2>SMTP Connection Successful!</h2>
         <p>If you are reading this, your SMTP credentials for RAGCP are perfectly configured.</p>
+        <p style="color: #64748b; font-size: 12px;">Server: ${finalHost}:${finalPort} | User: ${finalUser}</p>
       </div>`
         };
         await transporter.verify();

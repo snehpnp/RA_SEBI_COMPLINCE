@@ -136,8 +136,7 @@ class TenantProvisionEngine {
             : 0.0;
         try {
             // Step 2: Register in Central DB `all_companies` collection
-            await tenantConnectionManager_1.centralModels.AllCompany.findOneAndUpdate({ tenantId }, {
-                tenantId,
+            await tenantConnectionManager_1.centralModels.AllCompany.findOneAndUpdate({ email: tenantPayload.email }, {
                 companyName,
                 companyType: tenantPayload.companyType || 'INDIVIDUAL',
                 raType: tenantPayload.raType || 'FULL_TIME',
@@ -180,14 +179,12 @@ class TenantProvisionEngine {
                 tempPassword: rawPassword,
                 status: 'ACTIVE'
             };
-            // Precreate all collections on the dedicated DB
-            await this.precreateAllCollections(mongoDbUrl, dbName);
-            const targetPool = tenantConnectionManager_1.tenantConnectionManager.getConnectionByUri(mongoDbUrl);
-            const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(targetPool.models, fullTenantData, fullAdminData);
+            // Provision tenant and admin in central database
+            const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(tenantConnectionManager_1.centralModels, fullTenantData, fullAdminData);
             const createdAdmin = result.adminUser;
             return {
                 success: true,
-                message: `Company '${companyName}' successfully created. Dedicated database '${dbName}' initialized with all collections and Admin account.`,
+                message: `Company '${companyName}' successfully created. Profile registered and Admin account initialized.`,
                 tenantId,
                 companyName,
                 domainUrl: tenantPayload.domainUrl || null,
@@ -201,7 +198,7 @@ class TenantProvisionEngine {
         catch (error) {
             console.error(`Automated Tenant Provisioning failed for ${companyName}:`, error);
             // Rollback Central DB all_companies record if provisioning fails
-            await tenantConnectionManager_1.centralModels.AllCompany.deleteMany({ tenantId }).catch(() => { });
+            await tenantConnectionManager_1.centralModels.AllCompany.deleteMany({ email: tenantPayload.email }).catch(() => { });
             return {
                 success: false,
                 message: `Failed to provision company database: ${error.message}`,

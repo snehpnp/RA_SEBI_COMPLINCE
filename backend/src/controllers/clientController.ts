@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import dynamicDb from '../config/db';
+import mongoose from 'mongoose';
+import dynamicDb, { centralModels } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
@@ -121,6 +122,7 @@ export const registerClient = async (req: Request, res: Response) => {
     });
 
     const client: any = await dynamicDb.Client.create({
+      tenantId,
       userId: user._id || user.id,
       name,
       email,
@@ -669,9 +671,55 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
     const agreements = await dynamicDb.Agreement.find({ clientId }).lean();
     const consents = await dynamicDb.Consent.find({ clientId }).lean();
     const user = await dynamicDb.User.findById(req.user!.id).lean();
-    const tenant = user ? await dynamicDb.Tenant.findById((user as any).tenantId)
-      .select('agreementContent companyName sebiRegistration address activePaymentGateway kycFirst')
-      .lean() : null;
+    let tenantObj: any = null;
+    if (user && (user as any).tenantId) {
+      const tenantId = (user as any).tenantId;
+      if (mongoose.Types.ObjectId.isValid(tenantId)) {
+        tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+      }
+      if (!tenantObj) {
+        tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+      }
+      if (!tenantObj) {
+        tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+      }
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    let isPaymentGatewayConfigured = false;
+    let tenantFormatted = null;
+
+    if (tenantObj) {
+      const activeGateway = (tenantObj.activePaymentGateway || 'RAZORPAY').toUpperCase();
+      if (activeGateway === 'RAZORPAY') {
+        isPaymentGatewayConfigured = !!(tenantObj.razorpayKeyId && tenantObj.razorpayKeySecret && tenantObj.razorpayKeyId.trim() && tenantObj.razorpayKeySecret.trim());
+      } else if (activeGateway === 'CCAVENUE') {
+        isPaymentGatewayConfigured = !!(tenantObj.ccavenueMerchantId && tenantObj.ccavenueAccessCode && tenantObj.ccavenueWorkingKey && tenantObj.ccavenueMerchantId.trim() && tenantObj.ccavenueWorkingKey.trim());
+      } else if (activeGateway === 'CASHFREE') {
+        isPaymentGatewayConfigured = !!(tenantObj.cashfreeAppId && tenantObj.cashfreeSecretKey && tenantObj.cashfreeAppId.trim() && tenantObj.cashfreeSecretKey.trim());
+      } else if (activeGateway === 'STRIPE') {
+        isPaymentGatewayConfigured = !!(tenantObj.stripePublishableKey && tenantObj.stripeSecretKey && tenantObj.stripePublishableKey.trim() && tenantObj.stripeSecretKey.trim());
+      }
+
+      tenantFormatted = {
+        _id: tenantObj._id || tenantObj.id,
+        id: String(tenantObj._id || tenantObj.id),
+        companyName: tenantObj.companyName,
+        sebiRegistration: tenantObj.sebiRegistration,
+        address: tenantObj.address,
+        email: tenantObj.email,
+        mobile: tenantObj.mobile,
+        agreementContent: tenantObj.agreementContent,
+        activePaymentGateway: tenantObj.activePaymentGateway || 'RAZORPAY',
+        razorpayKeyId: tenantObj.razorpayKeyId || null,
+        ccavenueMerchantId: tenantObj.ccavenueMerchantId || null,
+        kycFirst: tenantObj.kycFirst !== false,
+        gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
+        isPaymentGatewayConfigured
+      };
+    }
 
     const formatted = {
       ...client,
@@ -690,7 +738,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
       user: user ? {
         ...user,
         id: String((user as any)._id || (user as any).id),
-        tenant
+        tenant: tenantFormatted
       } : null
     };
 
@@ -805,11 +853,35 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    const tenantId = req.user!.tenantId!;
-    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.id) {
+      if (client?.tenantId) tenantId = client.tenantId;
+      if (!tenantId) {
+        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
+        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
+      }
+    }
+
+    let tenantObj: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
     
-    if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret) {
-      return res.status(400).json({ success: false, message: 'Razorpay credentials not configured for this tenant' });
+    if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
+      return res.status(400).json({ 
+        success: false, 
+        isConfigured: false,
+        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+      });
     }
 
     const plan: any = await dynamicDb.Plan.findById(planId).lean();
@@ -858,7 +930,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
       }
     };
 
-    const order = await razorpay.orders.create(orderOptions);
+    const order: any = await razorpay.orders.create(orderOptions as any);
 
     return res.status(200).json({
       success: true,
@@ -973,10 +1045,35 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    const tenantId = req.user!.tenantId!;
-    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
-    if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey) {
-      return res.status(400).json({ success: false, message: 'CCAvenue credentials not configured' });
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.id) {
+      if (client?.tenantId) tenantId = client.tenantId;
+      if (!tenantId) {
+        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
+        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
+      }
+    }
+
+    let tenantObj: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
+      return res.status(400).json({ 
+        success: false, 
+        isConfigured: false,
+        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+      });
     }
 
     const plan: any = await dynamicDb.Plan.findById(planId).lean();
@@ -1009,7 +1106,7 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     const amount = finalPrice.toFixed(2);
     
     const origin = req.headers.origin || 'http://localhost:3000';
-    const redirectUrl = `${req.protocol}://${req.get('host')}/api/payment/ccavenue/response?tenantId=${tenantId}`;
+    const redirectUrl = `${req.protocol}://${req.get('host')}/api/v1/payment/ccavenue/response?tenantId=${tenantObj._id || tenantObj.id || tenantId}`;
     const cancelUrl = `${origin}/client`;
 
     let merchantData = `merchant_id=${tenantObj.ccavenueMerchantId}&order_id=${orderId}&currency=INR&amount=${amount}&redirect_url=${redirectUrl}&cancel_url=${cancelUrl}&language=EN`;
@@ -1102,3 +1199,98 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
     return res.status(500).send('Internal Server Error');
   }
 };
+
+export const getPaymentGatewayStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.id) {
+      const clientDoc: any = await dynamicDb.Client.findOne({ userId: req.user.id }).lean();
+      if (clientDoc?.tenantId) tenantId = clientDoc.tenantId;
+      if (!tenantId) {
+        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
+        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
+      }
+    }
+
+    let tenantObj: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await centralModels.AllCompany.findOne({ deletedAt: null }).lean();
+    }
+
+    if (!tenantObj) {
+      return res.status(200).json({
+        success: true,
+        isConfigured: false,
+        activeGateway: 'RAZORPAY',
+        message: 'Administrator has not configured a payment gateway. Please contact admin to buy this plan.',
+        adminContact: {
+          companyName: 'Advisory Administration',
+          email: null,
+          mobile: null,
+          sebiRegistration: null,
+          address: null,
+          website: null,
+          bankDetails: null
+        }
+      });
+    }
+
+    const activeGateway = (tenantObj.activePaymentGateway || 'RAZORPAY').toUpperCase();
+    let isConfigured = false;
+
+    if (activeGateway === 'RAZORPAY') {
+      isConfigured = !!(tenantObj.razorpayKeyId && tenantObj.razorpayKeySecret && tenantObj.razorpayKeyId.trim() && tenantObj.razorpayKeySecret.trim());
+    } else if (activeGateway === 'CCAVENUE') {
+      isConfigured = !!(tenantObj.ccavenueMerchantId && tenantObj.ccavenueAccessCode && tenantObj.ccavenueWorkingKey && tenantObj.ccavenueMerchantId.trim() && tenantObj.ccavenueWorkingKey.trim());
+    } else if (activeGateway === 'CASHFREE') {
+      isConfigured = !!(tenantObj.cashfreeAppId && tenantObj.cashfreeSecretKey && tenantObj.cashfreeAppId.trim() && tenantObj.cashfreeSecretKey.trim());
+    } else if (activeGateway === 'STRIPE') {
+      isConfigured = !!(tenantObj.stripePublishableKey && tenantObj.stripeSecretKey && tenantObj.stripePublishableKey.trim() && tenantObj.stripeSecretKey.trim());
+    } else {
+      isConfigured = false;
+    }
+
+    const adminContact = {
+      companyName: tenantObj.companyName || 'Advisory Team',
+      email: tenantObj.companyEmail || tenantObj.email || null,
+      mobile: tenantObj.mobile || null,
+      sebiRegistration: tenantObj.sebiRegistration || null,
+      address: tenantObj.address || null,
+      website: tenantObj.website || null,
+      bankDetails: (tenantObj.bankAccountNo && tenantObj.bankIfsc) ? {
+        bankAccountName: tenantObj.bankAccountName || tenantObj.companyName,
+        bankAccountNo: tenantObj.bankAccountNo,
+        bankAccountType: tenantObj.bankAccountType || 'Current',
+        bankIfsc: tenantObj.bankIfsc,
+        bankName: tenantObj.bankName,
+        bankBranch: tenantObj.bankBranch
+      } : null
+    };
+
+    return res.status(200).json({
+      success: true,
+      isConfigured,
+      activeGateway,
+      adminContact,
+      message: isConfigured 
+        ? `Payment gateway (${activeGateway}) is ready.`
+        : `Payment gateway credentials are not configured by the administrator for ${activeGateway}. Please contact administrator to purchase this plan.`
+    });
+  } catch (error: any) {
+    console.error('Payment gateway status error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
