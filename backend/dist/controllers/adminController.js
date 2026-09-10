@@ -231,6 +231,13 @@ const saveProfileStep = async (req, res) => {
     }
     try {
         const oldTenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
+        if (!oldTenant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tenant company record not found. Please log out and log in again.',
+                errors: ['Tenant record not found']
+            });
+        }
         if (step === 'ORG') {
             if (data.gst) {
                 const duplicateGst = await db_1.default.tenant.findFirst({

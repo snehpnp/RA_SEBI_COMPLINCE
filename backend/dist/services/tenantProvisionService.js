@@ -1156,14 +1156,19 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
         if (!rulesToSync || rulesToSync.length === 0) {
             const rulesPath = path.join(__dirname, '../../prisma/rules.json');
             if (fs.existsSync(rulesPath)) {
-                rulesToSync = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
+                try {
+                    rulesToSync = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
+                }
+                catch { }
             }
         }
+        const requirementIdMap = {};
         if (rulesToSync && rulesToSync.length > 0) {
             for (const rule of rulesToSync) {
-                await db.collection('ComplianceRequirement').updateOne({ serialNo: Number(rule.serialNo) }, {
+                const serialNo = Number(rule.serialNo);
+                const res = await db.collection('ComplianceRequirement').findOneAndUpdate({ serialNo }, {
                     $set: {
-                        serialNo: Number(rule.serialNo),
+                        serialNo,
                         requirement: rule.requirement,
                         frequency: rule.frequency,
                         frequencyType: rule.frequencyType || 'CONTINUOUS',
@@ -1173,10 +1178,117 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                         updatedAt: new Date()
                     },
                     $setOnInsert: { createdAt: new Date() }
+                }, { upsert: true, returnDocument: 'after' });
+                if (res && res._id) {
+                    requirementIdMap[serialNo] = res._id.toString();
+                }
+            }
+        }
+        // 10. Compliance Audits for this Tenant
+        try {
+            const activeRules = await db.collection('ComplianceRequirement').find({ isActive: true }).toArray();
+            const now = new Date();
+            for (const reqRule of activeRules) {
+                const period = (0, complianceDateHelper_1.getCompliancePeriod)(reqRule.frequencyType || 'CONTINUOUS', now, targetTenant?.createdAt || now);
+                const reqId = reqRule._id.toString();
+                const existingAudit = await db.collection('ComplianceAudit').findOne({
+                    tenantId,
+                    requirementId: reqId,
+                    dueDate: { $gte: period.startDate, $lte: period.dueDate }
+                });
+                if (!existingAudit) {
+                    await db.collection('ComplianceAudit').insertOne({
+                        tenantId,
+                        requirementId: reqId,
+                        status: 'PENDING',
+                        dueDate: period.dueDate,
+                        createdAt: new Date(),
+                        updatedAt: new Date()
+                    });
+                }
+            }
+        }
+        catch (auditErr) {
+            console.warn('Dedicated Mongo ComplianceAudit note:', auditErr);
+        }
+        // 11. Plan Category & Plans
+        try {
+            const categoryMap = {};
+            const categoriesToSync = tenantData.planCategories && tenantData.planCategories.length > 0
+                ? tenantData.planCategories
+                : [{ name: 'Equity & Derivatives', segments: 'EQUITY,DERIVATIVE', status: 'ACTIVE' }];
+            for (const cat of categoriesToSync) {
+                const catRes = await db.collection('PlanCategory').findOneAndUpdate({ tenantId, name: cat.name }, {
+                    $set: {
+                        tenantId,
+                        name: cat.name,
+                        segments: cat.segments || 'EQUITY,DERIVATIVE',
+                        status: cat.status || 'ACTIVE',
+                        updatedAt: new Date()
+                    },
+                    $setOnInsert: { createdAt: new Date() }
+                }, { upsert: true, returnDocument: 'after' });
+                if (catRes && catRes._id) {
+                    categoryMap[cat.name] = catRes._id.toString();
+                    if (cat.id)
+                        categoryMap[cat.id] = catRes._id.toString();
+                }
+            }
+            const defaultCatId = Object.values(categoryMap)[0];
+            const plansToSync = tenantData.plans && tenantData.plans.length > 0
+                ? tenantData.plans
+                : defaultCatId ? [{
+                        categoryId: defaultCatId,
+                        name: 'Standard Advisory Plan',
+                        description: 'Comprehensive equity recommendations and research reports with SEBI compliant disclosures.',
+                        price: 5000.0,
+                        durationMonths: 1,
+                        researchSegments: 'EQUITY,DERIVATIVE',
+                        notificationsAllowed: 'EMAIL,INAPP',
+                        clientLimit: 100,
+                        status: 'ACTIVE'
+                    }] : [];
+            for (const pl of plansToSync) {
+                const targetCatId = categoryMap[pl.categoryId] || defaultCatId;
+                if (!targetCatId)
+                    continue;
+                await db.collection('Plan').updateOne({ tenantId, name: pl.name }, {
+                    $set: {
+                        tenantId,
+                        categoryId: targetCatId,
+                        name: pl.name,
+                        description: pl.description || '',
+                        price: parseFloat(String(pl.price || 0)),
+                        durationMonths: parseInt(String(pl.durationMonths || 1)),
+                        researchSegments: pl.researchSegments || 'EQUITY,DERIVATIVE',
+                        notificationsAllowed: pl.notificationsAllowed || 'EMAIL,INAPP',
+                        clientLimit: parseInt(String(pl.clientLimit || 100)),
+                        status: pl.status || 'ACTIVE',
+                        updatedAt: new Date()
+                    },
+                    $setOnInsert: { createdAt: new Date() }
                 }, { upsert: true });
             }
         }
-        // 10. System Settings (Branding & Global Configurations)
+        catch (planErr) {
+            console.warn('Dedicated Mongo Plan note:', planErr);
+        }
+        // 12. Indian States & GST Codes
+        try {
+            const { INDIAN_STATES } = require('./stateService');
+            if (INDIAN_STATES && Array.isArray(INDIAN_STATES)) {
+                for (const st of INDIAN_STATES) {
+                    await db.collection('State').updateOne({ name: st.name }, {
+                        $set: { name: st.name, gstCode: st.gstCode, isActive: true },
+                        $setOnInsert: { createdAt: new Date() }
+                    }, { upsert: true });
+                }
+            }
+        }
+        catch (stateErr) {
+            console.warn('Dedicated Mongo State note:', stateErr);
+        }
+        // 13. System Settings (Branding & Global Configurations)
         if (tenantData.systemSettings && tenantData.systemSettings.length > 0) {
             for (const setting of tenantData.systemSettings) {
                 if (!setting.key)
@@ -1191,7 +1303,7 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 }, { upsert: true });
             }
         }
-        // 11. Global Resources
+        // 14. Global Resources
         if (tenantData.resources) {
             const activeObjectIds = [];
             for (const res of tenantData.resources) {
@@ -1220,9 +1332,40 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
                 await db.collection('Resource').deleteMany({}).catch(() => { });
             }
         }
+        // 15. Ensure all core operational collections exist with proper collections initialized
+        const operationalCollections = [
+            'Client',
+            'ClientProfile',
+            'ClientDocument',
+            'Staff',
+            'Stock',
+            'Signal',
+            'SignalMessage',
+            'ResearchReport',
+            'Payment',
+            'Subscription',
+            'Agreement',
+            'Complaint',
+            'Coupon',
+            'TenantDocumentHistory',
+            'SupportTicket',
+            'TicketMessage',
+            'AuditLog',
+            'NotificationLog',
+            'Penalty'
+        ];
+        for (const colName of operationalCollections) {
+            try {
+                const existing = await db.listCollections({ name: colName }).toArray();
+                if (existing.length === 0) {
+                    await db.createCollection(colName).catch(() => { });
+                }
+            }
+            catch { }
+        }
         return {
             success: true,
-            message: `Dedicated MongoDB database provisioned and synced successfully for ${tenantData.companyName}. Admin user ${adminEmail} is active with all 11 collections synchronized.`,
+            message: `Dedicated MongoDB database provisioned and synced successfully for ${tenantData.companyName}. Admin user ${adminEmail} is active with all collections synchronized.`,
             tenantId,
             companyName: tenantData.companyName,
             adminEmail,

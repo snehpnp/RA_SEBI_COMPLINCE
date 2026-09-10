@@ -1,22 +1,22 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function (o, m, k, k2) {
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
     if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: function () { return m[k]; } };
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
     Object.defineProperty(o, k2, desc);
-}) : (function (o, m, k, k2) {
+}) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
 }));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function (o, v) {
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
     Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function (o, v) {
+}) : function(o, v) {
     o["default"] = v;
 });
 var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function (o) {
+    var ownKeys = function(o) {
         ownKeys = Object.getOwnPropertyNames || function (o) {
             var ar = [];
             for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
@@ -168,43 +168,51 @@ const createTenant = async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(rawAdminPassword, salt);
         const generatedApiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
-        // Execute comprehensive provisioning of all 11 collections on the local master DB
-        const provisionResult = await (0, tenantProvisionService_1.provisionAllTenantCollections)(db_1.default, {
+        // 1. Prepare Tenant & Admin provision payloads
+        const certValidity = certificateValidity && !isNaN(new Date(certificateValidity).getTime())
+            ? new Date(certificateValidity)
+            : null;
+        const nismVal = nismValidity && !isNaN(new Date(nismValidity).getTime())
+            ? new Date(nismValidity)
+            : null;
+        const depAmt = depositAmount && !isNaN(parseFloat(depositAmount))
+            ? parseFloat(depositAmount)
+            : 0.0;
+        const tenantPayload = {
             companyName,
             panelName: panelName || `${companyName} Portal`,
             domainUrl: domainUrl || null,
-            mongoDbUrl: mongoDbUrl || null,
-            dbName: dbName || null,
             tenantApiKey: generatedApiKey,
             companyType: companyType || 'INDIVIDUAL',
             raType: raType || 'FULL_TIME',
             ownerName,
             sebiRegistration: ocrExtractedReg,
-            bseEnrollment,
+            bseEnrollment: bseEnrollment || null,
             email,
             mobile,
             address,
             pan,
-            gst,
-            website,
+            gst: gst || null,
+            website: website || null,
             certificateUrl,
-            certificateValidity: certificateValidity ? new Date(certificateValidity) : null,
+            certificateValidity: certValidity,
             nismCertificateUrl,
-            nismValidity: nismValidity ? new Date(nismValidity) : null,
-            depositAmount: depositAmount ? parseFloat(depositAmount) : 0.0,
+            nismValidity: nismVal,
+            depositAmount: depAmt,
             state: effectiveState,
             status: 'PENDING_PROFILE'
-        }, {
+        };
+        const adminUserPayload = {
             email: adminEmailToUse,
-            passwordHash,
-            tempPassword: rawAdminPassword,
             firstName: adminFirstName,
             lastName: adminLastName,
             mobile: adminMobileToUse,
+            passwordHash,
+            tempPassword: rawAdminPassword,
             status: 'ACTIVE'
-        });
-        const createdTenant = provisionResult.tenant;
-        const createdAdminUser = provisionResult.adminUser;
+        };
+        // 2. Provision Tenant, Admin User, Roles, Permissions, Custom Pages, Email Templates, Plans & Compliance in DB
+        const { tenant: createdTenant, adminUser: createdAdminUser } = await (0, tenantProvisionService_1.provisionAllTenantCollections)(db_1.default, tenantPayload, adminUserPayload);
         // Record document history if certificate files were uploaded
         if (certificateUrl && files?.sebiCertificate?.[0]) {
             await db_1.default.tenantDocumentHistory.create({
@@ -896,6 +904,32 @@ const updateTenantDetails = async (req, res) => {
                 });
                 adminUser = updatedAdmin;
             }
+        }
+        else {
+            const adminRole = await db_1.default.role.findUnique({ where: { name: 'ADMIN' } }) || await db_1.default.role.create({
+                data: { name: 'ADMIN', description: 'RA Company Owner' }
+            });
+            const targetEmail = (adminEmail && String(adminEmail).trim()) || updatedTenant.email;
+            const targetName = (adminName && String(adminName).trim()) || updatedTenant.ownerName || updatedTenant.companyName;
+            const parts = targetName.split(' ');
+            const firstName = parts[0] || 'Admin';
+            const lastName = parts.slice(1).join(' ') || '';
+            const rawPass = (adminPassword && String(adminPassword).trim()) || 'Admin@123';
+            const salt = await bcrypt.genSalt(10);
+            const hash = await bcrypt.hash(rawPass, salt);
+            adminUser = await db_1.default.user.create({
+                data: {
+                    tenantId: id,
+                    roleId: adminRole.id,
+                    firstName,
+                    lastName,
+                    email: targetEmail.toLowerCase().trim(),
+                    mobile: (adminMobile && String(adminMobile).trim()) || updatedTenant.mobile,
+                    passwordHash: hash,
+                    tempPassword: rawPass,
+                    status: (adminStatus && String(adminStatus).trim()) || 'ACTIVE'
+                }
+            });
         }
         // Auto-sync company & admin updates to remote domainUrl API and dedicated MongoDB in background
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(id, {

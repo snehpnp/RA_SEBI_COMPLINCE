@@ -163,48 +163,58 @@ export const createTenant = async (req: AuthenticatedRequest, res: Response) => 
     const passwordHash = await bcrypt.hash(rawAdminPassword, salt);
     const generatedApiKey = 'ragcp_' + crypto.randomBytes(16).toString('hex');
 
-    // Execute comprehensive provisioning of all 11 collections on the local master DB
-    const provisionResult = await provisionAllTenantCollections(
-      prisma,
-      {
-        companyName,
-        panelName: panelName || `${companyName} Portal`,
-        domainUrl: domainUrl || null,
-        mongoDbUrl: mongoDbUrl || null,
-        dbName: dbName || null,
-        tenantApiKey: generatedApiKey,
-        companyType: companyType || 'INDIVIDUAL',
-        raType: raType || 'FULL_TIME',
-        ownerName,
-        sebiRegistration: ocrExtractedReg,
-        bseEnrollment,
-        email,
-        mobile,
-        address,
-        pan,
-        gst,
-        website,
-        certificateUrl,
-        certificateValidity: certificateValidity ? new Date(certificateValidity) : null,
-        nismCertificateUrl,
-        nismValidity: nismValidity ? new Date(nismValidity) : null,
-        depositAmount: depositAmount ? parseFloat(depositAmount) : 0.0,
-        state: effectiveState,
-        status: 'PENDING_PROFILE'
-      },
-      {
-        email: adminEmailToUse,
-        passwordHash,
-        tempPassword: rawAdminPassword,
-        firstName: adminFirstName,
-        lastName: adminLastName,
-        mobile: adminMobileToUse,
-        status: 'ACTIVE'
-      }
-    );
+    // 1. Prepare Tenant & Admin provision payloads
+    const certValidity = certificateValidity && !isNaN(new Date(certificateValidity).getTime())
+      ? new Date(certificateValidity)
+      : null;
+    const nismVal = nismValidity && !isNaN(new Date(nismValidity).getTime())
+      ? new Date(nismValidity)
+      : null;
+    const depAmt = depositAmount && !isNaN(parseFloat(depositAmount))
+      ? parseFloat(depositAmount)
+      : 0.0;
 
-    const createdTenant = provisionResult.tenant;
-    const createdAdminUser = provisionResult.adminUser;
+    const tenantPayload = {
+      companyName,
+      panelName: panelName || `${companyName} Portal`,
+      domainUrl: domainUrl || null,
+      tenantApiKey: generatedApiKey,
+      companyType: companyType || 'INDIVIDUAL',
+      raType: raType || 'FULL_TIME',
+      ownerName,
+      sebiRegistration: ocrExtractedReg,
+      bseEnrollment: bseEnrollment || null,
+      email,
+      mobile,
+      address,
+      pan,
+      gst: gst || null,
+      website: website || null,
+      certificateUrl,
+      certificateValidity: certValidity,
+      nismCertificateUrl,
+      nismValidity: nismVal,
+      depositAmount: depAmt,
+      state: effectiveState,
+      status: 'PENDING_PROFILE'
+    };
+
+    const adminUserPayload = {
+      email: adminEmailToUse,
+      firstName: adminFirstName,
+      lastName: adminLastName,
+      mobile: adminMobileToUse,
+      passwordHash,
+      tempPassword: rawAdminPassword,
+      status: 'ACTIVE'
+    };
+
+    // 2. Provision Tenant, Admin User, Roles, Permissions, Custom Pages, Email Templates, Plans & Compliance in DB
+    const { tenant: createdTenant, adminUser: createdAdminUser } = await provisionAllTenantCollections(
+      prisma,
+      tenantPayload,
+      adminUserPayload
+    );
 
     // Record document history if certificate files were uploaded
     if (certificateUrl && files?.sebiCertificate?.[0]) {
@@ -965,6 +975,31 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
         });
         adminUser = updatedAdmin;
       }
+    } else {
+      const adminRole = await prisma.role.findUnique({ where: { name: 'ADMIN' } }) || await prisma.role.create({
+        data: { name: 'ADMIN', description: 'RA Company Owner' }
+      });
+      const targetEmail = (adminEmail && String(adminEmail).trim()) || updatedTenant.email;
+      const targetName = (adminName && String(adminName).trim()) || updatedTenant.ownerName || updatedTenant.companyName;
+      const parts = targetName.split(' ');
+      const firstName = parts[0] || 'Admin';
+      const lastName = parts.slice(1).join(' ') || '';
+      const rawPass = (adminPassword && String(adminPassword).trim()) || 'Admin@123';
+      const salt = await bcrypt.genSalt(10);
+      const hash = await bcrypt.hash(rawPass, salt);
+      adminUser = await prisma.user.create({
+        data: {
+          tenantId: id,
+          roleId: adminRole.id,
+          firstName,
+          lastName,
+          email: targetEmail.toLowerCase().trim(),
+          mobile: (adminMobile && String(adminMobile).trim()) || updatedTenant.mobile,
+          passwordHash: hash,
+          tempPassword: rawPass,
+          status: (adminStatus && String(adminStatus).trim()) || 'ACTIVE'
+        }
+      });
     }
 
     // Auto-sync company & admin updates to remote domainUrl API and dedicated MongoDB in background
@@ -1904,5 +1939,4 @@ export const getCompanyStaff = async (req: AuthenticatedRequest, res: Response) 
     });
   }
 };
-
 

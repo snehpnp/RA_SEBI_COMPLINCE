@@ -143,6 +143,7 @@ router.get(
   requireRoles(['SUPER_ADMIN']),
   getTenants
 );
+
 router.post(
   '/super-admin/tenants/:id/status',
   authenticateJWT,

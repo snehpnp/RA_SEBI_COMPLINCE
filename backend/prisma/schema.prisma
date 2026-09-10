@@ -512,17 +512,17 @@ model ComplianceAlert {
 
 model AuditLog {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  tenantId  String? @db.ObjectId // Null for Super Admin operations
-  userId    String @db.ObjectId
-  action    String // CREATE, UPDATE, DELETE, LOGIN, EXPORT
-  module    String // TENANTS, USERS, STAFF, CLIENTS, RESEARCH, PAYMENTS, COMPLIANCE
-  oldValue  String? // JSON string
-  newValue  String? // JSON string
+  tenantId  String?  @db.ObjectId // Null for Super Admin operations
+  userId    String?  @db.ObjectId
+  action    String   // CREATE, UPDATE, DELETE, LOGIN, EXPORT
+  module    String   // TENANTS, USERS, STAFF, CLIENTS, RESEARCH, PAYMENTS, COMPLIANCE
+  oldValue  String?  // JSON string
+  newValue  String?  // JSON string
   ipAddress String?
   timestamp DateTime @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User    @relation("UserAudits", fields: [userId], references: [id], onDelete: Cascade)
+  user   User?   @relation("UserAudits", fields: [userId], references: [id], onDelete: SetNull)
 }
 
 model NotificationLog {
@@ -814,5 +814,3 @@ model AdminPermission {
 
   @@unique([tenantId, module])
 }
-
-
