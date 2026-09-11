@@ -14,7 +14,7 @@ console.log("=>>>>>>>>>>>>>>>>>>", defaultDbName, defaultCentralUrl);
 exports.centralConnection = mongoose_1.default.createConnection(defaultCentralUrl, {
     dbName: defaultDbName,
     maxPoolSize: 20,
-    serverSelectionTimeoutMS: 5000
+    serverSelectionTimeoutMS: 10000,
 });
 // Central Models
 exports.centralModels = (0, models_1.registerTenantModels)(exports.centralConnection);

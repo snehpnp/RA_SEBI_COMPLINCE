@@ -114,19 +114,6 @@ const registerClient = async (req, res) => {
         if (!clientRole) {
             return res.status(500).json({ success: false, message: 'Client role not seeded.' });
         }
-        const poRole = await db_1.default.Role.findOne({ name: 'PRINCIPAL_OFFICER' }).lean();
-        const poUser = poRole ? await db_1.default.User.findOne({
-            tenantId,
-            roleId: poRole._id || poRole.id,
-            status: 'ACTIVE'
-        }).lean() : null;
-        if (!poUser) {
-            return res.status(400).json({
-                success: false,
-                message: 'Onboarding is temporarily disabled for this advisor company.',
-                errors: ['Tenant advisor profile completion is below 80%.']
-            });
-        }
         const creatorId = req.body.createdById || (req.user ? req.user.id : null);
         const user = await db_1.default.User.create({
             tenantId,

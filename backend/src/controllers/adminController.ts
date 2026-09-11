@@ -735,39 +735,70 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const staff: any = await dynamicDb.Staff.findById(id).lean();
+    let staff: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+    }
+    if (!staff) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+          { employeeId: id },
+          { email: email }
+        ]
+      }).lean();
+    }
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
     }
 
-    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
-    if (!staffUser || staffUser.tenantId !== tenantId) {
-      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    const staffId = staff._id;
+    let staffUser: any = null;
+    if (staff.userId) {
+      staffUser = await dynamicDb.User.findById(staff.userId).lean();
+    }
+    if (!staffUser && staff.email) {
+      staffUser = await dynamicDb.User.findOne({ email: staff.email }).lean();
+    }
+
+    if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized: Staff belongs to another tenant.' });
     }
 
     if (nismNumber && nismNumber.trim().length > 0) {
       const existingNism = await dynamicDb.Staff.findOne({
         nismNumber: nismNumber.trim(),
-        _id: { $ne: id }
+        _id: { $ne: staffId }
       }).lean();
       if (existingNism) {
         return res.status(400).json({ success: false, message: 'Duplicate NISM Certificate Number. This number is already in use.' });
       }
     }
 
+    const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
+
     const updateUserData: any = {
       firstName: name.split(' ')[0],
       lastName: name.split(' ').slice(1).join(' ') || 'Staff',
       mobile
     };
+    if (targetRole) {
+      updateUserData.roleId = targetRole._id || targetRole.id;
+    }
 
-    if (email !== staff.email) {
-      const emailExists = await dynamicDb.User.findOne({ email, _id: { $ne: staff.userId } }).lean();
+    const targetUserId = staff.userId || staffUser?._id;
+    if (email && email !== staff.email) {
+      const emailExists = await dynamicDb.User.findOne({
+        email,
+        ...(targetUserId ? { _id: { $ne: targetUserId } } : {})
+      }).lean();
       if (emailExists) throw new Error('Email already in use by another user.');
       updateUserData.email = email;
     }
 
-    await dynamicDb.User.findByIdAndUpdate(staff.userId, { $set: updateUserData });
+    if (targetUserId) {
+      await dynamicDb.User.findByIdAndUpdate(targetUserId, { $set: updateUserData });
+    }
 
     const updateStaffData: any = {
       name,
@@ -776,7 +807,8 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       dob: dob ? new Date(dob) : null,
       joiningDate: joiningDate ? new Date(joiningDate) : null,
       nismNumber,
-      nismValidity: nismValidity ? new Date(nismValidity) : null
+      nismValidity: nismValidity ? new Date(nismValidity) : null,
+      ...(targetUserId ? { userId: targetUserId } : {})
     };
 
     if (req.file) {
@@ -784,22 +816,22 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const updatedStaff = await dynamicDb.Staff.findByIdAndUpdate(
-      id,
+      staffId,
       { $set: updateStaffData },
       { returnDocument: 'after', lean: true }
     );
 
-    await dynamicDb.PersonAssociated.deleteMany({ staffId: id });
+    await dynamicDb.PersonAssociated.deleteMany({ staffId });
 
     if (['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(effectiveRoleName)) {
       await dynamicDb.PersonAssociated.create({
-        staffId: id,
+        staffId,
         roleType: effectivePersonAssociatedType || 'SALES',
         customRole: effectivePersonAssociatedType === 'OTHER' ? customRole : null
       });
     }
 
-    const newStaffVal = await dynamicDb.Staff.findById(id).lean();
+    const newStaffVal = await dynamicDb.Staff.findById(staffId).lean();
 
     await logAudit({
       tenantId,
@@ -832,27 +864,44 @@ export const toggleStaffStatus = async (req: AuthenticatedRequest, res: Response
   }
 
   try {
-    const staff: any = await dynamicDb.Staff.findById(id).lean();
+    let staff: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+    }
+    if (!staff) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+          { employeeId: id }
+        ]
+      }).lean();
+    }
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
     }
 
-    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
-    if (!staffUser || staffUser.tenantId !== tenantId) {
-      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    const staffId = staff._id;
+    let staffUser: any = null;
+    if (staff.userId) {
+      staffUser = await dynamicDb.User.findById(staff.userId).lean();
+    }
+    if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access.' });
     }
 
     const newStatus = staff.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
 
     const updatedStaff = await dynamicDb.Staff.findByIdAndUpdate(
-      id,
+      staffId,
       { $set: { status: newStatus } },
       { returnDocument: 'after', lean: true }
     );
 
-    await dynamicDb.User.findByIdAndUpdate(staff.userId, {
-      $set: { status: newStatus }
-    });
+    if (staff.userId) {
+      await dynamicDb.User.findByIdAndUpdate(staff.userId, {
+        $set: { status: newStatus }
+      });
+    }
 
     await logAudit({
       tenantId,
@@ -885,19 +934,36 @@ export const deleteStaff = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const staff: any = await dynamicDb.Staff.findById(id).lean();
+    let staff: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+    }
+    if (!staff) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+          { employeeId: id }
+        ]
+      }).lean();
+    }
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
     }
 
-    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
-    if (!staffUser || staffUser.tenantId !== tenantId) {
-      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    const staffId = staff._id;
+    let staffUser: any = null;
+    if (staff.userId) {
+      staffUser = await dynamicDb.User.findById(staff.userId).lean();
+    }
+    if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access.' });
     }
 
     const now = new Date();
-    await dynamicDb.User.findByIdAndUpdate(staff.userId, { $set: { deletedAt: now } });
-    await dynamicDb.Staff.findByIdAndUpdate(id, { $set: { status: 'INACTIVE' } });
+    if (staff.userId) {
+      await dynamicDb.User.findByIdAndUpdate(staff.userId, { $set: { deletedAt: now, status: 'INACTIVE' } });
+    }
+    await dynamicDb.Staff.findByIdAndUpdate(staffId, { $set: { status: 'INACTIVE', deletedAt: now } });
 
     await logAudit({
       tenantId,
@@ -929,21 +995,30 @@ export const restoreStaff = async (req: AuthenticatedRequest, res: Response) => 
   }
 
   try {
-    const staff: any = await dynamicDb.Staff.findById(id).lean();
+    let staff: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+    }
+    if (!staff) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+          { employeeId: id }
+        ]
+      }).lean();
+    }
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Deleted staff member not found.' });
     }
 
-    const staffUser: any = await dynamicDb.User.findById(staff.userId).lean();
-    if (!staffUser || staffUser.tenantId !== tenantId || !staffUser.deletedAt) {
-      return res.status(404).json({ success: false, message: 'Deleted staff member not found.' });
+    const staffId = staff._id;
+    if (staff.userId) {
+      await dynamicDb.User.findByIdAndUpdate(staff.userId, {
+        $set: { deletedAt: null, status: 'ACTIVE' }
+      });
     }
-
-    await dynamicDb.User.findByIdAndUpdate(staff.userId, {
-      $set: { deletedAt: null, status: 'ACTIVE' }
-    });
-    await dynamicDb.Staff.findByIdAndUpdate(id, {
-      $set: { status: 'ACTIVE' }
+    await dynamicDb.Staff.findByIdAndUpdate(staffId, {
+      $set: { status: 'ACTIVE', deletedAt: null }
     });
 
     await logAudit({

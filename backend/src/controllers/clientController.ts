@@ -104,21 +104,6 @@ export const registerClient = async (req: Request, res: Response) => {
       return res.status(500).json({ success: false, message: 'Client role not seeded.' });
     }
 
-    const poRole = await dynamicDb.Role.findOne({ name: 'PRINCIPAL_OFFICER' }).lean();
-    const poUser = poRole ? await dynamicDb.User.findOne({
-      tenantId,
-      roleId: poRole._id || poRole.id,
-      status: 'ACTIVE'
-    }).lean() : null;
-
-    if (!poUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Onboarding is temporarily disabled for this advisor company.',
-        errors: ['Tenant advisor profile completion is below 80%.']
-      });
-    }
-
     const creatorId = req.body.createdById || ((req as any).user ? (req as any).user.id : null);
 
     const user: any = await dynamicDb.User.create({

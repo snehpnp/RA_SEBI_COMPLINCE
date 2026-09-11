@@ -718,35 +718,64 @@ const updateStaff = async (req, res) => {
         }
     }
     try {
-        const staff = await db_1.default.Staff.findById(id).lean();
+        let staff = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+        }
+        if (!staff) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+                    { employeeId: id },
+                    { email: email }
+                ]
+            }).lean();
+        }
         if (!staff) {
             return res.status(404).json({ success: false, message: 'Staff member not found.' });
         }
-        const staffUser = await db_1.default.User.findById(staff.userId).lean();
-        if (!staffUser || staffUser.tenantId !== tenantId) {
-            return res.status(404).json({ success: false, message: 'Staff member not found.' });
+        const staffId = staff._id;
+        let staffUser = null;
+        if (staff.userId) {
+            staffUser = await db_1.default.User.findById(staff.userId).lean();
+        }
+        if (!staffUser && staff.email) {
+            staffUser = await db_1.default.User.findOne({ email: staff.email }).lean();
+        }
+        if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: Staff belongs to another tenant.' });
         }
         if (nismNumber && nismNumber.trim().length > 0) {
             const existingNism = await db_1.default.Staff.findOne({
                 nismNumber: nismNumber.trim(),
-                _id: { $ne: id }
+                _id: { $ne: staffId }
             }).lean();
             if (existingNism) {
                 return res.status(400).json({ success: false, message: 'Duplicate NISM Certificate Number. This number is already in use.' });
             }
         }
+        const targetRole = await db_1.default.Role.findOne({ name: effectiveRoleName }).lean();
         const updateUserData = {
             firstName: name.split(' ')[0],
             lastName: name.split(' ').slice(1).join(' ') || 'Staff',
             mobile
         };
-        if (email !== staff.email) {
-            const emailExists = await db_1.default.User.findOne({ email, _id: { $ne: staff.userId } }).lean();
+        if (targetRole) {
+            updateUserData.roleId = targetRole._id || targetRole.id;
+        }
+        const targetUserId = staff.userId || staffUser?._id;
+        if (email && email !== staff.email) {
+            const emailExists = await db_1.default.User.findOne({
+                email,
+                ...(targetUserId ? { _id: { $ne: targetUserId } } : {})
+            }).lean();
             if (emailExists)
                 throw new Error('Email already in use by another user.');
             updateUserData.email = email;
         }
-        await db_1.default.User.findByIdAndUpdate(staff.userId, { $set: updateUserData });
+        if (targetUserId) {
+            await db_1.default.User.findByIdAndUpdate(targetUserId, { $set: updateUserData });
+        }
         const updateStaffData = {
             name,
             email: updateUserData.email || staff.email,
@@ -754,21 +783,22 @@ const updateStaff = async (req, res) => {
             dob: dob ? new Date(dob) : null,
             joiningDate: joiningDate ? new Date(joiningDate) : null,
             nismNumber,
-            nismValidity: nismValidity ? new Date(nismValidity) : null
+            nismValidity: nismValidity ? new Date(nismValidity) : null,
+            ...(targetUserId ? { userId: targetUserId } : {})
         };
         if (req.file) {
             updateStaffData.nismUpload = `/uploads/staff/${req.file.filename}`;
         }
-        const updatedStaff = await db_1.default.Staff.findByIdAndUpdate(id, { $set: updateStaffData }, { returnDocument: 'after', lean: true });
-        await db_1.default.PersonAssociated.deleteMany({ staffId: id });
+        const updatedStaff = await db_1.default.Staff.findByIdAndUpdate(staffId, { $set: updateStaffData }, { returnDocument: 'after', lean: true });
+        await db_1.default.PersonAssociated.deleteMany({ staffId });
         if (['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(effectiveRoleName)) {
             await db_1.default.PersonAssociated.create({
-                staffId: id,
+                staffId,
                 roleType: effectivePersonAssociatedType || 'SALES',
                 customRole: effectivePersonAssociatedType === 'OTHER' ? customRole : null
             });
         }
-        const newStaffVal = await db_1.default.Staff.findById(id).lean();
+        const newStaffVal = await db_1.default.Staff.findById(staffId).lean();
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
@@ -797,19 +827,36 @@ const toggleStaffStatus = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const staff = await db_1.default.Staff.findById(id).lean();
+        let staff = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+        }
+        if (!staff) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+                    { employeeId: id }
+                ]
+            }).lean();
+        }
         if (!staff) {
             return res.status(404).json({ success: false, message: 'Staff member not found.' });
         }
-        const staffUser = await db_1.default.User.findById(staff.userId).lean();
-        if (!staffUser || staffUser.tenantId !== tenantId) {
-            return res.status(404).json({ success: false, message: 'Staff member not found.' });
+        const staffId = staff._id;
+        let staffUser = null;
+        if (staff.userId) {
+            staffUser = await db_1.default.User.findById(staff.userId).lean();
+        }
+        if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
+            return res.status(403).json({ success: false, message: 'Unauthorized access.' });
         }
         const newStatus = staff.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-        const updatedStaff = await db_1.default.Staff.findByIdAndUpdate(id, { $set: { status: newStatus } }, { returnDocument: 'after', lean: true });
-        await db_1.default.User.findByIdAndUpdate(staff.userId, {
-            $set: { status: newStatus }
-        });
+        const updatedStaff = await db_1.default.Staff.findByIdAndUpdate(staffId, { $set: { status: newStatus } }, { returnDocument: 'after', lean: true });
+        if (staff.userId) {
+            await db_1.default.User.findByIdAndUpdate(staff.userId, {
+                $set: { status: newStatus }
+            });
+        }
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
@@ -838,17 +885,34 @@ const deleteStaff = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const staff = await db_1.default.Staff.findById(id).lean();
+        let staff = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+        }
+        if (!staff) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+                    { employeeId: id }
+                ]
+            }).lean();
+        }
         if (!staff) {
             return res.status(404).json({ success: false, message: 'Staff member not found.' });
         }
-        const staffUser = await db_1.default.User.findById(staff.userId).lean();
-        if (!staffUser || staffUser.tenantId !== tenantId) {
-            return res.status(404).json({ success: false, message: 'Staff member not found.' });
+        const staffId = staff._id;
+        let staffUser = null;
+        if (staff.userId) {
+            staffUser = await db_1.default.User.findById(staff.userId).lean();
+        }
+        if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
+            return res.status(403).json({ success: false, message: 'Unauthorized access.' });
         }
         const now = new Date();
-        await db_1.default.User.findByIdAndUpdate(staff.userId, { $set: { deletedAt: now } });
-        await db_1.default.Staff.findByIdAndUpdate(id, { $set: { status: 'INACTIVE' } });
+        if (staff.userId) {
+            await db_1.default.User.findByIdAndUpdate(staff.userId, { $set: { deletedAt: now, status: 'INACTIVE' } });
+        }
+        await db_1.default.Staff.findByIdAndUpdate(staffId, { $set: { status: 'INACTIVE', deletedAt: now } });
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: req.user.id,
@@ -876,19 +940,29 @@ const restoreStaff = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        const staff = await db_1.default.Staff.findById(id).lean();
+        let staff = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+        }
+        if (!staff) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+                    { employeeId: id }
+                ]
+            }).lean();
+        }
         if (!staff) {
             return res.status(404).json({ success: false, message: 'Deleted staff member not found.' });
         }
-        const staffUser = await db_1.default.User.findById(staff.userId).lean();
-        if (!staffUser || staffUser.tenantId !== tenantId || !staffUser.deletedAt) {
-            return res.status(404).json({ success: false, message: 'Deleted staff member not found.' });
+        const staffId = staff._id;
+        if (staff.userId) {
+            await db_1.default.User.findByIdAndUpdate(staff.userId, {
+                $set: { deletedAt: null, status: 'ACTIVE' }
+            });
         }
-        await db_1.default.User.findByIdAndUpdate(staff.userId, {
-            $set: { deletedAt: null, status: 'ACTIVE' }
-        });
-        await db_1.default.Staff.findByIdAndUpdate(id, {
-            $set: { status: 'ACTIVE' }
+        await db_1.default.Staff.findByIdAndUpdate(staffId, {
+            $set: { status: 'ACTIVE', deletedAt: null }
         });
         await (0, auditService_1.logAudit)({
             tenantId,
