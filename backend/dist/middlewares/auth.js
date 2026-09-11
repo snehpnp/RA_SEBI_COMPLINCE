@@ -64,13 +64,13 @@ const authenticateJWT = (req, res, next) => {
                             .select('status tokenVersion currentSessionId roleId tenantId')
                             .lean();
                     }
-                    if (!user || user.status !== 'ACTIVE') {
-                        return res.status(403).json({
-                            success: false,
-                            message: 'Your account has been deactivated. Please contact admin.',
-                            errors: ['User inactive or suspended']
-                        });
-                    }
+                    // if (!user || user.status !== 'ACTIVE') {
+                    //   return res.status(403).json({
+                    //     success: false,
+                    //     message: 'Your account has been deactivated. Please contact admin.',
+                    //     errors: ['User inactive or suspended']
+                    //   });
+                    // }
                     // Session validation
                     const decodedTokenVersion = Number(decoded.tokenVersion || 0);
                     const userTokenVersion = Number(user.tokenVersion || 0);

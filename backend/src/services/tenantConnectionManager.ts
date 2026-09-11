@@ -3,14 +3,19 @@ import mongoose, { Connection } from 'mongoose';
 import { ITenantModels, registerTenantModels } from '../models';
 
 const defaultDbName: string = (process.env.DB_NAME && process.env.DB_NAME.trim()) || 'sebi-compliance';
-const defaultCentralUrl: string = process.env.DATABASE_URL || `mongodb://localhost:27017/${defaultDbName}`;
+const defaultCentralUrl: string = (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) || 'mongodb://localhost:27017/sebi-compliance';
+
+console.log("=>>>>>>>>>>>>>>>>>>", defaultDbName, defaultCentralUrl)
 
 // Dedicated Central DB Mongoose Connection
-export const centralConnection: Connection = mongoose.createConnection(defaultCentralUrl, {
-  dbName: defaultDbName,
-  maxPoolSize: 20,
-  serverSelectionTimeoutMS: 5000
-});
+export const centralConnection = mongoose.createConnection(
+  defaultCentralUrl,
+  {
+    dbName: defaultDbName,
+    maxPoolSize: 20,
+    serverSelectionTimeoutMS: 10000,
+  }
+);
 
 // Central Models
 export const centralModels: ITenantModels = registerTenantModels(centralConnection);
@@ -99,6 +104,7 @@ class TenantConnectionManager {
       } else {
         allComp = await centralModels.AllCompany.findOne({
           $or: [
+            { companyName: new RegExp(`^${trimmed}$`, 'i') },
             { domainUrl: new RegExp(trimmed, 'i') },
             { email: trimmed }
           ]
@@ -130,7 +136,7 @@ class TenantConnectionManager {
       return null;
     }
 
-    const tenantId = (allComp?.tenantId || tenantRecord?._id || tenantRecord?.id)?.toString();
+    const tenantId = (allComp?._id || allComp?.tenantId || tenantRecord?._id || tenantRecord?.id)?.toString();
     const companyName = allComp?.companyName || tenantRecord?.companyName;
     const domainUrl = allComp?.domainUrl || tenantRecord?.domainUrl;
     const dbName = allComp?.dbName || tenantRecord?.dbName || this.sanitizeTenantDbName(companyName, tenantId);
@@ -193,7 +199,7 @@ class TenantConnectionManager {
       if (meta.mongoDbUrl && this.connectionPool.has(meta.mongoDbUrl)) {
         const poolItem = this.connectionPool.get(meta.mongoDbUrl);
         this.connectionPool.delete(meta.mongoDbUrl);
-        await poolItem?.connection.close().catch(() => {});
+        await poolItem?.connection.close().catch(() => { });
       }
     }
   }
@@ -203,10 +209,10 @@ class TenantConnectionManager {
    */
   public async disconnectAll(): Promise<void> {
     this.connectionPool.forEach(async (poolItem) => {
-      await poolItem.connection.close().catch(() => {});
+      await poolItem.connection.close().catch(() => { });
     });
     this.connectionPool.clear();
-    await centralConnection.close().catch(() => {});
+    await centralConnection.close().catch(() => { });
   }
 }
 

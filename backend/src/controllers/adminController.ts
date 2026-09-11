@@ -84,53 +84,15 @@ export const calculateCompleteness = async (tenantId: string) => {
       $or: [{ id: tenantId }, { tenantId: tenantId }]
     }).lean();
   }
-  if (!tenant && tenantId) {
-    tenant = await centralModels.AllCompany.findOne({
-      $or: [
-        ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
-        { tenantId: tenantId }
-      ]
-    }).lean();
-  }
   if (!tenant) {
     tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
   }
   if (!tenant) return { score: 0, details: { organization: false, principalOfficer: false, complianceOfficer: false, grievance: false, internalPolicy: false }, data: null };
 
-  // Fallback SMTP lookup if dynamic tenant document lacks SMTP fields
+  // Fallback SMTP lookup in local dynamicDb.SystemSetting if dynamic tenant document lacks SMTP fields
   if (!tenant.smtpHost || !tenant.smtpUser) {
     try {
-      const centralTenant: any = await centralModels.Tenant.findById(tenant._id || tenant.id || tenantId).lean();
-      if (centralTenant?.smtpHost && centralTenant?.smtpUser) {
-        tenant.smtpHost = centralTenant.smtpHost;
-        tenant.smtpPort = centralTenant.smtpPort;
-        tenant.smtpUser = centralTenant.smtpUser;
-        tenant.smtpPassword = centralTenant.smtpPassword;
-        tenant.smtpFrom = centralTenant.smtpFrom;
-      }
-    } catch { }
-  }
-  if (!tenant.smtpHost || !tenant.smtpUser) {
-    try {
-      const allComp: any = await centralModels.AllCompany.findOne({
-        $or: [
-          ...(tenant._id ? [{ _id: tenant._id }] : []),
-          ...(tenantId && mongoose.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
-          { tenantId: tenantId }
-        ]
-      }).lean();
-      if (allComp?.smtpHost && allComp?.smtpUser) {
-        tenant.smtpHost = allComp.smtpHost;
-        tenant.smtpPort = allComp.smtpPort;
-        tenant.smtpUser = allComp.smtpUser;
-        tenant.smtpPassword = allComp.smtpPassword;
-        tenant.smtpFrom = allComp.smtpFrom;
-      }
-    } catch { }
-  }
-  if (!tenant.smtpHost || !tenant.smtpUser) {
-    try {
-      const setting: any = await centralModels.SystemSetting.findOne({ key: 'GLOBAL_SMTP' }).lean();
+      const setting: any = await dynamicDb.SystemSetting.findOne({ key: 'GLOBAL_SMTP' }).lean();
       if (setting?.value) {
         const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
         if (parsed.smtpHost && parsed.smtpUser) {
@@ -294,14 +256,6 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
     if (!oldTenant && tenantId) {
       oldTenant = await dynamicDb.Tenant.findOne({
         $or: [{ id: tenantId }, { tenantId: tenantId }]
-      }).lean();
-    }
-    if (!oldTenant) {
-      oldTenant = await centralModels.AllCompany.findOne({
-        $or: [
-          ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
-          { tenantId: tenantId }
-        ]
       }).lean();
     }
     if (!oldTenant) {
@@ -2314,14 +2268,6 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
         $or: [{ id: tenantId }, { tenantId: tenantId }]
       }).lean();
     }
-    if (!oldTenant && tenantId) {
-      oldTenant = await centralModels.AllCompany.findOne({
-        $or: [
-          ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []),
-          { tenantId: tenantId }
-        ]
-      }).lean();
-    }
     if (!oldTenant) {
       oldTenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
     }
@@ -2420,20 +2366,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
       );
     }
 
-    // Also update Central DB AllCompany and Tenant
-    await centralModels.AllCompany.findOneAndUpdate(
-      { $or: [{ tenantId: tenantId }, ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []), ...(oldTenant?._id ? [{ _id: oldTenant._id }] : [])] },
-      { $set: dataToUpdate },
-      { new: true }
-    ).catch(() => {});
-
-    await centralModels.Tenant.findOneAndUpdate(
-      { $or: [{ tenantId: tenantId }, ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ _id: tenantId }] : []), ...(oldTenant?._id ? [{ _id: oldTenant._id }] : [])] },
-      { $set: dataToUpdate },
-      { new: true }
-    ).catch(() => {});
-
-    // Save/Sync to SystemSetting GLOBAL_SMTP so any service can resolve it immediately
+    // Save/Sync to local dynamicDb.SystemSetting GLOBAL_SMTP so any service on this tenant can resolve it immediately
     if (dataToUpdate.smtpHost || dataToUpdate.smtpUser || (oldTenant?.smtpHost && dataToUpdate.smtpPassword)) {
       const finalSmtpConfig = {
         smtpHost: dataToUpdate.smtpHost !== undefined ? dataToUpdate.smtpHost : oldTenant?.smtpHost,
@@ -2442,11 +2375,6 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
         smtpPassword: dataToUpdate.smtpPassword || oldTenant?.smtpPassword,
         smtpFrom: dataToUpdate.smtpFrom || dataToUpdate.smtpUser || oldTenant?.smtpFrom || oldTenant?.smtpUser
       };
-      await centralModels.SystemSetting.findOneAndUpdate(
-        { key: 'GLOBAL_SMTP' },
-        { $set: { value: JSON.stringify(finalSmtpConfig) }, $setOnInsert: { key: 'GLOBAL_SMTP' } },
-        { upsert: true }
-      ).catch(() => {});
       await dynamicDb.SystemSetting.findOneAndUpdate(
         { key: 'GLOBAL_SMTP' },
         { $set: { value: JSON.stringify(finalSmtpConfig) }, $setOnInsert: { key: 'GLOBAL_SMTP' } },
@@ -2454,17 +2382,17 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
       ).catch(() => {});
     }
 
-    // Sync Global Branding setting if applicable
+    // Sync local Branding setting in dynamicDb.SystemSetting if applicable
     if (dataToUpdate.logoUrl) {
       try {
-        const existingSetting: any = await centralModels.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean();
+        const existingSetting: any = await dynamicDb.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean();
         let brandingData: any = {};
         if (existingSetting?.value) {
           try { brandingData = JSON.parse(existingSetting.value); } catch {}
         }
         brandingData.logoUrl = dataToUpdate.logoUrl;
         if (dataToUpdate.companyName) brandingData.appName = dataToUpdate.companyName;
-        await centralModels.SystemSetting.findOneAndUpdate(
+        await dynamicDb.SystemSetting.findOneAndUpdate(
           { key: 'GLOBAL_BRANDING' },
           { key: 'GLOBAL_BRANDING', value: JSON.stringify(brandingData) },
           { upsert: true }

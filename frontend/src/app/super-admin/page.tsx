@@ -800,7 +800,8 @@ function SuperAdminDashboardContent() {
           data: res.data || [],
           localData: res.localData || [],
           remoteCount: res.remoteCount,
-          localCount: res.localCount
+          localCount: res.localCount,
+          endpointUsed: res.endpointUsed || null
         });
       } else {
         setCompanyClientsData({

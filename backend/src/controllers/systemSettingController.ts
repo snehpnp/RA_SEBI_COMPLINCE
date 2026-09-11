@@ -1,38 +1,71 @@
 import { Request, Response } from 'express';
-import dynamicDb from '../config/db';
+import dynamicDb, { centralModels } from '../config/db';
 import nodemailer from 'nodemailer';
 import { syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 import { resolveSmtpCredentials } from '../services/emailService';
+import { tenantConnectionManager } from '../services/tenantConnectionManager';
+
+import mongoose from 'mongoose';
 
 const BRANDING_KEY = 'GLOBAL_BRANDING';
 
 export const getGlobalBranding = async (req: Request, res: Response) => {
   try {
-    const setting = await dynamicDb.SystemSetting.findOne({
-      key: BRANDING_KEY,
-    }).lean();
+    // 1. Check local dynamicDb.Tenant first (tenant database)
+    const requestedTenant = (req.query.tenantId || req.query.tenant || req.query.company || req.query.domain || req.headers['x-tenant-id'] || req.headers['x-domain-url']) as string;
+    let localTenant: any = null;
 
-    if (!setting) {
-      // Return default branding if not set
+    if (requestedTenant) {
+      localTenant = await dynamicDb.Tenant.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(requestedTenant) ? [{ _id: requestedTenant }] : []),
+          { id: requestedTenant },
+          { tenantId: requestedTenant },
+          { domainUrl: new RegExp(requestedTenant.replace(/^https?:\/\//, ''), 'i') }
+        ]
+      }).lean();
+    }
+    if (!localTenant) {
+      localTenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    if (localTenant && (localTenant.logoUrl || localTenant.companyName)) {
       return res.status(200).json({
         success: true,
         data: {
-          appName: 'RAGCP',
-          logoUrl: '/logo-light.png',
-          faviconUrl: '/favicon.ico',
-          loginLogoUrl: '/logo-light.png'
+          appName: localTenant.companyName || 'RAGCP',
+          logoUrl: localTenant.logoUrl || '/logo-light.png',
+          faviconUrl: localTenant.faviconUrl || '/favicon.ico',
+          loginLogoUrl: localTenant.logoUrl || '/logo-light.png',
+          companyName: localTenant.companyName,
+          themeColor: localTenant.themeColor || null
         }
       });
     }
 
-    const brandingData = JSON.parse(setting.value);
-    res.status(200).json({
+    // 2. Check local dynamicDb.SystemSetting
+    const localSetting = await dynamicDb.SystemSetting.findOne({ key: BRANDING_KEY }).lean();
+    if (localSetting && localSetting.value) {
+      const parsed = typeof localSetting.value === 'string' ? JSON.parse(localSetting.value) : localSetting.value;
+      return res.status(200).json({
+        success: true,
+        data: parsed
+      });
+    }
+
+    // 3. Return default branding
+    return res.status(200).json({
       success: true,
-      data: brandingData
+      data: {
+        appName: 'RAGCP',
+        logoUrl: '/logo-light.png',
+        faviconUrl: '/favicon.ico',
+        loginLogoUrl: '/logo-light.png'
+      }
     });
   } catch (error: any) {
     console.error('Error fetching global branding:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 

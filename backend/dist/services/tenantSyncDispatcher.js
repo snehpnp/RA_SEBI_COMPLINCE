@@ -186,6 +186,9 @@ async function syncTenantToRemote(tenantId, options) {
             let candidateEndpoints = [];
             if (reason === 'BOOTSTRAP') {
                 candidateEndpoints = [
+                    `${rawDomain}/backend/api/v1/sync/bootstrap`,
+                    `${rawDomain}/backend/api/v1/sync/tenant`,
+                    `${rawDomain}/backend/api/v1/sync/update`,
                     `${rawDomain}/api/v1/sync/bootstrap`,
                     `${rawDomain}/api/v1/sync/tenant`,
                     `${rawDomain}/api/v1/sync/update`,
@@ -194,6 +197,8 @@ async function syncTenantToRemote(tenantId, options) {
             }
             else if (reason === 'STATUS_CHANGE') {
                 candidateEndpoints = [
+                    `${rawDomain}/backend/api/v1/sync/status`,
+                    `${rawDomain}/backend/api/v1/sync/update`,
                     `${rawDomain}/api/v1/sync/status`,
                     `${rawDomain}/api/v1/sync/update`,
                     `${rawDomain}/sync/status`
@@ -201,6 +206,8 @@ async function syncTenantToRemote(tenantId, options) {
             }
             else if (reason === 'DELETE') {
                 candidateEndpoints = [
+                    `${rawDomain}/backend/api/v1/sync/delete`,
+                    `${rawDomain}/backend/api/v1/sync/update`,
                     `${rawDomain}/api/v1/sync/delete`,
                     `${rawDomain}/api/v1/sync/update`,
                     `${rawDomain}/sync/delete`
@@ -208,6 +215,9 @@ async function syncTenantToRemote(tenantId, options) {
             }
             else {
                 candidateEndpoints = [
+                    `${rawDomain}/backend/api/v1/sync/update`,
+                    `${rawDomain}/backend/api/v1/sync/tenant`,
+                    `${rawDomain}/backend/api/v1/sync/bootstrap`,
                     `${rawDomain}/api/v1/sync/update`,
                     `${rawDomain}/api/v1/sync/tenant`,
                     `${rawDomain}/api/v1/sync/bootstrap`,
@@ -257,13 +267,17 @@ async function syncTenantToRemote(tenantId, options) {
     };
     const domainSyncResult = await syncPromise();
     const hasDomain = Boolean(targetDomainRaw);
-    const overallSuccess = hasDomain ? Boolean(domainSyncResult?.success) : true;
+    const isDomainSynced = Boolean(domainSyncResult?.success);
     let finalMessage = 'Tenant updated in master database successfully.';
-    if (domainSyncResult) {
+    if (domainSyncResult?.success) {
         finalMessage = domainSyncResult.message;
     }
+    else if (hasDomain && !isDomainSynced) {
+        finalMessage = `Tenant updated in master database successfully. Remote domain (${targetDomainRaw}) is offline or unreachable.`;
+    }
     return {
-        success: overallSuccess,
+        success: true,
+        isRemoteUnreachable: hasDomain && !isDomainSynced,
         tenantId: tenant._id ? tenant._id.toString() : tenant.id,
         companyName: tenant.companyName,
         domainUrl: tenant.domainUrl || tenant.website,

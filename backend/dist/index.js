@@ -29,8 +29,18 @@ app.use((0, cors_1.default)({
     origin: ['http://localhost:3000', 'http://localhost:3001'],
     credentials: true
 }));
-app.use(express_1.default.json());
-app.use(express_1.default.urlencoded({ extended: true }));
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
+// Global body-parser error handler
+app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+        return res.status(400).json({ success: false, message: 'Invalid JSON payload received.' });
+    }
+    if (err?.type === 'entity.too.large') {
+        return res.status(413).json({ success: false, message: 'Request payload too large (max 50MB).' });
+    }
+    next(err);
+});
 // Request Logger Middleware (Prints all incoming API calls to console)
 app.use((req, res, next) => {
     const start = Date.now();

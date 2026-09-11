@@ -31,7 +31,17 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const fetchBranding = async () => {
     try {
-      const res = await api.get('/system-settings/branding');
+      const params: Record<string, string> = {};
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tParam = urlParams.get('tenant') || urlParams.get('tenantId') || urlParams.get('company');
+        if (tParam) params.tenant = tParam;
+        if (window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          params.domain = window.location.hostname;
+        }
+      }
+
+      const res = await api.get('/system-settings/branding', { params });
       if (res.data.success && res.data.data) {
 
         // Resolve URLs: paths starting with /uploads/ need the backend base URL
@@ -46,7 +56,7 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const newBranding = {
           appName: res.data.data.appName !== undefined ? res.data.data.appName : defaultBranding.appName,
           logoUrl: resolveUrl(res.data.data.logoUrl, defaultBranding.logoUrl),
-          loginLogoUrl: resolveUrl(res.data.data.loginLogoUrl, defaultBranding.loginLogoUrl),
+          loginLogoUrl: resolveUrl(res.data.data.loginLogoUrl || res.data.data.logoUrl, defaultBranding.loginLogoUrl),
           faviconUrl: resolveUrl(res.data.data.faviconUrl, defaultBranding.faviconUrl),
         };
         setBranding(newBranding);

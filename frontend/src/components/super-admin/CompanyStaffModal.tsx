@@ -106,9 +106,9 @@ export default function CompanyStaffModal({
   const paginatedStaff = filteredStaff.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const targetDomain = staffData.domainUrl || company.domainUrl || company.website || '';
-  const thirdPartyEndpoint = targetDomain
-    ? `${targetDomain.replace(/\/+$/, '')}/api/v1/third-party-api/staff`
-    : `${base_api_url}/third-party-api/${company.id}/staff`;
+  const thirdPartyEndpoint = (staffData as any).endpointUsed || (targetDomain
+    ? `${targetDomain.replace(/\/+$/, '')}/backend/api/v1/third-party-api/staff`
+    : `${base_api_url}/third-party-api/${company.id}/staff`);
 
   const handleExportCSV = () => {
     const exportRows = filteredStaff.map((s: any, index: number) => ({

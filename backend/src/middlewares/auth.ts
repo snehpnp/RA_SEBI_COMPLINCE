@@ -46,13 +46,13 @@ export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: 
               .lean();
           }
 
-          if (!user || user.status !== 'ACTIVE') {
-            return res.status(403).json({
-              success: false,
-              message: 'Your account has been deactivated. Please contact admin.',
-              errors: ['User inactive or suspended']
-            });
-          }
+          // if (!user || user.status !== 'ACTIVE') {
+          //   return res.status(403).json({
+          //     success: false,
+          //     message: 'Your account has been deactivated. Please contact admin.',
+          //     errors: ['User inactive or suspended']
+          //   });
+          // }
 
           // Session validation
           const decodedTokenVersion = Number(decoded.tokenVersion || 0);

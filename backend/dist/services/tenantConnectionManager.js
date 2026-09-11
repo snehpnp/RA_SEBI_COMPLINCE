@@ -8,7 +8,8 @@ require("dotenv/config");
 const mongoose_1 = __importDefault(require("mongoose"));
 const models_1 = require("../models");
 const defaultDbName = (process.env.DB_NAME && process.env.DB_NAME.trim()) || 'sebi-compliance';
-const defaultCentralUrl = process.env.DATABASE_URL || `mongodb://localhost:27017/${defaultDbName}`;
+const defaultCentralUrl = (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) || 'mongodb://localhost:27017/sebi-compliance';
+console.log("=>>>>>>>>>>>>>>>>>>", defaultDbName, defaultCentralUrl);
 // Dedicated Central DB Mongoose Connection
 exports.centralConnection = mongoose_1.default.createConnection(defaultCentralUrl, {
     dbName: defaultDbName,
@@ -79,6 +80,7 @@ class TenantConnectionManager {
             else {
                 allComp = await exports.centralModels.AllCompany.findOne({
                     $or: [
+                        { companyName: new RegExp(`^${trimmed}$`, 'i') },
                         { domainUrl: new RegExp(trimmed, 'i') },
                         { email: trimmed }
                     ]
@@ -110,7 +112,7 @@ class TenantConnectionManager {
         if (!allComp && !tenantRecord) {
             return null;
         }
-        const tenantId = (allComp?.tenantId || tenantRecord?._id || tenantRecord?.id)?.toString();
+        const tenantId = (allComp?._id || allComp?.tenantId || tenantRecord?._id || tenantRecord?.id)?.toString();
         const companyName = allComp?.companyName || tenantRecord?.companyName;
         const domainUrl = allComp?.domainUrl || tenantRecord?.domainUrl;
         const dbName = allComp?.dbName || tenantRecord?.dbName || this.sanitizeTenantDbName(companyName, tenantId);

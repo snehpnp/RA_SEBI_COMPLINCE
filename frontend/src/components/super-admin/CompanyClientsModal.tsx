@@ -42,6 +42,7 @@ interface CompanyClientsModalProps {
     error: string | null;
     source?: string;
     domainUrl?: string | null;
+    endpointUsed?: string | null;
     company?: any;
     data: any[];
     localData?: any[];
@@ -77,6 +78,12 @@ export default function CompanyClientsModal({
     return clientsData?.data || [];
   }, [activeSourceView, clientsData, hasLocalData]);
 
+  // Helper to check KYC pending status
+  const isClientKycPending = (client: any) => {
+    const status = (client.status || '').toUpperCase();
+    return status.includes('KYC') || status.includes('PENDING') || client.kraVerified === false || client.kraVerified === 'false';
+  };
+
   // Filter clients
   const filteredClients = useMemo(() => {
     if (!activeClientsList || activeClientsList.length === 0) return [];
@@ -94,10 +101,11 @@ export default function CompanyClientsModal({
         (client.state && client.state.toLowerCase().includes(q));
 
       const status = (client.status || 'ACTIVE').toUpperCase();
+      const kycPending = isClientKycPending(client);
       const matchesStatus =
         statusFilter === 'ALL' ||
         (statusFilter === 'ACTIVE' && status === 'ACTIVE') ||
-        (statusFilter === 'KYC_PENDING' && (status.includes('KYC') || status.includes('PENDING'))) ||
+        (statusFilter === 'KYC_PENDING' && kycPending) ||
         (statusFilter === 'INACTIVE' && (status === 'INACTIVE' || status === 'SUSPENDED'));
 
       return matchesSearch && matchesStatus;
@@ -109,16 +117,20 @@ export default function CompanyClientsModal({
   // Statistics
   const totalCount = activeClientsList.length;
   const activeCount = activeClientsList.filter((c: any) => (c.status || '').toUpperCase() === 'ACTIVE').length;
-  const kycPendingCount = activeClientsList.filter((c: any) => (c.status || '').toUpperCase().includes('KYC') || (c.status || '').toUpperCase().includes('PENDING')).length;
+  const kycPendingCount = activeClientsList.filter((c: any) => isClientKycPending(c)).length;
+  const inactiveCount = activeClientsList.filter((c: any) => {
+    const s = (c.status || '').toUpperCase();
+    return s === 'INACTIVE' || s === 'SUSPENDED';
+  }).length;
   const withPlanCount = activeClientsList.filter((c: any) => c.activeSubscription || c.subscriptionsCount > 0).length;
 
   const totalPages = Math.ceil(filteredClients.length / itemsPerPage) || 1;
   const paginatedClients = filteredClients.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const targetDomain = clientsData.domainUrl || company.domainUrl || company.website || '';
-  const thirdPartyEndpoint = targetDomain
-    ? `${targetDomain.replace(/\/+$/, '')}/api/v1/third-party-api/clients`
-    : `${base_api_url}/third-party-api/${company.id}/clients`;
+  const thirdPartyEndpoint = clientsData.endpointUsed || (targetDomain
+    ? `${targetDomain.replace(/\/+$/, '')}/backend/api/v1/third-party-api/clients`
+    : `${base_api_url}/third-party-api/${company.id}/clients`);
 
   const handleExportCSV = () => {
     const exportRows = filteredClients.map((c: any, index: number) => ({
@@ -341,26 +353,30 @@ export default function CompanyClientsModal({
           </div>
 
           <div className="flex items-center space-x-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-            {['ALL', 'ACTIVE', 'KYC_PENDING', 'INACTIVE'].map(statusKey => (
+            {[
+              { key: 'ALL', label: 'All Clients', count: totalCount },
+              { key: 'ACTIVE', label: 'Active', count: activeCount },
+              { key: 'KYC_PENDING', label: 'KYC / Pending', count: kycPendingCount },
+              { key: 'INACTIVE', label: 'Inactive', count: inactiveCount }
+            ].map(({ key: statusKey, label, count }) => (
               <button
                 key={statusKey}
                 onClick={() => {
                   setStatusFilter(statusKey);
                   setCurrentPage(1);
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                   statusFilter === statusKey
                     ? 'bg-primary-600 text-white shadow-md shadow-primary-500/20'
                     : 'bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/5'
                 }`}
               >
-                {statusKey === 'ALL'
-                  ? 'All Clients'
-                  : statusKey === 'ACTIVE'
-                  ? 'Active'
-                  : statusKey === 'KYC_PENDING'
-                  ? 'KYC / Pending'
-                  : 'Inactive'}
+                <span>{label}</span>
+                <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono ${
+                  statusFilter === statusKey ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-300'
+                }`}>
+                  {count}
+                </span>
               </button>
             ))}
           </div>
@@ -405,8 +421,8 @@ export default function CompanyClientsModal({
                   <tbody className="divide-y divide-slate-200 dark:divide-white/5">
                     {paginatedClients.map((client: any, idx: number) => {
                       const status = (client.status || 'ACTIVE').toUpperCase();
+                      const isKycPending = isClientKycPending(client);
                       const isClientActive = status === 'ACTIVE';
-                      const isKycPending = status.includes('KYC') || status.includes('PENDING');
 
                       return (
                         <tr
@@ -489,17 +505,28 @@ export default function CompanyClientsModal({
                             {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString('en-IN') : 'N/A'}
                           </td>
                           <td className="py-3.5 px-4 text-center">
-                            <span
-                              className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                                isClientActive
-                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                                  : isKycPending
-                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                  : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20'
-                              }`}
-                            >
-                              {status}
-                            </span>
+                            <div className="flex flex-col items-center gap-1">
+                              <span
+                                className={`inline-flex px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                                  isClientActive
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                    : isKycPending
+                                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                    : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                }`}
+                              >
+                                {status}
+                              </span>
+                              {client.kraVerified === false ? (
+                                <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 rounded">
+                                  KRA Pending
+                                </span>
+                              ) : client.kraVerified ? (
+                                <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
+                                  KRA Verified
+                                </span>
+                              ) : null}
+                            </div>
                           </td>
                           <td className="py-3.5 px-4 text-center" onClick={e => e.stopPropagation()}>
                             <button

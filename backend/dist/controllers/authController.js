@@ -89,23 +89,24 @@ const login = async (req, res) => {
                 }
             }
         }
-        if (!user || user.deletedAt || user.status === 'DELETED') {
-            if (user && (user.deletedAt || user.status === 'DELETED')) {
-                const adminMsg = user.role?.name === 'ADMIN'
-                    ? 'Your company has been removed. Please contact super admin.'
-                    : 'Your company has been removed. Please contact admin.';
-                return res.status(403).json({
-                    success: false,
-                    message: adminMsg,
-                    errors: ['User deleted']
-                });
-            }
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid credentials',
-                errors: ['User not found']
-            });
-        }
+        // if (!user || user.deletedAt || user.status === 'DELETED') {
+        //   if (user && (user.deletedAt || user.status === 'DELETED')) {
+        //     const adminMsg =
+        //       user.role?.name === 'ADMIN'
+        //         ? 'Your company has been removed. Please contact super admin.'
+        //         : 'Your company has been removed. Please contact admin.';
+        //     return res.status(403).json({
+        //       success: false,
+        //       message: adminMsg,
+        //       errors: ['User deleted']
+        //     });
+        //   }
+        //   return res.status(401).json({
+        //     success: false,
+        //     message: 'Invalid credentials',
+        //     errors: ['User not found']
+        //   });
+        // }
         if (user.tenant) {
             if (user.tenant.status === 'DELETED' || user.tenant.deletedAt) {
                 return res.status(403).json({
@@ -140,16 +141,17 @@ const login = async (req, res) => {
             await db_1.Client.updateMany({ userId: user._id || user.id }, { status: 'ACTIVE' });
             user.status = 'ACTIVE';
         }
-        if (user.status === 'INACTIVE') {
-            const inactiveMsg = user.role?.name === 'ADMIN'
-                ? 'Your account has been deactivated. Please contact super admin.'
-                : 'Your account has been deactivated. Please contact admin.';
-            return res.status(403).json({
-                success: false,
-                message: inactiveMsg,
-                errors: ['User inactive']
-            });
-        }
+        // if (user.status === 'INACTIVE') {
+        //   const inactiveMsg =
+        //     user.role?.name === 'ADMIN'
+        //       ? 'Your account has been deactivated. Please contact super admin.'
+        //       : 'Your account has been deactivated. Please contact admin.';
+        //   return res.status(403).json({
+        //     success: false,
+        //     message: inactiveMsg,
+        //     errors: ['User inactive']
+        //   });
+        // }
         const isMatch = await bcrypt.compare(password, user.passwordHash);
         if (!isMatch) {
             return res.status(401).json({

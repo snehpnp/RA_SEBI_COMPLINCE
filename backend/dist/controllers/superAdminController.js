@@ -653,10 +653,24 @@ const getGlobalTelemetry = async (req, res) => {
         let activeClients = 0;
         let pendingClients = 0;
         try {
-            const allClients = await db_1.default.Client.find({}, 'status').lean();
+            const allClients = await db_1.default.Client.find({}, 'status kraVerified').lean();
             totalClients = allClients.length;
             activeClients = allClients.filter((c) => c.status === 'ACTIVE').length;
-            pendingClients = allClients.filter((c) => c.status !== 'ACTIVE').length;
+            pendingClients = allClients.filter((c) => c.status !== 'ACTIVE' || c.kraVerified === false).length;
+            if (totalClients === 0 && validTenants.length > 0) {
+                for (const t of validTenants) {
+                    try {
+                        const conn = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(t.tenantId || t._id || t.id);
+                        if (conn && conn.models) {
+                            const tClients = await conn.models.Client.find({}, 'status kraVerified').lean();
+                            totalClients += tClients.length;
+                            activeClients += tClients.filter((c) => c.status === 'ACTIVE').length;
+                            pendingClients += tClients.filter((c) => c.status !== 'ACTIVE' || c.kraVerified === false).length;
+                        }
+                    }
+                    catch { }
+                }
+            }
         }
         catch { }
         // Fetch staff count safely
@@ -666,6 +680,19 @@ const getGlobalTelemetry = async (req, res) => {
             const allStaff = await db_1.default.Staff.find({}, 'status').lean();
             totalStaff = allStaff.length;
             activeStaff = allStaff.filter((s) => s.status === 'ACTIVE').length;
+            if (totalStaff === 0 && validTenants.length > 0) {
+                for (const t of validTenants) {
+                    try {
+                        const conn = await tenantConnectionManager_1.tenantConnectionManager.getTenantConnection(t.tenantId || t._id || t.id);
+                        if (conn && conn.models) {
+                            const tStaff = await conn.models.Staff.find({}, 'status').lean();
+                            totalStaff += tStaff.length;
+                            activeStaff += tStaff.filter((s) => s.status === 'ACTIVE').length;
+                        }
+                    }
+                    catch { }
+                }
+            }
         }
         catch { }
         // Fetch alerts count safely
@@ -1061,22 +1088,21 @@ const updateTenantDetails = async (req, res) => {
             });
         }
         // Sync to Central all_companies catalog
-        await db_1.centralModels.AllCompany.findOneAndUpdate({ tenantId: id }, {
+        const isIdObjectId = /^[0-9a-fA-F]{24}$/.test(String(id).trim());
+        await db_1.centralModels.AllCompany.findOneAndUpdate({ $or: isIdObjectId ? [{ _id: id }, { tenantId: id }] : [{ tenantId: id }] }, {
             $set: {
+                tenantId: id,
                 companyName: updatedTenant.companyName,
                 domainUrl: updatedTenant.domainUrl || null,
                 ownerName: updatedTenant.ownerName,
                 email: updatedTenant.email,
                 mobile: updatedTenant.mobile,
                 sebiRegistration: updatedTenant.sebiRegistration,
-                status: updatedTenant.status
-            },
-            $setOnInsert: {
-                tenantId: id,
-                dbName: updatedTenant.dbName || tenantConnectionManager_1.tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id),
-                mongoDbUrl: updatedTenant.mongoDbUrl || tenantConnectionManager_1.tenantConnectionManager.buildTenantMongoUri(updatedTenant.dbName || tenantConnectionManager_1.tenantConnectionManager.sanitizeTenantDbName(updatedTenant.companyName, id))
+                status: updatedTenant.status,
+                ...(updatedTenant.dbName ? { dbName: updatedTenant.dbName } : {}),
+                ...(updatedTenant.mongoDbUrl ? { mongoDbUrl: updatedTenant.mongoDbUrl } : {})
             }
-        }, { upsert: true, returnDocument: 'after' }).catch(() => { });
+        }, { upsert: false, returnDocument: 'after' }).catch(() => { });
         // Invalidate cached connection metadata so changes take effect immediately
         await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
         // Auto-sync company & admin updates to remote domainUrl API
@@ -1418,7 +1444,7 @@ const syncTenantApi = async (req, res) => {
             targetUrl,
             reason: 'MANUAL_SYNC'
         });
-        if (result.success || result.domainSyncResult?.success) {
+        if (result.success && !result.isRemoteUnreachable) {
             await (0, auditService_1.logAudit)({
                 userId: req.user.id,
                 action: 'UPDATE',
@@ -1433,9 +1459,9 @@ const syncTenantApi = async (req, res) => {
             });
         }
         return res.status(200).json({
-            success: false,
-            isRemoteUnreachable: true,
-            message: result.message || `Remote server at ${targetUrl || 'configured domain'} could not be reached. Local database is ready!`,
+            success: true,
+            isRemoteUnreachable: result.isRemoteUnreachable || false,
+            message: result.message || `Tenant updated in master database. Remote server at ${targetUrl || 'configured domain'} could not be reached.`,
             data: result
         });
     }
