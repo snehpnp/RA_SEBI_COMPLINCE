@@ -5944,56 +5944,74 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Select Active Plan <span className="text-rose-600 dark:text-rose-400">*</span>
                                   </label>
-                                  {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).length === 0 ? (
-                                    <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
-                                      No active plans found in this category.
-                                    </div>
-                                  ) : (
-                                    <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
-                                      {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).map((p) => {
-                                        const isSelected = assignPlanId === p.id;
-                                        return (
-                                          <div
-                                            key={p.id}
-                                            onClick={() => {
-                                              setAssignPlanId(p.id);
-                                              setAssignCustomAmount('');
-                                              setAssignCustomDays('');
-                                            }}
-                                            className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
-                                          >
-                                            <div className="flex justify-between items-start">
-                                              <div>
-                                                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
-                                                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                  {(() => {
+                                    const selectedCat = categories.find((c: any) => String(c.id || c._id) === String(assignPlanCategoryId) || String(c.name).toUpperCase() === String(assignPlanCategoryId).toUpperCase());
+                                    const selectedCatName = (selectedCat?.name || '').toUpperCase();
+                                    const filteredPlans = adminPlans.filter((p: any) => {
+                                      const pCatId = typeof p.categoryId === 'object' && p.categoryId ? String(p.categoryId._id || p.categoryId.id) : String(p.categoryId || '');
+                                      const pCatObjId = p.category ? (typeof p.category === 'object' ? String(p.category.id || p.category._id) : String(p.category)) : '';
+                                      const pCatName = (p.category?.name || (typeof p.categoryId === 'object' ? p.categoryId.name : '') || '').toUpperCase();
+                                      
+                                      const matchesCategory = 
+                                        pCatId === String(assignPlanCategoryId) ||
+                                        pCatObjId === String(assignPlanCategoryId) ||
+                                        (selectedCatName && (pCatName === selectedCatName || pCatId === selectedCatName)) ||
+                                        (pCatName && pCatName === String(assignPlanCategoryId).toUpperCase());
+
+                                      return matchesCategory && p.status === 'ACTIVE' && !p.deletedAt;
+                                    });
+
+                                    return filteredPlans.length === 0 ? (
+                                      <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+                                        No active plans found in this category.
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
+                                        {filteredPlans.map((p: any) => {
+                                          const isSelected = assignPlanId === p.id;
+                                          return (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                setAssignPlanId(p.id);
+                                                setAssignCustomAmount('');
+                                                setAssignCustomDays('');
+                                              }}
+                                              className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
+                                            >
+                                              <div className="flex justify-between items-start">
+                                                <div>
+                                                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
+                                                  <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                                </div>
+                                                <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
+                                                  {gstCalculationType === 'EXCLUSIVE' ? (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
+                                                    </div>
+                                                  )}
+                                                  <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
+                                                </div>
                                               </div>
-                                              <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
-                                                {gstCalculationType === 'EXCLUSIVE' ? (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
-                                                  </div>
-                                                ) : (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
-                                                  </div>
-                                                )}
-                                                <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
-                                              </div>
+                                              {isSelected && (
+                                                <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
+                                                  <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
+                                                </div>
+                                              )}
                                             </div>
-                                            {isSelected && (
-                                              <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
-                                                <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
 
@@ -8105,7 +8123,7 @@ function AdminDashboardContent() {
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Category</label>
                           <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
                             <option value="">Select Category</option>
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name} ({c.segments})</option>)}
+                            {categories.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name} ({c.segments})</option>)}
                           </select>
                         </div>
 

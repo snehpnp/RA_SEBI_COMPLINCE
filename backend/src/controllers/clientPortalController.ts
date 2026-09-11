@@ -7,11 +7,18 @@ export const getSubscriptions = async (req: Request, res: Response) => {
   const { tenantId, id: userId } = (req as any).user;
 
   try {
-    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
-    if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
+    let client: any = await dynamicDb.Client.findOne({ userId }).lean();
+    if (!client) {
+      client = await dynamicDb.Client.findById(userId).lean();
+    }
+
+    const clientId = client ? (client._id || client.id) : userId;
 
     const subscriptions = await dynamicDb.Subscription.find({
-      clientId: client._id || client.id
+      $or: [
+        { clientId },
+        { clientId: userId }
+      ]
     })
       .populate('planId')
       .sort({ createdAt: -1 })
@@ -40,8 +47,12 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
     const client: any = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
+    const clientId = client._id || client.id;
     const payments = await dynamicDb.Payment.find({
-      clientId: client._id || client.id,
+      $or: [
+        { clientId },
+        { clientId: userId }
+      ],
       tenantId
     })
       .populate('couponId')

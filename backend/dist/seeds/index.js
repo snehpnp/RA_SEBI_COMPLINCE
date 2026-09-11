@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runAllSeeds = runAllSeeds;
+require("dotenv/config");
 const seedInitial_1 = require("./seedInitial");
 const seedCompliance_1 = require("./seedCompliance");
 const seedStates_1 = require("./seedStates");

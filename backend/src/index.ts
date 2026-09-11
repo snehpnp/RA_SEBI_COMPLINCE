@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
 });

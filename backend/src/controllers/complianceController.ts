@@ -1524,30 +1524,58 @@ const getMetricsForTenant = async (tenantId: string, res: Response) => {
     const audits = await dynamicDb.ComplianceAudit.find({ tenantId })
       .populate('requirementId')
       .populate('penalty')
+      .populate('tenantId')
       .lean();
 
+    const normalizeAudit = (a: any) => {
+      const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+      const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || {});
+      return {
+        ...a,
+        id: a._id ? a._id.toString() : a.id,
+        requirement: {
+          id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+          serialNo: reqObj.serialNo,
+          requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+          frequency: reqObj.frequency,
+          frequencyType: reqObj.frequencyType,
+          severityLevel: reqObj.severityLevel,
+          penaltyAmount: reqObj.penaltyAmount
+        },
+        requirementId: reqObj,
+        tenant: {
+          id: tenObj._id ? tenObj._id.toString() : (tenObj.id || tenantId),
+          companyName: tenObj.companyName || '—',
+          sebiRegistration: tenObj.sebiRegistration || '—',
+          domainUrl: tenObj.domainUrl || null,
+          website: tenObj.website || null
+        },
+        penalty: a.penalty || null
+      };
+    };
+
     const upcoming = audits.filter((a: any) => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
       a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
-    );
+    ).map(normalizeAudit);
 
     const due = audits.filter((a: any) => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
       a.dueDate && new Date(a.dueDate) >= now
-    );
+    ).map(normalizeAudit);
 
     const overdue = audits.filter((a: any) => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      ((a.dueDate && new Date(a.dueDate) < now) || a.status === 'OVERDUE')
-    );
+      ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+      a.status === 'OVERDUE'
+    ).map(normalizeAudit);
 
     const penalty = audits.filter((a: any) => 
-      a.penalty && a.penalty.status === 'PENDING_PAYMENT'
-    );
+      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+    ).map(normalizeAudit);
 
     const closed = audits.filter((a: any) => 
-      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED'
-    );
+      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+    ).map(normalizeAudit);
 
     return res.status(200).json({
       success: true,
@@ -1562,7 +1590,8 @@ const getMetricsForTenant = async (tenantId: string, res: Response) => {
           due: due.length,
           overdue: overdue.length,
           penalty: penalty.length,
-          closed: closed.length
+          closed: closed.length,
+          total: audits.length
         }
       }
     });
@@ -1582,28 +1611,55 @@ const getGlobalComplianceMetrics = async (res: Response) => {
       .populate('tenantId')
       .lean();
 
+    const normalizeAudit = (a: any) => {
+      const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+      const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || {});
+      return {
+        ...a,
+        id: a._id ? a._id.toString() : a.id,
+        requirement: {
+          id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+          serialNo: reqObj.serialNo,
+          requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+          frequency: reqObj.frequency,
+          frequencyType: reqObj.frequencyType,
+          severityLevel: reqObj.severityLevel,
+          penaltyAmount: reqObj.penaltyAmount
+        },
+        requirementId: reqObj,
+        tenant: {
+          id: tenObj._id ? tenObj._id.toString() : (tenObj.id || ''),
+          companyName: tenObj.companyName || '—',
+          sebiRegistration: tenObj.sebiRegistration || '—',
+          domainUrl: tenObj.domainUrl || null,
+          website: tenObj.website || null
+        },
+        penalty: a.penalty || null
+      };
+    };
+
     const upcoming = audits.filter((a: any) => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
       a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
-    );
+    ).map(normalizeAudit);
 
     const due = audits.filter((a: any) => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
       a.dueDate && new Date(a.dueDate) >= now
-    );
+    ).map(normalizeAudit);
 
     const overdue = audits.filter((a: any) => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      ((a.dueDate && new Date(a.dueDate) < now) || a.status === 'OVERDUE')
-    );
+      ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+      a.status === 'OVERDUE'
+    ).map(normalizeAudit);
 
     const penalty = audits.filter((a: any) => 
-      a.penalty && a.penalty.status === 'PENDING_PAYMENT'
-    );
+      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+    ).map(normalizeAudit);
 
     const closed = audits.filter((a: any) => 
-      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED'
-    );
+      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+    ).map(normalizeAudit);
 
     return res.status(200).json({
       success: true,
@@ -1618,7 +1674,8 @@ const getGlobalComplianceMetrics = async (res: Response) => {
           due: due.length,
           overdue: overdue.length,
           penalty: penalty.length,
-          closed: closed.length
+          closed: closed.length,
+          total: audits.length
         }
       }
     });

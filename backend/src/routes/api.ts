@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp } from '../controllers/authController';
-import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, verifyDomainUrl, testMongoConnection } from '../controllers/superAdminController';
+import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
 import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
@@ -27,7 +27,7 @@ import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, get
 import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
 import { getGlobalBranding, updateGlobalBranding, testSmtpConnection } from '../controllers/systemSettingController';
 import { getTenantPermissions, updateTenantPermissions } from '../controllers/permissionController';
-import { bootstrapTenant, getTenantSyncConfig } from '../controllers/tenantSyncController';
+import { bootstrapTenant, syncTenantUpdate, syncTenantStatus, syncTenantDelete, getTenantSyncConfig } from '../controllers/tenantSyncController';
 
 const router = Router();
 
@@ -232,11 +232,15 @@ router.post(
   requireRoles(['SUPER_ADMIN']),
   verifyDomainUrl
 );
+// Universal Remote Instance Webhook Sync Endpoints
 router.post('/sync/bootstrap', bootstrapTenant);
-router.post('/sync/update', bootstrapTenant);
 router.post('/sync/tenant', bootstrapTenant);
+router.post('/sync/update', syncTenantUpdate);
+router.post('/sync/status', syncTenantStatus);
+router.post('/sync/delete', syncTenantDelete);
 router.get('/sync/config', getTenantSyncConfig);
 router.get('/tenant/sync-config', getTenantSyncConfig);
+
 router.get(
   '/super-admin/tenants/:id/clients',
   authenticateJWT,
@@ -248,6 +252,18 @@ router.get(
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   getCompanyStaff
+);
+router.get(
+  '/super-admin/tenants/:id/compliance',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyCompliance
+);
+router.post(
+  '/super-admin/tenants/:id/compliance/sweep',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  runCompanyComplianceSweep
 );
 router.use('/third-party-api', thirdPartyRoutes);
 router.get(
@@ -263,18 +279,6 @@ router.put(
   updateTenantPermissions
 );
 router.post(
-  '/sync/bootstrap',
-  bootstrapTenant
-);
-router.post(
-  '/sync/update',
-  bootstrapTenant
-);
-router.post(
-  '/sync/tenant',
-  bootstrapTenant
-);
-router.post(
   '/super-admin/tenants/sync-all',
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
@@ -285,14 +289,6 @@ router.post(
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   verifyDomainUrl
-);
-router.get(
-  '/sync/config',
-  getTenantSyncConfig
-);
-router.get(
-  '/tenant/sync-config',
-  getTenantSyncConfig
 );
 router.put(
   '/super-admin/password',
@@ -335,6 +331,12 @@ router.get(
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   getGlobalTelemetry
+);
+router.get(
+  '/super-admin/companies/:id/panel-stats',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyPanelStats
 );
 
 // ----------------------------------------------------

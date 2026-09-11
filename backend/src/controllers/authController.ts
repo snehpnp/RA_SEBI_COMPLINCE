@@ -145,13 +145,25 @@ export const login = async (req: Request, res: Response) => {
     const sessionId = crypto.randomUUID();
     const userId = (user._id || user.id).toString();
 
+    let activeTenantId = user.tenantId ? user.tenantId.toString() : null;
+    let tenantInfo = user.tenant;
+    if (!activeTenantId && user.role?.name !== 'SUPER_ADMIN') {
+      try {
+        const defaultTenant: any = await centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await centralModels.Tenant.findOne().lean();
+        if (defaultTenant) {
+          activeTenantId = (defaultTenant._id || defaultTenant.id).toString();
+          tenantInfo = defaultTenant;
+        }
+      } catch {}
+    }
+
     // Generate tokens
     const accessToken = jwt.sign(
       {
         id: userId,
         email: user.email,
         role: user.role?.name,
-        tenantId: user.tenantId ? user.tenantId.toString() : null,
+        tenantId: activeTenantId,
         tokenVersion: user.tokenVersion || 0,
         sessionId: sessionId
       },
@@ -178,7 +190,7 @@ export const login = async (req: Request, res: Response) => {
 
     // Write audit log
     await logAudit({
-      tenantId: user.tenantId ? user.tenantId.toString() : null,
+      tenantId: activeTenantId,
       userId: userId,
       action: 'LOGIN',
       module: 'USERS',
@@ -199,10 +211,10 @@ export const login = async (req: Request, res: Response) => {
           role: user.role?.name,
           allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
           permissions,
-          tenantId: user.tenantId ? user.tenantId.toString() : null,
-          tenantStatus: user.tenant?.status || null,
-          tenantName: user.tenant?.companyName || 'RAGCP',
-          tenantLogo: user.tenant?.logoUrl || null
+          tenantId: activeTenantId,
+          tenantStatus: tenantInfo?.status || null,
+          tenantName: tenantInfo?.companyName || 'RAGCP',
+          tenantLogo: tenantInfo?.logoUrl || null
         }
       }
     });
@@ -528,20 +540,24 @@ export const requestOtp = async (req: Request, res: Response) => {
     console.log(`[OTP] Generated OTP for ${cleanEmail}: ${otp}`);
 
     let companyName = 'RAGCP Platform';
-    if (tenantId) {
+    let resolvedTenantId = tenantId;
+    if (resolvedTenantId) {
       try {
-        const t: any = await centralModels.Tenant.findById(tenantId).lean() || await centralModels.AllCompany.findById(tenantId).lean();
+        const t: any = await centralModels.Tenant.findById(resolvedTenantId).lean() || await centralModels.AllCompany.findById(resolvedTenantId).lean();
         if (t?.companyName) companyName = t.companyName;
       } catch {}
     } else {
       try {
-        const t: any = await centralModels.Tenant.findOne({ status: 'ACTIVE' }).lean();
-        if (t?.companyName) companyName = t.companyName;
+        const t: any = await centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await centralModels.Tenant.findOne().lean();
+        if (t) {
+          resolvedTenantId = (t._id || t.id).toString();
+          if (t.companyName) companyName = t.companyName;
+        }
       } catch {}
     }
 
     const emailSent = await sendOtpEmail({
-      tenantId,
+      tenantId: resolvedTenantId,
       toEmail: cleanEmail,
       otp,
       companyName

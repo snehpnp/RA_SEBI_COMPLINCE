@@ -161,12 +161,24 @@ const login = async (req, res) => {
         const permissions = user.role?.permissions?.map((rp) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
         const sessionId = crypto.randomUUID();
         const userId = (user._id || user.id).toString();
+        let activeTenantId = user.tenantId ? user.tenantId.toString() : null;
+        let tenantInfo = user.tenant;
+        if (!activeTenantId && user.role?.name !== 'SUPER_ADMIN') {
+            try {
+                const defaultTenant = await tenantConnectionManager_1.centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean();
+                if (defaultTenant) {
+                    activeTenantId = (defaultTenant._id || defaultTenant.id).toString();
+                    tenantInfo = defaultTenant;
+                }
+            }
+            catch { }
+        }
         // Generate tokens
         const accessToken = jwt.sign({
             id: userId,
             email: user.email,
             role: user.role?.name,
-            tenantId: user.tenantId ? user.tenantId.toString() : null,
+            tenantId: activeTenantId,
             tokenVersion: user.tokenVersion || 0,
             sessionId: sessionId
         }, JWT_SECRET, { expiresIn: '12h' });
@@ -183,7 +195,7 @@ const login = async (req, res) => {
         });
         // Write audit log
         await (0, auditService_1.logAudit)({
-            tenantId: user.tenantId ? user.tenantId.toString() : null,
+            tenantId: activeTenantId,
             userId: userId,
             action: 'LOGIN',
             module: 'USERS',
@@ -203,10 +215,10 @@ const login = async (req, res) => {
                     role: user.role?.name,
                     allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
                     permissions,
-                    tenantId: user.tenantId ? user.tenantId.toString() : null,
-                    tenantStatus: user.tenant?.status || null,
-                    tenantName: user.tenant?.companyName || 'RAGCP',
-                    tenantLogo: user.tenant?.logoUrl || null
+                    tenantId: activeTenantId,
+                    tenantStatus: tenantInfo?.status || null,
+                    tenantName: tenantInfo?.companyName || 'RAGCP',
+                    tenantLogo: tenantInfo?.logoUrl || null
                 }
             }
         });
@@ -410,7 +422,7 @@ exports.getMe = getMe;
 const getPublicTenants = async (req, res) => {
     try {
         const tenants = await db_1.Tenant.find({ status: 'ACTIVE' })
-            .select('id companyName')
+            .select('id companyName logoUrl')
             .lean();
         return res.json({ success: true, data: tenants });
     }
@@ -492,9 +504,10 @@ const requestOtp = async (req, res) => {
         await db_1.EmailVerification.findOneAndUpdate({ email: cleanEmail }, { otp, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }, { upsert: true, returnDocument: 'after' });
         console.log(`[OTP] Generated OTP for ${cleanEmail}: ${otp}`);
         let companyName = 'RAGCP Platform';
-        if (tenantId) {
+        let resolvedTenantId = tenantId;
+        if (resolvedTenantId) {
             try {
-                const t = await tenantConnectionManager_1.centralModels.Tenant.findById(tenantId).lean() || await tenantConnectionManager_1.centralModels.AllCompany.findById(tenantId).lean();
+                const t = await tenantConnectionManager_1.centralModels.Tenant.findById(resolvedTenantId).lean() || await tenantConnectionManager_1.centralModels.AllCompany.findById(resolvedTenantId).lean();
                 if (t?.companyName)
                     companyName = t.companyName;
             }
@@ -502,14 +515,17 @@ const requestOtp = async (req, res) => {
         }
         else {
             try {
-                const t = await tenantConnectionManager_1.centralModels.Tenant.findOne({ status: 'ACTIVE' }).lean();
-                if (t?.companyName)
-                    companyName = t.companyName;
+                const t = await tenantConnectionManager_1.centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean();
+                if (t) {
+                    resolvedTenantId = (t._id || t.id).toString();
+                    if (t.companyName)
+                        companyName = t.companyName;
+                }
             }
             catch { }
         }
         const emailSent = await (0, emailService_1.sendOtpEmail)({
-            tenantId,
+            tenantId: resolvedTenantId,
             toEmail: cleanEmail,
             otp,
             companyName

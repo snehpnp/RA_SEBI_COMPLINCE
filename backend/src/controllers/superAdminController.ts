@@ -299,7 +299,7 @@ export const getTenantDocumentHistory = async (req: AuthenticatedRequest, res: R
 
 export const getTenants = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const companies = await centralModels.AllCompany.find({})
+    const companies = await centralModels.AllCompany.find({ deletedAt: null, status: { $ne: 'DELETED' } })
       .sort({ createdAt: -1 })
       .lean();
     const mapped = companies.map((c: any) => ({
@@ -584,6 +584,113 @@ export const impersonateTenant = async (req: AuthenticatedRequest, res: Response
   }
 };
 
+// Helper: make a GET request to a remote panel endpoint with api-key auth, with timeout
+const fetchRemote = async (url: string, apiKey?: string | null): Promise<any> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['x-tenant-api-key'] = apiKey;
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    clearTimeout(tid);
+    if (!res.ok) return null;
+    const json = await res.json().catch(() => null);
+    return json;
+  } catch {
+    clearTimeout(tid);
+    return null;
+  }
+};
+
+// Fetch live dashboard stats for a specific company panel via its remote third-party API
+export const getCompanyPanelStats = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const company = await centralModels.AllCompany.findById(id).lean() as any;
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Company not found' });
+    }
+
+    const rawDomain = (company.domainUrl || '').trim();
+    const apiKey = company.tenantApiKey || null;
+    let source = 'CENTRAL_DATABASE';
+    let stats: any = {
+      staffCount: 0,
+      clientCount: 0,
+      researchCount: 0,
+      planCount: 0,
+      activeClients: 0,
+      pendingClients: 0
+    };
+
+    if (rawDomain) {
+      let origin = rawDomain;
+      if (!origin.startsWith('http://') && !origin.startsWith('https://')) origin = 'https://' + origin;
+      origin = origin.replace(/\/+$/, '');
+
+      // Try both path prefixes: /backend/api/v1 and /api/v1
+      const prefixes = [`${origin}/backend/api/v1`, `${origin}/api/v1`];
+
+      for (const prefix of prefixes) {
+        try {
+          // 1st: Try single aggregated /stats endpoint (most efficient)
+          const statsRes = await fetchRemote(`${prefix}/third-party-api/stats`, apiKey);
+          if (statsRes?.success && statsRes?.data) {
+            stats = statsRes.data;
+            source = 'REMOTE_PANEL';
+            break;
+          }
+
+          // 2nd fallback: Make parallel requests to clients + staff + plans
+          const [clientsRes, staffRes, plansRes] = await Promise.all([
+            fetchRemote(`${prefix}/third-party-api/clients`, apiKey),
+            fetchRemote(`${prefix}/third-party-api/staff`, apiKey),
+            fetchRemote(`${prefix}/third-party-api/plans`, apiKey)
+          ]);
+
+          const anySuccess = (clientsRes?.success) || (staffRes?.success) || (plansRes?.success);
+          if (!anySuccess) continue;
+
+          const clients: any[] = clientsRes?.data || [];
+          const staff: any[] = staffRes?.data || [];
+          const plans: any[] = plansRes?.data || [];
+
+          stats = {
+            staffCount: staff.length,
+            clientCount: clients.length,
+            activeClients: clients.filter((c: any) => c.status === 'ACTIVE').length,
+            pendingClients: clients.filter((c: any) => c.status !== 'ACTIVE').length,
+            planCount: plans.filter((p: any) => p.status === 'ACTIVE').length,
+            researchCount: 0
+          };
+          source = 'REMOTE_PANEL';
+          break;
+        } catch {
+          // try next prefix
+        }
+      }
+    }
+
+
+    return res.status(200).json({
+      success: true,
+      source,
+      company: {
+        id: company._id.toString(),
+        companyName: company.companyName,
+        domainUrl: company.domainUrl,
+        status: company.status
+      },
+      data: stats
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+
+
+
 export const getAuditLogs = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const logs = await dynamicDb.AuditLog.find({})
@@ -709,26 +816,99 @@ export const getTenantDetails = async (req: AuthenticatedRequest, res: Response)
       }).lean();
     }
 
+    if (!company) {
+      company = await dynamicDb.Tenant.findById(id.trim()).lean();
+    }
+
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Tenant company not found' });
+    }
+
+    const tenantIdStr = (company.tenantId || company._id || company.id).toString();
+    const rawDomain = (company.domainUrl || company.website || '').trim();
+
     let tenantData: any = company;
     let admin: any = null;
     let officers: any[] = [];
     let allStaff: any[] = [];
+    let dataSource = 'CENTRAL_DATABASE';
 
-    // Get live details from Central Database
-    try {
-      const liveTenant: any = await centralModels.Tenant.findOne({
-        $or: isObjectId ? [{ _id: id.trim() }, { id: id.trim() }] : [{ email: company?.email }]
-      }).lean();
-      const users: any[] = await centralModels.User.find({
-        $or: isObjectId ? [{ tenantId: id.trim() }] : [{ email: company?.email }]
-      }).populate('roleId').lean();
-      const userIds = users.map((u: any) => u._id || u.id);
-      const staffRecords: any[] = await centralModels.Staff.find({ userId: { $in: userIds } }).lean();
-      const staffMap = new Map(staffRecords.map((s: any) => [String(s.userId), s]));
+    // 1. Try remote domain API if domainUrl is configured
+    if (rawDomain) {
+      let targetOrigin = rawDomain;
+      if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
+        targetOrigin = 'https://' + targetOrigin;
+      }
+      targetOrigin = targetOrigin.replace(/\/+$/, '');
 
-      if (liveTenant) {
-        tenantData = { ...company, ...liveTenant };
-        admin = users.find((u: any) => u.roleId?.name === 'ADMIN');
+      const candidateEndpoints = [
+        `${targetOrigin}/backend/api/v1/third-party-api/info`,
+        `${targetOrigin}/api/v1/third-party-api/info`,
+        `${targetOrigin}/backend/api/v1/sync/config`,
+        `${targetOrigin}/api/v1/sync/config`
+      ];
+
+      for (const endpoint of candidateEndpoints) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1800);
+
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'x-tenant-id': tenantIdStr
+          };
+          if (company.tenantApiKey) {
+            headers['x-tenant-api-key'] = company.tenantApiKey;
+          }
+
+          const remoteRes = await fetch(endpoint, {
+            method: 'GET',
+            headers,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (remoteRes.ok) {
+            const remoteJson: any = await remoteRes.json().catch(() => null);
+            if (remoteJson && remoteJson.success && remoteJson.data) {
+              const rData = remoteJson.data;
+              tenantData = {
+                ...company,
+                ...rData,
+                status: rData.status || company.status,
+                logoUrl: rData.logoUrl || company.logoUrl,
+                faviconUrl: rData.faviconUrl || company.faviconUrl
+              };
+              if (rData.adminUser) {
+                admin = rData.adminUser;
+              }
+              dataSource = 'REMOTE_DOMAIN_API';
+              break;
+            }
+          }
+        } catch (e) {
+          // Continue
+        }
+      }
+    }
+
+    // 2. Fetch admin and staff from Central/Local Database if not retrieved from remote
+    if (!admin) {
+      try {
+        const liveTenant: any = await centralModels.Tenant.findOne({
+          $or: isObjectId ? [{ _id: id.trim() }, { id: id.trim() }] : [{ email: company?.email }]
+        }).lean();
+        const users: any[] = await centralModels.User.find({
+          $or: isObjectId ? [{ tenantId: id.trim() }] : [{ email: company?.email }]
+        }).populate('roleId').lean();
+        const userIds = users.map((u: any) => u._id || u.id);
+        const staffRecords: any[] = await centralModels.Staff.find({ userId: { $in: userIds } }).lean();
+        const staffMap = new Map(staffRecords.map((s: any) => [String(s.userId), s]));
+
+        if (liveTenant) {
+          tenantData = { ...company, ...liveTenant };
+        }
+        admin = users.find((u: any) => u.roleId?.name === 'ADMIN') || admin;
         officers = users.filter((u: any) => ['PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER'].includes(u.roleId?.name)) || [];
         allStaff = users.filter((u: any) => u.roleId?.name !== 'CLIENT').map((u: any) => {
           const st = staffMap.get(String(u._id || u.id));
@@ -742,17 +922,14 @@ export const getTenantDetails = async (req: AuthenticatedRequest, res: Response)
             status: st?.status || u.status || 'ACTIVE'
           };
         }) || [];
+      } catch {
+        // Fallback gracefully
       }
-    } catch {
-      // Use company details from all_companies
-    }
-
-    if (!tenantData) {
-      return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
     return res.status(200).json({
       success: true,
+      source: dataSource,
       data: {
         tenant: tenantData,
         admin,
@@ -1595,9 +1772,12 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
     const tenantIdStr = (tenant.tenantId || tenant._id || tenant.id).toString();
     const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
 
-    // 1. Try remote domain API if domainUrl is configured
-    if (rawDomain) {
-      let targetOrigin = rawDomain;
+    const forceLocal = req.query.source === 'local';
+    let remoteClients: any[] | null = null;
+    let endpointUsed: string | null = null;
+    let targetOrigin = rawDomain;
+
+    if (targetOrigin) {
       if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
         targetOrigin = 'https://' + targetOrigin;
       }
@@ -1607,13 +1787,13 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
       } catch (e) {
         targetOrigin = targetOrigin.replace(/\/+$/, '');
       }
+    }
 
+    // 1. Try remote domain API if domainUrl is configured and not forced local
+    if (targetOrigin && !forceLocal) {
       const candidateEndpoints = [
         `${targetOrigin}/backend/api/v1/third-party-api/clients`,
         `${targetOrigin}/backend/api/v1/third-party-api/${tenantIdStr}/clients`,
-        `${targetOrigin}/backend/api/v1/clients`,
-        `${targetOrigin}/backend/third-party-api/clients`,
-        `${targetOrigin}/backend/clients`,
         `${targetOrigin}/api/v1/third-party-api/clients`,
         `${targetOrigin}/api/v1/third-party-api/${tenantIdStr}/clients`,
         `${targetOrigin}/third-party-api/clients`,
@@ -1624,7 +1804,7 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
       for (const endpoint of candidateEndpoints) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1500);
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
 
           const headers: Record<string, string> = {
             'Content-Type': 'application/json',
@@ -1644,96 +1824,216 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
           if (remoteRes.ok) {
             const remoteData: any = await remoteRes.json().catch(() => null);
             if (remoteData && (Array.isArray(remoteData.data) || Array.isArray(remoteData))) {
-              const clientsArray = Array.isArray(remoteData.data) ? remoteData.data : remoteData;
-              return res.status(200).json({
-                success: true,
-                source: 'REMOTE_DOMAIN_API',
-                domainUrl: targetOrigin,
-                endpointUsed: endpoint,
-                company: {
-                  id: tenantIdStr,
-                  companyName: tenant.companyName,
-                  sebiRegistration: tenant.sebiRegistration,
-                  domainUrl: tenant.domainUrl,
-                  website: tenant.website
-                },
-                count: clientsArray.length,
-                data: clientsArray
-              });
+              remoteClients = Array.isArray(remoteData.data) ? remoteData.data : remoteData;
+              endpointUsed = endpoint;
+              break;
             }
           }
         } catch (remoteErr) {
-          // Continue
+          // Continue to next endpoint
         }
       }
     }
 
-    // 2. Fallback to Central Master Database
+    // 2. Fetch Central Database Clients strictly for THIS Tenant
     const dbModels = centralModels;
 
+    const tenantOids = [
+      tenantIdStr,
+      id.trim(),
+      ...(tenant.tenantId ? [tenant.tenantId.toString()] : []),
+      ...(tenant._id ? [tenant._id.toString()] : [])
+    ];
+    const uniqueTenantIds = [...new Set(tenantOids)];
+    const validTenantObjectIds = uniqueTenantIds
+      .filter(tId => mongoose.Types.ObjectId.isValid(tId))
+      .map(tId => new mongoose.Types.ObjectId(tId));
+
+    const clientRoles = await dbModels.Role.find({
+      name: { $regex: /^(client|user|customer|investor)$/i }
+    }).lean().catch(() => []);
+    const clientRoleIds = clientRoles.map((r: any) => r._id || r.id);
+
+    // Fetch users who are clients belonging specifically to this tenant
+    const localUsers: any[] = await dbModels.User.find({
+      deletedAt: null,
+      $and: [
+        {
+          $or: [
+            { tenantId: { $in: [...uniqueTenantIds, ...validTenantObjectIds] } },
+            { tenantId: tenantIdStr }
+          ]
+        },
+        {
+          $or: [
+            { roleId: { $in: clientRoleIds } },
+            { role: { $regex: /^(client|user|customer|investor)$/i } }
+          ]
+        }
+      ]
+    }).populate('roleId').sort({ createdAt: -1 }).lean().catch(() => []);
+
+    const userIds = localUsers.map((u: any) => u._id || u.id);
+    const userObjectIds = userIds
+      .filter(uid => mongoose.Types.ObjectId.isValid(String(uid)))
+      .map(uid => new mongoose.Types.ObjectId(String(uid)));
+
+    // Fetch Client records belonging to this tenant directly or linked via tenant's users
     const localClients = await dbModels.Client.find({
-      $or: [{ tenantId: tenantIdStr }, { tenantId: id.trim() }]
+      $or: [
+        { tenantId: { $in: [...uniqueTenantIds, ...validTenantObjectIds] } },
+        ...(userIds.length > 0 ? [
+          { userId: { $in: [...userIds, ...userObjectIds, ...userIds.map(String)] } }
+        ] : [])
+      ]
     })
-      .populate('userId', 'email mobile firstName lastName status createdAt lastLogin')
+      .populate('userId', 'email mobile firstName lastName status createdAt lastLogin tenantId')
       .sort({ createdAt: -1 })
-      .lean();
+      .lean().catch(() => []);
 
-    const clientIds = localClients.map((c: any) => c._id || c.id);
-    const profiles = await dbModels.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
-    const profileMap = new Map(profiles.map((p: any) => [String(p.clientId), p]));
+    const clientByUserId = new Map<string, any>();
+    for (const c of localClients) {
+      const uIdStr = String(c.userId?._id || c.userId?.id || c.userId || '');
+      if (uIdStr) {
+        clientByUserId.set(uIdStr, c);
+      }
+    }
 
-    const subscriptions = await dbModels.Subscription.find({ clientId: { $in: clientIds } })
-      .populate('planId', 'name price durationMonths researchSegments')
-      .sort({ createdAt: -1 })
-      .lean();
+    const combinedLocal: any[] = [...localClients];
+    for (const u of localUsers) {
+      const uIdStr = String(u._id || u.id);
+      if (!clientByUserId.has(uIdStr)) {
+        const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || u.email || 'Client';
+        const synthClient: any = {
+          _id: u._id,
+          id: uIdStr,
+          userId: u,
+          name: fullName,
+          email: u.email,
+          mobile: u.mobile || '',
+          dob: u.dob || null,
+          pan: u.pan || null,
+          aadhaar: u.aadhaar || null,
+          category: u.category || 'INDIVIDUAL',
+          occupation: u.occupation || 'OTHER',
+          status: u.status || 'ACTIVE',
+          tenantId: u.tenantId || tenantIdStr,
+          kraVerified: false,
+          createdAt: u.createdAt,
+          updatedAt: u.updatedAt
+        };
+        combinedLocal.push(synthClient);
+        clientByUserId.set(uIdStr, synthClient);
+      }
+    }
+
+    const clientIds = combinedLocal.map((c: any) => c._id || c.id);
+    const lookupIds = [...new Set([...clientIds, ...userIds.map(String)])];
+
+    const [profiles, subscriptions, agreements, documents] = await Promise.all([
+      dbModels.ClientProfile.find({ clientId: { $in: lookupIds } }).lean().catch(() => []),
+      dbModels.Subscription.find({ clientId: { $in: lookupIds } })
+        .populate('planId', 'id name price durationMonths researchSegments')
+        .sort({ createdAt: -1 })
+        .lean()
+        .catch(() => []),
+      dbModels.Agreement.find({ clientId: { $in: lookupIds } }).lean().catch(() => []),
+      dbModels.ClientDocument.find({ clientId: { $in: lookupIds } }).lean().catch(() => [])
+    ]);
+
+    const profileMap = new Map((profiles as any[]).map(p => [String(p.clientId), p]));
     const subMap = new Map<string, any[]>();
-    for (const sub of subscriptions) {
+    for (const sub of (subscriptions as any[])) {
       const cId = String(sub.clientId);
       if (!subMap.has(cId)) subMap.set(cId, []);
       subMap.get(cId)!.push(sub);
     }
 
-    const agreements = await dbModels.Agreement.find({ clientId: { $in: clientIds } }).lean();
     const agMap = new Map<string, number>();
-    for (const ag of agreements) {
+    for (const ag of (agreements as any[])) {
       const cId = String(ag.clientId);
       agMap.set(cId, (agMap.get(cId) || 0) + 1);
     }
 
-    const documents = await dbModels.ClientDocument.find({ clientId: { $in: clientIds } }).lean();
     const docMap = new Map<string, number>();
-    for (const doc of documents) {
+    for (const doc of (documents as any[])) {
       const cId = String(doc.clientId);
       docMap.set(cId, (docMap.get(cId) || 0) + 1);
     }
 
-    const sanitizedClients = localClients.map((c: any) => {
+    const sanitizedLocalClients = combinedLocal.map((c: any) => {
       const cIdStr = String(c._id || c.id);
       const userObj: any = c.userId || {};
-      const prof: any = profileMap.get(cIdStr);
-      const clientSubs = subMap.get(cIdStr) || [];
+      const uIdStr = String(userObj._id || userObj.id || c.userId || cIdStr);
+      const prof: any = profileMap.get(cIdStr) || profileMap.get(uIdStr);
+      const clientSubs = subMap.get(cIdStr) || subMap.get(uIdStr) || [];
+      const primarySub = clientSubs[0] || null;
+
+      const planObj = primarySub?.planId && typeof primarySub.planId === 'object'
+        ? primarySub.planId
+        : (primarySub?.plan || null);
 
       return {
         id: cIdStr,
-        userId: String(userObj._id || userObj.id || c.userId),
-        name: c.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim(),
-        email: c.email || userObj.email,
-        mobile: c.mobile || userObj.mobile,
-        pan: c.pan,
-        aadhaar: c.aadhaar,
-        category: c.category,
-        occupation: c.occupation,
-        status: c.status || userObj.status,
+        userId: uIdStr,
+        tenantId: tenantIdStr,
+        companyName: tenant.companyName,
+        name: c.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || userObj.name || 'Client',
+        email: c.email || userObj.email || '',
+        mobile: c.mobile || userObj.mobile || '',
+        pan: c.pan || userObj.pan || '',
+        aadhaar: c.aadhaar || userObj.aadhaar || '',
+        category: c.category || 'INDIVIDUAL',
+        occupation: c.occupation || 'OTHER',
+        status: c.status || userObj.status || 'ACTIVE',
+        kraVerified: c.kraVerified || false,
         riskProfile: prof?.riskProfile || 'MODERATE',
         city: prof?.city || null,
         state: prof?.state || null,
+        address: prof?.address || null,
         joinedAt: userObj.createdAt || c.createdAt,
-        activeSubscription: clientSubs[0] || null,
+        lastLogin: userObj.lastLogin || null,
+        activeSubscription: primarySub ? {
+          id: primarySub._id || primarySub.id,
+          plan: planObj ? {
+            id: planObj._id || planObj.id,
+            name: planObj.name || 'Active Plan',
+            price: planObj.price,
+            durationMonths: planObj.durationMonths || 1,
+            researchSegments: planObj.researchSegments || []
+          } : null,
+          startDate: primarySub.startDate,
+          endDate: primarySub.endDate,
+          status: primarySub.status,
+          amountTotal: primarySub.amountTotal || null
+        } : null,
         subscriptionsCount: clientSubs.length,
-        agreementsCount: agMap.get(cIdStr) || 0,
-        documentsCount: docMap.get(cIdStr) || 0
+        agreementsCount: agMap.get(cIdStr) || agMap.get(uIdStr) || 0,
+        documentsCount: docMap.get(cIdStr) || docMap.get(uIdStr) || 0
       };
     });
+
+    if (remoteClients && !forceLocal) {
+      return res.status(200).json({
+        success: true,
+        source: 'REMOTE_DOMAIN_API',
+        domainUrl: targetOrigin,
+        endpointUsed,
+        company: {
+          id: tenantIdStr,
+          companyName: tenant.companyName,
+          sebiRegistration: tenant.sebiRegistration,
+          domainUrl: tenant.domainUrl,
+          website: tenant.website
+        },
+        count: remoteClients.length,
+        data: remoteClients,
+        localData: sanitizedLocalClients,
+        remoteData: remoteClients,
+        remoteCount: remoteClients.length,
+        localCount: sanitizedLocalClients.length
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -1746,8 +2046,12 @@ export const getCompanyClients = async (req: AuthenticatedRequest, res: Response
         domainUrl: tenant.domainUrl,
         website: tenant.website
       },
-      count: sanitizedClients.length,
-      data: sanitizedClients
+      count: sanitizedLocalClients.length,
+      data: sanitizedLocalClients,
+      localData: sanitizedLocalClients,
+      remoteData: remoteClients || [],
+      remoteCount: remoteClients ? remoteClients.length : 0,
+      localCount: sanitizedLocalClients.length
     });
   } catch (error: any) {
     console.error('Error fetching company clients:', error);
@@ -1926,3 +2230,370 @@ export const getCompanyStaff = async (req: AuthenticatedRequest, res: Response) 
     });
   }
 };
+
+/**
+ * Dynamic Company Compliance Endpoint for Super Admin.
+ * Queries remote domain API if configured, otherwise fetches from central/local database.
+ */
+export const getCompanyCompliance = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const isGlobal = !id || id === 'ALL' || id === 'all';
+
+  try {
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const normalizeAudit = (a: any, fallbackTenant?: any) => {
+      const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+      const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || fallbackTenant || {});
+      const tenantIdStr = (tenObj._id || tenObj.id || a.tenantId || '').toString();
+
+      return {
+        id: a._id ? a._id.toString() : a.id,
+        _id: a._id,
+        tenantId: tenantIdStr,
+        status: a.status,
+        dueDate: a.dueDate,
+        officerRemarks: a.officerRemarks,
+        proofDocumentUrl: a.proofDocumentUrl,
+        resolvedAt: a.resolvedAt,
+        updatedAt: a.updatedAt,
+        requirement: {
+          id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+          serialNo: reqObj.serialNo,
+          requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+          frequency: reqObj.frequency,
+          frequencyType: reqObj.frequencyType,
+          severityLevel: reqObj.severityLevel,
+          penaltyAmount: reqObj.penaltyAmount
+        },
+        requirementId: reqObj,
+        penalty: a.penalty || null,
+        tenant: {
+          id: tenantIdStr,
+          companyName: tenObj.companyName || '—',
+          sebiRegistration: tenObj.sebiRegistration || '—',
+          domainUrl: tenObj.domainUrl || null,
+          website: tenObj.website || null
+        }
+      };
+    };
+
+    if (!isGlobal) {
+      const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+      const tenant: any = await dynamicDb.Tenant.findById(id).lean() ||
+        await centralModels.AllCompany.findOne({
+          $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean();
+
+      if (!tenant) {
+        return res.status(404).json({ success: false, message: 'Tenant company not found' });
+      }
+
+      const tenantIdStr = (tenant.tenantId || tenant._id || tenant.id).toString();
+      const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
+
+      // 1. Try remote domain API if domainUrl is configured
+      if (rawDomain) {
+        let targetOrigin = rawDomain;
+        if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
+          targetOrigin = 'https://' + targetOrigin;
+        }
+        try {
+          const parsed = new URL(targetOrigin);
+          targetOrigin = parsed.origin;
+        } catch (e) {
+          targetOrigin = targetOrigin.replace(/\/+$/, '');
+        }
+
+        const candidateEndpoints = [
+          `${targetOrigin}/backend/api/v1/third-party-api/compliance`,
+          `${targetOrigin}/backend/api/v1/third-party-api/${tenantIdStr}/compliance`,
+          `${targetOrigin}/backend/api/v1/compliance/dashboard-metrics`,
+          `${targetOrigin}/api/v1/third-party-api/compliance`,
+          `${targetOrigin}/api/v1/third-party-api/${tenantIdStr}/compliance`,
+          `${targetOrigin}/api/v1/compliance/dashboard-metrics`,
+          `${targetOrigin}/third-party-api/compliance`
+        ];
+
+        for (const endpoint of candidateEndpoints) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1800);
+
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+              'x-tenant-id': tenantIdStr
+            };
+            if (tenant.tenantApiKey) {
+              headers['x-tenant-api-key'] = tenant.tenantApiKey;
+            }
+
+            const remoteRes = await fetch(endpoint, {
+              method: 'GET',
+              headers,
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (remoteRes.ok) {
+              const remoteData: any = await remoteRes.json().catch(() => null);
+              if (remoteData && remoteData.data) {
+                return res.status(200).json({
+                  success: true,
+                  source: 'REMOTE_DOMAIN_API',
+                  domainUrl: targetOrigin,
+                  endpointUsed: endpoint,
+                  company: {
+                    id: tenantIdStr,
+                    companyName: tenant.companyName,
+                    sebiRegistration: tenant.sebiRegistration,
+                    domainUrl: tenant.domainUrl,
+                    website: tenant.website
+                  },
+                  data: remoteData.data
+                });
+              }
+            }
+          } catch (remoteErr) {
+            // Continue to next endpoint or fallback
+          }
+        }
+      }
+
+      // 2. Fallback to Local Central Database
+      const localAudits = await dynamicDb.ComplianceAudit.find({
+        $or: [{ tenantId: tenantIdStr }, { tenantId: id.trim() }]
+      })
+        .populate('requirementId')
+        .populate('penalty')
+        .populate('tenantId')
+        .sort({ dueDate: 1 })
+        .lean();
+
+      const upcoming = localAudits.filter((a: any) => 
+        (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
+        a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
+      ).map(a => normalizeAudit(a, tenant));
+
+      const due = localAudits.filter((a: any) => 
+        (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
+        a.dueDate && new Date(a.dueDate) >= now
+      ).map(a => normalizeAudit(a, tenant));
+
+      const overdue = localAudits.filter((a: any) => 
+        ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+        a.status === 'OVERDUE'
+      ).map(a => normalizeAudit(a, tenant));
+
+      const penalty = localAudits.filter((a: any) => 
+        a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+      ).map(a => normalizeAudit(a, tenant));
+
+      const closed = localAudits.filter((a: any) => 
+        a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+      ).map(a => normalizeAudit(a, tenant));
+
+      return res.status(200).json({
+        success: true,
+        source: 'LOCAL_DATABASE',
+        domainUrl: rawDomain || null,
+        company: {
+          id: tenantIdStr,
+          companyName: tenant.companyName,
+          sebiRegistration: tenant.sebiRegistration,
+          domainUrl: tenant.domainUrl,
+          website: tenant.website
+        },
+        data: {
+          counts: {
+            upcoming: upcoming.length,
+            due: due.length,
+            overdue: overdue.length,
+            penalty: penalty.length,
+            closed: closed.length,
+            total: localAudits.length
+          },
+          upcoming,
+          due,
+          overdue,
+          penalty,
+          closed
+        }
+      });
+    }
+
+    // Global / ALL Companies
+    const allAudits = await dynamicDb.ComplianceAudit.find()
+      .populate('requirementId')
+      .populate('penalty')
+      .populate('tenantId')
+      .sort({ dueDate: 1 })
+      .lean();
+
+    const upcoming = allAudits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
+      a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
+    ).map(a => normalizeAudit(a));
+
+    const due = allAudits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
+      a.dueDate && new Date(a.dueDate) >= now
+    ).map(a => normalizeAudit(a));
+
+    const overdue = allAudits.filter((a: any) => 
+      ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+      a.status === 'OVERDUE'
+    ).map(a => normalizeAudit(a));
+
+    const penalty = allAudits.filter((a: any) => 
+      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+    ).map(a => normalizeAudit(a));
+
+    const closed = allAudits.filter((a: any) => 
+      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+    ).map(a => normalizeAudit(a));
+
+    return res.status(200).json({
+      success: true,
+      source: 'LOCAL_DATABASE',
+      data: {
+        counts: {
+          upcoming: upcoming.length,
+          due: due.length,
+          overdue: overdue.length,
+          penalty: penalty.length,
+          closed: closed.length,
+          total: allAudits.length
+        },
+        upcoming,
+        due,
+        overdue,
+        penalty,
+        closed
+      }
+    });
+  } catch (error: any) {
+    console.error('Error fetching compliance for super admin:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch compliance metrics: ' + error.message,
+      errors: [error.message]
+    });
+  }
+};
+
+/**
+ * Trigger verification sweep for a single tenant or all tenants.
+ */
+export const runCompanyComplianceSweep = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const isGlobal = !id || id === 'ALL' || id === 'all';
+
+  try {
+    const { checkComplianceForTenant } = await import('./complianceController');
+
+    if (!isGlobal) {
+      const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+      const tenant: any = await dynamicDb.Tenant.findById(id).lean() ||
+        await centralModels.AllCompany.findOne({
+          $or: isObjectId ? [{ tenantId: id }, { _id: id }] : [{ tenantId: id }]
+        }).lean();
+
+      if (!tenant) {
+        return res.status(404).json({ success: false, message: 'Tenant company not found' });
+      }
+
+      const tenantIdStr = (tenant.tenantId || tenant._id || tenant.id).toString();
+      const rawDomain = (tenant.domainUrl || tenant.website || '').trim();
+
+      // Attempt remote sweep if domain is available
+      if (rawDomain) {
+        let targetOrigin = rawDomain;
+        if (!targetOrigin.startsWith('http://') && !targetOrigin.startsWith('https://')) {
+          targetOrigin = 'https://' + targetOrigin;
+        }
+        try {
+          const parsed = new URL(targetOrigin);
+          targetOrigin = parsed.origin;
+        } catch (e) {
+          targetOrigin = targetOrigin.replace(/\/+$/, '');
+        }
+
+        const candidateSweepUrls = [
+          `${targetOrigin}/backend/api/v1/third-party-api/compliance/sweep`,
+          `${targetOrigin}/backend/api/v1/third-party-api/${tenantIdStr}/compliance/sweep`,
+          `${targetOrigin}/api/v1/third-party-api/compliance/sweep`,
+          `${targetOrigin}/api/v1/third-party-api/${tenantIdStr}/compliance/sweep`,
+          `${targetOrigin}/api/v1/compliance/check`
+        ];
+
+        for (const sweepUrl of candidateSweepUrls) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+              'x-tenant-id': tenantIdStr
+            };
+            if (tenant.tenantApiKey) {
+              headers['x-tenant-api-key'] = tenant.tenantApiKey;
+            }
+            await fetch(sweepUrl, { method: 'POST', headers, signal: controller.signal });
+            clearTimeout(timeoutId);
+            break;
+          } catch (e) {}
+        }
+      }
+
+      // Run local sweep
+      const alerts = await checkComplianceForTenant(tenantIdStr).catch(() => []);
+      syncTenantToRemote(tenantIdStr, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+
+      await logAudit({
+        userId: req.user!.id,
+        action: 'UPDATE',
+        module: 'COMPLIANCE',
+        newValue: { tenantId: tenantIdStr, sweepResult: 'SUCCESS', alertsGenerated: alerts?.length || 0 },
+        ipAddress: req.ip
+      }).catch(() => {});
+
+      return res.status(200).json({
+        success: true,
+        message: `Verification sweep completed successfully for ${tenant.companyName}.`,
+        alertsGenerated: alerts?.length || 0
+      });
+    }
+
+    // Global sweep across all tenants
+    const tenants = await dynamicDb.Tenant.find({ deletedAt: null }).lean();
+    let totalAlerts = 0;
+    for (const t of tenants) {
+      const alerts = await checkComplianceForTenant(t._id.toString()).catch(() => []);
+      totalAlerts += alerts?.length || 0;
+    }
+    syncAllTenantsToRemote({ reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+
+    await logAudit({
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'COMPLIANCE',
+      newValue: { globalSweep: true, totalAlerts },
+      ipAddress: req.ip
+    }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      message: `Global verification sweep completed across all ${tenants.length} companies.`,
+      alertsGenerated: totalAlerts
+    });
+  } catch (error: any) {
+    console.error('Error running compliance sweep:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to run verification sweep: ' + error.message,
+      errors: [error.message]
+    });
+  }
+};
+

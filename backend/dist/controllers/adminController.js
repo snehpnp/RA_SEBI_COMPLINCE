@@ -1787,10 +1787,15 @@ const getAdminCategories = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const categories = await db_1.default.PlanCategory.find({ tenantId })
+        const rawCategories = await db_1.default.PlanCategory.find({ tenantId })
             .sort({ createdAt: -1 })
             .lean();
-        return res.status(200).json({ success: true, data: categories });
+        const formatted = rawCategories.map(c => ({
+            ...c,
+            id: String(c._id || c.id),
+            _id: c._id
+        }));
+        return res.status(200).json({ success: true, data: formatted });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -1896,14 +1901,19 @@ const getAdminPlans = async (req, res) => {
             .populate('categoryId')
             .sort({ createdAt: -1 })
             .lean();
-        const formattedPlans = plans.map((p) => ({
-            ...p,
-            id: String(p._id || p.id),
-            category: p.categoryId ? {
-                ...p.categoryId,
-                id: String(p.categoryId._id || p.categoryId.id)
-            } : null
-        }));
+        const formattedPlans = plans.map((p) => {
+            const catObj = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId : null;
+            const catIdStr = catObj ? String(catObj._id || catObj.id) : (p.categoryId ? String(p.categoryId) : '');
+            return {
+                ...p,
+                id: String(p._id || p.id),
+                categoryId: catIdStr,
+                category: catObj ? {
+                    ...catObj,
+                    id: String(catObj._id || catObj.id)
+                } : (p.category ? p.category : null)
+            };
+        });
         return res.status(200).json({ success: true, data: formattedPlans });
     }
     catch (error) {
@@ -1927,17 +1937,46 @@ const createPlan = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Duration must be at least 1 month.' });
     }
     try {
-        const category = await db_1.default.PlanCategory.findOne({ _id: categoryId, tenantId }).lean();
-        if (!category)
-            return res.status(404).json({ success: false, message: 'Category not found.' });
+        let category = null;
+        const catIdStr = String(categoryId).trim();
+        const isCatObjectId = mongoose_1.default.Types.ObjectId.isValid(catIdStr);
+        if (isCatObjectId) {
+            category = await db_1.default.PlanCategory.findOne({
+                _id: catIdStr,
+                $or: [{ tenantId }, { tenantId: null }]
+            }).lean();
+        }
+        if (!category) {
+            const cleanCatName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim();
+            category = await db_1.default.PlanCategory.findOne({
+                tenantId,
+                $or: [
+                    { name: { $regex: new RegExp(`^${cleanCatName}$`, 'i') } },
+                    { name: catIdStr },
+                    { segments: { $regex: new RegExp(cleanCatName, 'i') } }
+                ]
+            }).lean();
+        }
+        if (!category) {
+            category = await db_1.default.PlanCategory.findOne({ tenantId }).lean();
+            if (!category) {
+                const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Advisory Category';
+                category = await db_1.default.PlanCategory.create({
+                    tenantId,
+                    name: cleanName,
+                    segments: 'EQUITY,DERIVATIVE',
+                    status: 'ACTIVE'
+                });
+            }
+        }
         const plan = await db_1.default.Plan.create({
             tenantId,
-            categoryId,
+            categoryId: category._id || category.id,
             name: name.trim().toUpperCase(),
             description: description || '',
             price: parseFloat(price),
             durationMonths: parseInt(durationMonths),
-            researchSegments: category.segments,
+            researchSegments: researchSegments || category.segments || 'EQUITY',
             notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
             clientLimit: parseInt(clientLimit) || 100,
             createdById: req.user.id,
@@ -1967,16 +2006,36 @@ const updatePlan = async (req, res) => {
         const existing = await db_1.default.Plan.findOne({ _id: id, tenantId }).lean();
         if (!existing || existing.deletedAt !== null)
             return res.status(404).json({ success: false, message: 'Plan not found.' });
+        let newCategoryId = existing.categoryId;
         let newSegments = existing.researchSegments;
         if (categoryId) {
-            const category = await db_1.default.PlanCategory.findOne({ _id: categoryId, tenantId }).lean();
+            const catIdStr = String(categoryId).trim();
+            const isCatObjectId = mongoose_1.default.Types.ObjectId.isValid(catIdStr);
+            let category = null;
+            if (isCatObjectId) {
+                category = await db_1.default.PlanCategory.findOne({
+                    _id: catIdStr,
+                    $or: [{ tenantId }, { tenantId: null }]
+                }).lean();
+            }
+            if (!category) {
+                const cleanCatName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim();
+                category = await db_1.default.PlanCategory.findOne({
+                    tenantId,
+                    $or: [
+                        { name: { $regex: new RegExp(`^${cleanCatName}$`, 'i') } },
+                        { name: catIdStr }
+                    ]
+                }).lean();
+            }
             if (category) {
+                newCategoryId = category._id || category.id;
                 newSegments = category.segments;
             }
         }
         const updated = await db_1.default.Plan.findByIdAndUpdate(id, {
             $set: {
-                categoryId: categoryId || existing.categoryId,
+                categoryId: newCategoryId,
                 name: name.trim().toUpperCase(),
                 description: description || '',
                 price: parseFloat(price),
@@ -2558,19 +2617,32 @@ const assignPlanByAdmin = async (req, res) => {
     if (!paymentDate)
         return res.status(400).json({ success: false, message: 'Payment Date is required.' });
     try {
-        const client = await db_1.default.Client.findById(clientId).lean();
-        if (!client)
-            return res.status(404).json({ success: false, message: 'Client not found in this tenant.' });
-        const clientUser = await db_1.default.User.findById(client.userId).lean();
-        if (!clientUser || clientUser.tenantId !== tenantId) {
-            return res.status(404).json({ success: false, message: 'Client not found in this tenant.' });
+        let client = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(clientId)) {
+            client = await db_1.default.Client.findById(clientId).lean();
         }
-        const clientProfile = await db_1.default.ClientProfile.findOne({ clientId }).lean();
-        const plan = await db_1.default.Plan.findOne({
-            _id: planId,
-            tenantId,
-            status: 'ACTIVE'
-        }).lean();
+        if (!client) {
+            client = await db_1.default.Client.findOne({ $or: [{ _id: clientId }, { userId: clientId }, { id: clientId }] }).lean();
+        }
+        if (!client && db_1.centralModels?.Client) {
+            if (mongoose_1.default.Types.ObjectId.isValid(clientId)) {
+                client = await db_1.centralModels.Client.findById(clientId).lean();
+            }
+            if (!client) {
+                client = await db_1.centralModels.Client.findOne({ $or: [{ _id: clientId }, { userId: clientId }, { id: clientId }] }).lean();
+            }
+        }
+        if (!client)
+            return res.status(404).json({ success: false, message: 'Client not found.' });
+        const actualClientId = client._id || client.id;
+        const clientProfile = await db_1.default.ClientProfile.findOne({ $or: [{ clientId: actualClientId }, { clientId: client.userId }] }).lean();
+        let plan = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(planId)) {
+            plan = await db_1.default.Plan.findById(planId).lean();
+        }
+        if (!plan) {
+            plan = await db_1.default.Plan.findOne({ $or: [{ _id: planId }, { id: planId }] }).lean();
+        }
         if (!plan || plan.deletedAt !== null) {
             return res.status(404).json({ success: false, message: 'Plan not found or inactive.' });
         }
@@ -2594,10 +2666,10 @@ const assignPlanByAdmin = async (req, res) => {
             if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
                 return res.status(400).json({ success: false, message: 'Coupon usage limit reached.' });
             }
-            if (coupon.clientId && coupon.clientId !== clientId) {
+            if (coupon.clientId && String(coupon.clientId) !== String(actualClientId) && String(coupon.clientId) !== String(clientId)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable to this client.' });
             }
-            if (coupon.planId && coupon.planId !== planId) {
+            if (coupon.planId && String(coupon.planId) !== String(plan._id || plan.id)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
             }
             if (coupon.categoryId && String(coupon.categoryId) !== String(plan.categoryId)) {
@@ -2645,8 +2717,8 @@ const assignPlanByAdmin = async (req, res) => {
         const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
         const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
         const existingSub = await db_1.default.Subscription.findOne({
-            clientId,
-            planId,
+            $or: [{ clientId: actualClientId }, { clientId: client.userId }],
+            planId: plan._id || plan.id,
             status: 'ACTIVE',
             endDate: { $gt: new Date() }
         }).sort({ endDate: -1 }).lean();
@@ -2657,8 +2729,8 @@ const assignPlanByAdmin = async (req, res) => {
         const planValidityDays = customDays !== undefined ? customDays : plan.durationMonths * 30;
         const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
         const subscription = await db_1.default.Subscription.create({
-            clientId,
-            planId,
+            clientId: actualClientId,
+            planId: plan._id || plan.id,
             startDate,
             endDate,
             status: 'ACTIVE',
@@ -2668,9 +2740,9 @@ const assignPlanByAdmin = async (req, res) => {
             isGstInclusive: tenantObj?.gstCalculationType !== 'EXCLUSIVE'
         });
         const payment = await db_1.default.Payment.create({
-            tenantId,
-            clientId,
-            planId,
+            tenantId: tenantId || client.tenantId,
+            clientId: actualClientId,
+            planId: plan._id || plan.id,
             amount: parseFloat(finalTotalAmount.toFixed(2)),
             paymentMode,
             transactionRef: paymentRefId,
@@ -2688,6 +2760,14 @@ const assignPlanByAdmin = async (req, res) => {
             couponId: appliedCouponId,
             discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
         });
+        await db_1.default.Client.findByIdAndUpdate(actualClientId, {
+            $set: { status: 'ACTIVE' }
+        });
+        if (client.userId) {
+            await db_1.default.User.findByIdAndUpdate(client.userId, {
+                $set: { status: 'ACTIVE' }
+            });
+        }
         if (appliedCouponId) {
             await db_1.default.Coupon.findByIdAndUpdate(appliedCouponId, {
                 $inc: { usedCount: 1 }

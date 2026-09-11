@@ -4,12 +4,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.tenantConnectionManager = exports.centralModels = exports.centralConnection = void 0;
+require("dotenv/config");
 const mongoose_1 = __importDefault(require("mongoose"));
 const models_1 = require("../models");
-const defaultCentralUrl = process.env.DATABASE_URL ||
-    'mongodb://sebi:Sebi%40123@192.168.1.203:27017/sebi-compliance?authSource=sebi-compliance&replicaSet=rs0';
+const defaultDbName = (process.env.DB_NAME && process.env.DB_NAME.trim()) || 'sebi-compliance';
+const defaultCentralUrl = process.env.DATABASE_URL || `mongodb://localhost:27017/${defaultDbName}`;
 // Dedicated Central DB Mongoose Connection
 exports.centralConnection = mongoose_1.default.createConnection(defaultCentralUrl, {
+    dbName: defaultDbName,
     maxPoolSize: 20,
     serverSelectionTimeoutMS: 5000
 });

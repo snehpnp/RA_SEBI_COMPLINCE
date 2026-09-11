@@ -10,11 +10,16 @@ const auditService_1 = require("../services/auditService");
 const getSubscriptions = async (req, res) => {
     const { tenantId, id: userId } = req.user;
     try {
-        const client = await db_1.default.Client.findOne({ userId }).lean();
-        if (!client)
-            return res.status(404).json({ success: false, message: 'Client not found.' });
+        let client = await db_1.default.Client.findOne({ userId }).lean();
+        if (!client) {
+            client = await db_1.default.Client.findById(userId).lean();
+        }
+        const clientId = client ? (client._id || client.id) : userId;
         const subscriptions = await db_1.default.Subscription.find({
-            clientId: client._id || client.id
+            $or: [
+                { clientId },
+                { clientId: userId }
+            ]
         })
             .populate('planId')
             .sort({ createdAt: -1 })
@@ -41,8 +46,12 @@ const getPaymentHistory = async (req, res) => {
         const client = await db_1.default.Client.findOne({ userId }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found.' });
+        const clientId = client._id || client.id;
         const payments = await db_1.default.Payment.find({
-            clientId: client._id || client.id,
+            $or: [
+                { clientId },
+                { clientId: userId }
+            ],
             tenantId
         })
             .populate('couponId')

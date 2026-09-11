@@ -16,7 +16,7 @@ import crypto from 'crypto';
 
 export const registerClient = async (req: Request, res: Response) => {
   const {
-    tenantId,
+    tenantId: passedTenantId,
     name,
     email,
     mobile,
@@ -31,7 +31,7 @@ export const registerClient = async (req: Request, res: Response) => {
     zipCode
   } = req.body;
 
-  if (!tenantId || !name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
+  if (!name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
     return res.status(400).json({
       success: false,
       message: 'All fields (name, email, mobile, password, PAN, Aadhaar, address, state) are required.'
@@ -39,9 +39,21 @@ export const registerClient = async (req: Request, res: Response) => {
   }
 
   try {
-    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    let tenantId = passedTenantId;
+    let tenant: any = null;
+
+    if (tenantId) {
+      tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
     if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant company not found' });
+      tenant = await dynamicDb.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await dynamicDb.Tenant.findOne().lean();
+      if (tenant) {
+        tenantId = (tenant._id || tenant.id).toString();
+      }
+    }
+
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
     }
 
     const duplicateEmail = await dynamicDb.User.findOne({ email }).lean();
@@ -369,8 +381,19 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
       ipAddress: req.ip
     });
 
+    // Check if client already has an active subscription assigned by admin
+    const activeSub = await dynamicDb.Subscription.findOne({
+      clientId: client._id || client.id,
+      status: 'ACTIVE'
+    }).lean();
+
+    const newStatus = (activeSub && client.kraVerified) ? 'ACTIVE' : (activeSub ? 'ACTIVE' : 'PAYMENT_PENDING');
+
     await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
-      $set: { status: 'PAYMENT_PENDING' }
+      $set: { 
+        status: newStatus,
+        agreementSigned: true
+      }
     });
 
     return res.status(200).json({
@@ -503,6 +526,16 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
     const tenantId = req.user!.tenantId!;
     const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
     const profile = await dynamicDb.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
+
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+      });
+    }
 
     const payment = await dynamicDb.Payment.create({
       tenantId,
@@ -639,14 +672,19 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
       .populate('categoryId')
       .lean();
 
-    const formatted = plans.map((p: any) => ({
-      ...p,
-      id: String(p._id || p.id),
-      category: p.categoryId ? {
-        ...p.categoryId,
-        id: String(p.categoryId._id || p.categoryId.id)
-      } : null
-    }));
+    const formatted = plans.map((p: any) => {
+      const catObj = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId : null;
+      const catIdStr = catObj ? String(catObj._id || catObj.id) : (p.categoryId ? String(p.categoryId) : '');
+      return {
+        ...p,
+        id: String(p._id || p.id),
+        categoryId: catIdStr,
+        category: catObj ? {
+          ...catObj,
+          id: String(catObj._id || catObj.id)
+        } : (p.category ? p.category : null)
+      };
+    });
 
     return res.status(200).json({ 
       success: true, 
@@ -666,10 +704,16 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
     }
 
     const clientId = client._id || client.id;
-    const profile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
-    const subscriptions = await dynamicDb.Subscription.find({ clientId }).populate('planId').lean();
-    const agreements = await dynamicDb.Agreement.find({ clientId }).lean();
-    const consents = await dynamicDb.Consent.find({ clientId }).lean();
+    const profile = await dynamicDb.ClientProfile.findOne({ $or: [{ clientId }, { clientId: client.userId }] }).lean();
+    const subscriptions = await dynamicDb.Subscription.find({
+      $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
+    }).populate('planId').lean();
+    const agreements = await dynamicDb.Agreement.find({
+      $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
+    }).lean();
+    const consents = await dynamicDb.Consent.find({
+      $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
+    }).lean();
     const user = await dynamicDb.User.findById(req.user!.id).lean();
     let tenantObj: any = null;
     if (user && (user as any).tenantId) {
@@ -884,6 +928,16 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
       });
     }
 
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+      });
+    }
+
     const plan: any = await dynamicDb.Plan.findById(planId).lean();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
@@ -1073,6 +1127,16 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
         success: false, 
         isConfigured: false,
         message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+      });
+    }
+
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
       });
     }
 

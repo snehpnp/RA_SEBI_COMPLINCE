@@ -15,7 +15,6 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
 
   const [step, setStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
-  const [tenantId, setTenantId] = useState('');
   const [name, setName] = useState('');
 
   // OTP States
@@ -44,25 +43,12 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   const { states } = useStates();
   const { cities } = useCities(state);
   const { logoUrl, appName } = useBranding();
- 
-  useEffect(() => {
-    // Load companies
-    api.getPublicTenants()
-      .then(res => {
-        if (res.success && res.data.length > 0) {
-
-          setTenantId(res.data[0].id);
-        }
-      })
-      .catch(err => console.error('Failed to load companies:', err))
-      .finally(() => { });
-  }, []);
 
   const handleSendOtp = async () => {
     if (!email) return toast.error('Please enter an email address first.');
     setSendingOtp(true);
     try {
-      const res = await api.requestOtp(email, tenantId);
+      const res = await api.requestOtp(email);
       if (res.success) {
         setOtpSent(true);
         toast.success(res.message || 'OTP sent successfully!');
@@ -91,7 +77,6 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   };
 
   const validateStep1 = () => {
-    if (!tenantId) return toast.error('Please select an Advisor.');
     if (!emailVerified) return toast.error('Please verify your email to continue.');
     if (!password || password.length < 8) return toast.error('Password must be at least 8 characters.');
     setStep(2);
@@ -115,7 +100,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
     setError(null);
 
     const payload = {
-      tenantId, name, email, mobile, password,
+      name, email, mobile, password,
       pan: pan.toUpperCase(), aadhaar, category, occupation,
       addressLine1, city, state, zipCode
     };

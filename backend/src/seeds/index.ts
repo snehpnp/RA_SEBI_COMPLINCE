@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { seedInitial } from './seedInitial';
 import { seedCompliance } from './seedCompliance';
 import { seedStates } from './seedStates';

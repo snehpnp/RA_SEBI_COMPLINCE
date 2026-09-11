@@ -60,48 +60,74 @@ function ClientPortalContent() {
   const [policiesExpanded, setPoliciesExpanded] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
-  useEffect(() => {
-    // Let ThemeProvider handle theme
+  const fetchData = async () => {
+    try {
+      const [profileRes, subRes, pagesRes] = await Promise.all([
+        api.getClientProfile().catch(() => ({ success: false, data: null })),
+        api.getClientSubscriptions().catch(() => ({ success: false, data: [] })),
+        api.request('/pages').catch(() => ({ success: false, data: [] }))
+      ]);
 
-    const fetchData = async () => {
-      try {
-        const [profileRes, subRes, pagesRes] = await Promise.all([
-          api.getClientProfile().catch(() => ({ success: false, data: null })),
-          api.getClientSubscriptions().catch(() => ({ success: false, data: [] })),
-          api.request('/pages').catch(() => ({ success: false, data: [] }))
-        ]);
-
-        if (pagesRes?.success && pagesRes.data) {
-          setPages(pagesRes.data);
-        }
-
-        if (profileRes?.success && profileRes.data) {
-          const p = profileRes.data;
-          setProfile(p);
-
-          // Determine if user needs onboarding
-          // Criteria: Needs VERIFIED KYC, signed agreement, and at least 1 active subscription.
-          const isKycDone = p.kycStatus === 'VERIFIED' || p.kycStatus === 'APPROVED' || p.status === 'ACTIVE' || p.status === 'PAYMENT_PENDING' || p.status === 'AGREEMENT_PENDING';
-          const isAgreementDone = !!p.agreementSigned || p.status === 'ACTIVE' || p.status === 'PAYMENT_PENDING';
-          const hasActivePlan = subRes.success && subRes.data.length > 0;
-
-          if (hasActivePlan && (!isKycDone || !isAgreementDone)) {
-            // Force onboarding if they have a plan (e.g. assigned by admin) but missing KYC/Agreement
-            setShowOnboarding(true);
-          } else {
-            // If they don't have a plan, let them browse the dashboard.
-            setShowOnboarding(false);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch data', err);
-      } finally {
-        // Simulate a smooth loading experience
-        setTimeout(() => setLoading(false), 800);
+      if (pagesRes?.success && pagesRes.data) {
+        setPages(pagesRes.data);
       }
-    };
+
+      if (profileRes?.success && profileRes.data) {
+        const p = profileRes.data;
+        setProfile(p);
+
+        // Determine if user has an active assigned plan (from admin or purchase)
+        const hasPlan = Boolean(
+          (subRes?.success && Array.isArray(subRes.data) && subRes.data.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+          (p.subscriptions && Array.isArray(p.subscriptions) && p.subscriptions.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+          (p.status === 'ACTIVE' && (p.subscriptions?.length > 0 || p.plan))
+        );
+
+        // Determine if compliance onboarding is fully completed
+        const isKycDone = Boolean(p.kraVerified === true || p.kycStatus === 'VERIFIED' || p.kycStatus === 'APPROVED');
+        const isAgreementDone = Boolean(p.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') || p.agreementSigned);
+        const isFully = isKycDone && isAgreementDone;
+
+        // User requirement: Modal only shows if plan is assigned AND KYC/Agreement is pending
+        if (hasPlan && !isFully) {
+          setShowOnboarding(true);
+        } else {
+          setShowOnboarding(false);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch data', err);
+    } finally {
+      setTimeout(() => setLoading(false), 800);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
+
+  // Check if client has an active assigned plan
+  const hasAssignedPlan = Boolean(
+    (profile?.subscriptions && Array.isArray(profile.subscriptions) && profile.subscriptions.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+    (profile?.status === 'ACTIVE' && (profile?.subscriptions?.length > 0 || profile?.plan))
+  );
+
+  // Check if compliance onboarding is fully completed
+  const isKycDone = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
+  const isAgreementDone = Boolean(profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') || profile?.agreementSigned);
+  const isFullyOnboarded = isKycDone && isAgreementDone;
+
+  const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab);
+    setMobileMenuOpen(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('clientActiveTab', newTab);
+    }
+    // Re-open onboarding modal on tab switch ONLY if plan is assigned and onboarding is incomplete
+    if (hasAssignedPlan && !isFullyOnboarded) {
+      setShowOnboarding(true);
+    }
+  };
 
   const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: Layers },
@@ -131,10 +157,10 @@ function ClientPortalContent() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <Dashboard profile={profile} setActiveTab={setActiveTab} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+      case 'dashboard': return <Dashboard profile={profile} setActiveTab={handleTabChange} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'signals': return <MarketSignals />;
       case 'research': return <ResearchReports />;
-      case 'subscriptions': return <SubscriptionCenter profile={profile} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+      case 'subscriptions': return <SubscriptionCenter profile={profile} onNavigateToKyc={() => handleTabChange('kyc')} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'payments': return <PaymentCenter profile={profile} />;
       case 'kyc': return <KYCCenter onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'complaints': return <ComplaintsCenter profile={profile} />;
@@ -163,7 +189,7 @@ function ClientPortalContent() {
               if (page.type === 'URL' && page.externalUrl) {
                 window.open(page.externalUrl, '_blank');
               } else {
-                setActiveTab(page.slug);
+                handleTabChange(page.slug);
               }
             }}
           />
@@ -173,7 +199,7 @@ function ClientPortalContent() {
         if (page) {
           return <CustomPageView page={page} />;
         }
-        return <Dashboard profile={profile} setActiveTab={setActiveTab} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+        return <Dashboard profile={profile} setActiveTab={handleTabChange} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       }
     }
   };
@@ -189,13 +215,19 @@ function ClientPortalContent() {
     );
   }
 
-  if (showOnboarding) {
-    return <OnboardingWizard profile={profile} onComplete={() => setShowOnboarding(false)} />;
-  }
-
   return (
-    <div className="h-dvh bg-premium-bg text-premium-text flex font-sans overflow-hidden">
-
+    <div className="h-dvh bg-premium-bg text-premium-text flex font-sans overflow-hidden relative">
+      {/* Onboarding Wizard Modal Overlay */}
+      {showOnboarding && (
+        <OnboardingWizard
+          profile={profile}
+          onClose={() => setShowOnboarding(false)}
+          onComplete={() => {
+            setShowOnboarding(false);
+            fetchData();
+          }}
+        />
+      )}
 
       <WelcomeInstructionModal
         profile={profile}
@@ -249,10 +281,7 @@ function ClientPortalContent() {
             return (
               <button
                 key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id);
-                  setMobileMenuOpen(false);
-                }}
+                onClick={() => handleTabChange(item.id)}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
                   ? 'bg-white/15 text-white font-bold shadow-md shadow-black/10'
                   : 'text-white/70 hover:bg-white/5 hover:text-white'
@@ -332,7 +361,7 @@ function ClientPortalContent() {
               }}
               badgeLabel="Premium Member"
               badgeColor="amber"
-              onProfileClick={() => setActiveTab('profile' as any)}
+              onProfileClick={() => handleTabChange('profile')}
               onLogoutClick={() => setIsLogoutModalOpen(true)}
             />
           </div>

@@ -255,13 +255,19 @@ function SuperAdminDashboardContent() {
     domainUrl?: string | null;
     company?: any;
     data: any[];
+    localData?: any[];
+    remoteCount?: number;
+    localCount?: number;
   }>({
     loading: false,
     error: null,
     source: undefined,
     domainUrl: null,
     company: null,
-    data: []
+    data: [],
+    localData: [],
+    remoteCount: 0,
+    localCount: 0
   });
 
   // Company Staff Modal State (Domain API Live Access)
@@ -334,14 +340,23 @@ function SuperAdminDashboardContent() {
 
   const loadComplianceMetrics = async (compId: string) => {
     try {
-      const url = compId === 'ALL'
-        ? '/compliance/dashboard-metrics'
-        : `/compliance/dashboard-metrics?tenantId=${compId}`;
-      const res = await api.request(url);
-      if (res.success) {
-        setComplianceMetrics(res.data);
+      const res = await api.getTenantCompliance(compId);
+      if (res && (res.success || res.data)) {
+        if (res.source || res.company) {
+          setComplianceMetrics({
+            ...res.data,
+            _meta: {
+              source: res.source,
+              domainUrl: res.domainUrl,
+              company: res.company,
+              endpointUsed: res.endpointUsed
+            }
+          });
+        } else {
+          setComplianceMetrics(res.data);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load compliance metrics:', err);
     }
   };
@@ -349,13 +364,13 @@ function SuperAdminDashboardContent() {
   const handleGlobalComplianceSweep = async () => {
     setComplianceSweepLoading(true);
     try {
-      const url = selectedCompanyForCompliance === 'ALL'
-        ? '/compliance/check'
-        : `/compliance/check?tenantId=${selectedCompanyForCompliance}`;
-      const res = await api.request(url, { method: 'POST' });
-      if (res.success) {
-        triggerAlert('Compliance verification sweep completed successfully.');
-        loadComplianceMetrics(selectedCompanyForCompliance);
+      const res = await api.runTenantComplianceSweep(selectedCompanyForCompliance);
+      if (res && res.success) {
+        triggerAlert(res.message || 'Compliance verification sweep completed successfully.');
+        await loadComplianceMetrics(selectedCompanyForCompliance);
+      } else {
+        triggerAlert(res?.message || 'Compliance sweep completed with notes.');
+        await loadComplianceMetrics(selectedCompanyForCompliance);
       }
     } catch (err: any) {
       triggerAlert('Failed to run compliance sweep: ' + err.message);
@@ -782,7 +797,10 @@ function SuperAdminDashboardContent() {
           source: res.source,
           domainUrl: res.domainUrl || company.domainUrl,
           company: res.company || company,
-          data: res.data || []
+          data: res.data || [],
+          localData: res.localData || [],
+          remoteCount: res.remoteCount,
+          localCount: res.localCount
         });
       } else {
         setCompanyClientsData({
@@ -791,7 +809,8 @@ function SuperAdminDashboardContent() {
           source: 'LOCAL_DATABASE',
           domainUrl: company.domainUrl,
           company,
-          data: []
+          data: [],
+          localData: []
         });
       }
     } catch (err: any) {
@@ -801,7 +820,8 @@ function SuperAdminDashboardContent() {
         source: 'LOCAL_DATABASE',
         domainUrl: company.domainUrl,
         company,
-        data: []
+        data: [],
+        localData: []
       });
     }
   };
@@ -1226,6 +1246,7 @@ function SuperAdminDashboardContent() {
             itemsPerPage={itemsPerPage}
             setCurrentPageAlerts={setCurrentPageAudits}
             setItemsPerPage={setItemsPerPage}
+            onRefresh={() => loadComplianceMetrics(selectedCompanyForCompliance)}
           />
         )}
 
@@ -2181,59 +2202,7 @@ function SuperAdminDashboardContent() {
                     </div>
                   )}
 
-                  <div className="col-span-2 my-2 border-t border-slate-400 dark:border-white/10 pt-4">
-                    <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">Admin Details</h3>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Name</label>
-                    <input type="text" value={editData.adminName} onChange={e => setEditData({ ...editData, adminName: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Email</label>
-                    <input type="email" value={editData.adminEmail} onChange={e => setEditData({ ...editData, adminEmail: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Admin Mobile</label>
-                    <input type="text" value={editData.adminMobile} onChange={e => setEditData({ ...editData, adminMobile: e.target.value.replace(/\D/g, '').slice(0, 10) })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">New Password (leave blank to keep)</label>
-                    <input type="password" value={editData.adminPassword} onChange={e => setEditData({ ...editData, adminPassword: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" placeholder="••••••••" />
-                  </div>
-
-                  {editData.tenantApiKey && (
-                    <div className="col-span-2 p-3 bg-slate-100 dark:bg-slate-950/50 border border-slate-300 dark:border-white/10 rounded-xl flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Tenant API Key (For Remote Builds & API Sync)</span>
-                        <span className="font-mono text-xs text-indigo-600 dark:text-indigo-400 font-bold select-all">{editData.tenantApiKey}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(editData.tenantApiKey);
-                          setCopiedApiKey(true);
-                          setTimeout(() => setCopiedApiKey(false), 2000);
-                        }}
-                        className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-xs font-bold rounded-lg text-slate-700 dark:text-slate-300 flex items-center space-x-1.5 transition-colors"
-                      >
-                        {copiedApiKey ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                        <span>{copiedApiKey ? 'Copied' : 'Copy Key'}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="col-span-2 p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl flex items-center space-x-3">
-                    <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex-shrink-0">
-                      <Globe className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 dark:text-white block">Auto-Sync Active</span>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        Clicking <strong>Save Changes</strong> will directly update and automatically sync all details, Admin password, and roles to the remote server via API in the background.
-                      </p>
-                    </div>
-                  </div>
+                 
                 </div>
                 <div className="flex justify-end space-x-3 pt-6 border-t border-slate-300 dark:border-white/5">
                   <button type="button" disabled={isSavingTenant} onClick={() => setIsEditModalOpen(false)} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-sm font-bold rounded-xl transition-colors text-slate-700 dark:text-slate-300 disabled:opacity-50">Cancel</button>

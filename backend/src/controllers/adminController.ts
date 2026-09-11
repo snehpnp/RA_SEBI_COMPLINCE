@@ -1929,10 +1929,17 @@ export const getAdminCategories = async (req: AuthenticatedRequest, res: Respons
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const categories = await dynamicDb.PlanCategory.find({ tenantId })
+    const rawCategories = await dynamicDb.PlanCategory.find({ tenantId })
       .sort({ createdAt: -1 })
       .lean();
-    return res.status(200).json({ success: true, data: categories });
+
+    const formatted = (rawCategories as any[]).map(c => ({
+      ...c,
+      id: String(c._id || c.id),
+      _id: c._id
+    }));
+
+    return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -2054,14 +2061,19 @@ export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) =>
       .sort({ createdAt: -1 })
       .lean();
 
-    const formattedPlans = plans.map((p: any) => ({
-      ...p,
-      id: String(p._id || p.id),
-      category: p.categoryId ? {
-        ...p.categoryId,
-        id: String(p.categoryId._id || p.categoryId.id)
-      } : null
-    }));
+    const formattedPlans = plans.map((p: any) => {
+      const catObj = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId : null;
+      const catIdStr = catObj ? String(catObj._id || catObj.id) : (p.categoryId ? String(p.categoryId) : '');
+      return {
+        ...p,
+        id: String(p._id || p.id),
+        categoryId: catIdStr,
+        category: catObj ? {
+          ...catObj,
+          id: String(catObj._id || catObj.id)
+        } : (p.category ? p.category : null)
+      };
+    });
 
     return res.status(200).json({ success: true, data: formattedPlans });
   } catch (error: any) {
@@ -2085,17 +2097,50 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const category: any = await dynamicDb.PlanCategory.findOne({ _id: categoryId, tenantId }).lean();
-    if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
+    let category: any = null;
+    const catIdStr = String(categoryId).trim();
+    const isCatObjectId = mongoose.Types.ObjectId.isValid(catIdStr);
+
+    if (isCatObjectId) {
+      category = await dynamicDb.PlanCategory.findOne({
+        _id: catIdStr,
+        $or: [{ tenantId }, { tenantId: null }]
+      }).lean();
+    }
+
+    if (!category) {
+      const cleanCatName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim();
+      category = await dynamicDb.PlanCategory.findOne({
+        tenantId,
+        $or: [
+          { name: { $regex: new RegExp(`^${cleanCatName}$`, 'i') } },
+          { name: catIdStr },
+          { segments: { $regex: new RegExp(cleanCatName, 'i') } }
+        ]
+      }).lean();
+    }
+
+    if (!category) {
+      category = await dynamicDb.PlanCategory.findOne({ tenantId }).lean();
+      if (!category) {
+        const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Advisory Category';
+        category = await dynamicDb.PlanCategory.create({
+          tenantId,
+          name: cleanName,
+          segments: 'EQUITY,DERIVATIVE',
+          status: 'ACTIVE'
+        });
+      }
+    }
 
     const plan = await dynamicDb.Plan.create({
       tenantId,
-      categoryId,
+      categoryId: category._id || category.id,
       name: name.trim().toUpperCase(),
       description: description || '',
       price: parseFloat(price),
       durationMonths: parseInt(durationMonths),
-      researchSegments: category.segments,
+      researchSegments: researchSegments || category.segments || 'EQUITY',
       notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
       clientLimit: parseInt(clientLimit) || 100,
       createdById: req.user!.id,
@@ -2125,10 +2170,34 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
     const existing: any = await dynamicDb.Plan.findOne({ _id: id, tenantId }).lean();
     if (!existing || existing.deletedAt !== null) return res.status(404).json({ success: false, message: 'Plan not found.' });
 
+    let newCategoryId = existing.categoryId;
     let newSegments = existing.researchSegments;
+
     if (categoryId) {
-      const category: any = await dynamicDb.PlanCategory.findOne({ _id: categoryId, tenantId }).lean();
+      const catIdStr = String(categoryId).trim();
+      const isCatObjectId = mongoose.Types.ObjectId.isValid(catIdStr);
+      let category: any = null;
+
+      if (isCatObjectId) {
+        category = await dynamicDb.PlanCategory.findOne({
+          _id: catIdStr,
+          $or: [{ tenantId }, { tenantId: null }]
+        }).lean();
+      }
+
+      if (!category) {
+        const cleanCatName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        category = await dynamicDb.PlanCategory.findOne({
+          tenantId,
+          $or: [
+            { name: { $regex: new RegExp(`^${cleanCatName}$`, 'i') } },
+            { name: catIdStr }
+          ]
+        }).lean();
+      }
+
       if (category) {
+        newCategoryId = category._id || category.id;
         newSegments = category.segments;
       }
     }
@@ -2137,7 +2206,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
       id,
       {
         $set: {
-          categoryId: categoryId || existing.categoryId,
+          categoryId: newCategoryId,
           name: name.trim().toUpperCase(),
           description: description || '',
           price: parseFloat(price),
@@ -2750,21 +2819,33 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
   if (!paymentDate) return res.status(400).json({ success: false, message: 'Payment Date is required.' });
 
   try {
-    const client: any = await dynamicDb.Client.findById(clientId).lean();
-    if (!client) return res.status(404).json({ success: false, message: 'Client not found in this tenant.' });
-
-    const clientUser: any = await dynamicDb.User.findById(client.userId).lean();
-    if (!clientUser || clientUser.tenantId !== tenantId) {
-      return res.status(404).json({ success: false, message: 'Client not found in this tenant.' });
+    let client: any = null;
+    if (mongoose.Types.ObjectId.isValid(clientId)) {
+      client = await dynamicDb.Client.findById(clientId).lean();
     }
+    if (!client) {
+      client = await dynamicDb.Client.findOne({ $or: [{ _id: clientId }, { userId: clientId }, { id: clientId }] }).lean();
+    }
+    if (!client && (centralModels as any)?.Client) {
+      if (mongoose.Types.ObjectId.isValid(clientId)) {
+        client = await (centralModels as any).Client.findById(clientId).lean();
+      }
+      if (!client) {
+        client = await (centralModels as any).Client.findOne({ $or: [{ _id: clientId }, { userId: clientId }, { id: clientId }] }).lean();
+      }
+    }
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
+    const actualClientId = client._id || client.id;
+    const clientProfile = await dynamicDb.ClientProfile.findOne({ $or: [{ clientId: actualClientId }, { clientId: client.userId }] }).lean();
 
-    const plan: any = await dynamicDb.Plan.findOne({
-      _id: planId,
-      tenantId,
-      status: 'ACTIVE'
-    }).lean();
+    let plan: any = null;
+    if (mongoose.Types.ObjectId.isValid(planId)) {
+      plan = await dynamicDb.Plan.findById(planId).lean();
+    }
+    if (!plan) {
+      plan = await dynamicDb.Plan.findOne({ $or: [{ _id: planId }, { id: planId }] }).lean();
+    }
 
     if (!plan || plan.deletedAt !== null) {
       return res.status(404).json({ success: false, message: 'Plan not found or inactive.' });
@@ -2796,11 +2877,11 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         return res.status(400).json({ success: false, message: 'Coupon usage limit reached.' });
       }
 
-      if (coupon.clientId && coupon.clientId !== clientId) {
+      if (coupon.clientId && String(coupon.clientId) !== String(actualClientId) && String(coupon.clientId) !== String(clientId)) {
         return res.status(400).json({ success: false, message: 'Coupon is not applicable to this client.' });
       }
 
-      if (coupon.planId && coupon.planId !== planId) {
+      if (coupon.planId && String(coupon.planId) !== String(plan._id || plan.id)) {
         return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
       }
 
@@ -2856,8 +2937,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
 
     const existingSub: any = await dynamicDb.Subscription.findOne({
-      clientId,
-      planId,
+      $or: [{ clientId: actualClientId }, { clientId: client.userId }],
+      planId: plan._id || plan.id,
       status: 'ACTIVE',
       endDate: { $gt: new Date() }
     }).sort({ endDate: -1 }).lean();
@@ -2871,8 +2952,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
 
     const subscription = await dynamicDb.Subscription.create({
-      clientId,
-      planId,
+      clientId: actualClientId,
+      planId: plan._id || plan.id,
       startDate,
       endDate,
       status: 'ACTIVE',
@@ -2883,9 +2964,9 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     });
 
     const payment = await dynamicDb.Payment.create({
-      tenantId,
-      clientId,
-      planId,
+      tenantId: tenantId || client.tenantId,
+      clientId: actualClientId,
+      planId: plan._id || plan.id,
       amount: parseFloat(finalTotalAmount.toFixed(2)),
       paymentMode,
       transactionRef: paymentRefId,
@@ -2903,6 +2984,15 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       couponId: appliedCouponId,
       discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
     });
+
+    await dynamicDb.Client.findByIdAndUpdate(actualClientId, {
+      $set: { status: 'ACTIVE' }
+    });
+    if (client.userId) {
+      await dynamicDb.User.findByIdAndUpdate(client.userId, {
+        $set: { status: 'ACTIVE' }
+      });
+    }
 
     if (appliedCouponId) {
       await dynamicDb.Coupon.findByIdAndUpdate(appliedCouponId, {

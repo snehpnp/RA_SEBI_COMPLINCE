@@ -3,14 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTenantSyncConfig = exports.syncTenantUpdate = exports.bootstrapTenant = void 0;
+exports.getTenantSyncConfig = exports.syncTenantDelete = exports.syncTenantStatus = exports.syncTenantUpdate = exports.bootstrapTenant = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const tenantProvisionService_1 = require("../services/tenantProvisionService");
 /**
- * Universal Endpoint on any deployed instance / client build to sync, bootstrap,
- * or update its tenant database and collections via API call.
+ * Universal Endpoint on any deployed instance / client build to bootstrap its tenant database.
  * POST /api/v1/sync/bootstrap
- * POST /api/v1/sync/update
  * POST /api/v1/sync/tenant
  */
 const bootstrapTenant = async (req, res) => {
@@ -45,8 +43,8 @@ const bootstrapTenant = async (req, res) => {
         const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(db_1.default, tenantData, adminUser, permissions);
         return res.status(200).json({
             success: true,
-            action: action || 'SYNC',
-            message: `Tenant "${result.tenant.companyName}" successfully synchronized on domain database. All collections updated and Admin user "${result.adminUser.email}" is ready.`,
+            action: action || 'BOOTSTRAP',
+            message: `Tenant "${result.tenant.companyName}" successfully initialized on domain database. All collections updated and Admin user "${result.adminUser.email}" is ready.`,
             data: {
                 tenantId: String(result.tenant._id || result.tenant.id),
                 companyName: result.tenant.companyName,
@@ -62,16 +60,156 @@ const bootstrapTenant = async (req, res) => {
         console.error('Error in bootstrapTenant API:', error);
         return res.status(500).json({
             success: false,
-            message: `Failed to sync tenant on domain database: ${error.message}`,
+            message: `Failed to bootstrap tenant on domain database: ${error.message}`,
             error: error.message
         });
     }
 };
 exports.bootstrapTenant = bootstrapTenant;
 /**
- * Alias for sync update endpoint
+ * Universal Endpoint on any deployed instance to update tenant information,
+ * branding, admin user, or permissions.
+ * POST /api/v1/sync/update
  */
-exports.syncTenantUpdate = exports.bootstrapTenant;
+const syncTenantUpdate = async (req, res) => {
+    try {
+        const apiKey = req.headers['x-tenant-api-key'] || req.body.apiKey;
+        const { tenant, adminUser, permissions, action, status } = req.body;
+        // Check if tenant already exists in local DB
+        let localTenant = await db_1.default.Tenant.findOne({}).lean();
+        if (!localTenant && tenant) {
+            // If not yet present, run bootstrap
+            return (0, exports.bootstrapTenant)(req, res);
+        }
+        const tenantUpdates = {};
+        if (tenant) {
+            const allowedFields = [
+                'companyName', 'panelName', 'domainUrl', 'website', 'ownerName',
+                'sebiRegistration', 'bseEnrollment', 'email', 'mobile', 'address',
+                'state', 'pan', 'gst', 'certificateUrl', 'certificateValidity',
+                'nismCertificateUrl', 'nismValidity', 'depositAmount', 'status',
+                'logoUrl', 'faviconUrl', 'activePaymentGateway'
+            ];
+            allowedFields.forEach(f => {
+                if (tenant[f] !== undefined)
+                    tenantUpdates[f] = tenant[f];
+            });
+            if (apiKey)
+                tenantUpdates.tenantApiKey = apiKey;
+        }
+        if (status) {
+            tenantUpdates.status = status;
+        }
+        // Update local Tenant document
+        if (Object.keys(tenantUpdates).length > 0) {
+            localTenant = await db_1.default.Tenant.findOneAndUpdate({}, { $set: tenantUpdates }, { returnDocument: 'after', upsert: true }).lean();
+        }
+        // Update Admin User if provided
+        if (adminUser) {
+            const adminUpdates = {};
+            if (adminUser.firstName)
+                adminUpdates.firstName = adminUser.firstName;
+            if (adminUser.lastName)
+                adminUpdates.lastName = adminUser.lastName;
+            if (adminUser.mobile)
+                adminUpdates.mobile = adminUser.mobile;
+            if (adminUser.status)
+                adminUpdates.status = adminUser.status;
+            if (adminUser.tempPassword)
+                adminUpdates.tempPassword = adminUser.tempPassword;
+            if (adminUser.passwordHash)
+                adminUpdates.passwordHash = adminUser.passwordHash;
+            const adminRole = await db_1.default.Role.findOne({ name: 'ADMIN' }).lean();
+            if (adminRole) {
+                await db_1.default.User.findOneAndUpdate({ roleId: adminRole._id || adminRole.id }, { $set: adminUpdates }, { returnDocument: 'after' });
+            }
+        }
+        // Update permissions if provided
+        if (Array.isArray(permissions) && permissions.length > 0 && localTenant) {
+            const tenantIdStr = String(localTenant._id || localTenant.id);
+            for (const p of permissions) {
+                if (p.permissionKey) {
+                    await db_1.default.AdminPermission.findOneAndUpdate({ tenantId: tenantIdStr, permissionKey: p.permissionKey }, { $set: { isEnabled: p.isEnabled !== false } }, { upsert: true });
+                }
+            }
+        }
+        return res.status(200).json({
+            success: true,
+            action: action || 'UPDATE',
+            message: `Tenant "${localTenant?.companyName || 'Company'}" updated successfully on domain database.`,
+            data: localTenant
+        });
+    }
+    catch (error) {
+        console.error('Error in syncTenantUpdate API:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Failed to update tenant on domain database: ${error.message}`,
+            error: error.message
+        });
+    }
+};
+exports.syncTenantUpdate = syncTenantUpdate;
+/**
+ * Universal Endpoint to change status (Stop/Start/Suspend/Activate) on the deployed instance.
+ * POST /api/v1/sync/status
+ */
+const syncTenantStatus = async (req, res) => {
+    try {
+        const { status, action } = req.body;
+        const effectiveStatus = (status || (action === 'SUSPEND' ? 'SUSPENDED' : (action === 'ACTIVATE' ? 'ACTIVE' : null)))?.toUpperCase();
+        if (!effectiveStatus || !['ACTIVE', 'SUSPENDED', 'DELETED', 'INACTIVE'].includes(effectiveStatus)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid status ("ACTIVE", "SUSPENDED", "DELETED") is required.'
+            });
+        }
+        const updatedTenant = await db_1.default.Tenant.findOneAndUpdate({}, { $set: { status: effectiveStatus } }, { returnDocument: 'after' }).lean();
+        // Toggle user login access on this instance
+        const userStatus = effectiveStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE';
+        await db_1.default.User.updateMany({}, { $set: { status: userStatus } });
+        return res.status(200).json({
+            success: true,
+            status: effectiveStatus,
+            message: `Tenant status successfully updated to "${effectiveStatus}" on domain database. User access ${effectiveStatus === 'ACTIVE' ? 'restored' : 'restricted'}.`,
+            data: updatedTenant
+        });
+    }
+    catch (error) {
+        console.error('Error in syncTenantStatus API:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Failed to update tenant status: ${error.message}`,
+            error: error.message
+        });
+    }
+};
+exports.syncTenantStatus = syncTenantStatus;
+/**
+ * Universal Endpoint to soft-delete / deactivate the deployed instance.
+ * POST /api/v1/sync/delete
+ */
+const syncTenantDelete = async (req, res) => {
+    try {
+        const updatedTenant = await db_1.default.Tenant.findOneAndUpdate({}, { $set: { status: 'DELETED', deletedAt: new Date() } }, { returnDocument: 'after' }).lean();
+        // Deactivate all users on this instance
+        await db_1.default.User.updateMany({}, { $set: { status: 'INACTIVE', deletedAt: new Date() } });
+        return res.status(200).json({
+            success: true,
+            message: 'Tenant successfully marked as DELETED on domain database.',
+            data: updatedTenant
+        });
+    }
+    catch (error) {
+        console.error('Error in syncTenantDelete API:', error);
+        return res.status(500).json({
+            success: false,
+            message: `Failed to delete tenant: ${error.message}`,
+            error: error.message
+        });
+    }
+};
+exports.syncTenantDelete = syncTenantDelete;
 /**
  * Endpoint to retrieve tenant sync configuration
  * GET /api/v1/sync/config

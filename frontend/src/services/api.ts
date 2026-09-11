@@ -232,6 +232,35 @@ class ApiClient {
     return { success: false, message: 'Failed to fetch staff' };
   }
 
+  async getTenantCompliance(id?: string) {
+    if (id && id !== 'ALL' && id !== 'all') {
+      try {
+        const res = await this.request(`/super-admin/tenants/${id}/compliance`);
+        if (res && (res.success || res.data)) return res;
+      } catch (e) {
+        // Fallback to compliance metrics with query param
+        return this.request(`/compliance/dashboard-metrics?tenantId=${id}`);
+      }
+    }
+    return this.request('/super-admin/tenants/ALL/compliance').catch(() =>
+      this.request('/compliance/dashboard-metrics')
+    );
+  }
+
+  async runTenantComplianceSweep(id?: string) {
+    if (id && id !== 'ALL' && id !== 'all') {
+      try {
+        const res = await this.request(`/super-admin/tenants/${id}/compliance/sweep`, { method: 'POST' });
+        if (res && res.success) return res;
+      } catch (e) {
+        return this.request(`/compliance/check?tenantId=${id}`, { method: 'POST' });
+      }
+    }
+    return this.request('/super-admin/tenants/ALL/compliance/sweep', { method: 'POST' }).catch(() =>
+      this.request('/compliance/check', { method: 'POST' })
+    );
+  }
+
   async createTenant(formData: FormData) {
     return this.request('/super-admin/tenants', {
       method: 'POST',
@@ -292,6 +321,10 @@ class ApiClient {
 
   async getSuperAdminDashboard() {
     return this.getTelemetry();
+  }
+
+  async getCompanyPanelStats(companyId: string) {
+    return this.request(`/super-admin/companies/${companyId}/panel-stats`);
   }
 
   async verifyDomainUrl(domainUrl: string) {
@@ -551,10 +584,10 @@ class ApiClient {
     return this.request('/client/account', { method: 'DELETE' });
   }
 
-  async signAgreement(payload: { signatureText: string }) {
+  async signAgreement(payload?: { signatureText?: string }) {
     return this.request('/client/esign', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload || { signatureText: 'eSign Verified' })
     });
   }
 

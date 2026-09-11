@@ -99,62 +99,181 @@ export const getThirdPartyClients = async (req: Request, res: Response) => {
   try {
     const tenant: any = await resolveTenantFromRequest(req);
 
-    const userFilter: any = {};
-    if (tenant) {
-      userFilter.tenantId = tenant._id || tenant.id;
-    }
+    const tenantIdStr = tenant ? (tenant._id || tenant.id || tenant.tenantId).toString() : null;
+    const isObjectId = tenantIdStr && mongoose.Types.ObjectId.isValid(tenantIdStr);
 
-    const matchingUsers = await dynamicDb.User.find(userFilter).select('_id').lean();
-    const userIds = matchingUsers.map(u => u._id);
+    const tenantIds = tenantIdStr ? [
+      tenantIdStr,
+      ...(tenant.tenantId ? [tenant.tenantId.toString()] : []),
+      ...(tenant._id ? [tenant._id.toString()] : [])
+    ] : [];
+    const tenantOids = tenantIds
+      .filter(tId => mongoose.Types.ObjectId.isValid(tId))
+      .map(tId => new mongoose.Types.ObjectId(tId));
 
-    const clients = await dynamicDb.Client.find({
-      ...(userIds.length > 0 || !tenant ? { userId: { $in: userIds } } : { _id: null })
+    // 1. Find all matching Client users for this tenant
+    const clientRoles = await dynamicDb.Role.find({
+      name: { $regex: /^(client|user|customer|investor)$/i }
+    }).lean();
+    const clientRoleIds = clientRoles.map((r: any) => r._id || r.id);
+
+    const matchingUsers: any[] = await dynamicDb.User.find({
+      deletedAt: null,
+      $and: [
+        ...(tenantIds.length > 0 ? [{
+          $or: [
+            { tenantId: { $in: [...tenantIds, ...tenantOids] } },
+            { tenantId: tenantIdStr }
+          ]
+        }] : []),
+        {
+          $or: [
+            { roleId: { $in: clientRoleIds } },
+            { role: { $regex: /^(client|user|customer|investor)$/i } }
+          ]
+        }
+      ]
+    }).populate('roleId', 'id name description').sort({ createdAt: -1 }).lean();
+
+    const userIds = matchingUsers.map(u => u._id || u.id);
+    const userOids = userIds
+      .filter(uId => mongoose.Types.ObjectId.isValid(String(uId)))
+      .map(uId => new mongoose.Types.ObjectId(String(uId)));
+
+    // 2. Find Client documents for this tenant directly or linked via users
+    const matchingClients: any[] = await dynamicDb.Client.find({
+      ...(tenantIds.length > 0 ? {
+        $or: [
+          { tenantId: { $in: [...tenantIds, ...tenantOids] } },
+          ...(userIds.length > 0 ? [{ userId: { $in: [...userIds, ...userOids, ...userIds.map(String)] } }] : [])
+        ]
+      } : {})
     })
-      .populate({
-        path: 'userId',
-        select: 'id email mobile firstName lastName status createdAt lastLogin'
-      })
-      .populate('profile')
-      .populate({
-        path: 'subscriptions',
-        populate: {
-          path: 'plan',
-          select: 'id name price durationMonths researchSegments'
-        },
-        options: { sort: { createdAt: -1 } }
-      })
-      .populate({
-        path: 'agreements',
-        select: 'id status signedAt agreementUrl'
-      })
-      .populate({
-        path: 'documents',
-        select: 'id docType status fileName uploadedAt'
-      })
+      .populate('userId')
       .sort({ createdAt: -1 })
       .lean();
 
-    const sanitizedClients = clients.map((c: any) => {
-      const user = c.userId || {};
+    // Map existing Client records by userId
+    const clientByUserId = new Map<string, any>();
+    for (const c of matchingClients) {
+      const uIdStr = String(c.userId?._id || c.userId?.id || c.userId || '');
+      if (uIdStr) {
+        clientByUserId.set(uIdStr, c);
+      }
+    }
+
+    // Combine Client records and any Users with client role that don't have a Client doc yet
+    const combinedClients: any[] = [...matchingClients];
+    for (const u of matchingUsers) {
+      const uIdStr = String(u._id || u.id);
+      if (!clientByUserId.has(uIdStr)) {
+        const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || u.email || 'Client';
+        const synthClient: any = {
+          _id: u._id,
+          id: uIdStr,
+          userId: u,
+          name: fullName,
+          email: u.email,
+          mobile: u.mobile || '',
+          dob: u.dob || null,
+          pan: u.pan || null,
+          aadhaar: u.aadhaar || null,
+          category: u.category || 'INDIVIDUAL',
+          occupation: u.occupation || 'OTHER',
+          status: u.status || 'ACTIVE',
+          kraVerified: false,
+          createdAt: u.createdAt,
+          updatedAt: u.updatedAt
+        };
+        combinedClients.push(synthClient);
+        clientByUserId.set(uIdStr, synthClient);
+      }
+    }
+
+    const allClientIds = combinedClients.map((c: any) => c._id || c.id);
+    const allUserIds = combinedClients.map((c: any) => String(c.userId?._id || c.userId?.id || c.userId || c._id || c.id));
+    const allLookupIds = [...new Set([...allClientIds, ...allUserIds])];
+
+    // Look up Profiles, Subscriptions, Agreements, Documents
+    const [profiles, subscriptions, agreements, documents] = await Promise.all([
+      dynamicDb.ClientProfile.find({ clientId: { $in: allLookupIds } }).lean().catch(() => []),
+      dynamicDb.Subscription.find({ clientId: { $in: allLookupIds } })
+        .populate('planId', 'id name price durationMonths researchSegments')
+        .sort({ createdAt: -1 })
+        .lean()
+        .catch(() => []),
+      dynamicDb.Agreement.find({ clientId: { $in: allLookupIds } }).lean().catch(() => []),
+      dynamicDb.ClientDocument.find({ clientId: { $in: allLookupIds } }).lean().catch(() => [])
+    ]);
+
+    const profileMap = new Map((profiles as any[]).map(p => [String(p.clientId), p]));
+    const subMap = new Map<string, any[]>();
+    for (const sub of (subscriptions as any[])) {
+      const cId = String(sub.clientId);
+      if (!subMap.has(cId)) subMap.set(cId, []);
+      subMap.get(cId)!.push(sub);
+    }
+
+    const agMap = new Map<string, number>();
+    for (const ag of (agreements as any[])) {
+      const cId = String(ag.clientId);
+      agMap.set(cId, (agMap.get(cId) || 0) + 1);
+    }
+
+    const docMap = new Map<string, number>();
+    for (const doc of (documents as any[])) {
+      const cId = String(doc.clientId);
+      docMap.set(cId, (docMap.get(cId) || 0) + 1);
+    }
+
+    const sanitizedClients = combinedClients.map((c: any) => {
+      const cIdStr = String(c._id || c.id);
+      const userObj: any = c.userId || {};
+      const uIdStr = String(userObj._id || userObj.id || c.userId || cIdStr);
+      const prof: any = profileMap.get(cIdStr) || profileMap.get(uIdStr);
+      const clientSubs = subMap.get(cIdStr) || subMap.get(uIdStr) || [];
+      const primarySub = clientSubs[0] || null;
+
+      const planObj = primarySub?.planId && typeof primarySub.planId === 'object'
+        ? primarySub.planId
+        : (primarySub?.plan || null);
+
       return {
-        id: c._id?.toString() || c.id,
-        userId: user._id?.toString() || user.id || c.userId,
-        name: c.name || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        email: c.email || user.email,
-        mobile: c.mobile || user.mobile,
-        pan: c.pan,
-        aadhaar: c.aadhaar,
-        category: c.category,
-        occupation: c.occupation,
-        status: c.status || user.status,
-        riskProfile: c.profile?.riskProfile || 'MODERATE',
-        city: c.profile?.city || null,
-        state: c.profile?.state || null,
-        joinedAt: user.createdAt,
-        activeSubscription: c.subscriptions?.[0] || null,
-        subscriptionsCount: c.subscriptions?.length || 0,
-        agreementsCount: c.agreements?.length || 0,
-        documentsCount: c.documents?.length || 0
+        id: cIdStr,
+        userId: uIdStr,
+        name: c.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || userObj.name || 'Client',
+        email: c.email || userObj.email || '',
+        mobile: c.mobile || userObj.mobile || '',
+        dob: c.dob || userObj.dob || null,
+        pan: c.pan || userObj.pan || null,
+        aadhaar: c.aadhaar || userObj.aadhaar || null,
+        category: c.category || 'INDIVIDUAL',
+        occupation: c.occupation || 'OTHER',
+        status: c.status || userObj.status || 'ACTIVE',
+        kraVerified: c.kraVerified || false,
+        riskProfile: prof?.riskProfile || 'MODERATE',
+        city: prof?.city || null,
+        state: prof?.state || null,
+        address: prof?.address || null,
+        joinedAt: userObj.createdAt || c.createdAt,
+        lastLogin: userObj.lastLogin || null,
+        activeSubscription: primarySub ? {
+          id: primarySub._id || primarySub.id,
+          plan: planObj ? {
+            id: planObj._id || planObj.id,
+            name: planObj.name || 'Subscription Plan',
+            price: planObj.price,
+            durationMonths: planObj.durationMonths || 1,
+            researchSegments: planObj.researchSegments || []
+          } : null,
+          startDate: primarySub.startDate,
+          endDate: primarySub.endDate,
+          status: primarySub.status,
+          amountTotal: primarySub.amountTotal || primarySub.amountBase || null
+        } : null,
+        subscriptionsCount: clientSubs.length,
+        agreementsCount: agMap.get(cIdStr) || agMap.get(uIdStr) || 0,
+        documentsCount: docMap.get(cIdStr) || docMap.get(uIdStr) || 0
       };
     });
 
@@ -162,7 +281,7 @@ export const getThirdPartyClients = async (req: Request, res: Response) => {
       success: true,
       source: 'THIRD_PARTY_API',
       company: tenant ? {
-        id: tenant._id?.toString() || tenant.id,
+        id: tenantIdStr,
         companyName: tenant.companyName,
         sebiRegistration: tenant.sebiRegistration,
         domainUrl: tenant.domainUrl,
@@ -328,3 +447,207 @@ export const getThirdPartyInfo = async (req: Request, res: Response) => {
     });
   }
 };
+
+/**
+ * GET /api/v1/third-party-api/stats
+ * GET /api/v1/third-party-api/:tenantId/stats
+ * Returns aggregated dashboard counts — accessible with x-tenant-api-key only (no JWT)
+ */
+export const getThirdPartyStats = async (req: Request, res: Response) => {
+  try {
+    const tenant: any = await resolveTenantFromRequest(req);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant company not found.' });
+    }
+
+    const tenantId = (tenant._id || tenant.id).toString();
+
+    const [
+      totalClients,
+      activeClients,
+      totalStaff,
+      totalPlans,
+      activePlans,
+      totalResearch
+    ] = await Promise.all([
+      dynamicDb.Client.countDocuments({}),
+      dynamicDb.Client.countDocuments({ status: 'ACTIVE' }),
+      dynamicDb.Staff.countDocuments({}),
+      dynamicDb.Plan.countDocuments({ deletedAt: null }),
+      dynamicDb.Plan.countDocuments({ status: 'ACTIVE', deletedAt: null }),
+      dynamicDb.ResearchReport.countDocuments({ tenantId }).catch(() => 0)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      source: 'THIRD_PARTY_API',
+      company: {
+        id: tenantId,
+        companyName: tenant.companyName,
+        status: tenant.status
+      },
+      data: {
+        clientCount: totalClients,
+        activeClients,
+        pendingClients: totalClients - activeClients,
+        staffCount: totalStaff,
+        planCount: activePlans,
+        totalPlans,
+        researchCount: totalResearch
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch stats: ' + error.message
+    });
+  }
+};
+
+/**
+ * GET /api/v1/third-party-api/compliance
+ * GET /api/v1/third-party-api/:tenantId/compliance
+ */
+export const getThirdPartyCompliance = async (req: Request, res: Response) => {
+  try {
+    const tenant: any = await resolveTenantFromRequest(req);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant company not found.' });
+    }
+
+    const tenantId = (tenant._id || tenant.id).toString();
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const audits = await dynamicDb.ComplianceAudit.find({
+      $or: [{ tenantId }, { tenantId: tenant._id }]
+    })
+      .populate('requirementId')
+      .populate('penalty')
+      .lean();
+
+    const normalizeAudit = (a: any) => {
+      const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+      return {
+        id: a._id ? a._id.toString() : a.id,
+        _id: a._id,
+        tenantId,
+        status: a.status,
+        dueDate: a.dueDate,
+        officerRemarks: a.officerRemarks,
+        proofDocumentUrl: a.proofDocumentUrl,
+        resolvedAt: a.resolvedAt,
+        updatedAt: a.updatedAt,
+        requirement: {
+          id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+          serialNo: reqObj.serialNo,
+          requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+          frequency: reqObj.frequency,
+          frequencyType: reqObj.frequencyType,
+          severityLevel: reqObj.severityLevel,
+          penaltyAmount: reqObj.penaltyAmount
+        },
+        requirementId: reqObj,
+        penalty: a.penalty || null,
+        tenant: {
+          id: tenantId,
+          companyName: tenant.companyName,
+          sebiRegistration: tenant.sebiRegistration,
+          domainUrl: tenant.domainUrl,
+          website: tenant.website
+        }
+      };
+    };
+
+    const upcoming = audits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
+      a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
+    ).map(normalizeAudit);
+
+    const due = audits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
+      a.dueDate && new Date(a.dueDate) >= now
+    ).map(normalizeAudit);
+
+    const overdue = audits.filter((a: any) => 
+      ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+      a.status === 'OVERDUE'
+    ).map(normalizeAudit);
+
+    const penalty = audits.filter((a: any) => 
+      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+    ).map(normalizeAudit);
+
+    const closed = audits.filter((a: any) => 
+      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+    ).map(normalizeAudit);
+
+    return res.status(200).json({
+      success: true,
+      source: 'THIRD_PARTY_API',
+      company: {
+        id: tenantId,
+        companyName: tenant.companyName,
+        sebiRegistration: tenant.sebiRegistration,
+        bseEnrollment: tenant.bseEnrollment,
+        domainUrl: tenant.domainUrl,
+        website: tenant.website,
+        status: tenant.status
+      },
+      data: {
+        counts: {
+          upcoming: upcoming.length,
+          due: due.length,
+          overdue: overdue.length,
+          penalty: penalty.length,
+          closed: closed.length,
+          total: audits.length
+        },
+        upcoming,
+        due,
+        overdue,
+        penalty,
+        closed
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch third party compliance: ' + error.message
+    });
+  }
+};
+
+/**
+ * POST /api/v1/third-party-api/compliance/sweep
+ * POST /api/v1/third-party-api/:tenantId/compliance/sweep
+ */
+export const runThirdPartyComplianceSweep = async (req: Request, res: Response) => {
+  try {
+    const tenant: any = await resolveTenantFromRequest(req);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant company not found.' });
+    }
+
+    const tenantId = (tenant._id || tenant.id).toString();
+    const { checkComplianceForTenant } = await import('../controllers/complianceController');
+    const alertsCreated = await checkComplianceForTenant(tenantId);
+
+    return res.status(200).json({
+      success: true,
+      source: 'THIRD_PARTY_API',
+      message: `Compliance sweep completed for ${tenant.companyName}. Evaluated rules and updated audit records.`,
+      company: {
+        id: tenantId,
+        companyName: tenant.companyName
+      },
+      alertsGenerated: Array.isArray(alertsCreated) ? alertsCreated.length : 0
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to execute compliance sweep: ' + error.message
+    });
+  }
+};
+

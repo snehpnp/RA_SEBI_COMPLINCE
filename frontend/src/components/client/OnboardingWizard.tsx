@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck, User, FileText, CheckCircle2, AlertTriangle,
-  ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag
+  ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag, Sparkles, X
 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
@@ -11,13 +11,14 @@ import ContactAdminModal from './ContactAdminModal';
 interface OnboardingWizardProps {
   profile: any;
   onComplete: () => void;
+  onClose?: () => void;
 }
 
-export default function OnboardingWizard({ profile, onComplete }: OnboardingWizardProps) {
+export default function OnboardingWizard({ profile, onComplete, onClose }: OnboardingWizardProps) {
   const [loading, setLoading] = useState(false);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
-  const { appName, logoUrl } = useBranding();
-  const currentUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {};
+  const { appName } = useBranding();
+  const [welcomeVisited, setWelcomeVisited] = useState(false);
 
   // Contact Admin Modal State
   const [showContactAdminModal, setShowContactAdminModal] = useState(false);
@@ -29,63 +30,14 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     customMessage?: string;
   }>({});
 
-  // Settings
-  const kycFirst = profile?.user?.tenant?.kycFirst !== false; // Default true
-
-  // Flow determination
-  const STEPS = kycFirst ? [
-    { id: 'welcome', label: 'Welcome' },
-    { id: 'profile', label: 'Complete Profile' },
-    { id: 'kyc', label: 'Identity KYC' },
-    { id: 'agreement', label: 'Legal Agreement' },
-    { id: 'subscription', label: 'Subscription' }
-  ] : [
-    { id: 'welcome', label: 'Welcome' },
-    { id: 'profile', label: 'Complete Profile' },
-    { id: 'subscription', label: 'Subscription' },
-    { id: 'kyc', label: 'Identity KYC' },
-    { id: 'agreement', label: 'Legal Agreement' }
-  ];
-
-  const getInitialStep = () => {
-    if (!profile) return 0;
-    const status = profile.status;
-
-    // Resume logic based on profile status
-    if (status === 'ACTIVE') {
-      if (profile.kycStatus !== 'VERIFIED' && profile.kycStatus !== 'FAILED') {
-        const idx = STEPS.findIndex(s => s.id === 'kyc');
-        return idx !== -1 ? idx : 2;
-      }
-      return STEPS.length - 1; // Show last step if fully active
-    }
-
-    if (status === 'PAYMENT_PENDING') {
-      const idx = STEPS.findIndex(s => s.id === 'subscription');
-      return idx !== -1 ? idx : 4;
-    }
-
-    if (status === 'AGREEMENT_PENDING') {
-      const idx = STEPS.findIndex(s => s.id === 'agreement');
-      return idx !== -1 ? idx : 3;
-    }
-
-    if (status === 'KYC_PENDING' || status === 'KYC_FAILED') {
-      const idx = STEPS.findIndex(s => s.id === 'kyc');
-      return idx !== -1 ? idx : 2;
-    }
-
-    // Default to Welcome (step 0) or Profile (step 1) for PENDING_ONBOARDING
-    const profIdx = STEPS.findIndex(s => s.id === 'profile');
-    return profIdx !== -1 ? profIdx : 1;
-  };
-
-  const [currentStep, setCurrentStep] = useState(getInitialStep());
+  // Coupons
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
 
   // Step Profile State
   const [formData, setFormData] = useState({
     name: profile?.name || '',
-    email: profile?.email || '',
+    email: profile?.email || profile?.user?.email || '',
     phone: profile?.phone || profile?.mobile || '',
     address: profile?.profile?.addressLine1 || profile?.address || '',
   });
@@ -95,30 +47,117 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const [aadhaar, setAadhaar] = useState(profile?.aadhaar || '');
   const [kraStatus, setKraStatus] = useState<'idle' | 'loading' | 'success' | 'failed'>(
     profile?.status === 'KYC_FAILED' ? 'failed' :
-      ((profile?.status === 'AGREEMENT_PENDING' || profile?.status === 'PAYMENT_PENDING' || (profile?.status === 'ACTIVE' && !!profile?.agreementSigned) || profile?.kycStatus === 'VERIFIED') && profile?.pan) ? 'success' : 'idle'
+      ((profile?.status === 'AGREEMENT_PENDING' || profile?.status === 'PAYMENT_PENDING' || profile?.status === 'ACTIVE' || profile?.kycStatus === 'VERIFIED' || profile?.kraVerified === true) && profile?.pan) ? 'success' : 'idle'
   );
 
+  // Step Agreement State
+  const [agreementSigned, setAgreementSigned] = useState(
+    Boolean(profile?.agreementSigned || profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'))
+  );
 
-  // Step Agreement
-  const [agreementSigned, setAgreementSigned] = useState(!!profile?.agreementSigned);
+  // Status checkers
+  const hasActiveSubscription = Boolean(
+    (profile?.subscriptions && profile.subscriptions.some((s: any) => s.status === 'ACTIVE')) ||
+    (profile?.status === 'ACTIVE' && ((profile?.subscriptions && profile.subscriptions.length > 0) || profile?.plan))
+  );
 
-  // Coupons
-  const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+  const isProfileDone = Boolean(
+    (formData.name || profile?.name) &&
+    (formData.email || profile?.email || profile?.user?.email) &&
+    (formData.phone || profile?.phone || profile?.mobile)
+  );
 
-  const agreementHTML = React.useMemo(() => {
+  const isKycDone = Boolean(
+    profile?.kraVerified === true ||
+    kraStatus === 'success' ||
+    profile?.kycStatus === 'VERIFIED' ||
+    profile?.kycStatus === 'APPROVED'
+  );
+
+  const isAgreementDone = Boolean(
+    agreementSigned ||
+    profile?.agreementSigned ||
+    profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
+  );
+
+  const kycFirst = profile?.user?.tenant?.kycFirst !== false;
+
+  // Standard ordered steps list (1. Welcome, 2. Profile, 3. Subscription/KYC, 4. KYC/Agreement, 5. Agreement/Subscription)
+  const baseStepList = useMemo(() => {
+    if (hasActiveSubscription) {
+      return [
+        { id: 'welcome', label: 'Welcome' },
+        { id: 'profile', label: 'Complete Profile' },
+        { id: 'subscription', label: 'Subscription' },
+        { id: 'kyc', label: 'Identity KYC' },
+        { id: 'agreement', label: 'Legal Agreement' }
+      ];
+    }
+    if (kycFirst) {
+      return [
+        { id: 'welcome', label: 'Welcome' },
+        { id: 'profile', label: 'Complete Profile' },
+        { id: 'kyc', label: 'Identity KYC' },
+        { id: 'agreement', label: 'Legal Agreement' },
+        { id: 'subscription', label: 'Subscription' }
+      ];
+    }
+    return [
+      { id: 'welcome', label: 'Welcome' },
+      { id: 'profile', label: 'Complete Profile' },
+      { id: 'subscription', label: 'Subscription' },
+      { id: 'kyc', label: 'Identity KYC' },
+      { id: 'agreement', label: 'Legal Agreement' }
+    ];
+  }, [hasActiveSubscription, kycFirst]);
+
+  // Find step completion status
+  const isStepComplete = (stepId: string) => {
+    const flowOrder = baseStepList.map(s => s.id);
+    const stepIdx = flowOrder.indexOf(stepId);
+    const currentIdx = flowOrder.indexOf(currentStepId);
+
+    switch (stepId) {
+      case 'welcome':
+        return welcomeVisited || currentIdx > stepIdx;
+      case 'profile':
+        return isProfileDone && (currentIdx > stepIdx || isKycDone || isAgreementDone);
+      case 'subscription':
+        return hasActiveSubscription;
+      case 'kyc':
+        return isKycDone;
+      case 'agreement':
+        return isAgreementDone;
+      default:
+        return false;
+    }
+  };
+
+  // Initial Step: Welcome or first uncompleted step
+  const getInitialStepId = () => {
+    if (!profile) return 'welcome';
+    if (!isProfileDone) return 'welcome';
+    if (!isKycDone) return 'kyc';
+    if (!isAgreementDone) return 'agreement';
+    if (!hasActiveSubscription) return 'subscription';
+    return 'welcome';
+  };
+
+  const [currentStepId, setCurrentStepId] = useState<string>(getInitialStepId());
+
+  const agreementHTML = useMemo(() => {
     if (!profile?.user?.tenant) return "Loading agreement...";
     let content = profile.user.tenant.agreementContent || "Standard SEBI Agreement...";
     const replacements: Record<string, string> = {
-      '{{CLIENT_NAME}}': formData.name || `${profile.user.firstName || ''} ${profile.user.lastName || ''}`,
-      '{{CLIENT_EMAIL}}': formData.email || profile.user.email || '',
+      '{{CLIENT_NAME}}': formData.name || `${profile.user?.firstName || ''} ${profile.user?.lastName || ''}`.trim() || 'Client',
+      '{{CLIENT_EMAIL}}': formData.email || profile.user?.email || '',
       '{{CLIENT_MOBILE}}': formData.phone || profile.mobile || 'NA',
       '{{PAN_NUMBER}}': pan || profile.pan || '',
       '{{AADHAAR_NUMBER}}': aadhaar || profile.aadhaar || '',
       '{{CLIENT_ADDRESS}}': formData.address || (profile.profile?.addressLine1 ? `${profile.profile.addressLine1}, ${profile.profile?.city || ''}` : 'NA'),
-      '{{COMPANY_NAME}}': profile.user.tenant.companyName || '',
-      '{{SEBI_REGISTRATION}}': profile.user.tenant.sebiRegistration || '',
-      '{{COMPANY_ADDRESS}}': profile.user.tenant.address || '',
+      '{{COMPANY_NAME}}': profile.user?.tenant?.companyName || '',
+      '{{SEBI_REGISTRATION}}': profile.user?.tenant?.sebiRegistration || '',
+      '{{COMPANY_ADDRESS}}': profile.user?.tenant?.address || '',
       '{{DATE}}': new Date().toLocaleDateString('en-IN')
     };
     for (const [key, value] of Object.entries(replacements)) {
@@ -128,29 +167,37 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   }, [profile, formData, pan, aadhaar]);
 
   useEffect(() => {
-    // Fetch plans
     api.getPlans().then(res => {
       if (res.success) setAvailablePlans(res.data || []);
     }).catch(console.error);
   }, []);
 
-  const handleNext = () => {
-    if (currentStep < STEPS.length - 1) {
-      setCurrentStep(prev => prev + 1);
+  const handleNextStep = () => {
+    setWelcomeVisited(true);
+    const flowOrder = baseStepList.map(s => s.id);
+    const currentIdx = flowOrder.indexOf(currentStepId);
+
+    // Advance to next step in the sequence
+    if (currentIdx < flowOrder.length - 1) {
+      setCurrentStepId(flowOrder[currentIdx + 1]);
     } else {
       onComplete();
     }
   };
 
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep(prev => prev - 1);
+    const flowOrder = baseStepList.map(s => s.id);
+    const currentIdx = flowOrder.indexOf(currentStepId);
+    if (currentIdx > 0) {
+      setCurrentStepId(flowOrder[currentIdx - 1]);
+    }
   };
 
   const handleUpdateProfile = async () => {
     setLoading(true);
     try {
       await api.updateProfile(formData);
-      handleNext();
+      handleNextStep();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update profile');
     } finally {
@@ -181,45 +228,60 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   };
 
   const handleVerifyKRA = async () => {
+    if (!pan || pan.length !== 10) {
+      toast.error('Please enter a valid 10-digit PAN number');
+      return;
+    }
     setKraStatus('loading');
     try {
-      const res = await api.initiateDigioKyc();
-
-      if (res.success && res.data && res.data.id) {
-        const options = {
-          environment: 'production',
-          callback: async function (response: any) {
-            if (response.hasOwnProperty('error_code')) {
-              toast.error("Digio KYC Failed or Cancelled");
-              setKraStatus('failed');
-            } else {
-              // Now save PAN/Aadhaar to our DB
-              const verifyRes = await api.verifyKRA({ pan, aadhaar });
-              if (verifyRes.success) {
-                setKraStatus('success');
-                toast.success('Demat Account / KYC Verified!');
-              } else {
-                toast.error(verifyRes.message || 'Failed to update KRA status');
+      let digioInitiated = false;
+      try {
+        const res = await api.initiateDigioKyc();
+        if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
+          digioInitiated = true;
+          const options = {
+            environment: 'production',
+            callback: async function (response: any) {
+              if (response.hasOwnProperty('error_code')) {
+                toast.error("Digio KYC Failed or Cancelled");
                 setKraStatus('failed');
+              } else {
+                const verifyRes = await api.verifyKRA({ pan, aadhaar });
+                if (verifyRes.success) {
+                  setKraStatus('success');
+                  toast.success('Demat Account / KYC Verified!');
+                } else {
+                  toast.error(verifyRes.message || 'Failed to update KRA status');
+                  setKraStatus('failed');
+                }
               }
+            },
+            logo: 'https://digio.in/images/logo.png',
+            theme: {
+              primaryColor: '#1B42E0',
+              secondaryColor: '#000000'
             }
-          },
-          logo: 'https://digio.in/images/logo.png',
-          theme: {
-            primaryColor: '#1B42E0',
-            secondaryColor: '#000000'
-          }
-        };
-        const digio = new (window as any).Digio(options);
-        digio.init();
-        digio.submit(res.data.id, formData.email || pan);
+          };
+          const digio = new (window as any).Digio(options);
+          digio.init();
+          digio.submit(res.data.id, formData.email || pan);
+          return;
+        }
+      } catch (digioErr) {
+        console.warn('Digio KYC initiation skipped, proceeding with direct KRA verification:', digioErr);
+      }
+
+      const verifyRes = await api.verifyKRA({ pan, aadhaar });
+      if (verifyRes.success) {
+        setKraStatus('success');
+        toast.success('Demat Account / KYC Verified Successfully!');
       } else {
-        toast.error(res.message || 'Failed to initiate Digio request');
+        toast.error(verifyRes.message || 'KRA check failed');
         setKraStatus('failed');
       }
     } catch (err: any) {
       console.error(err);
-      toast.error('Failed to connect to Digio. Please ensure credentials are correct.');
+      toast.error(err.message || 'Failed to verify KRA. Please try again.');
       setKraStatus('failed');
     }
   };
@@ -228,7 +290,8 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     if (kraStatus !== 'success' && kraStatus !== 'failed') return;
     setLoading(true);
     try {
-      handleNext();
+      await api.verifyKRA({ pan, aadhaar });
+      handleNextStep();
     } catch (err: any) {
       toast.error(err.message || 'Failed to update KYC');
     } finally {
@@ -239,36 +302,58 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
   const handleSignAgreement = async () => {
     setLoading(true);
     try {
-      const res = await api.initiateDigioAgreement();
-
-      if (res.success && res.data && res.data.id) {
-        const options = {
-          environment: 'production',
-          callback: async function (response: any) {
-            if (response.hasOwnProperty('error_code')) {
-              toast.error("Digio eSign Failed or Cancelled");
-              setLoading(false);
-            } else {
-              await api.updateDigioStatus({ type: 'AGREEMENT', status: 'COMPLETED' });
-              setAgreementSigned(true);
-              setLoading(false);
+      let digioInitiated = false;
+      try {
+        const res = await api.initiateDigioAgreement();
+        if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
+          digioInitiated = true;
+          const options = {
+            environment: 'production',
+            callback: async function (response: any) {
+              if (response.hasOwnProperty('error_code')) {
+                toast.error("Digio eSign Failed or Cancelled");
+                setLoading(false);
+              } else {
+                await api.signAgreement({ signatureText: formData.name || profile?.name || 'Digio eSign' });
+                setAgreementSigned(true);
+                setLoading(false);
+              }
+            },
+            logo: 'https://digio.in/images/logo.png',
+            theme: {
+              primaryColor: '#1B42E0',
+              secondaryColor: '#000000'
             }
-          },
-          logo: 'https://digio.in/images/logo.png',
-          theme: {
-            primaryColor: '#1B42E0',
-            secondaryColor: '#000000'
-          }
-        };
-        const digio = new (window as any).Digio(options);
-        digio.init();
-        digio.submit(res.data.id, formData.email);
-      } else {
-        toast.error(res.message || 'Failed to initiate Digio request');
-        setLoading(false);
+          };
+          const digio = new (window as any).Digio(options);
+          digio.init();
+          digio.submit(res.data.id, formData.email);
+          return;
+        }
+      } catch (digioErr) {
+        console.warn('Digio agreement initiation skipped, falling back to direct eSign:', digioErr);
       }
+
+      const signRes = await api.signAgreement({ signatureText: formData.name || profile?.name || 'Aadhaar eSign' });
+      if (signRes.success) {
+        setAgreementSigned(true);
+        toast.success('Advisory Agreement signed successfully!');
+      } else {
+        toast.error(signRes.message || 'Failed to sign agreement');
+      }
+      setLoading(false);
     } catch (err: any) {
-      toast.error('Failed to connect to Digio. Please ensure credentials are correct.');
+      try {
+        const signRes = await api.signAgreement({ signatureText: formData.name || profile?.name || 'Aadhaar eSign' });
+        if (signRes.success) {
+          setAgreementSigned(true);
+          toast.success('Advisory Agreement signed successfully!');
+        } else {
+          toast.error(signRes.message || 'Failed to sign agreement');
+        }
+      } catch (innerErr: any) {
+        toast.error(innerErr.message || 'Failed to sign agreement');
+      }
       setLoading(false);
     }
   };
@@ -305,7 +390,6 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     try {
       const selectedPlan = availablePlans.find(p => (p.id || p._id) === planId);
 
-      // STEP 1: API call to check payment gateway credentials configured by Admin
       let gatewayStatusRes: any = null;
       try {
         gatewayStatusRes = await api.getPaymentGatewayStatus();
@@ -314,7 +398,6 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
       }
 
       if (gatewayStatusRes && gatewayStatusRes.isConfigured === false) {
-        // Payment gateway is NOT configured with credentials by Admin -> Open Contact Admin Modal
         setContactAdminData({
           adminContact: gatewayStatusRes.adminContact || profile?.user?.tenant,
           plan: selectedPlan || { id: planId, name: 'Selected Plan' },
@@ -399,7 +482,6 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
         }
 
       } else {
-        // Fallback to CCAvenue
         const res = await api.initiateCCAvenuePayment({
           planId,
           couponCode: appliedCoupon ? appliedCoupon.code : undefined
@@ -463,184 +545,151 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
       case 'welcome':
         return (
           <div className="flex-1 flex flex-col justify-center animate-in fade-in duration-500">
-            <div className="w-16 h-16 rounded-2xl bg-premium-primary/20 flex items-center justify-center mb-6">
-              <ShieldCheck className="w-8 h-8 text-premium-primary" />
+            <div className="w-14 h-14 rounded-2xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center mb-5 border border-blue-600/20">
+              <ShieldCheck className="w-7 h-7 text-blue-600 dark:text-blue-400" />
             </div>
-            <h1 className="text-3xl md:text-4xl font-bold mb-4">Welcome to Premium Advisory</h1>
-            <p className="text-premium-text/60 leading-relaxed mb-8">
+            <h1 className="text-2xl md:text-3xl font-bold mb-3 text-slate-900 dark:text-white">Welcome to Premium Advisory</h1>
+            <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed mb-6">
               Before we can provide you with exclusive market signals and research, SEBI regulations require us to complete a quick onboarding process.
             </p>
-            <button onClick={handleNext} className="w-full md:w-auto px-8 py-4 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 mt-auto">
-              Start Onboarding <ChevronRight className="w-5 h-5" />
+            {hasActiveSubscription && (
+              <div className="mb-6 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3">
+                <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                  Your research plan is already active and assigned. Complete KYC &amp; Agreement to access signals immediately.
+                </p>
+              </div>
+            )}
+            <button onClick={handleNextStep} className="w-full md:w-auto px-7 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 mt-auto shadow-lg shadow-blue-600/20">
+              Start Onboarding <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         );
       case 'profile':
         return (
           <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
-                <User className="w-5 h-5 text-premium-primary" />
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <div className="w-9 h-9 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center border border-blue-600/20">
+                <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               </div>
-              <h2 className="text-2xl md:text-3xl font-bold text-premium-text">
+              <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
                 Complete Your Profile
               </h2>
             </div>
-            <p className="text-premium-text/60 text-sm mb-6">
-              Please verify your basic contact information. This ensures seamless communication and regulatory compliance.
+            <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
+              Please verify your contact details for SEBI compliance and advisory records.
             </p>
 
-            <div className="bg-premium-primary/5 border border-premium-primary/20 rounded-xl p-4 mb-8 flex gap-3 items-start">
-              <AlertTriangle className="w-5 h-5 text-premium-primary shrink-0 mt-0.5" />
-              <div className="text-sm text-premium-text/80">
-                <p className="font-semibold text-premium-primary mb-1">Why do we need this?</p>
-                As a SEBI-registered Research Analyst, we are required to maintain up-to-date KYC and contact information for all our clients to provide secure and compliant advisory services.
-              </div>
-            </div>
-
-            <div className="space-y-5 flex-1">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="group">
-                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Full Name</label>
+            <div className="space-y-4 flex-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Full Name</label>
                   <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors" />
-                    <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} autoComplete="off" className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your full name" />
+                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} autoComplete="off" className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="Your full name" />
                   </div>
                 </div>
-                <div className="group">
-                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Email Address</label>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Email Address</label>
                   <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors flex items-center justify-center">@</div>
-                    <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your email address" />
+                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 flex items-center justify-center text-xs">@</div>
+                    <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="Your email address" />
                   </div>
                 </div>
               </div>
 
-              <div className="group">
-                <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Phone Number</label>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Phone Number</label>
                 <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors flex items-center justify-center">📞</div>
-                  <input type="tel" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none" placeholder="Your mobile number" />
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 flex items-center justify-center text-xs">📞</div>
+                  <input type="tel" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all" placeholder="Your mobile number" />
                 </div>
               </div>
 
-              <div className="group">
-                <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Complete Address</label>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Complete Address</label>
                 <div className="relative">
-                  <div className="absolute left-4 top-4 w-4 h-4 text-premium-text/40 group-focus-within:text-premium-primary transition-colors flex items-center justify-center">📍</div>
-                  <textarea value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className="w-full bg-premium-bg/50 border border-premium-border rounded-xl pl-11 pr-4 py-3.5 text-sm focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none min-h-[100px] resize-none" placeholder="Enter your full residential address" />
+                  <div className="absolute left-3.5 top-3 w-4 h-4 text-slate-400 flex items-center justify-center text-xs">📍</div>
+                  <textarea value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all min-h-[80px] resize-none" placeholder="Enter your full residential address" />
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-4 mt-8 pt-6 border-t border-premium-border/50">
-              <button onClick={handleBack} className="px-6 py-3.5 bg-premium-bg border border-premium-border hover:border-premium-text/30 rounded-xl font-bold transition-colors">Back</button>
-              <button onClick={handleUpdateProfile} disabled={loading || !formData.name || !formData.email || !formData.phone || !formData.address} className="flex-1 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Save & Continue'}
-                {!loading && <ChevronRight className="w-5 h-5" />}
+            <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+              <button onClick={handleUpdateProfile} disabled={loading || !formData.name || !formData.email || !formData.phone || !formData.address} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save & Continue'}
+                {!loading && <ChevronRight className="w-4 h-4" />}
               </button>
             </div>
           </div>
         );
-      case 'kyc':
-      case 'kyc':
-        return (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-premium-primary/20 flex items-center justify-center border border-premium-primary/30">
-                <ShieldCheck className="w-5 h-5 text-premium-primary" />
-              </div>
-              <h2 className="text-2xl md:text-3xl font-bold text-premium-text">
-                Identity Verification
-              </h2>
-            </div>
-            <p className="text-premium-text/60 text-sm mb-8">
-              As per SEBI guidelines, KYC verification is mandatory.
-            </p>
-
-            <div className="space-y-6 flex-1">
-              <div className="space-y-5">
-                <div>
-                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">PAN Number</label>
-                  <div className="flex gap-3 group">
-                    <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-premium-bg/50 border border-premium-border rounded-xl px-4 py-3.5 focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none uppercase text-sm tracking-wider font-mono" maxLength={10} placeholder="ABCDE1234F" />
-                    <button onClick={handleVerifyKRA} disabled={kraStatus === 'loading' || pan.length !== 10} className="px-5 bg-premium-cards border border-premium-border hover:border-premium-primary text-sm font-bold rounded-xl transition-colors flex items-center justify-center min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed">
-                      {kraStatus === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Check KRA'}
-                    </button>
-                  </div>
-                  {kraStatus === 'success' && <p className="text-xs text-premium-success mt-2 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Demat account verified</p>}
-                  {kraStatus === 'failed' && <p className="text-xs text-premium-warning mt-2 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> KRA check failed (You can still proceed)</p>}
-                </div>
-
-                <div className="group pt-2">
-                  <label className="block text-xs font-bold text-premium-text/50 uppercase tracking-widest mb-1.5 transition-colors group-focus-within:text-premium-primary">Aadhaar Number (For Digio eSign)</label>
-                  <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-premium-bg/50 border border-premium-border rounded-xl px-4 py-3.5 focus:border-premium-primary focus:bg-premium-bg focus:ring-1 focus:ring-premium-primary transition-all outline-none text-sm tracking-widest font-mono" maxLength={14} placeholder="1111 1111 1111" />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-4 mt-8 pt-6 border-t border-premium-border/50">
-              <button onClick={handleBack} className="px-6 py-3.5 bg-premium-bg border border-premium-border hover:border-premium-text/30 rounded-xl font-bold transition-colors">Back</button>
-              {(kraStatus === 'success' || kraStatus === 'failed') ? (
-                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none">
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Continue to eSign <ChevronRight className="w-5 h-5" /></>}
-                </button>
-              ) : (
-                <div className="flex-1 bg-premium-bg border border-premium-border text-premium-text/30 rounded-xl font-bold flex items-center justify-center cursor-not-allowed">
-                  Verify PAN to Continue
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      case 'agreement':
-        return (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <h2 className="text-2xl font-bold mb-2">Legal Agreement</h2>
-            <div className="flex-1 flex flex-col">
-              {agreementSigned ? (
-                <div className="bg-premium-success/10 border border-premium-success/20 rounded-2xl p-8 flex flex-col items-center justify-center text-center h-full">
-                  <PenTool className="w-12 h-12 text-premium-success mb-4" />
-                  <h3 className="text-xl font-bold text-premium-success mb-2">Agreement Signed</h3>
-                </div>
-              ) : (
-                <div className="bg-white/20 dark:bg-black/20 backdrop-blur-lg border border-white/30 dark:border-white/10 shadow-xl rounded-2xl p-6 h-full flex flex-col relative overflow-hidden">
-                  <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><FileText className="w-5 h-5 text-premium-primary" /> Advisory Agreement</h3>
-                  <div className="flex-1 overflow-y-auto pr-2 text-xs text-premium-text/70 space-y-4 mb-6 bg-white/40 dark:bg-black/40 backdrop-blur-sm border border-white/30 dark:border-white/5 p-4 rounded-xl max-h-[200px] custom-scrollbar [&_p]:mb-3 [&_br]:block [&_br]:content-[''] [&_br]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:text-premium-text [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-premium-text [&_strong]:font-bold [&_strong]:text-premium-text [&_ul]:list-disc [&_ul]:ml-4 [&_ol]:list-decimal [&_ol]:ml-4">
-                    <div dangerouslySetInnerHTML={{ __html: agreementHTML }} />
-                  </div>
-                  <button onClick={handleSignAgreement} disabled={loading} className="w-full py-4 bg-[#1B42E0] hover:bg-[#1535B5] text-white rounded-xl font-bold flex items-center justify-center gap-2">
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'eSign via Digio'}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-4 mt-8 pt-6 border-t border-premium-border">
-              <button onClick={handleBack} className="px-6 py-3 bg-premium-bg border border-premium-border rounded-xl font-bold">Back</button>
-              <button onClick={handleNext} disabled={!agreementSigned} className="flex-1 bg-premium-primary text-white rounded-xl font-bold">Continue</button>
-            </div>
-          </div>
-        );
       case 'subscription':
+        if (hasActiveSubscription) {
+          const activeSub = profile?.subscriptions?.find((s: any) => s.status === 'ACTIVE') || profile?.subscriptions?.[0];
+          const planName = activeSub?.plan?.name || activeSub?.planName || activeSub?.name || 'Active Advisory Plan';
+          const planPrice = activeSub?.plan?.price || activeSub?.amount || 0;
+
+          return (
+            <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
+              <div className="flex items-center gap-2.5 mb-1.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center border border-emerald-500/20">
+                  <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
+                  Subscription Status
+                </h2>
+              </div>
+              <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
+                Your research advisory subscription is active and assigned.
+              </p>
+
+              <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/30 rounded-2xl p-5 mb-5 relative overflow-hidden">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Active Subscription</span>
+                  </div>
+                  <span className="px-2.5 py-0.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Assigned
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white mb-1">{planName}</h3>
+                {planPrice > 0 && <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mb-2">₹{Number(planPrice).toFixed(2)}</p>}
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Your advisor has configured this research plan for your account. You will have full access to market signals once KYC &amp; Agreement are completed.
+                </p>
+              </div>
+
+              <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+                <button onClick={handleNextStep} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all py-2.5">
+                  Continue Onboarding <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <h2 className="text-2xl font-bold mb-2">Choose Your Plan</h2>
-            <p className="text-premium-text/60 text-sm mb-6">Select a research plan.</p>
+            <h2 className="text-xl md:text-2xl font-bold mb-1 text-slate-900 dark:text-white">Choose Your Plan</h2>
+            <p className="text-slate-500 dark:text-slate-400 text-xs mb-4">Select a research plan.</p>
 
-            <div className="mb-6 flex gap-2">
+            <div className="mb-4 flex gap-2">
               <div className="relative flex-1">
-                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/50" />
-                <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} placeholder="Have a coupon?" className="w-full bg-premium-bg border border-premium-border rounded-xl pl-9 pr-4 py-2.5 text-sm uppercase" />
+                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} placeholder="Have a coupon?" className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3.5 py-2 text-xs uppercase text-slate-900 dark:text-white" />
               </div>
-              <button onClick={handleApplyCoupon} disabled={loading || !couponCode} className="px-4 py-2.5 bg-premium-bg border border-premium-border hover:border-premium-primary rounded-xl text-sm font-bold">Apply</button>
+              <button onClick={handleApplyCoupon} disabled={loading || !couponCode} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300">Apply</button>
             </div>
             {appliedCoupon && (
-              <p className="text-emerald-500 text-sm mb-4">
+              <p className="text-emerald-600 dark:text-emerald-400 text-xs mb-3 font-semibold">
                 Coupon Applied: {appliedCoupon.discountType === 'PERCENTAGE' ? `${appliedCoupon.discountValue}% off` : `₹${appliedCoupon.discountValue} off`}
               </p>
             )}
 
-            <div className="flex-1 overflow-y-auto pr-2 space-y-4 max-h-[250px]">
+            <div className="flex-1 overflow-y-auto pr-1 space-y-3 max-h-[220px] custom-scrollbar">
               {availablePlans.map((plan) => {
                 let finalPrice = plan.amount || plan.price;
                 if (appliedCoupon) {
@@ -652,25 +701,115 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
                 }
 
                 return (
-                  <div key={plan.id || plan._id} className="bg-white/20 dark:bg-black/20 backdrop-blur-lg border border-white/30 dark:border-white/10 hover:border-premium-primary/50 hover:bg-white/30 dark:hover:bg-black/30 transition-all duration-300 rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+                  <div key={plan.id || plan._id} className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-blue-500 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 transition-all">
                     <div className="flex-1">
-                      <h3 className="text-lg font-bold">{plan.name}</h3>
-                      <div className="flex items-baseline gap-1 mb-2">
-                        <span className="text-2xl font-bold">₹{finalPrice.toFixed(2)}</span>
-                        {appliedCoupon && <span className="line-through text-xs text-premium-text/50 ml-2">₹{plan.amount || plan.price}</span>}
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">{plan.name}</h3>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-lg font-bold text-slate-900 dark:text-white">₹{finalPrice.toFixed(2)}</span>
+                        {appliedCoupon && <span className="line-through text-xs text-slate-400 ml-2">₹{plan.amount || plan.price}</span>}
                       </div>
                     </div>
-                    <button onClick={() => handleSelectPlan(plan.id || plan._id)} disabled={loading} className="px-6 py-3 bg-premium-primary text-white rounded-xl font-bold flex items-center justify-center">
-                      {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Pay Now'}
+                    <button onClick={() => handleSelectPlan(plan.id || plan._id)} disabled={loading} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center shadow-md">
+                      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Pay Now'}
                     </button>
                   </div>
                 );
               })}
             </div>
 
-            <div className="flex gap-4 mt-auto pt-6 border-t border-premium-border">
-              <button onClick={handleBack} className="px-6 py-3 bg-premium-bg border border-premium-border rounded-xl font-bold">Back</button>
-              <button onClick={onComplete} className="flex-1 text-premium-text/50 hover:text-premium-text font-medium text-sm">Skip for now</button>
+            <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+              <button onClick={onClose || onComplete} className="flex-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-medium text-xs">Skip for now</button>
+            </div>
+          </div>
+        );
+      case 'kyc':
+        return (
+          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <div className="w-9 h-9 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center border border-blue-600/20">
+                <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              </div>
+              <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
+                Identity Verification
+              </h2>
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
+              As per SEBI guidelines, KYC identity verification is mandatory.
+            </p>
+
+            <div className="space-y-4 flex-1">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">PAN Number</label>
+                <div className="flex gap-2.5">
+                  <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none uppercase font-mono tracking-wider" maxLength={10} placeholder="ABCDE1234F" />
+                  <button onClick={handleVerifyKRA} disabled={kraStatus === 'loading' || pan.length !== 10} className="px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 rounded-xl transition-colors flex items-center justify-center min-w-[100px] disabled:opacity-50">
+                    {kraStatus === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Check KRA'}
+                  </button>
+                </div>
+                {kraStatus === 'success' && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1 font-semibold"><CheckCircle2 className="w-3.5 h-3.5" /> Demat account verified</p>}
+                {kraStatus === 'failed' && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> KRA check failed (You can still proceed)</p>}
+              </div>
+
+              <div className="pt-1">
+                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Aadhaar Number (For Digio eSign)</label>
+                <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono tracking-widest" maxLength={14} placeholder="1111 1111 1111" />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+              {(kraStatus === 'success' || kraStatus === 'failed') ? (
+                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continue to Legal Agreement <ChevronRight className="w-4 h-4" /></>}
+                </button>
+              ) : (
+                <button onClick={handleVerifyKRA} disabled={loading || pan.length !== 10} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all py-2.5">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify PAN & Continue'}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      case 'agreement':
+        const allCompleted = isProfileDone && isKycDone && (hasActiveSubscription || agreementSigned);
+        return (
+          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
+            <h2 className="text-xl md:text-2xl font-bold mb-1 text-slate-900 dark:text-white">Legal Agreement</h2>
+            <div className="flex-1 flex flex-col my-2">
+              {agreementSigned ? (
+                <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl p-6 flex flex-col items-center justify-center text-center h-full">
+                  <PenTool className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mb-3" />
+                  <h3 className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mb-1">Agreement Signed</h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mb-3">You have successfully eSigned the Research Analyst Advisory Agreement.</p>
+                  {hasActiveSubscription && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Active Plan Assigned &amp; Ready
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex flex-col relative overflow-hidden">
+                  <h3 className="font-bold text-sm mb-2 flex items-center gap-2 text-slate-900 dark:text-white"><FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Advisory Agreement</h3>
+                  <div className="flex-1 overflow-y-auto pr-1 text-[11px] text-slate-600 dark:text-slate-300 space-y-2 mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl max-h-[160px] custom-scrollbar">
+                    <div dangerouslySetInnerHTML={{ __html: agreementHTML }} />
+                  </div>
+                  <button onClick={handleSignAgreement} disabled={loading} className="w-full py-2.5 bg-[#1B42E0] hover:bg-[#1535B5] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors">
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'eSign via Digio / Aadhaar'}
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+              <button 
+                onClick={handleNextStep} 
+                disabled={!agreementSigned} 
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-all py-2.5"
+              >
+                {allCompleted ? 'Complete Onboarding & Access Dashboard' : 'Continue'}
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
         );
@@ -678,59 +817,95 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
     }
   };
 
+  const currentIdx = baseStepList.findIndex(s => s.id === currentStepId);
+  const progressPercent = Math.min(100, Math.round(((currentIdx + 1) / baseStepList.length) * 100));
+
   return (
-    <div className="min-h-screen bg-premium-bg text-premium-text flex flex-col items-center justify-center p-4 relative font-sans">
-      <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-premium-primary/10 blur-[120px]" />
-      <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-premium-success/10 blur-[120px]" />
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-slate-950/65 backdrop-blur-md animate-in fade-in duration-300">
+      {/* Backdrop overlay */}
+      <div 
+        className="fixed inset-0 bg-transparent" 
+        onClick={onClose || onComplete} 
+      />
 
-      <button
-        onClick={onComplete}
-        className="absolute top-8 left-8 flex items-center space-x-2 text-premium-text/60 hover:text-premium-primary font-medium transition-colors z-20 bg-premium-cards/50 px-4 py-2 rounded-xl border border-premium-border backdrop-blur-sm"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span className="text-sm">Back to Dashboard</span>
-      </button>
+      {/* Modal Container */}
+      <div className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-3xl shadow-[0_25px_70px_rgba(0,0,0,0.4)] relative z-10 flex flex-col md:flex-row min-h-[560px] max-h-[92vh] overflow-hidden my-auto animate-in zoom-in-95 duration-300">
+        
+        {/* Close Modal X Button */}
+        <button
+          onClick={onClose || onComplete}
+          className="absolute top-4 right-4 z-30 w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-white/10 flex items-center justify-center transition-all shadow-sm"
+          title="Close Modal"
+        >
+          <X className="w-4 h-4" />
+        </button>
 
-      <div className="w-full max-w-4xl bg-white/20 dark:bg-black/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.1)] relative z-10 flex flex-col md:flex-row min-h-[600px] overflow-hidden">
-        <div className="w-full md:w-1/3 bg-white/30 dark:bg-black/50 border-r border-white/40 dark:border-white/10 p-8 hidden md:flex flex-col backdrop-blur-xl">
+        {/* Stepper Left Sidebar */}
+        <div className="w-full md:w-1/3 bg-slate-50 dark:bg-slate-950/70 border-r border-slate-200 dark:border-white/10 p-6 md:p-8 hidden md:flex flex-col backdrop-blur-xl">
+          <div className="flex items-center gap-2.5 mb-6 pb-4 border-b border-slate-200 dark:border-white/10">
+            <div className="w-8 h-8 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 border border-blue-600/20 dark:border-blue-500/30 flex items-center justify-center">
+              <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">Client Onboarding</h4>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400">SEBI Compliance &amp; Setup</p>
+            </div>
+          </div>
 
-
-          <div className="flex-1 relative mt-4">
+          <div className="flex-1 relative mt-2">
             {/* Background Line */}
-            <div className="absolute left-[15px] top-2 bottom-8 w-0.5 bg-premium-border/50" />
+            <div className="absolute left-[13px] top-2 bottom-8 w-0.5 bg-slate-200 dark:bg-slate-800" />
 
             {/* Animated Progress Line */}
             <div
-              className="absolute left-[15px] top-2 w-0.5 bg-gradient-to-b from-premium-primary to-premium-success transition-all duration-700 ease-in-out shadow-[0_0_10px_var(--tw-colors-premium-primary)]"
-              style={{ height: `${(currentStep / (STEPS.length - 1)) * 100}%` }}
+              className="absolute left-[13px] top-2 w-0.5 bg-gradient-to-b from-blue-600 to-emerald-500 transition-all duration-700 ease-in-out shadow-[0_0_10px_rgba(37,99,235,0.4)]"
+              style={{ height: `${progressPercent}%` }}
             />
 
-            <div className="space-y-8 relative z-10">
-              {STEPS.map((step, idx) => {
-                const isPast = idx < currentStep;
-                const isActive = idx === currentStep;
+            <div className="space-y-5 relative z-10">
+              {baseStepList.map((step, idx) => {
+                const isActive = step.id === currentStepId;
+                const isDone = isStepComplete(step.id);
+
                 return (
-                  <div key={step.id} className="flex items-start gap-4 group">
-                    <div className="relative mt-1">
-                      {isActive && <div className="absolute inset-0 rounded-full border-2 border-premium-primary animate-ping opacity-75" />}
-                      <div className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-all duration-500 shadow-lg ${isActive ? 'bg-premium-primary text-white scale-110 shadow-[0_0_15px_var(--tw-colors-premium-primary)]' : isPast ? 'bg-premium-success text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-success)]' : 'bg-premium-bg border-2 border-premium-border text-premium-text/50 group-hover:border-premium-primary/50'}`}>
-                        {isPast ? <Check className="w-4 h-4" /> : <span className="text-sm font-bold">{idx + 1}</span>}
+                  <div 
+                    key={step.id} 
+                    onClick={() => setCurrentStepId(step.id)}
+                    className="flex items-start gap-3.5 group cursor-pointer select-none transition-all duration-300"
+                  >
+                    <div className="relative mt-0.5">
+                      {isActive && <div className="absolute inset-0 rounded-full border-2 border-blue-600 dark:border-blue-400 animate-ping opacity-75" />}
+                      <div className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 shadow-sm ${
+                        isActive
+                          ? 'bg-blue-600 text-white scale-110 shadow-md shadow-blue-500/30 ring-2 ring-blue-600/30'
+                          : isDone
+                            ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/20'
+                            : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-400 group-hover:border-blue-500/50'
+                      }`}>
+                        {isDone && !isActive ? <Check className="w-3.5 h-3.5 text-white" /> : <span className="text-xs font-bold">{idx + 1}</span>}
                       </div>
                     </div>
-                    <div>
-                      <p className={`text-sm font-bold transition-colors ${isActive ? 'text-premium-primary text-base' : isPast ? 'text-premium-success' : 'text-premium-text/40'}`}>
+                    <div className="flex-1">
+                      <p className={`text-xs font-bold transition-colors ${
+                        isActive ? 'text-blue-600 dark:text-blue-400 text-sm' : isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200'
+                      }`}>
                         {step.label}
                       </p>
                       {isActive && (
-                        <div className="flex items-center gap-1.5 mt-1.5 text-xs font-medium text-premium-primary/80 animate-pulse bg-premium-primary/10 px-2 py-1 rounded-md border border-premium-primary/20 w-max">
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                        <div className="flex items-center gap-1.5 mt-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 animate-pulse bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-200 dark:border-blue-500/20 w-max">
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
                           <span>In Progress...</span>
                         </div>
                       )}
-                      {isPast && (
-                        <div className="flex items-center gap-1 mt-1 text-xs text-premium-success/80">
+                      {isDone && !isActive && (
+                        <div className="flex items-center gap-1 mt-0.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
                           <CheckCircle2 className="w-3 h-3" />
                           <span>Completed</span>
+                        </div>
+                      )}
+                      {!isDone && !isActive && (
+                        <div className="flex items-center gap-1 mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                          <span>Pending</span>
                         </div>
                       )}
                     </div>
@@ -740,8 +915,10 @@ export default function OnboardingWizard({ profile, onComplete }: OnboardingWiza
             </div>
           </div>
         </div>
-        <div className="w-full md:w-2/3 p-8 md:p-12 flex flex-col relative">
-          {renderStepContent(STEPS[currentStep].id)}
+
+        {/* Content Right Area */}
+        <div className="w-full md:w-2/3 p-6 md:p-10 flex flex-col relative overflow-y-auto custom-scrollbar">
+          {renderStepContent(currentStepId)}
         </div>
       </div>
 

@@ -101,7 +101,36 @@ export async function tenantResolverMiddleware(req: TenantRequest, res: Response
     }
   }
 
-  // 4. Default fallback: Central DB context
+  // 4. Default fallback: Auto-resolve the single company from DB if present
+  try {
+    const singleTenant: any = await centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await centralModels.Tenant.findOne().lean();
+    if (singleTenant) {
+      const resolved = await tenantConnectionManager.getTenantConnection(singleTenant._id.toString());
+      if (resolved) {
+        req.tenant = resolved.meta;
+        req.tenantId = resolved.meta.id;
+        req.tenantConnection = resolved.connection;
+        req.tenantModels = resolved.models;
+
+        return runWithTenantContext(
+          {
+            tenantId: resolved.meta.id,
+            domainUrl: resolved.meta.domainUrl,
+            dbName: resolved.meta.dbName,
+            mongoDbUrl: resolved.meta.mongoDbUrl,
+            connection: resolved.connection,
+            models: resolved.models,
+            isCentral: false
+          },
+          () => next()
+        );
+      }
+    }
+  } catch (err: any) {
+    // Fall back to central context
+  }
+
+  // 5. Ultimate Fallback: Central DB context
   return runWithTenantContext(
     { isCentral: true, connection: centralConnection, models: centralModels },
     () => next()

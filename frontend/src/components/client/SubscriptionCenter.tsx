@@ -6,14 +6,32 @@ import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ContactAdminModal from './ContactAdminModal';
 
-export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { profile?: any, onTriggerOnboarding?: () => void }) {
+export default function SubscriptionCenter({ 
+  profile, 
+  onTriggerOnboarding, 
+  onNavigateToKyc 
+}: { 
+  profile?: any, 
+  onTriggerOnboarding?: () => void,
+  onNavigateToKyc?: () => void 
+}) {
   const [activeTab, setActiveTab] = useState<'active' | 'browse'>('active');
   const [activeSubscriptions, setActiveSubscriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [gstType, setGstType] = useState<string>('INCLUSIVE');
 
-  const isFullyOnboarded = profile?.status === 'PAYMENT_PENDING' || profile?.status === 'ACTIVE';
+  // Strict SEBI KYC check: kraVerified must be true or kycStatus verified
+  const kycFirst = profile?.user?.tenant?.kycFirst !== false; // Default true
+  const isKraVerified = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
+  const isAgreementDone = Boolean(
+    profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ||
+    profile?.agreementSigned ||
+    profile?.status === 'PAYMENT_PENDING'
+  );
+  const isKycDone = isKraVerified;
+  const isFullyOnboarded = !kycFirst || (isKycDone && isAgreementDone);
+
   const [checkoutPlan, setCheckoutPlan] = useState<any>(null);
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
@@ -62,15 +80,24 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
   const handleConfirmPurchase = async () => {
     if (!checkoutPlan) return;
 
-    // Check KYC First setting
-    const kycFirst = profile?.user?.tenant?.kycFirst !== false; // Default true
-    const isKycDone = profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED' || profile?.status === 'ACTIVE' || profile?.status === 'PAYMENT_PENDING' || profile?.status === 'AGREEMENT_PENDING';
-    const isAgreementDone = !!profile?.agreementSigned || profile?.status === 'ACTIVE' || profile?.status === 'PAYMENT_PENDING';
-
-    if (kycFirst && (!isKycDone || !isAgreementDone)) {
-      toast('Please complete your Identity KYC and Legal Agreement before making a payment.');
+    // Strict KYC verification enforcement
+    if (kycFirst && !isKycDone) {
+      toast.error('Please complete your KYC Verification before making payment. Redirecting to KYC Center...');
       setCheckoutPlan(null);
-      if (onTriggerOnboarding) {
+      if (onNavigateToKyc) {
+        onNavigateToKyc();
+      } else if (onTriggerOnboarding) {
+        onTriggerOnboarding();
+      }
+      return;
+    }
+
+    if (kycFirst && !isAgreementDone) {
+      toast.error('Please sign the Advisory Agreement before making a payment.');
+      setCheckoutPlan(null);
+      if (onNavigateToKyc) {
+        onNavigateToKyc();
+      } else if (onTriggerOnboarding) {
         onTriggerOnboarding();
       }
       return;
@@ -224,7 +251,15 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
         }
       }
     } catch (err: any) {
-      if (err.message && (err.message.toLowerCase().includes('contact the administrator') || err.message.toLowerCase().includes('not configured'))) {
+      if (err.requiresKyc || (err.message && err.message.toLowerCase().includes('kyc'))) {
+        toast.error(err.message || 'KYC Verification is required before purchasing a plan.');
+        setCheckoutPlan(null);
+        if (onNavigateToKyc) {
+          onNavigateToKyc();
+        } else if (onTriggerOnboarding) {
+          onTriggerOnboarding();
+        }
+      } else if (err.message && (err.message.toLowerCase().includes('contact the administrator') || err.message.toLowerCase().includes('not configured'))) {
         setContactAdminData({
           adminContact: profile?.user?.tenant,
           plan: checkoutPlan,
@@ -243,6 +278,15 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
   };
 
   useEffect(() => {
+    if (profile?.subscriptions && Array.isArray(profile.subscriptions) && profile.subscriptions.length > 0) {
+      const activeFromProp = profile.subscriptions.filter((s: any) => s.status === 'ACTIVE' || s.status === 'active');
+      if (activeFromProp.length > 0) {
+        setActiveSubscriptions(activeFromProp);
+      }
+    }
+  }, [profile]);
+
+  useEffect(() => {
     const fetchSub = async () => {
       try {
         const [subRes, plansRes, couponsRes] = await Promise.all([
@@ -251,9 +295,17 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
           api.getClientCoupons().catch(() => ({ success: false, data: [] }))
         ]);
 
-        if (subRes.success && subRes.data && subRes.data.length > 0) {
-          setActiveSubscriptions(subRes.data.filter((s: any) => s.status === 'ACTIVE' || s.status === 'active'));
+        let subs: any[] = [];
+        if (subRes.success && Array.isArray(subRes.data) && subRes.data.length > 0) {
+          subs = subRes.data;
+        } else if (profile?.subscriptions && Array.isArray(profile.subscriptions) && profile.subscriptions.length > 0) {
+          subs = profile.subscriptions;
         }
+
+        if (subs.length > 0) {
+          setActiveSubscriptions(subs.filter((s: any) => s.status === 'ACTIVE' || s.status === 'active'));
+        }
+
         if (couponsRes && couponsRes.success) setAvailableCoupons(couponsRes.data);
         if (plansRes.success) {
           setAvailablePlans(plansRes.data || []);
@@ -266,7 +318,7 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
       }
     };
     fetchSub();
-  }, []);
+  }, [profile]);
 
   return (
     <div className="space-y-6 font-sans text-premium-text animate-in fade-in duration-500 h-full">
@@ -377,6 +429,29 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
 
       {activeTab === 'browse' && (
         <div className="pt-4">
+          {kycFirst && !isKycDone && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 mb-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm animate-in fade-in duration-300">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+                  <Shield className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-amber-500">KYC Verification Required Before Payment</h4>
+                  <p className="text-xs text-premium-text/70 mt-0.5">As per SEBI compliance and advisor policy, you must complete your KYC identity verification before purchasing a plan.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (onNavigateToKyc) onNavigateToKyc();
+                  else if (onTriggerOnboarding) onTriggerOnboarding();
+                }}
+                className="shrink-0 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-bold text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5"
+              >
+                Complete KYC Now <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="w-8 h-8 text-premium-primary animate-spin mb-4" />
@@ -447,18 +522,32 @@ export default function SubscriptionCenter({ profile, onTriggerOnboarding }: { p
                     </div>
 
                     <button onClick={() => {
-                      if (isFullyOnboarded) {
-                        setCheckoutPlan(plan);
-                        setAppliedCoupon(null);
-                        setCouponCode('');
-                      } else {
-                        onTriggerOnboarding && onTriggerOnboarding();
+                      if (kycFirst && !isKycDone) {
+                        toast.error('KYC Verification is required before purchasing a plan. Redirecting to KYC Center...');
+                        if (onNavigateToKyc) {
+                          onNavigateToKyc();
+                        } else if (onTriggerOnboarding) {
+                          onTriggerOnboarding();
+                        }
+                        return;
                       }
+                      if (kycFirst && !isAgreementDone) {
+                        toast.error('Advisory Agreement must be signed before purchasing a plan.');
+                        if (onNavigateToKyc) {
+                          onNavigateToKyc();
+                        } else if (onTriggerOnboarding) {
+                          onTriggerOnboarding();
+                        }
+                        return;
+                      }
+                      setCheckoutPlan(plan);
+                      setAppliedCoupon(null);
+                      setCouponCode('');
                     }} className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${isPopular
                       ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90'
                       : 'bg-premium-primary hover:bg-premium-primary/90 text-white'
                       }`}>
-                      Select Plan <ChevronRight className="w-4 h-4" />
+                      {kycFirst && !isKycDone ? 'Complete KYC to Subscribe' : 'Select Plan'} <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                 );

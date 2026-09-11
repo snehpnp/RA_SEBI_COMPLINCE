@@ -19,7 +19,15 @@ import {
   ChevronLeft,
   ChevronRight,
   UserCheck,
-  CreditCard
+  CreditCard,
+  Eye,
+  FileText,
+  MapPin,
+  Calendar,
+  Phone,
+  Mail,
+  Shield,
+  Layers
 } from 'lucide-react';
 import { formatPan, formatAadhaar } from '@/utils/formatters';
 import { downloadCSV } from '@/utils/exportCsv';
@@ -36,6 +44,9 @@ interface CompanyClientsModalProps {
     domainUrl?: string | null;
     company?: any;
     data: any[];
+    localData?: any[];
+    remoteCount?: number;
+    localCount?: number;
   };
   onRefresh: () => void;
 }
@@ -49,24 +60,38 @@ export default function CompanyClientsModal({
 }: CompanyClientsModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [activeSourceView, setActiveSourceView] = useState<'REMOTE' | 'LOCAL'>('REMOTE');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [selectedClientForView, setSelectedClientForView] = useState<any | null>(null);
 
-  const rawClients = clientsData?.data || [];
+  const hasRemoteData = clientsData?.source === 'REMOTE_DOMAIN_API';
+  const hasLocalData = Array.isArray(clientsData?.localData) && clientsData.localData.length > 0;
 
-  // Filter clients - Hook placed unconditionally at top level
+  // Decide which list to use based on user selected source view
+  const activeClientsList = useMemo(() => {
+    if (activeSourceView === 'LOCAL' && hasLocalData) {
+      return clientsData.localData || [];
+    }
+    return clientsData?.data || [];
+  }, [activeSourceView, clientsData, hasLocalData]);
+
+  // Filter clients
   const filteredClients = useMemo(() => {
-    if (!rawClients || rawClients.length === 0) return [];
-    return rawClients.filter((client: any) => {
+    if (!activeClientsList || activeClientsList.length === 0) return [];
+    return activeClientsList.filter((client: any) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
         (client.name && client.name.toLowerCase().includes(q)) ||
+        (client.companyName && client.companyName.toLowerCase().includes(q)) ||
         (client.email && client.email.toLowerCase().includes(q)) ||
         (client.mobile && client.mobile.includes(q)) ||
         (client.pan && client.pan.toLowerCase().includes(q)) ||
-        (client.aadhaar && client.aadhaar.includes(q));
+        (client.aadhaar && client.aadhaar.includes(q)) ||
+        (client.city && client.city.toLowerCase().includes(q)) ||
+        (client.state && client.state.toLowerCase().includes(q));
 
       const status = (client.status || 'ACTIVE').toUpperCase();
       const matchesStatus =
@@ -77,15 +102,15 @@ export default function CompanyClientsModal({
 
       return matchesSearch && matchesStatus;
     });
-  }, [rawClients, searchQuery, statusFilter]);
+  }, [activeClientsList, searchQuery, statusFilter]);
 
   if (!isOpen || !company) return null;
 
   // Statistics
-  const totalCount = rawClients.length;
-  const activeCount = rawClients.filter((c: any) => (c.status || '').toUpperCase() === 'ACTIVE').length;
-  const kycPendingCount = rawClients.filter((c: any) => (c.status || '').toUpperCase().includes('KYC') || (c.status || '').toUpperCase().includes('PENDING')).length;
-  const withPlanCount = rawClients.filter((c: any) => c.activeSubscription || c.subscriptionsCount > 0).length;
+  const totalCount = activeClientsList.length;
+  const activeCount = activeClientsList.filter((c: any) => (c.status || '').toUpperCase() === 'ACTIVE').length;
+  const kycPendingCount = activeClientsList.filter((c: any) => (c.status || '').toUpperCase().includes('KYC') || (c.status || '').toUpperCase().includes('PENDING')).length;
+  const withPlanCount = activeClientsList.filter((c: any) => c.activeSubscription || c.subscriptionsCount > 0).length;
 
   const totalPages = Math.ceil(filteredClients.length / itemsPerPage) || 1;
   const paginatedClients = filteredClients.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -99,18 +124,21 @@ export default function CompanyClientsModal({
     const exportRows = filteredClients.map((c: any, index: number) => ({
       'S.No': index + 1,
       'Client Name': c.name || 'N/A',
+      'Company / Entity': c.companyName || company.companyName || 'N/A',
       'Email': c.email || 'N/A',
       'Mobile': c.mobile || 'N/A',
       'PAN': c.pan || 'N/A',
       'Aadhaar': c.aadhaar || 'N/A',
       'Risk Profile': c.riskProfile || 'MODERATE',
+      'City': c.city || '—',
+      'State': c.state || '—',
       'Status': c.status || 'ACTIVE',
       'Active Plan': c.activeSubscription?.plan?.name || (c.subscriptionsCount > 0 ? `${c.subscriptionsCount} Active` : 'None'),
       'Joined Date': c.joinedAt ? new Date(c.joinedAt).toLocaleDateString() : 'N/A',
-      'Source': clientsData.source || 'DATABASE'
+      'Source': activeSourceView === 'LOCAL' ? 'CENTRAL_DATABASE' : (clientsData.source || 'REMOTE_DOMAIN_API')
     }));
 
-    downloadCSV(exportRows, `${company.companyName.replace(/\s+/g, '_')}_Clients`);
+    downloadCSV(exportRows, `${company.companyName.replace(/\s+/g, '_')}_Clients_${activeSourceView}`);
   };
 
   const handleCopyEndpoint = () => {
@@ -138,18 +166,53 @@ export default function CompanyClientsModal({
                   {company.sebiRegistration}
                 </span>
 
-                {/* Live Data Source Badge */}
-                {clientsData.source === 'REMOTE_DOMAIN_API' ? (
-                  <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <Globe className="h-3.5 w-3.5" />
-                    <span>Live Domain API ({targetDomain})</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
-                    <Database className="h-3.5 w-3.5" />
-                    <span>Platform Database</span>
-                  </span>
+                {/* Source View Tabs */}
+                {hasRemoteData && hasLocalData && (
+                  <div className="inline-flex items-center p-0.5 rounded-full bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-white/10 text-xs font-semibold">
+                    <button
+                      onClick={() => {
+                        setActiveSourceView('REMOTE');
+                        setCurrentPage(1);
+                      }}
+                      className={`px-3 py-1 rounded-full flex items-center gap-1.5 transition ${
+                        activeSourceView === 'REMOTE'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span>Live Domain API ({clientsData.data?.length || 0})</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActiveSourceView('LOCAL');
+                        setCurrentPage(1);
+                      }}
+                      className={`px-3 py-1 rounded-full flex items-center gap-1.5 transition ${
+                        activeSourceView === 'LOCAL'
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Database className="w-3 h-3" />
+                      <span>Local Central DB ({clientsData.localData?.length || 0})</span>
+                    </button>
+                  </div>
+                )}
+
+                {(!hasRemoteData || !hasLocalData) && (
+                  clientsData.source === 'REMOTE_DOMAIN_API' ? (
+                    <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <Globe className="h-3.5 w-3.5" />
+                      <span>Live Domain API ({targetDomain})</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                      <Database className="h-3.5 w-3.5" />
+                      <span>Central Master Database</span>
+                    </span>
+                  )
                 )}
               </div>
 
@@ -202,51 +265,67 @@ export default function CompanyClientsModal({
           </div>
         </div>
 
-        {/* Stats Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 md:px-6 bg-slate-100/60 dark:bg-slate-950/20 border-b border-slate-200 dark:border-white/5">
-          <div className="bg-white dark:bg-slate-900/90 p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 md:px-6 md:pt-6">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-white/5 flex items-center space-x-3.5 shadow-xs">
+            <div className="p-3 bg-primary-500/10 text-primary-600 dark:text-primary-400 rounded-xl">
               <Users className="h-5 w-5" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Total Clients</span>
-              <span className="text-xl font-black text-slate-900 dark:text-white">{totalCount}</span>
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                Total Clients
+              </span>
+              <span className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                {totalCount}
+              </span>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900/90 p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-white/5 flex items-center space-x-3.5 shadow-xs">
+            <div className="p-3 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl">
               <UserCheck className="h-5 w-5" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Active Clients</span>
-              <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">{activeCount}</span>
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                Active Clients
+              </span>
+              <span className="text-xl md:text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+                {activeCount}
+              </span>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900/90 p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-white/5 flex items-center space-x-3.5 shadow-xs">
+            <div className="p-3 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl">
               <Clock className="h-5 w-5" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">KYC / Pending</span>
-              <span className="text-xl font-black text-amber-600 dark:text-amber-400">{kycPendingCount}</span>
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                KYC / Pending
+              </span>
+              <span className="text-xl md:text-2xl font-black text-amber-600 dark:text-amber-400 tracking-tight">
+                {kycPendingCount}
+              </span>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-slate-900/90 p-3.5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-white/5 flex items-center space-x-3.5 shadow-xs">
+            <div className="p-3 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl">
               <CreditCard className="h-5 w-5" />
             </div>
             <div>
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Subscribed</span>
-              <span className="text-xl font-black text-purple-600 dark:text-purple-400">{withPlanCount}</span>
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+                Subscribed
+              </span>
+              <span className="text-xl md:text-2xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight">
+                {withPlanCount}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Filter and Search Bar */}
-        <div className="p-4 md:px-6 flex flex-col md:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900">
+        {/* Filters & Search */}
+        <div className="px-4 md:px-6 py-3 flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
@@ -256,7 +335,7 @@ export default function CompanyClientsModal({
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              placeholder="Search by name, email, mobile, PAN..."
+              placeholder="Search by name, email, mobile, PAN, city..."
               className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 transition placeholder:text-slate-400 text-slate-900 dark:text-white"
             />
           </div>
@@ -304,7 +383,7 @@ export default function CompanyClientsModal({
               <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
                 {searchQuery
                   ? 'No clients matched your search query.'
-                  : `No client accounts are currently registered under ${company.companyName}.`}
+                  : `No client accounts are currently registered under ${company.companyName} in this source.`}
               </p>
             </div>
           ) : (
@@ -320,6 +399,7 @@ export default function CompanyClientsModal({
                       <th className="py-3 px-4">Subscriptions</th>
                       <th className="py-3 px-4">Joined Date</th>
                       <th className="py-3 px-4 text-center">Status</th>
+                      <th className="py-3 px-4 text-center w-16">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-white/5">
@@ -331,7 +411,8 @@ export default function CompanyClientsModal({
                       return (
                         <tr
                           key={client.id || idx}
-                          className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                          className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors cursor-pointer"
+                          onClick={() => setSelectedClientForView(client)}
                         >
                           <td className="py-3.5 px-4 text-center font-mono text-slate-400">
                             {(currentPage - 1) * itemsPerPage + idx + 1}
@@ -342,9 +423,16 @@ export default function CompanyClientsModal({
                                 {(client.name || 'C').charAt(0).toUpperCase()}
                               </div>
                               <div>
-                                <span className="font-bold text-slate-900 dark:text-white block">
-                                  {client.name || 'Client User'}
-                                </span>
+                                <div className="flex items-center space-x-2 flex-wrap">
+                                  <span className="font-bold text-slate-900 dark:text-white block">
+                                    {client.name || 'Client User'}
+                                  </span>
+                                  {client.companyName && (
+                                    <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                                      {client.companyName}
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="text-[11px] text-slate-500 block">{client.email || 'No email'}</span>
                                 {client.mobile && (
                                   <span className="text-[10px] font-mono text-slate-400">{client.mobile}</span>
@@ -384,8 +472,8 @@ export default function CompanyClientsModal({
                                   {client.activeSubscription.plan?.name || 'Active Plan'}
                                 </span>
                                 {client.activeSubscription.plan?.price !== undefined && (
-                                  <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
-                                    ₹{Number(client.activeSubscription.plan.price).toLocaleString()} / {client.activeSubscription.plan.durationMonths || 1}m
+                                  <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                                    ₹{Number(client.activeSubscription.plan.price).toLocaleString('en-IN')} / {client.activeSubscription.plan.durationMonths || 1}m
                                   </span>
                                 )}
                               </div>
@@ -398,7 +486,7 @@ export default function CompanyClientsModal({
                             )}
                           </td>
                           <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                            {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString() : 'N/A'}
+                            {client.joinedAt ? new Date(client.joinedAt).toLocaleDateString('en-IN') : 'N/A'}
                           </td>
                           <td className="py-3.5 px-4 text-center">
                             <span
@@ -412,6 +500,15 @@ export default function CompanyClientsModal({
                             >
                               {status}
                             </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => setSelectedClientForView(client)}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
+                              title="View Client Details"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -451,35 +548,180 @@ export default function CompanyClientsModal({
           )}
         </div>
 
-        {/* Footer / 3rd Party API Helper Snippet */}
-        <div className="p-4 md:px-6 bg-slate-50 dark:bg-slate-950/80 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center space-x-2 w-full sm:w-auto">
-            <span className="text-slate-500 font-bold uppercase tracking-wider text-[10px] whitespace-nowrap">
+        {/* Footer with Third-Party API Endpoint & Copy */}
+        <div className="p-4 px-6 border-t border-slate-200 dark:border-white/10 bg-slate-50/50 dark:bg-slate-950/40 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2 text-slate-500 dark:text-slate-400 flex-wrap">
+            <span className="font-bold text-slate-700 dark:text-slate-300 uppercase text-[10px] tracking-wider">
               3rd Party API Endpoint:
             </span>
-            <code className="font-mono text-primary-600 dark:text-primary-400 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/10 truncate max-w-[280px] md:max-w-md select-all">
+            <span className="font-mono text-xs px-2.5 py-1 rounded-lg bg-slate-200/70 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-700 dark:text-slate-300 select-all">
               {thirdPartyEndpoint}
-            </code>
+            </span>
             <button
               onClick={handleCopyEndpoint}
-              className="p-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-white rounded-md transition"
-              title="Copy 3rd Party API URL"
+              className="p-1 hover:text-primary-600 dark:hover:text-primary-400 transition"
+              title="Copy Endpoint"
             >
-              {copiedUrl ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+              {copiedUrl ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
             </button>
           </div>
 
-          <div className="flex items-center space-x-3 self-end sm:self-auto">
-            <button
-              onClick={onClose}
-              className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-xl transition text-xs shadow-md shadow-primary-500/20"
-            >
-              Close
-            </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl transition shadow-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+
+      {/* Client Profile Inspection Modal */}
+      {selectedClientForView && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400 flex items-center justify-center font-bold text-base">
+                  {(selectedClientForView.name || 'C').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {selectedClientForView.name || 'Client Details'}
+                  </h3>
+                  <span className="text-xs text-slate-500">{selectedClientForView.email || 'No email'}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedClientForView(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1 text-xs">
+              {/* Status & Risk Profile */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/5">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Account Status</span>
+                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                    {selectedClientForView.status || 'ACTIVE'}
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/5">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">Risk Profile</span>
+                  <p className="text-xs font-bold text-primary-600 dark:text-primary-400 mt-1">
+                    {selectedClientForView.riskProfile || 'MODERATE'}
+                  </p>
+                </div>
+              </div>
+
+              {/* KYC Identification */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/5 space-y-2">
+                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
+                  Identity & KYC
+                </span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">PAN Number</span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                      {selectedClientForView.pan ? formatPan(selectedClientForView.pan) : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Aadhaar Number</span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                      {selectedClientForView.aadhaar ? formatAadhaar(selectedClientForView.aadhaar) : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Category</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      {selectedClientForView.category || 'INDIVIDUAL'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Occupation</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      {selectedClientForView.occupation || 'OTHER'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Contact & Location */}
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-white/5 space-y-2">
+                <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
+                  Contact & Location
+                </span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Mobile</span>
+                    <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                      {selectedClientForView.mobile || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 text-[10px] block">Location</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">
+                      {[selectedClientForView.city, selectedClientForView.state].filter(Boolean).join(', ') || '—'}
+                    </span>
+                  </div>
+                  {selectedClientForView.address && (
+                    <div className="col-span-2">
+                      <span className="text-slate-400 text-[10px] block">Address</span>
+                      <span className="text-slate-700 dark:text-slate-300">{selectedClientForView.address}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Active Subscription Plan */}
+              {selectedClientForView.activeSubscription && (
+                <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
+                      Active Subscription
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
+                      {selectedClientForView.activeSubscription.status || 'ACTIVE'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <div>
+                      <p className="font-bold text-slate-900 dark:text-white">
+                        {selectedClientForView.activeSubscription.plan?.name || 'Subscription Plan'}
+                      </p>
+                      {selectedClientForView.activeSubscription.plan?.price !== undefined && (
+                        <p className="text-[11px] text-emerald-600 font-semibold font-mono mt-0.5">
+                          ₹{Number(selectedClientForView.activeSubscription.plan.price).toLocaleString('en-IN')}
+                        </p>
+                      )}
+                    </div>
+                    {selectedClientForView.activeSubscription.endDate && (
+                      <div className="text-right text-[11px] text-slate-500">
+                        <span>Valid until</span>
+                        <p className="font-semibold text-slate-700 dark:text-slate-300">
+                          {new Date(selectedClientForView.activeSubscription.endDate).toLocaleDateString('en-IN')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-slate-200 dark:border-white/10">
+              <button
+                onClick={() => setSelectedClientForView(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
-
-      </div>
+      )}
     </div>
   );
 }

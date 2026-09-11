@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
+exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -50,17 +50,27 @@ const querystring_1 = __importDefault(require("querystring"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
 const registerClient = async (req, res) => {
-    const { tenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode } = req.body;
-    if (!tenantId || !name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
+    const { tenantId: passedTenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode } = req.body;
+    if (!name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
         return res.status(400).json({
             success: false,
             message: 'All fields (name, email, mobile, password, PAN, Aadhaar, address, state) are required.'
         });
     }
     try {
-        const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        let tenantId = passedTenantId;
+        let tenant = null;
+        if (tenantId) {
+            tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        }
         if (!tenant) {
-            return res.status(404).json({ success: false, message: 'Tenant company not found' });
+            tenant = await db_1.default.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await db_1.default.Tenant.findOne().lean();
+            if (tenant) {
+                tenantId = (tenant._id || tenant.id).toString();
+            }
+        }
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
         }
         const duplicateEmail = await db_1.default.User.findOne({ email }).lean();
         if (duplicateEmail) {
@@ -344,8 +354,17 @@ const signAgreement = async (req, res) => {
             performedBy: client.name,
             ipAddress: req.ip
         });
+        // Check if client already has an active subscription assigned by admin
+        const activeSub = await db_1.default.Subscription.findOne({
+            clientId: client._id || client.id,
+            status: 'ACTIVE'
+        }).lean();
+        const newStatus = (activeSub && client.kraVerified) ? 'ACTIVE' : (activeSub ? 'ACTIVE' : 'PAYMENT_PENDING');
         await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
-            $set: { status: 'PAYMENT_PENDING' }
+            $set: {
+                status: newStatus,
+                agreementSigned: true
+            }
         });
         return res.status(200).json({
             success: true,
@@ -467,6 +486,15 @@ const submitManualPayment = async (req, res) => {
         const tenantId = req.user.tenantId;
         const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
         const profile = await db_1.default.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
+        const kycRequired = tenantObj?.kycFirst !== false;
+        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+        if (kycRequired && !isClientKycDone) {
+            return res.status(403).json({
+                success: false,
+                requiresKyc: true,
+                message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+            });
+        }
         const payment = await db_1.default.Payment.create({
             tenantId,
             clientId: client._id || client.id,
@@ -587,14 +615,19 @@ const getPlans = async (req, res) => {
         })
             .populate('categoryId')
             .lean();
-        const formatted = plans.map((p) => ({
-            ...p,
-            id: String(p._id || p.id),
-            category: p.categoryId ? {
-                ...p.categoryId,
-                id: String(p.categoryId._id || p.categoryId.id)
-            } : null
-        }));
+        const formatted = plans.map((p) => {
+            const catObj = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId : null;
+            const catIdStr = catObj ? String(catObj._id || catObj.id) : (p.categoryId ? String(p.categoryId) : '');
+            return {
+                ...p,
+                id: String(p._id || p.id),
+                categoryId: catIdStr,
+                category: catObj ? {
+                    ...catObj,
+                    id: String(catObj._id || catObj.id)
+                } : (p.category ? p.category : null)
+            };
+        });
         return res.status(200).json({
             success: true,
             data: formatted,
@@ -613,10 +646,16 @@ const getClientProfile = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Client profile not found.' });
         }
         const clientId = client._id || client.id;
-        const profile = await db_1.default.ClientProfile.findOne({ clientId }).lean();
-        const subscriptions = await db_1.default.Subscription.find({ clientId }).populate('planId').lean();
-        const agreements = await db_1.default.Agreement.find({ clientId }).lean();
-        const consents = await db_1.default.Consent.find({ clientId }).lean();
+        const profile = await db_1.default.ClientProfile.findOne({ $or: [{ clientId }, { clientId: client.userId }] }).lean();
+        const subscriptions = await db_1.default.Subscription.find({
+            $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user.id }]
+        }).populate('planId').lean();
+        const agreements = await db_1.default.Agreement.find({
+            $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user.id }]
+        }).lean();
+        const consents = await db_1.default.Consent.find({
+            $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user.id }]
+        }).lean();
         const user = await db_1.default.User.findById(req.user.id).lean();
         let tenantObj = null;
         if (user && user.tenantId) {
@@ -796,7 +835,16 @@ const initiateRazorpayPayment = async (req, res) => {
         const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
-        const tenantId = req.user.tenantId;
+        let tenantId = req.user?.tenantId;
+        if (!tenantId && req.user?.id) {
+            if (client?.tenantId)
+                tenantId = client.tenantId;
+            if (!tenantId) {
+                const userDoc = await db_1.default.User.findById(req.user.id).lean();
+                if (userDoc?.tenantId)
+                    tenantId = userDoc.tenantId;
+            }
+        }
         let tenantObj = null;
         if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
             tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
@@ -813,7 +861,17 @@ const initiateRazorpayPayment = async (req, res) => {
         if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
             return res.status(400).json({
                 success: false,
+                isConfigured: false,
                 message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+            });
+        }
+        const kycRequired = tenantObj?.kycFirst !== false;
+        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+        if (kycRequired && !isClientKycDone) {
+            return res.status(403).json({
+                success: false,
+                requiresKyc: true,
+                message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
             });
         }
         const plan = await db_1.default.Plan.findById(planId).lean();
@@ -962,7 +1020,16 @@ const initiateCCAvenuePayment = async (req, res) => {
         const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
-        const tenantId = req.user.tenantId;
+        let tenantId = req.user?.tenantId;
+        if (!tenantId && req.user?.id) {
+            if (client?.tenantId)
+                tenantId = client.tenantId;
+            if (!tenantId) {
+                const userDoc = await db_1.default.User.findById(req.user.id).lean();
+                if (userDoc?.tenantId)
+                    tenantId = userDoc.tenantId;
+            }
+        }
         let tenantObj = null;
         if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
             tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
@@ -979,7 +1046,17 @@ const initiateCCAvenuePayment = async (req, res) => {
         if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
             return res.status(400).json({
                 success: false,
+                isConfigured: false,
                 message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+            });
+        }
+        const kycRequired = tenantObj?.kycFirst !== false;
+        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+        if (kycRequired && !isClientKycDone) {
+            return res.status(403).json({
+                success: false,
+                requiresKyc: true,
+                message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
             });
         }
         const plan = await db_1.default.Plan.findById(planId).lean();
@@ -1009,7 +1086,7 @@ const initiateCCAvenuePayment = async (req, res) => {
         const orderId = 'TXN-' + Math.floor(100000 + Math.random() * 900000);
         const amount = finalPrice.toFixed(2);
         const origin = req.headers.origin || 'http://localhost:3000';
-        const redirectUrl = `${req.protocol}://${req.get('host')}/api/payment/ccavenue/response?tenantId=${tenantId}`;
+        const redirectUrl = `${req.protocol}://${req.get('host')}/api/v1/payment/ccavenue/response?tenantId=${tenantObj._id || tenantObj.id || tenantId}`;
         const cancelUrl = `${origin}/client`;
         let merchantData = `merchant_id=${tenantObj.ccavenueMerchantId}&order_id=${orderId}&currency=INR&amount=${amount}&redirect_url=${redirectUrl}&cancel_url=${cancelUrl}&language=EN`;
         merchantData += `&billing_name=${encodeURIComponent(client.name)}&billing_email=${encodeURIComponent(client.email)}&billing_tel=${encodeURIComponent(client.pan)}`;
@@ -1095,3 +1172,98 @@ const handleCCAvenueResponse = async (req, res) => {
     }
 };
 exports.handleCCAvenueResponse = handleCCAvenueResponse;
+const getPaymentGatewayStatus = async (req, res) => {
+    try {
+        let tenantId = req.user?.tenantId;
+        if (!tenantId && req.user?.id) {
+            const clientDoc = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+            if (clientDoc?.tenantId)
+                tenantId = clientDoc.tenantId;
+            if (!tenantId) {
+                const userDoc = await db_1.default.User.findById(req.user.id).lean();
+                if (userDoc?.tenantId)
+                    tenantId = userDoc.tenantId;
+            }
+        }
+        let tenantObj = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!tenantObj && tenantId) {
+            tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+        }
+        if (!tenantObj && tenantId) {
+            tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+        }
+        if (!tenantObj) {
+            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenantObj) {
+            tenantObj = await db_1.centralModels.AllCompany.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenantObj) {
+            return res.status(200).json({
+                success: true,
+                isConfigured: false,
+                activeGateway: 'RAZORPAY',
+                message: 'Administrator has not configured a payment gateway. Please contact admin to buy this plan.',
+                adminContact: {
+                    companyName: 'Advisory Administration',
+                    email: null,
+                    mobile: null,
+                    sebiRegistration: null,
+                    address: null,
+                    website: null,
+                    bankDetails: null
+                }
+            });
+        }
+        const activeGateway = (tenantObj.activePaymentGateway || 'RAZORPAY').toUpperCase();
+        let isConfigured = false;
+        if (activeGateway === 'RAZORPAY') {
+            isConfigured = !!(tenantObj.razorpayKeyId && tenantObj.razorpayKeySecret && tenantObj.razorpayKeyId.trim() && tenantObj.razorpayKeySecret.trim());
+        }
+        else if (activeGateway === 'CCAVENUE') {
+            isConfigured = !!(tenantObj.ccavenueMerchantId && tenantObj.ccavenueAccessCode && tenantObj.ccavenueWorkingKey && tenantObj.ccavenueMerchantId.trim() && tenantObj.ccavenueWorkingKey.trim());
+        }
+        else if (activeGateway === 'CASHFREE') {
+            isConfigured = !!(tenantObj.cashfreeAppId && tenantObj.cashfreeSecretKey && tenantObj.cashfreeAppId.trim() && tenantObj.cashfreeSecretKey.trim());
+        }
+        else if (activeGateway === 'STRIPE') {
+            isConfigured = !!(tenantObj.stripePublishableKey && tenantObj.stripeSecretKey && tenantObj.stripePublishableKey.trim() && tenantObj.stripeSecretKey.trim());
+        }
+        else {
+            isConfigured = false;
+        }
+        const adminContact = {
+            companyName: tenantObj.companyName || 'Advisory Team',
+            email: tenantObj.companyEmail || tenantObj.email || null,
+            mobile: tenantObj.mobile || null,
+            sebiRegistration: tenantObj.sebiRegistration || null,
+            address: tenantObj.address || null,
+            website: tenantObj.website || null,
+            bankDetails: (tenantObj.bankAccountNo && tenantObj.bankIfsc) ? {
+                bankAccountName: tenantObj.bankAccountName || tenantObj.companyName,
+                bankAccountNo: tenantObj.bankAccountNo,
+                bankAccountType: tenantObj.bankAccountType || 'Current',
+                bankIfsc: tenantObj.bankIfsc,
+                bankName: tenantObj.bankName,
+                bankBranch: tenantObj.bankBranch
+            } : null
+        };
+        return res.status(200).json({
+            success: true,
+            isConfigured,
+            activeGateway,
+            adminContact,
+            message: isConfigured
+                ? `Payment gateway (${activeGateway}) is ready.`
+                : `Payment gateway credentials are not configured by the administrator for ${activeGateway}. Please contact administrator to purchase this plan.`
+        });
+    }
+    catch (error) {
+        console.error('Payment gateway status error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.getPaymentGatewayStatus = getPaymentGatewayStatus;

@@ -1,12 +1,13 @@
+import 'dotenv/config';
 import mongoose, { Connection } from 'mongoose';
 import { ITenantModels, registerTenantModels } from '../models';
 
-const defaultCentralUrl =
-  process.env.DATABASE_URL ||
-  'mongodb://sebi:Sebi%40123@192.168.1.203:27017/sebi-compliance?authSource=sebi-compliance&replicaSet=rs0';
+const defaultDbName: string = (process.env.DB_NAME && process.env.DB_NAME.trim()) || 'sebi-compliance';
+const defaultCentralUrl: string = process.env.DATABASE_URL || `mongodb://localhost:27017/${defaultDbName}`;
 
 // Dedicated Central DB Mongoose Connection
 export const centralConnection: Connection = mongoose.createConnection(defaultCentralUrl, {
+  dbName: defaultDbName,
   maxPoolSize: 20,
   serverSelectionTimeoutMS: 5000
 });

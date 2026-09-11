@@ -182,13 +182,38 @@ async function syncTenantToRemote(tenantId, options) {
                 rawDomain = 'https://' + rawDomain;
             }
             rawDomain = rawDomain.replace(/\/+$/, '');
-            const candidateEndpoints = [
-                `${rawDomain}/api/v1/sync/update`,
-                `${rawDomain}/api/v1/sync/bootstrap`,
-                `${rawDomain}/api/v1/sync/tenant`,
-                `${rawDomain}/sync/update`,
-                `${rawDomain}/api/sync`
-            ];
+            const reason = options?.reason || 'UPDATE';
+            let candidateEndpoints = [];
+            if (reason === 'BOOTSTRAP') {
+                candidateEndpoints = [
+                    `${rawDomain}/api/v1/sync/bootstrap`,
+                    `${rawDomain}/api/v1/sync/tenant`,
+                    `${rawDomain}/api/v1/sync/update`,
+                    `${rawDomain}/sync/bootstrap`
+                ];
+            }
+            else if (reason === 'STATUS_CHANGE') {
+                candidateEndpoints = [
+                    `${rawDomain}/api/v1/sync/status`,
+                    `${rawDomain}/api/v1/sync/update`,
+                    `${rawDomain}/sync/status`
+                ];
+            }
+            else if (reason === 'DELETE') {
+                candidateEndpoints = [
+                    `${rawDomain}/api/v1/sync/delete`,
+                    `${rawDomain}/api/v1/sync/update`,
+                    `${rawDomain}/sync/delete`
+                ];
+            }
+            else {
+                candidateEndpoints = [
+                    `${rawDomain}/api/v1/sync/update`,
+                    `${rawDomain}/api/v1/sync/tenant`,
+                    `${rawDomain}/api/v1/sync/bootstrap`,
+                    `${rawDomain}/sync/update`
+                ];
+            }
             let successData = null;
             let endpointSuccess = '';
             let lastErr = null;

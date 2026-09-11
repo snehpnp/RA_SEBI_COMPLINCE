@@ -1,7 +1,7 @@
 const { MongoClient } = require('mongodb');
 require('dotenv').config();
 
-const uri = process.env.DATABASE_URL || 'mongodb://sebi:Sebi%40123@192.168.1.203:27017/sebi-compliance?authSource=sebi-compliance&replicaSet=rs0';
+const uri = process.env.DATABASE_URL 
 
 async function syncAllCompanies() {
   const client = new MongoClient(uri);
@@ -34,7 +34,7 @@ async function syncAllCompanies() {
       state: t.state || null,
       panelName: t.panelName || (t.companyName + ' Portal'),
       domainUrl: t.domainUrl || null,
-      mongoDbUrl: t.mongoDbUrl || 'mongodb://sebi:Sebi%40123@192.168.1.203:27017/' + (t.dbName || 'sebi_tenant_' + t._id) + '?authSource=sebi-compliance&replicaSet=rs0',
+      mongoDbUrl: t.mongoDbUrl  + (t.dbName || 'sebi_tenant_' + t._id) + '?authSource=sebi-compliance&replicaSet=rs0',
       dbName: t.dbName || ('sebi_tenant_' + t._id),
       tenantApiKey: t.tenantApiKey || null,
       createdById: t.createdById || null,
