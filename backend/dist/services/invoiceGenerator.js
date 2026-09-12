@@ -5,15 +5,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateInvoicePdf = void 0;
 const pdfkit_1 = __importDefault(require("pdfkit"));
-const client_1 = require("@prisma/client");
-const prisma = new client_1.PrismaClient();
+const db_1 = require("../config/db");
 // Helper to convert number to words (simple version for INR)
 function numberToWords(num) {
     const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
     const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
     if ((num = num.toString().replace(/[\, ]/g, '')) != parseFloat(num))
         return 'not a number';
-    let n = ("000000000" + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
+    let n = ('000000000' + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
     if (!n)
         return '';
     let str = '';
@@ -27,29 +26,21 @@ function numberToWords(num) {
 const generateInvoicePdf = async (paymentId) => {
     return new Promise(async (resolve, reject) => {
         try {
-            const payment = await prisma.payment.findUnique({
-                where: { id: paymentId },
-                include: { coupon: true }
-            });
+            const payment = await db_1.Payment.findById(paymentId).populate('coupon').lean();
             if (!payment) {
                 return reject(new Error('Payment not found'));
             }
-            const client = await prisma.client.findUnique({
-                where: { id: payment.clientId },
-                include: { user: true, profile: true }
-            });
+            const client = await db_1.Client.findById(payment.clientId).populate('user').populate('profile').lean();
             if (!client) {
                 return reject(new Error('Client not found'));
             }
-            const tenant = await prisma.tenant.findUnique({
-                where: { id: payment.tenantId }
-            });
+            const tenant = await db_1.Tenant.findById(payment.tenantId).lean();
             if (!tenant) {
                 return reject(new Error('Tenant not found'));
             }
             let planName = 'Custom Plan';
             if (payment.planId) {
-                const plan = await prisma.plan.findUnique({ where: { id: payment.planId } });
+                const plan = await db_1.Plan.findById(payment.planId).lean();
                 if (plan)
                     planName = plan.name;
             }
@@ -61,12 +52,10 @@ const generateInvoicePdf = async (paymentId) => {
                 resolve(pdfData);
             });
             // --- CALCULATE TAXES ---
-            // Assuming payment.amount is inclusive of 18% GST
             const totalAmount = payment.amount;
             const discount = payment.discountApplied || 0;
             const taxableValue = totalAmount / 1.18;
             const totalGst = totalAmount - taxableValue;
-            const baseProductPrice = taxableValue + discount;
             const stateCodes = {
                 'JAMMU AND KASHMIR': '01', 'HIMACHAL PRADESH': '02', 'PUNJAB': '03', 'CHANDIGARH': '04', 'UTTARAKHAND': '05',
                 'HARYANA': '06', 'DELHI': '07', 'RAJASTHAN': '08', 'UTTAR PRADESH': '09', 'BIHAR': '10', 'SIKKIM': '11',
@@ -76,10 +65,8 @@ const generateInvoicePdf = async (paymentId) => {
                 'GOA': '30', 'LAKSHADWEEP': '31', 'KERALA': '32', 'TAMIL NADU': '33', 'PUDUCHERRY': '34', 'ANDAMAN AND NICOBAR ISLANDS': '35',
                 'TELANGANA': '36', 'ANDHRA PRADESH': '37', 'LADAKH': '38'
             };
-            // Raw states for display
             let displayClientState = client.profile?.state?.trim().toUpperCase() || 'UNKNOWN';
             let displayTenantState = tenant.state ? tenant.state.trim().toUpperCase() : (tenant.address?.split(',').pop()?.trim().toUpperCase() || 'UNKNOWN');
-            // Normalized states for matching GST/IGST (removes all spaces)
             const normClientState = displayClientState.replace(/\s+/g, '');
             const normTenantState = displayTenantState.replace(/\s+/g, '');
             let cgst = 0, sgst = 0, igst = 0;
@@ -101,7 +88,7 @@ const generateInvoicePdf = async (paymentId) => {
                 doc.text(`Website: ${tenant.website}`, 300, 85, { align: 'right' });
             // Logo/Company name (Left aligned)
             doc.fontSize(20).font('Helvetica-Bold').fillColor('#0055AA').text(tenant.companyName, 40, 50, { width: 250 });
-            doc.fillColor('black'); // reset color
+            doc.fillColor('black');
             // --- SUBHEADER ---
             doc.moveTo(30, 100).lineTo(565, 100).stroke();
             doc.fontSize(9).font('Helvetica-Bold').text(tenant.gst ? `GSTIN ${tenant.gst}` : '', 30, 105, { align: 'center', width: 535 });
@@ -111,13 +98,11 @@ const generateInvoicePdf = async (paymentId) => {
             // --- INVOICE DETAILS ---
             const year = new Date(payment.createdAt).getFullYear();
             const startOfYear = new Date(`${year}-01-01T00:00:00.000Z`);
-            const paymentCount = await prisma.payment.count({
-                where: {
-                    tenantId: payment.tenantId,
-                    createdAt: {
-                        gte: startOfYear,
-                        lt: payment.createdAt
-                    }
+            const paymentCount = await db_1.Payment.countDocuments({
+                tenantId: payment.tenantId,
+                createdAt: {
+                    $gte: startOfYear,
+                    $lt: payment.createdAt
                 }
             });
             const seqNo = String(paymentCount + 1).padStart(3, '0');
@@ -128,29 +113,28 @@ const generateInvoicePdf = async (paymentId) => {
             doc.font('Helvetica-Bold').text('Invoice date: ', 35, 158, { continued: true }).font('Helvetica').text(invoiceDate);
             doc.moveTo(30, 171).lineTo(565, 171).stroke();
             doc.text('Reverse Charge (Y/N)', 35, 176);
-            doc.moveTo(300, 171).lineTo(300, 207).stroke(); // vertical line
+            doc.moveTo(300, 171).lineTo(300, 207).stroke();
             doc.text('N', 305, 176);
             doc.moveTo(30, 189).lineTo(565, 189).stroke();
             doc.text(`State: ${displayTenantState}`, 35, 194);
             doc.text(`State Code: ${stateCodes[displayTenantState.replace(/\s+/g, '')] || ''}`, 305, 194);
             doc.moveTo(30, 207).lineTo(565, 207).stroke();
-            doc.font('Helvetica-Bold').text('SAC CODE: 997156', 35, 212); // Standard for financial services
+            doc.font('Helvetica-Bold').text('SAC CODE: 997156', 35, 212);
             doc.moveTo(30, 225).lineTo(565, 225).stroke();
             doc.text('Bill to Party', 30, 230, { align: 'center', width: 535 });
             doc.moveTo(30, 243).lineTo(565, 243).stroke();
             // --- CLIENT DETAILS ---
             const clientAddress = client.profile ? `${client.profile.addressLine1 || ''}, ${client.profile.city || ''}, ${client.profile.state || ''}` : 'N/A';
-            doc.font('Helvetica').text(`Client Name: ${client.user.firstName} ${client.user.lastName}`, 35, 248, { width: 260 });
-            doc.moveTo(300, 243).lineTo(300, 315).stroke(); // vertical line
+            doc.font('Helvetica').text(`Client Name: ${client.user?.firstName || ''} ${client.user?.lastName || ''}`, 35, 248, { width: 260 });
+            doc.moveTo(300, 243).lineTo(300, 315).stroke();
             doc.text(`Mobile no: ${client.mobile}`, 305, 248);
             doc.moveTo(30, 261).lineTo(565, 261).stroke();
             doc.text(`Address: ${clientAddress}`, 35, 266, { width: 260 });
             doc.text(`Pincode: ${client.profile?.zipCode || 'N/A'}`, 305, 266);
-            // city state 
             doc.text(`City: ${client.profile?.city || 'N/A'}`, 35, 286, { continued: true }).text(`          State: ${displayClientState}`);
             doc.text(`State Code: ${stateCodes[displayClientState.replace(/\s+/g, '')] || ''}`, 305, 286);
             doc.moveTo(30, 298).lineTo(565, 298).stroke();
-            doc.text(`Email: ${client.user.email}`, 35, 303, { width: 260 });
+            doc.text(`Email: ${client.user?.email || ''}`, 35, 303, { width: 260 });
             doc.text(`PAN: ${client.pan}`, 305, 303);
             doc.moveTo(30, 315).lineTo(565, 315).stroke();
             // --- LINE ITEMS ---
@@ -162,7 +146,6 @@ const generateInvoicePdf = async (paymentId) => {
             doc.text('Discount', 415, 320, { width: 60, align: 'center' });
             doc.text('Taxable\nValues', 480, 320, { width: 80, align: 'center' });
             doc.moveTo(30, 345).lineTo(565, 345).stroke();
-            // vertical lines for table
             const xPositions = [75, 220, 345, 410, 475];
             xPositions.forEach(x => {
                 doc.moveTo(x, 315).lineTo(x, 400).stroke();
@@ -183,7 +166,6 @@ const generateInvoicePdf = async (paymentId) => {
             // --- TOTALS ---
             doc.font('Helvetica-Bold');
             doc.text(`Total Invoice amount in words: ${numberToWords(Math.round(totalAmount))}`, 35, 405, { width: 300 });
-            // Totals Box
             doc.moveTo(345, 400).lineTo(345, 490).stroke();
             doc.moveTo(475, 400).lineTo(475, 490).stroke();
             doc.text('Add: CGST(9%)', 350, 405, { width: 120 });
@@ -218,7 +200,7 @@ const generateInvoicePdf = async (paymentId) => {
             doc.end();
         }
         catch (error) {
-            console.error("PDF Generation Error:", error);
+            console.error('PDF Generation Error:', error);
             reject(error);
         }
     });

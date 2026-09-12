@@ -10,7 +10,7 @@ const getCoupons = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const coupons = await db_1.default.coupon.findMany({ where: { tenantId } });
+        const coupons = await db_1.default.Coupon.find({ tenantId }).lean();
         return res.status(200).json({ success: true, data: coupons });
     }
     catch (error) {
@@ -24,22 +24,20 @@ const createCoupon = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant' });
     try {
-        const coupon = await db_1.default.coupon.create({
-            data: {
-                tenantId,
-                code: code.toUpperCase(),
-                discountType,
-                discountValue: parseFloat(discountValue),
-                percentageType: percentageType || null,
-                minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
-                maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
-                expiryDate: expiryDate ? new Date(expiryDate) : null,
-                usageLimit: usageLimit ? parseInt(usageLimit) : null,
-                clientId: clientId || null,
-                planId: planId || null,
-                categoryId: categoryId || null,
-                isPublic: !!isPublic,
-            }
+        const coupon = await db_1.default.Coupon.create({
+            tenantId,
+            code: code.toUpperCase(),
+            discountType,
+            discountValue: parseFloat(discountValue),
+            percentageType: percentageType || null,
+            minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
+            maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
+            expiryDate: expiryDate ? new Date(expiryDate) : null,
+            usageLimit: usageLimit ? parseInt(usageLimit) : null,
+            clientId: clientId || null,
+            planId: planId || null,
+            categoryId: categoryId || null,
+            isPublic: !!isPublic,
         });
         return res.status(201).json({ success: true, data: coupon });
     }
@@ -52,15 +50,14 @@ const updateCoupon = async (req, res) => {
     const { id } = req.params;
     const { discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId } = req.body;
     try {
-        const existing = await db_1.default.coupon.findUnique({ where: { id } });
+        const existing = await db_1.default.Coupon.findById(id);
         if (!existing)
             return res.status(404).json({ success: false, message: 'Coupon not found' });
         if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
             return res.status(400).json({ success: false, message: 'Expired coupons cannot be edited' });
         }
-        const coupon = await db_1.default.coupon.update({
-            where: { id },
-            data: {
+        const coupon = await db_1.default.Coupon.findByIdAndUpdate(id, {
+            $set: {
                 discountType,
                 discountValue: parseFloat(discountValue),
                 percentageType: percentageType || null,
@@ -72,7 +69,7 @@ const updateCoupon = async (req, res) => {
                 planId: planId || null,
                 categoryId: categoryId || null,
             }
-        });
+        }, { returnDocument: 'after', lean: true });
         return res.status(200).json({ success: true, data: coupon });
     }
     catch (error) {
@@ -80,30 +77,30 @@ const updateCoupon = async (req, res) => {
     }
 };
 exports.updateCoupon = updateCoupon;
-const toggleCouponVisibility = async (req, res) => { const { id } = req.params; try {
-    const coupon = await db_1.default.coupon.findUnique({ where: { id } });
-    if (!coupon)
-        return res.status(404).json({ success: false, message: 'Coupon not found' });
-    const updated = await db_1.default.coupon.update({ where: { id }, data: { isPublic: !coupon.isPublic } });
-    return res.status(200).json({ success: true, data: updated });
-}
-catch (error) {
-    return res.status(500).json({ success: false, errors: [error.message] });
-} };
+const toggleCouponVisibility = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const coupon = await db_1.default.Coupon.findById(id);
+        if (!coupon)
+            return res.status(404).json({ success: false, message: 'Coupon not found' });
+        const updated = await db_1.default.Coupon.findByIdAndUpdate(id, { $set: { isPublic: !coupon.isPublic } }, { returnDocument: 'after', lean: true });
+        return res.status(200).json({ success: true, data: updated });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, errors: [error.message] });
+    }
+};
 exports.toggleCouponVisibility = toggleCouponVisibility;
 const toggleCouponStatus = async (req, res) => {
     const { id } = req.params;
     try {
-        const existing = await db_1.default.coupon.findUnique({ where: { id } });
+        const existing = await db_1.default.Coupon.findById(id);
         if (!existing)
             return res.status(404).json({ success: false, message: 'Not found' });
         if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
             return res.status(400).json({ success: false, message: 'Expired coupons cannot be toggled' });
         }
-        const coupon = await db_1.default.coupon.update({
-            where: { id },
-            data: { status: existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }
-        });
+        const coupon = await db_1.default.Coupon.findByIdAndUpdate(id, { $set: { status: existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' } }, { returnDocument: 'after', lean: true });
         return res.status(200).json({ success: true, data: coupon });
     }
     catch (error) {
@@ -117,46 +114,47 @@ const applyCoupon = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant' });
     try {
-        const coupon = await db_1.default.coupon.findFirst({
-            where: { tenantId, code: code.toUpperCase(), status: 'ACTIVE' }
-        });
+        const coupon = await db_1.default.Coupon.findOne({
+            tenantId,
+            code: code.toUpperCase(),
+            status: 'ACTIVE'
+        }).lean();
         if (!coupon)
             return res.status(404).json({ success: false, message: 'Invalid or inactive coupon' });
         if (coupon.expiryDate && new Date(coupon.expiryDate).getTime() < Date.now()) {
             return res.status(400).json({ success: false, message: 'Coupon has expired' });
         }
-        if (coupon.expiryDate && new Date(coupon.expiryDate) < new Date()) {
-            return res.status(400).json({ success: false, message: 'Coupon expired' });
-        }
-        if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+        if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
             return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
         }
         if (coupon.clientId && clientId && coupon.clientId !== clientId) {
             return res.status(400).json({ success: false, message: 'Coupon is not applicable for this client' });
         }
         if (coupon.planId && planId) {
+            const planIdStr = coupon.planId.toString();
             let allowedPlans = [];
             try {
-                allowedPlans = JSON.parse(coupon.planId);
+                allowedPlans = JSON.parse(planIdStr);
                 if (!Array.isArray(allowedPlans))
-                    allowedPlans = [coupon.planId];
+                    allowedPlans = [planIdStr];
             }
             catch (e) {
-                allowedPlans = [coupon.planId];
+                allowedPlans = [planIdStr];
             }
             if (allowedPlans.length > 0 && !allowedPlans.includes(planId)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable for this plan' });
             }
         }
         if (coupon.categoryId && categoryId) {
+            const catIdStr = coupon.categoryId.toString();
             let allowedCats = [];
             try {
-                allowedCats = JSON.parse(coupon.categoryId);
+                allowedCats = JSON.parse(catIdStr);
                 if (!Array.isArray(allowedCats))
-                    allowedCats = [coupon.categoryId];
+                    allowedCats = [catIdStr];
             }
             catch (e) {
-                allowedCats = [coupon.categoryId];
+                allowedCats = [catIdStr];
             }
             if (allowedCats.length > 0 && !allowedCats.includes(categoryId)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable for this segment' });
@@ -195,19 +193,17 @@ const getClientCoupons = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const coupons = await db_1.default.coupon.findMany({
-            where: {
-                tenantId,
-                status: 'ACTIVE',
-                isPublic: true,
-                OR: [
-                    { expiryDate: null },
-                    { expiryDate: { gt: new Date() } }
-                ]
-            }
-        });
+        const coupons = await db_1.default.Coupon.find({
+            tenantId,
+            status: 'ACTIVE',
+            isPublic: true,
+            $or: [
+                { expiryDate: null },
+                { expiryDate: { $gt: new Date() } }
+            ]
+        }).lean();
         // Optionally filter by clientId matching
-        const validCoupons = coupons.filter(c => !c.clientId || c.clientId === clientId);
+        const validCoupons = coupons.filter((c) => !c.clientId || c.clientId === clientId);
         return res.status(200).json({ success: true, data: validCoupons });
     }
     catch (error) {

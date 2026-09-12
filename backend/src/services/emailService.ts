@@ -1,9 +1,167 @@
 import nodemailer from 'nodemailer';
-import prisma from '../config/db';
+import dynamicDb, { Tenant, AllCompany, SystemSetting, NotificationLog, centralModels } from '../config/db';
+import { getTenantComplianceAttachments } from './pdfService';
+
+export interface SmtpResolvedConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  fromName: string;
+  fromEmail: string;
+}
 
 /**
- * Generic email sender using tenant's configured SMTP settings.
- * If SMTP is not configured, logs a warning and skips silently.
+ * Resolves SMTP credentials from the Database (Tenant, AllCompany, SystemSetting)
+ * before falling back to .env.
+ */
+export async function resolveSmtpCredentials(tenantId?: string | null): Promise<SmtpResolvedConfig | null> {
+  let tenantDoc: any = null;
+  let source = '';
+
+  const isValidCred = (doc: any) => {
+    return Boolean(
+      doc &&
+      typeof doc.smtpHost === 'string' && doc.smtpHost.trim() !== '' &&
+      typeof doc.smtpUser === 'string' && doc.smtpUser.trim() !== '' &&
+      typeof doc.smtpPassword === 'string' && doc.smtpPassword.trim() !== ''
+    );
+  };
+
+  // 1. If tenantId is provided, query dynamicDb and centralModels Tenant / AllCompany
+  if (tenantId) {
+    try {
+      const doc = await dynamicDb.Tenant.findById(tenantId).lean();
+      if (isValidCred(doc)) { tenantDoc = doc; source = 'dynamicDb.Tenant(findById)'; }
+    } catch { }
+
+    if (!tenantDoc) {
+      try {
+        const doc = await centralModels.Tenant.findById(tenantId).lean();
+        if (isValidCred(doc)) { tenantDoc = doc; source = 'centralModels.Tenant(findById)'; }
+      } catch { }
+    }
+
+    if (!tenantDoc) {
+      try {
+        const doc = await dynamicDb.Tenant.findOne({
+          $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+        }).lean();
+        if (isValidCred(doc)) { tenantDoc = doc; source = 'dynamicDb.Tenant(findOne)'; }
+      } catch { }
+    }
+
+    if (!tenantDoc) {
+      try {
+        const doc = await centralModels.Tenant.findOne({
+          $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+        }).lean();
+        if (isValidCred(doc)) { tenantDoc = doc; source = 'centralModels.Tenant(findOne)'; }
+      } catch { }
+    }
+
+    if (!tenantDoc) {
+      try {
+        const doc = await centralModels.AllCompany.findOne({
+          $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+        }).lean();
+        if (isValidCred(doc)) { tenantDoc = doc; source = 'centralModels.AllCompany(findOne)'; }
+      } catch { }
+    }
+  }
+
+  // 2. Query any active Tenant in dynamicDb or centralModels that has SMTP credentials
+  if (!tenantDoc) {
+    try {
+      const doc = await dynamicDb.Tenant.findOne({
+        smtpHost: { $nin: [null, ''] },
+        smtpUser: { $nin: [null, ''] },
+        smtpPassword: { $nin: [null, ''] }
+      }).lean();
+      if (isValidCred(doc)) { tenantDoc = doc; source = 'dynamicDb.Tenant(anyActive)'; }
+    } catch { }
+  }
+
+  if (!tenantDoc) {
+    try {
+      const doc = await centralModels.Tenant.findOne({
+        smtpHost: { $nin: [null, ''] },
+        smtpUser: { $nin: [null, ''] },
+        smtpPassword: { $nin: [null, ''] }
+      }).lean();
+      if (isValidCred(doc)) { tenantDoc = doc; source = 'centralModels.Tenant(anyActive)'; }
+    } catch { }
+  }
+
+  // 3. Query AllCompany in centralModels
+  if (!tenantDoc) {
+    try {
+      const doc = await centralModels.AllCompany.findOne({
+        smtpHost: { $nin: [null, ''] },
+        smtpUser: { $nin: [null, ''] },
+        smtpPassword: { $nin: [null, ''] }
+      }).lean();
+      if (isValidCred(doc)) { tenantDoc = doc; source = 'centralModels.AllCompany(anyActive)'; }
+    } catch { }
+  }
+
+  // 4. Query SystemSetting (keys: GLOBAL_SMTP, SMTP_CONFIG, SMTP_SETTINGS, SMTP) in dynamicDb and centralModels
+  const smtpSettingKeys = ['GLOBAL_SMTP', 'SMTP_CONFIG', 'SMTP_SETTINGS', 'SMTP', 'EMAIL_CONFIG'];
+
+  if (!tenantDoc) {
+    for (const key of smtpSettingKeys) {
+      try {
+        const setting: any = await dynamicDb.SystemSetting.findOne({ key }).lean();
+        if (setting?.value) {
+          const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+          if (isValidCred(parsed)) {
+            tenantDoc = parsed;
+            source = `dynamicDb.SystemSetting(${key})`;
+            break;
+          }
+        }
+      } catch { }
+    }
+  }
+
+  if (!tenantDoc) {
+    for (const key of smtpSettingKeys) {
+      try {
+        const setting: any = await centralModels.SystemSetting.findOne({ key }).lean();
+        if (setting?.value) {
+          const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+          if (isValidCred(parsed)) {
+            tenantDoc = parsed;
+            source = `centralModels.SystemSetting(${key})`;
+            break;
+          }
+        }
+      } catch { }
+    }
+  }
+
+  // 5. If credentials found in DB, return them
+  if (tenantDoc && tenantDoc.smtpHost && tenantDoc.smtpUser && tenantDoc.smtpPassword) {
+    const port = parseInt(tenantDoc.smtpPort || '587');
+    console.log(`[SMTP-RESOLVER] ✅ Using Database SMTP Credentials (${source}): Host=${tenantDoc.smtpHost}, Port=${port}, User=${tenantDoc.smtpUser}`);
+    return {
+      host: tenantDoc.smtpHost.trim(),
+      port,
+      secure: port === 465,
+      user: tenantDoc.smtpUser.trim(),
+      pass: tenantDoc.smtpPassword.trim(),
+      fromName: tenantDoc.smtpFrom || tenantDoc.companyName || 'RAGCP Platform',
+      fromEmail: tenantDoc.smtpUser.trim()
+    };
+  }
+
+  console.warn('[SMTP-RESOLVER] ⚠️ No SMTP credentials configured in Database. Please configure Email & SMTP in Admin Settings.');
+  return null;
+}
+
+/**
+ * Generic email sender using resolved SMTP settings from Database.
  */
 export async function sendEmail(
   tenantId: string | null | undefined,
@@ -13,72 +171,86 @@ export async function sendEmail(
   attachments?: any[]
 ): Promise<boolean> {
   try {
-    if (!tenantId) {
-      console.warn('[EMAIL] No tenantId provided. Skipping email to:', to);
-      return false;
-    }
-
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenant || !tenant.smtpHost || !tenant.smtpUser || !tenant.smtpPassword) {
-      console.warn('[EMAIL] SMTP not configured for tenant:', tenantId, '. Skipping email to:', to);
+    const smtp = await resolveSmtpCredentials(tenantId);
+    if (!smtp) {
+      console.warn('[EMAIL] No SMTP credentials found in Database or Environment. Skipping email to:', to);
       return false;
     }
 
     const transporter = nodemailer.createTransport({
-      host: tenant.smtpHost,
-      port: tenant.smtpPort || 587,
-      secure: (tenant.smtpPort || 587) === 465,
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
       auth: {
-        user: tenant.smtpUser,
-        pass: tenant.smtpPassword,
+        user: smtp.user,
+        pass: smtp.pass
       },
-      tls: { rejectUnauthorized: false },
+      tls: { rejectUnauthorized: false }
     });
 
-    const fromName = tenant.smtpFrom || tenant.companyName || 'RAGCP Platform';
-    const fromEmail = tenant.smtpUser;
-
     await transporter.sendMail({
-      from: `"${fromName}" <${fromEmail}>`,
+      from: `"${smtp.fromName}" <${smtp.fromEmail}>`,
       to,
       subject,
       html,
-      attachments,
+      attachments
     });
 
+    console.log(`[EMAIL] Email sent to ${to} using DB SMTP (${smtp.user} @ ${smtp.host}:${smtp.port})`);
+
     // Log to NotificationLog
-    await prisma.notificationLog.create({
-      data: {
-        tenantId,
+    try {
+      await NotificationLog.create({
+        tenantId: tenantId || null,
         recipient: to,
         channel: 'EMAIL',
         title: subject,
         message: html.replace(/<[^>]*>/g, '').slice(0, 500),
-        status: 'SENT',
-      },
-    });
-
+        status: 'SENT'
+      });
+    } catch { }
 
     return true;
   } catch (err: any) {
     console.error('[EMAIL] Failed to send email to:', to, '| Error:', err.message);
-    // Log failure
     if (tenantId) {
       try {
-        await prisma.notificationLog.create({
-          data: {
-            tenantId,
-            recipient: to,
-            channel: 'EMAIL',
-            title: subject,
-            message: `Failed: ${err.message}`,
-            status: 'FAILED',
-          },
+        await NotificationLog.create({
+          tenantId,
+          recipient: to,
+          channel: 'EMAIL',
+          title: subject,
+          message: `Failed: ${err.message}`,
+          status: 'FAILED'
         });
-      } catch {}
+      } catch { }
     }
     return false;
   }
+}
+
+/**
+ * Send OTP Verification Email
+ */
+export async function sendOtpEmail(opts: {
+  tenantId?: string | null;
+  toEmail: string;
+  otp: string;
+  companyName?: string;
+}): Promise<boolean> {
+  const { tenantId, toEmail, otp, companyName } = opts;
+  const subject = `Your OTP for ${companyName || 'RAGCP'} Registration: ${otp}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; padding: 24px; max-width: 580px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+      <h2 style="color: #1e293b; margin-top: 0;">Verify Your Email Address</h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.5;">You have requested to verify your email address on <strong>${companyName || 'RAGCP Platform'}</strong>. Please use the following One-Time Password (OTP) to complete your registration:</p>
+      <div style="background-color: #f1f5f9; padding: 18px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px dashed #cbd5e1;">
+        <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #2563eb; font-family: monospace;">${otp}</span>
+      </div>
+      <p style="color: #64748b; font-size: 13px; margin-bottom: 0;">⏳ This OTP is valid for 10 minutes. If you did not request this verification, please ignore this email.</p>
+    </div>
+  `;
+  return sendEmail(tenantId, toEmail, subject, html);
 }
 
 /**
@@ -95,7 +267,17 @@ export async function sendWelcomeEmail(opts: {
   customText?: string | null;
   attachments?: any[];
 }): Promise<boolean> {
-  const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText, attachments } = opts;
+  const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText } = opts;
+
+  let attachments = opts.attachments || [];
+  if ((!attachments || attachments.length === 0) && role === 'CLIENT' && tenantId) {
+    try {
+      attachments = await getTenantComplianceAttachments(tenantId);
+    } catch (attErr) {
+      console.error('[EMAIL] Error loading default compliance attachments:', attErr);
+    }
+  }
+
   const subject = `Welcome to ${companyName || 'RAGCP'} — Your Account is Ready`;
   const html = `
 <!DOCTYPE html>
@@ -148,6 +330,22 @@ export async function sendWelcomeEmail(opts: {
         </div>
       </div>
       <p style="color:#94a3b8; font-size:12px;">⚠️ Please change your password after first login for security.</p>
+
+      ${role === 'CLIENT' || (attachments && attachments.length > 0) ? `
+      <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 12px; padding: 18px; margin: 20px 0;">
+        <div style="font-weight: 700; color: #818cf8; font-size: 13px; margin-bottom: 8px;">
+          📎 Mandatory Compliance Documents Attached (PDF):
+        </div>
+        <div style="color: #cbd5e1; font-size: 13px; line-height: 1.6;">
+          <div style="margin-bottom: 4px;">• 📄 <strong>Terms & Conditions (PDF)</strong> — Advisory terms, disclosures & risk warnings</div>
+          <div>• 📄 <strong>Privacy Policy (PDF)</strong> — Client data protection & confidentiality policy</div>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 10px;">
+          Please review and keep these attached PDF documents for your compliance and regulatory records.
+        </div>
+      </div>
+      ` : ''}
+
       <a href="${loginUrl}" class="btn">Login to Your Account →</a>
     </div>
     <div class="footer">
@@ -228,16 +426,16 @@ export async function sendForgotPasswordEmail(opts: {
  * Send a test email to verify SMTP configuration.
  */
 export async function sendTestEmail(tenantId: string, toEmail: string): Promise<{ success: boolean; message: string }> {
-  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-  if (!tenant?.smtpHost || !tenant?.smtpUser || !tenant?.smtpPassword) {
-    return { success: false, message: 'SMTP is not fully configured. Please fill in all SMTP fields first.' };
+  const smtp = await resolveSmtpCredentials(tenantId);
+  if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+    return { success: false, message: 'SMTP is not fully configured. Please enter Host, Port, User, and Password first.' };
   }
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#1e293b;padding:32px;border-radius:12px;border:1px solid #334155">
       <h2 style="color:#6366f1;margin:0 0 16px">✅ SMTP Test Successful!</h2>
       <p style="color:#cbd5e1">Your SMTP configuration is working correctly.</p>
-      <p style="color:#64748b;font-size:12px;margin:16px 0 0">Server: ${tenant.smtpHost}:${tenant.smtpPort || 587}</p>
+      <p style="color:#64748b;font-size:12px;margin:16px 0 0">Server: ${smtp.host}:${smtp.port} | Sender: ${smtp.user}</p>
     </div>`;
 
   const sent = await sendEmail(tenantId, toEmail, '✅ SMTP Test — RAGCP Platform', html);

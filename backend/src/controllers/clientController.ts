@@ -1,15 +1,22 @@
 import { Request, Response } from 'express';
-import prisma from '../config/db';
+import mongoose from 'mongoose';
+import dynamicDb, { centralModels } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { sendWelcomeEmail } from '../services/emailService';
+import { getTenantComplianceAttachments } from '../services/pdfService';
 import { createKycRequest } from '../services/digioService';
+import { generateInvoicePdf } from '../services/invoiceGenerator';
+import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
+import querystring from 'querystring';
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
 
 export const registerClient = async (req: Request, res: Response) => {
   const {
-    tenantId,
+    tenantId: passedTenantId,
     name,
     email,
     mobile,
@@ -24,7 +31,7 @@ export const registerClient = async (req: Request, res: Response) => {
     zipCode
   } = req.body;
 
-  if (!tenantId || !name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
+  if (!name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
     return res.status(400).json({
       success: false,
       message: 'All fields (name, email, mobile, password, PAN, Aadhaar, address, state) are required.'
@@ -32,14 +39,24 @@ export const registerClient = async (req: Request, res: Response) => {
   }
 
   try {
-    // Check Tenant Validity
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    let tenantId = passedTenantId;
+    let tenant: any = null;
+
+    if (tenantId) {
+      tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
     if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant company not found' });
+      tenant = await dynamicDb.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await dynamicDb.Tenant.findOne().lean();
+      if (tenant) {
+        tenantId = (tenant._id || tenant.id).toString();
+      }
     }
 
-    // Check Duplicate email, mobile, pan, aadhaar individually
-    const duplicateEmail = await prisma.user.findUnique({ where: { email } });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
+    }
+
+    const duplicateEmail = await dynamicDb.User.findOne({ email }).lean();
     if (duplicateEmail) {
       return res.status(400).json({
         success: false,
@@ -49,7 +66,7 @@ export const registerClient = async (req: Request, res: Response) => {
       });
     }
 
-    const duplicateMobile = await prisma.user.findFirst({ where: { mobile } });
+    const duplicateMobile = await dynamicDb.User.findOne({ mobile }).lean();
     if (duplicateMobile) {
       return res.status(400).json({
         success: false,
@@ -59,7 +76,7 @@ export const registerClient = async (req: Request, res: Response) => {
       });
     }
 
-    const duplicatePan = await prisma.client.findUnique({ where: { pan } });
+    const duplicatePan = await dynamicDb.Client.findOne({ pan }).lean();
     if (duplicatePan) {
       return res.status(400).json({
         success: false,
@@ -69,7 +86,7 @@ export const registerClient = async (req: Request, res: Response) => {
       });
     }
 
-    const duplicateAadhaar = await prisma.client.findUnique({ where: { aadhaar } });
+    const duplicateAadhaar = await dynamicDb.Client.findOne({ aadhaar }).lean();
     if (duplicateAadhaar) {
       return res.status(400).json({
         success: false,
@@ -82,111 +99,81 @@ export const registerClient = async (req: Request, res: Response) => {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    const clientRole = await prisma.role.findUnique({ where: { name: 'CLIENT' } });
+    const clientRole = await dynamicDb.Role.findOne({ name: 'CLIENT' }).lean();
     if (!clientRole) {
       return res.status(500).json({ success: false, message: 'Client role not seeded.' });
     }
 
-    // Check if tenant has completed onboarding (80% score threshold check)
-    // For local convenience, we compute completeness but do not hard block signups, rather warn or restrict actions as requested.
-    // "Completion < 80: Disable client onboarding" -> We check tenant wizard progress
-    const poUser = await prisma.user.findFirst({
-      where: { tenantId, role: { name: 'PRINCIPAL_OFFICER' }, status: 'ACTIVE' }
-    });
-    if (!poUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Onboarding is temporarily disabled for this advisor company.',
-        errors: ['Tenant advisor profile completion is below 80%.']
-      });
-    }
-
     const creatorId = req.body.createdById || ((req as any).user ? (req as any).user.id : null);
-    const isAdminAdded = !!creatorId;
 
-    const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          tenantId,
-          roleId: clientRole.id,
-          firstName: name.split(' ')[0],
-          lastName: name.split(' ').slice(1).join(' ') || 'Client',
-          email,
-          mobile,
-          passwordHash,
-          status: isAdminAdded ? 'ACTIVE' : 'PENDING_APPROVAL',
-          tempPassword: isAdminAdded ? null : password
-        }
-      });
+    const user: any = await dynamicDb.User.create({
+      tenantId,
+      roleId: clientRole._id || clientRole.id,
+      firstName: name.split(' ')[0],
+      lastName: name.split(' ').slice(1).join(' ') || 'Client',
+      email,
+      mobile,
+      passwordHash,
+      status: 'ACTIVE',
+      tempPassword: null
+    });
 
-      const client = await tx.client.create({
-        data: {
-          userId: user.id,
-          name,
-          email,
-          mobile,
-          pan,
-          aadhaar,
-          category: category || 'INDIVIDUAL',
-          occupation,
-          status: isAdminAdded ? 'KYC_PENDING' : 'PENDING_APPROVAL',
-          createdById: creatorId
-        }
-      });
+    const client: any = await dynamicDb.Client.create({
+      tenantId,
+      userId: user._id || user.id,
+      name,
+      email,
+      mobile,
+      pan,
+      aadhaar,
+      category: category || 'INDIVIDUAL',
+      occupation,
+      status: 'ACTIVE',
+      createdById: creatorId
+    });
 
-      await tx.clientProfile.create({
-        data: {
-          clientId: client.id,
-          addressLine1,
-          city,
-          state,
-          country: 'India',
-          zipCode
-        }
-      });
-
-      return { user, client };
+    await dynamicDb.ClientProfile.create({
+      clientId: client._id || client.id,
+      addressLine1,
+      city,
+      state,
+      country: 'India',
+      zipCode
     });
 
     await logAudit({
       tenantId,
-      userId: result.user.id,
+      userId: user._id || user.id,
       action: 'CREATE',
       module: 'CLIENTS',
-      newValue: result.client,
+      newValue: client,
       ipAddress: req.ip
     });
 
-    // Get login URL
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
     
-    // Send Welcome Email only if admin added
-    if (isAdminAdded) {
-      const attachments: any[] = [];
-      if (tenant.termsPdfUrl) {
-        attachments.push({ filename: 'Terms_and_Conditions.pdf', path: require('path').join(__dirname, '../../..') + tenant.termsPdfUrl });
-      }
-      if (tenant.privacyPdfUrl) {
-        attachments.push({ filename: 'Privacy_Policy.pdf', path: require('path').join(__dirname, '../../..') + tenant.privacyPdfUrl });
-      }
+    try {
+      const attachments = await getTenantComplianceAttachments(tenant);
 
       await sendWelcomeEmail({
         tenantId,
         toEmail: email,
         name,
-        password: password, // Note: password is provided in body
+        password: password,
         role: 'CLIENT',
         loginUrl,
         companyName: tenant?.companyName || 'RAGCP Platform',
         customText: tenant?.welcomeEmailText,
         attachments
       });
+    } catch (emailErr) {
+      console.error('[EMAIL] Failed to send welcome email:', emailErr);
     }
 
     return res.status(201).json({
       success: true,
-      message: 'Client registered successfully.',
-      data: result.client
+      message: 'Client registered and activated successfully.',
+      data: client
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -196,18 +183,18 @@ export const registerClient = async (req: Request, res: Response) => {
 export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.user!.tenantId;
-    const client = await prisma.client.findFirst({ where: { userId: req.user!.id } });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found.' });
     }
 
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId! } });
+    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
     if (!tenant?.digioClientId || !tenant?.digioClientSecret || !tenant?.digioKycTemplateName) {
       return res.status(400).json({ success: false, message: 'Digio KYC is not configured for this tenant.' });
     }
 
-    const customerIdentifier = client.email; // Digio uses email or mobile as identifier
+    const customerIdentifier = client.email;
     const customerName = client.name || 'Client';
 
     const digioResponse = await createKycRequest(
@@ -229,7 +216,7 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
 };
 
 export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
-  const { pan, aadhaar, statusInput } = req.body; // statusInput: 'SUCCESS' or 'FAIL' to simulate KRA result
+  const { pan, aadhaar, statusInput } = req.body;
   const tenantId = req.user!.tenantId;
 
   if (!pan) {
@@ -237,90 +224,79 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
   }
 
   try {
-    const client = await prisma.client.findFirst({
-      where: { userId: req.user!.id }
-    });
+    const client: any = await dynamicDb.Client.findOne({
+      userId: req.user!.id
+    }).lean();
 
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client profile not found.' });
     }
 
-    // Check uniqueness if PAN is being updated
     if (pan !== client.pan) {
-      const duplicatePan = await prisma.client.findFirst({
-        where: { pan, NOT: { id: client.id } }
-      });
+      const duplicatePan = await dynamicDb.Client.findOne({
+        pan,
+        _id: { $ne: client._id || client.id }
+      }).lean();
       if (duplicatePan) {
         return res.status(400).json({ success: false, message: 'Verified PAN is already in use by another client.' });
       }
     }
 
-    // Check uniqueness if Aadhaar is provided and being updated
     if (aadhaar && aadhaar !== client.aadhaar) {
-      const duplicateAadhaar = await prisma.client.findFirst({
-        where: { aadhaar, NOT: { id: client.id } }
-      });
+      const duplicateAadhaar = await dynamicDb.Client.findOne({
+        aadhaar,
+        _id: { $ne: client._id || client.id }
+      }).lean();
       if (duplicateAadhaar) {
         return res.status(400).json({ success: false, message: 'Verified Aadhaar number is already in use by another client.' });
       }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // Log PAN change if different
-      if (pan !== client.pan) {
-        await tx.clientIdentityHistory.create({
-          data: {
-            clientId: client.id,
-            fieldName: 'PAN',
-            oldValue: client.pan,
-            newValue: pan,
-            changedBy: 'CLIENT',
-            remarks: 'Updated during DigiLocker eKYC verification'
-          }
-        });
-      }
-
-      // Log Aadhaar change if different and provided
-      if (aadhaar && aadhaar !== client.aadhaar) {
-        await tx.clientIdentityHistory.create({
-          data: {
-            clientId: client.id,
-            fieldName: 'AADHAAR',
-            oldValue: client.aadhaar,
-            newValue: aadhaar,
-            changedBy: 'CLIENT',
-            remarks: 'Updated during DigiLocker eKYC verification'
-          }
-        });
-      }
-
-      const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
-      const updatedClient = await tx.client.update({
-        where: { id: client.id },
-        data: {
-          pan,
-          ...(aadhaar && { aadhaar }),
-          status: nextStatus
-        }
+    if (pan !== client.pan) {
+      await dynamicDb.ClientIdentityHistory.create({
+        clientId: client._id || client.id,
+        fieldName: 'PAN',
+        oldValue: client.pan,
+        newValue: pan,
+        changedBy: 'CLIENT',
+        remarks: 'Updated during DigiLocker eKYC verification'
       });
+    }
 
-      if (statusInput === 'FAIL') {
-        // Create Compliance Alert
-        await tx.complianceAlert.create({
-          data: {
-            tenantId: tenantId!,
-            alertType: 'KYC_FAILED',
-            severity: 'HIGH',
-            description: `KRA automated KYC failed for Client PAN ${pan} (${client.name}). Manual verification required.`,
-            clientId: client.id
-          }
-        });
-      }
+    if (aadhaar && aadhaar !== client.aadhaar) {
+      await dynamicDb.ClientIdentityHistory.create({
+        clientId: client._id || client.id,
+        fieldName: 'AADHAAR',
+        oldValue: client.aadhaar,
+        newValue: aadhaar,
+        changedBy: 'CLIENT',
+        remarks: 'Updated during DigiLocker eKYC verification'
+      });
+    }
 
-      return updatedClient;
-    });
+    const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
+    const updatedClient = await dynamicDb.Client.findByIdAndUpdate(
+      client._id || client.id,
+      {
+        $set: {
+          pan,
+          ...(aadhaar ? { aadhaar } : {}),
+          status: nextStatus,
+          kraVerified: statusInput !== 'FAIL'
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
 
     if (statusInput === 'FAIL') {
+      await dynamicDb.ComplianceAlert.create({
+        tenantId: tenantId!,
+        alertType: 'KYC_FAILED',
+        severity: 'HIGH',
+        description: `KRA automated KYC failed for Client PAN ${pan} (${client.name}). Manual verification required.`,
+        clientId: client._id || client.id
+      });
+
       return res.status(200).json({
         success: true,
         message: 'KRA lookup failed. System generated an alert for manual verification but onboarding remains unblocked.',
@@ -342,24 +318,20 @@ export const acceptConsent = async (req: AuthenticatedRequest, res: Response) =>
   const { tncAccept, policyAccept, researchAccept } = req.body;
 
   try {
-    const client = await prisma.client.findFirst({ where: { userId: req.user!.id } });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
 
-    const consent = await prisma.consent.create({
-      data: {
-        clientId: client.id,
-        tncAccept: !!tncAccept,
-        policyAccept: !!policyAccept,
-        researchAccept: !!researchAccept,
-        ipAddress: req.ip
-      }
+    const consent: any = await dynamicDb.Consent.create({
+      clientId: client._id || client.id,
+      tncAccept: !!tncAccept,
+      policyAccept: !!policyAccept,
+      researchAccept: !!researchAccept,
+      ipAddress: req.ip
     });
 
-    await prisma.consentHistory.create({
-      data: {
-        consentId: consent.id,
-        action: 'ACCEPTED'
-      }
+    await dynamicDb.ConsentHistory.create({
+      consentId: consent._id || consent.id,
+      action: 'ACCEPTED'
     });
 
     return res.status(200).json({
@@ -373,36 +345,40 @@ export const acceptConsent = async (req: AuthenticatedRequest, res: Response) =>
 };
 
 export const signAgreement = async (req: AuthenticatedRequest, res: Response) => {
-  const { signatureText } = req.body; // drawing data url or typed signature text
-
   try {
-    const client = await prisma.client.findFirst({ where: { userId: req.user!.id } });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
 
-    const agreementUrl = `/uploads/agreements/${client.id}_signed_agreement.pdf`;
+    const agreementUrl = `/uploads/agreements/${client._id || client.id}_signed_agreement.pdf`;
 
-    const agreement = await prisma.agreement.create({
-      data: {
-        clientId: client.id,
-        agreementUrl,
-        esignMode: 'MOCK_AADHAAR',
-        ipAddress: req.ip,
-        status: 'SIGNED'
-      }
+    const agreement: any = await dynamicDb.Agreement.create({
+      clientId: client._id || client.id,
+      agreementUrl,
+      esignMode: 'MOCK_AADHAAR',
+      ipAddress: req.ip,
+      status: 'SIGNED'
     });
 
-    await prisma.agreementHistory.create({
-      data: {
-        agreementId: agreement.id,
-        action: 'SIGNED',
-        performedBy: client.name,
-        ipAddress: req.ip
-      }
+    await dynamicDb.AgreementHistory.create({
+      agreementId: agreement._id || agreement.id,
+      action: 'SIGNED',
+      performedBy: client.name,
+      ipAddress: req.ip
     });
 
-    await prisma.client.update({
-      where: { id: client.id },
-      data: { status: 'PAYMENT_PENDING' }
+    // Check if client already has an active subscription assigned by admin
+    const activeSub = await dynamicDb.Subscription.findOne({
+      clientId: client._id || client.id,
+      status: 'ACTIVE'
+    }).lean();
+
+    const newStatus = (activeSub && client.kraVerified) ? 'ACTIVE' : (activeSub ? 'ACTIVE' : 'PAYMENT_PENDING');
+
+    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+      $set: { 
+        status: newStatus,
+        agreementSigned: true
+      }
     });
 
     return res.status(200).json({
@@ -416,97 +392,83 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
 };
 
 export const handleRazorpayWebhook = async (req: Request, res: Response) => {
-  const { clientId, planId, amount, paymentMode, transactionRef, statusInput, couponCode } = req.body; // Simulating webhook payload
+  const { clientId, planId, amount, paymentMode, transactionRef, statusInput, couponCode } = req.body;
 
   try {
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-      include: { user: true, profile: true }
-    });
+    const client: any = await dynamicDb.Client.findById(clientId).populate('userId').lean();
 
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
-    const tenantId = client.user.tenantId!;
+    const tenantId = client.userId?.tenantId;
 
-    // Check payment rule: Amount > 151,000 forces client category to NON_INDIVIDUAL
     if (amount > 151000) {
-      await prisma.client.update({
-        where: { id: clientId },
-        data: { category: 'NON_INDIVIDUAL' }
+      await dynamicDb.Client.findByIdAndUpdate(clientId, {
+        $set: { category: 'NON_INDIVIDUAL' }
       });
-     }
+    }
 
-    // Check cash payment rule (if UPI/Bank cash deposit)
-    // Cash payment >= 50,000 triggers an FIU case (ComplianceAlert)
     if (paymentMode !== 'ONLINE_RAZORPAY' && amount >= 50000) {
-      await prisma.complianceAlert.create({
-        data: {
-          tenantId,
-          alertType: 'COMPLIANCE_PENDING',
-          severity: 'HIGH',
-          description: `FIU ALERT: Cash payment of ${amount} received from Client ${client.name} (PAN: ${client.pan}). High risk case logged.`
-        }
+      await dynamicDb.ComplianceAlert.create({
+        tenantId,
+        alertType: 'COMPLIANCE_PENDING',
+        severity: 'HIGH',
+        description: `FIU ALERT: Cash payment of ${amount} received from Client ${client.name} (PAN: ${client.pan}). High risk case logged.`
       });
     }
 
     const payStatus = statusInput === 'FAILED' ? 'FAILED' : 'SUCCESS';
 
     let discountAmount = 0;
-    let appliedCouponId = null;
+    let appliedCouponId: any = null;
     if (couponCode) {
-      const coupon = await prisma.coupon.findFirst({ where: { code: couponCode, tenantId } });
-      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
+      const plan: any = await dynamicDb.Plan.findById(planId).lean();
       if (coupon && plan && coupon.status === 'ACTIVE') {
-         if (coupon.discountType === 'FLAT') {
-           discountAmount = coupon.discountValue;
-         } else if (coupon.discountType === 'PERCENTAGE') {
-           discountAmount = (plan.price * coupon.discountValue) / 100;
-           if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
-             discountAmount = coupon.maxDiscountValue;
-           }
-         }
-         if (discountAmount > plan.price) discountAmount = plan.price;
-         
-         if (statusInput !== 'FAILED') {
-           await prisma.coupon.update({
-             where: { id: coupon.id },
-             data: { usedCount: { increment: 1 } }
-           });
-         }
+        if (coupon.discountType === 'FLAT') {
+          discountAmount = coupon.discountValue;
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          discountAmount = (plan.price * coupon.discountValue) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
+            discountAmount = coupon.maxDiscountValue;
+          }
+        }
+        if (discountAmount > plan.price) discountAmount = plan.price;
+        appliedCouponId = coupon._id || coupon.id;
+        
+        if (statusInput !== 'FAILED') {
+          await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
+            $inc: { usedCount: 1 }
+          });
+        }
       }
     }
 
-    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const profile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
 
-    const payment = await prisma.payment.create({
-      data: {
-        tenantId,
-        clientId,
-        planId,
-        amount: parseFloat(amount) || 0,
-        couponId: appliedCouponId,
-        discountApplied: discountAmount || 0,
-        paymentMode: paymentMode || 'ONLINE_RAZORPAY',
-        transactionRef: transactionRef || 'TXN-' + Math.floor(100000 + Math.random() * 900000),
-        status: payStatus,
-        clientCity: client.profile?.city || null,
-        clientState: client.profile?.state || null,
-        tenantState: tenantObj?.state || null
-      }
+    const payment = await dynamicDb.Payment.create({
+      tenantId,
+      clientId,
+      planId,
+      amount: parseFloat(amount) || 0,
+      couponId: appliedCouponId,
+      discountApplied: discountAmount || 0,
+      paymentMode: paymentMode || 'ONLINE_RAZORPAY',
+      transactionRef: transactionRef || 'TXN-' + Math.floor(100000 + Math.random() * 900000),
+      status: payStatus,
+      clientCity: profile?.city || null,
+      clientState: profile?.state || null,
+      tenantState: tenantObj?.state || null
     });
 
     if (payStatus === 'SUCCESS') {
-      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+      const plan: any = await dynamicDb.Plan.findById(planId).lean();
       if (plan) {
-        // Calculate active dates (stack if same plan already exists)
-        const existingSub = await prisma.subscription.findFirst({
-          where: {
-            clientId,
-            planId,
-            status: 'ACTIVE',
-            endDate: { gt: new Date() }
-          },
-          orderBy: { endDate: 'desc' }
-        });
+        const existingSub: any = await dynamicDb.Subscription.findOne({
+          clientId,
+          planId,
+          status: 'ACTIVE',
+          endDate: { $gt: new Date() }
+        }).sort({ endDate: -1 }).lean();
 
         let startDate = new Date();
         if (existingSub) {
@@ -515,19 +477,16 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
         
         const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
-        await prisma.subscription.create({
-          data: {
-            clientId,
-            planId,
-            startDate,
-            endDate,
-            status: 'ACTIVE'
-          }
+        await dynamicDb.Subscription.create({
+          clientId,
+          planId,
+          startDate,
+          endDate,
+          status: 'ACTIVE'
         });
 
-        await prisma.client.update({
-          where: { id: clientId },
-          data: { status: 'ACTIVE' }
+        await dynamicDb.Client.findByIdAndUpdate(clientId, {
+          $set: { status: 'ACTIVE' }
         });
       }
     }
@@ -547,29 +506,35 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
   const receiptUrl = req.file ? `/uploads/payments/${req.file.filename}` : '/uploads/payments/mock_receipt.png';
 
   try {
-    const client = await prisma.client.findFirst({ 
-      where: { userId: req.user!.id },
-      include: { profile: true } 
-    });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     const tenantId = req.user!.tenantId!;
-    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const profile = await dynamicDb.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
 
-    const payment = await prisma.payment.create({
-      data: {
-        tenantId,
-        clientId: client.id,
-        planId,
-        amount: parseFloat(amount) || 0,
-        paymentMode: paymentMode || 'MANUAL_UPI',
-        transactionRef: transactionRef || 'MANUAL-' + Date.now(),
-        receiptUrl,
-        status: 'PENDING',
-        remarks,
-        clientCity: client.profile?.city || null,
-        clientState: client.profile?.state || null,
-        tenantState: tenantObj?.state || null
-      }
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+      });
+    }
+
+    const payment = await dynamicDb.Payment.create({
+      tenantId,
+      clientId: client._id || client.id,
+      planId,
+      amount: parseFloat(amount) || 0,
+      paymentMode: paymentMode || 'MANUAL_UPI',
+      transactionRef: transactionRef || 'MANUAL-' + Date.now(),
+      receiptUrl,
+      status: 'PENDING',
+      remarks,
+      clientCity: profile?.city || null,
+      clientState: profile?.state || null,
+      tenantState: tenantObj?.state || null
     });
 
     return res.status(201).json({
@@ -583,56 +548,51 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
 };
 
 export const verifyManualPayment = async (req: AuthenticatedRequest, res: Response) => {
-  const { paymentId, status, remarks } = req.body; // status: SUCCESS or FAILED
+  const { paymentId, status, remarks } = req.body;
 
   try {
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+    const payment: any = await dynamicDb.Payment.findById(paymentId).lean();
     if (!payment) return res.status(404).json({ success: false, message: 'Payment record not found' });
     const tenantId = req.user!.tenantId!;
 
-    const updatedPayment = await prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        status,
-        remarks,
-        verifiedByStaffId: req.user!.id
-      }
-    });
+    const updatedPayment = await dynamicDb.Payment.findByIdAndUpdate(
+      paymentId,
+      {
+        $set: {
+          status,
+          remarks,
+          verifiedByStaffId: req.user!.id
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
 
     if (status === 'SUCCESS') {
-      const plan = await prisma.plan.findUnique({ where: { id: payment.planId! } });
+      const plan: any = await dynamicDb.Plan.findById(payment.planId).lean();
       if (plan) {
-        // Enforce high-value client rules
-        const client = await prisma.client.findUnique({ where: { id: payment.clientId } });
+        const client: any = await dynamicDb.Client.findById(payment.clientId).lean();
         if (client) {
           if (payment.amount > 151000) {
-            await prisma.client.update({
-              where: { id: client.id },
-              data: { category: 'NON_INDIVIDUAL' }
+            await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+              $set: { category: 'NON_INDIVIDUAL' }
             });
-            }
+          }
           if (payment.paymentMode !== 'ONLINE_RAZORPAY' && payment.amount >= 50000) {
-            await prisma.complianceAlert.create({
-              data: {
-                tenantId,
-                alertType: 'COMPLIANCE_PENDING',
-                severity: 'HIGH',
-                description: `FIU ALERT: Cash/Manual payment of ${payment.amount} received from Client ${client.name} (PAN: ${client.pan}). High risk case logged.`
-              }
+            await dynamicDb.ComplianceAlert.create({
+              tenantId,
+              alertType: 'COMPLIANCE_PENDING',
+              severity: 'HIGH',
+              description: `FIU ALERT: Cash/Manual payment of ${payment.amount} received from Client ${client.name} (PAN: ${client.pan}). High risk case logged.`
             });
           }
         }
 
-        // Calculate active dates (stack if same plan already exists)
-        const existingSub = await prisma.subscription.findFirst({
-          where: {
-            clientId: payment.clientId,
-            planId: plan.id,
-            status: 'ACTIVE',
-            endDate: { gt: new Date() }
-          },
-          orderBy: { endDate: 'desc' }
-        });
+        const existingSub: any = await dynamicDb.Subscription.findOne({
+          clientId: payment.clientId,
+          planId: plan._id || plan.id,
+          status: 'ACTIVE',
+          endDate: { $gt: new Date() }
+        }).sort({ endDate: -1 }).lean();
 
         let startDate = new Date();
         if (existingSub) {
@@ -641,19 +601,16 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
         
         const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
-        await prisma.subscription.create({
-          data: {
-            clientId: payment.clientId,
-            planId: plan.id,
-            startDate,
-            endDate,
-            status: 'ACTIVE'
-          }
+        await dynamicDb.Subscription.create({
+          clientId: payment.clientId,
+          planId: plan._id || plan.id,
+          startDate,
+          endDate,
+          status: 'ACTIVE'
         });
 
-        await prisma.client.update({
-          where: { id: payment.clientId },
-          data: { status: 'ACTIVE' }
+        await dynamicDb.Client.findByIdAndUpdate(payment.clientId, {
+          $set: { status: 'ACTIVE' }
         });
       }
     }
@@ -682,23 +639,42 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
   if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant ID required.' });
 
   try {
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    const plans = await prisma.plan.findMany({ 
-        where: { 
-            tenantId, 
-            deletedAt: null, 
-            status: 'ACTIVE',
-            OR: [
-              { categoryId: null },
-              { category: { status: 'ACTIVE' } }
-            ]
-        },
-        include: { category: true }
+    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    
+    // Find active categories
+    const activeCategories = await dynamicDb.PlanCategory.find({ tenantId, status: 'ACTIVE' }).lean();
+    const activeCatIds = activeCategories.map((c: any) => c._id || c.id);
+
+    const plans = await dynamicDb.Plan.find({ 
+      tenantId, 
+      deletedAt: null, 
+      status: 'ACTIVE',
+      $or: [
+        { categoryId: null },
+        { categoryId: { $in: activeCatIds } }
+      ]
+    })
+      .populate('categoryId')
+      .lean();
+
+    const formatted = plans.map((p: any) => {
+      const catObj = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId : null;
+      const catIdStr = catObj ? String(catObj._id || catObj.id) : (p.categoryId ? String(p.categoryId) : '');
+      return {
+        ...p,
+        id: String(p._id || p.id),
+        categoryId: catIdStr,
+        category: catObj ? {
+          ...catObj,
+          id: String(catObj._id || catObj.id)
+        } : (p.category ? p.category : null)
+      };
     });
+
     return res.status(200).json({ 
-        success: true, 
-        data: plans, 
-        gstCalculationType: tenant?.gstCalculationType || 'EXCLUSIVE' 
+      success: true, 
+      data: formatted, 
+      gstCalculationType: tenant?.gstCalculationType || 'EXCLUSIVE' 
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -707,30 +683,95 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
 
 export const getClientProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const client = await prisma.client.findFirst({
-      where: { userId: req.user!.id },
-      include: {
-        profile: true,
-        subscriptions: {
-          include: { plan: true }
-        },
-        agreements: true,
-        consents: true,
-        user: {
-          include: {
-            tenant: {
-              select: { agreementContent: true, companyName: true, sebiRegistration: true, address: true, activePaymentGateway: true, kycFirst: true }
-            }
-          }
-        }
-      }
-    });
-
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client profile not found.' });
     }
 
-    return res.status(200).json({ success: true, data: client });
+    const clientId = client._id || client.id;
+    const profile = await dynamicDb.ClientProfile.findOne({ $or: [{ clientId }, { clientId: client.userId }] }).lean();
+    const subscriptions = await dynamicDb.Subscription.find({
+      $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
+    }).populate('planId').lean();
+    const agreements = await dynamicDb.Agreement.find({
+      $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
+    }).lean();
+    const consents = await dynamicDb.Consent.find({
+      $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
+    }).lean();
+    const user = await dynamicDb.User.findById(req.user!.id).lean();
+    let tenantObj: any = null;
+    if (user && (user as any).tenantId) {
+      const tenantId = (user as any).tenantId;
+      if (mongoose.Types.ObjectId.isValid(tenantId)) {
+        tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+      }
+      if (!tenantObj) {
+        tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+      }
+      if (!tenantObj) {
+        tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+      }
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    let isPaymentGatewayConfigured = false;
+    let tenantFormatted = null;
+
+    if (tenantObj) {
+      const activeGateway = (tenantObj.activePaymentGateway || 'RAZORPAY').toUpperCase();
+      if (activeGateway === 'RAZORPAY') {
+        isPaymentGatewayConfigured = !!(tenantObj.razorpayKeyId && tenantObj.razorpayKeySecret && tenantObj.razorpayKeyId.trim() && tenantObj.razorpayKeySecret.trim());
+      } else if (activeGateway === 'CCAVENUE') {
+        isPaymentGatewayConfigured = !!(tenantObj.ccavenueMerchantId && tenantObj.ccavenueAccessCode && tenantObj.ccavenueWorkingKey && tenantObj.ccavenueMerchantId.trim() && tenantObj.ccavenueWorkingKey.trim());
+      } else if (activeGateway === 'CASHFREE') {
+        isPaymentGatewayConfigured = !!(tenantObj.cashfreeAppId && tenantObj.cashfreeSecretKey && tenantObj.cashfreeAppId.trim() && tenantObj.cashfreeSecretKey.trim());
+      } else if (activeGateway === 'STRIPE') {
+        isPaymentGatewayConfigured = !!(tenantObj.stripePublishableKey && tenantObj.stripeSecretKey && tenantObj.stripePublishableKey.trim() && tenantObj.stripeSecretKey.trim());
+      }
+
+      tenantFormatted = {
+        _id: tenantObj._id || tenantObj.id,
+        id: String(tenantObj._id || tenantObj.id),
+        companyName: tenantObj.companyName,
+        sebiRegistration: tenantObj.sebiRegistration,
+        address: tenantObj.address,
+        email: tenantObj.email,
+        mobile: tenantObj.mobile,
+        agreementContent: tenantObj.agreementContent,
+        activePaymentGateway: tenantObj.activePaymentGateway || 'RAZORPAY',
+        razorpayKeyId: tenantObj.razorpayKeyId || null,
+        ccavenueMerchantId: tenantObj.ccavenueMerchantId || null,
+        kycFirst: tenantObj.kycFirst !== false,
+        gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
+        isPaymentGatewayConfigured
+      };
+    }
+
+    const formatted = {
+      ...client,
+      id: String(clientId),
+      profile,
+      subscriptions: subscriptions.map((s: any) => ({
+        ...s,
+        id: String(s._id || s.id),
+        plan: s.planId ? {
+          ...s.planId,
+          id: String(s.planId._id || s.planId.id)
+        } : null
+      })),
+      agreements,
+      consents,
+      user: user ? {
+        ...user,
+        id: String((user as any)._id || (user as any).id),
+        tenant: tenantFormatted
+      } : null
+    };
+
+    return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -741,54 +782,44 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
     const { pan, aadhaar, name, email, mobile, dob, address } = req.body;
     const userId = req.user!.id;
 
-    const client = await prisma.client.findFirst({ where: { userId } });
+    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found.' });
     }
 
-    await prisma.$transaction(async (tx) => {
-      // Update Client table
-      await tx.client.update({
-        where: { id: client.id },
-        data: {
-          ...(pan !== undefined && { pan }),
-          ...(aadhaar !== undefined && { aadhaar }),
-          ...(name && { name }),
-          ...(email && { email }),
-          ...(mobile && { mobile }),
-          ...(dob && { dob: new Date(dob) })
-        }
-      });
+    const clientUpdate: any = {};
+    if (pan !== undefined) clientUpdate.pan = pan;
+    if (aadhaar !== undefined) clientUpdate.aadhaar = aadhaar;
+    if (name) clientUpdate.name = name;
+    if (email) clientUpdate.email = email;
+    if (mobile) clientUpdate.mobile = mobile;
+    if (dob) clientUpdate.dob = new Date(dob);
 
-      // Update User table if basic info changed
-      if (name || email || mobile) {
-        await tx.user.update({
-          where: { id: userId },
-          data: {
-            ...(name && { firstName: name.split(' ')[0], lastName: name.split(' ').slice(1).join(' ') || 'Client' }),
-            ...(email && { email }),
-            ...(mobile && { mobile })
-          }
-        });
-      }
+    if (Object.keys(clientUpdate).length > 0) {
+      await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, { $set: clientUpdate });
+    }
 
-      // Update ClientProfile if address changed
-      if (address) {
-        await tx.clientProfile.upsert({
-          where: { clientId: client.id },
-          create: {
-            clientId: client.id,
-            addressLine1: address,
-            city: '',
-            state: '',
-            country: 'India'
-          },
-          update: {
-            addressLine1: address
-          }
-        });
+    if (name || email || mobile) {
+      const userUpdate: any = {};
+      if (name) {
+        userUpdate.firstName = name.split(' ')[0];
+        userUpdate.lastName = name.split(' ').slice(1).join(' ') || 'Client';
       }
-    });
+      if (email) userUpdate.email = email;
+      if (mobile) userUpdate.mobile = mobile;
+      await dynamicDb.User.findByIdAndUpdate(userId, { $set: userUpdate });
+    }
+
+    if (address) {
+      await dynamicDb.ClientProfile.findOneAndUpdate(
+        { clientId: client._id || client.id },
+        {
+          $set: { addressLine1: address },
+          $setOnInsert: { clientId: client._id || client.id, city: '', state: '', country: 'India' }
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+    }
 
     return res.status(200).json({ success: true, message: 'Profile updated' });
   } catch (error: any) {
@@ -799,19 +830,16 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
 export const deleteClientAccount = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
-    const client = await prisma.client.findFirst({ where: { userId } });
+    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: userId },
-        data: { deletedAt: new Date(), deletedBy: 'SELF', status: 'INACTIVE' }
-      });
-      await tx.client.update({
-        where: { id: client.id },
-        data: { status: 'INACTIVE' }
-      });
+    await dynamicDb.User.findByIdAndUpdate(userId, {
+      $set: { deletedAt: new Date(), deletedBy: 'SELF', status: 'INACTIVE' }
     });
+    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+      $set: { status: 'INACTIVE' }
+    });
+
     return res.status(200).json({ success: true, message: 'Account deleted successfully' });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -822,24 +850,17 @@ export const uploadClientDocument = async (req: Request, res: Response) => {
   res.json({ success: true, message: 'Document uploaded' });
 };
 
-import { generateInvoicePdf } from '../services/invoiceGenerator';
-
 export const downloadInvoice = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    // ensure payment exists and belongs to client
-    const payment = await prisma.payment.findUnique({
-      where: { id }
-    });
+    const payment: any = await dynamicDb.Payment.findById(id).lean();
     
     if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
     
-    // Auth check: Is the user the owner of this payment? Or an admin?
-    // Since this is a client route, check clientId
     const user = (req as any).user;
-    if (user.role === 'CLIENT') {
-      const client = await prisma.client.findUnique({ where: { userId: user.id } });
-      if (!client || client.id !== payment.clientId) {
+    if (user && user.role === 'CLIENT') {
+      const client: any = await dynamicDb.Client.findOne({ userId: user.id }).lean();
+      if (!client || String(client._id || client.id) !== String(payment.clientId)) {
         return res.status(403).json({ success: false, message: 'Forbidden' });
       }
     }
@@ -855,35 +876,61 @@ export const downloadInvoice = async (req: Request, res: Response) => {
   }
 };
 
-import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
-import querystring from 'querystring';
-import Razorpay from 'razorpay';
-import crypto from 'crypto';
-
 export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Response) => {
   const { planId, couponCode } = req.body;
   try {
-    const client = await prisma.client.findUnique({
-      where: { userId: req.user!.id },
-      include: { profile: true }
-    });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    const tenantId = req.user!.tenantId!;
-    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    
-    if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret) {
-      return res.status(400).json({ success: false, message: 'Razorpay credentials not configured for this tenant' });
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.id) {
+      if (client?.tenantId) tenantId = client.tenantId;
+      if (!tenantId) {
+        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
+        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
+      }
     }
 
-    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    let tenantObj: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    
+    if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
+      return res.status(400).json({ 
+        success: false, 
+        isConfigured: false,
+        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+      });
+    }
+
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+      });
+    }
+
+    const plan: any = await dynamicDb.Plan.findById(planId).lean();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
     let finalPrice = plan.price;
     let appliedCouponId = null;
 
     if (couponCode) {
-      const coupon = await prisma.coupon.findFirst({ where: { code: couponCode, tenantId } });
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
         if (coupon.discountType === 'FLAT') {
           finalPrice = Math.max(0, finalPrice - coupon.discountValue);
@@ -894,7 +941,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
           }
           finalPrice = Math.max(0, finalPrice - discount);
         }
-        appliedCouponId = coupon.id;
+        appliedCouponId = coupon._id || coupon.id;
       }
     }
     
@@ -915,14 +962,14 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
       currency: 'INR',
       receipt: receiptId,
       notes: {
-        clientId: client.id,
-        planId: plan.id,
-        couponId: appliedCouponId || '',
+        clientId: String(client._id || client.id),
+        planId: String(plan._id || plan.id),
+        couponId: appliedCouponId ? String(appliedCouponId) : '',
         tenantId: tenantId
       }
     };
 
-    const order = await razorpay.orders.create(orderOptions);
+    const order: any = await razorpay.orders.create(orderOptions as any);
 
     return res.status(200).json({
       success: true,
@@ -941,13 +988,11 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
 export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Response) => {
   const { razorpay_payment_id, razorpay_order_id, razorpay_signature, planId, couponCode } = req.body;
   try {
-    const client = await prisma.client.findUnique({
-      where: { userId: req.user!.id }
-    });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
     const tenantId = req.user!.tenantId!;
-    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
     if (!tenantObj || !tenantObj.razorpayKeySecret) {
       return res.status(400).json({ success: false, message: 'Razorpay configuration error' });
     }
@@ -959,15 +1004,14 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
       return res.status(400).json({ success: false, message: 'Invalid payment signature' });
     }
 
-    // Signature matches, process the payment
-    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    const plan: any = await dynamicDb.Plan.findById(planId).lean();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
     let discountAmount = 0;
-    let appliedCouponId = null;
+    let appliedCouponId: any = null;
 
     if (couponCode) {
-      const coupon = await prisma.coupon.findFirst({ where: { code: couponCode, tenantId } });
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
         if (coupon.discountType === 'FLAT') {
           discountAmount = coupon.discountValue;
@@ -978,51 +1022,52 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
           }
         }
         if (discountAmount > plan.price) discountAmount = plan.price;
-        appliedCouponId = coupon.id;
+        appliedCouponId = coupon._id || coupon.id;
 
-        await prisma.coupon.update({
-          where: { id: coupon.id },
-          data: { usedCount: { increment: 1 } }
+        await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
+          $inc: { usedCount: 1 }
         });
       }
     }
 
-    // Calculate actual amount paid based on Razorpay logic (or default from plan for simplicity)
     let finalPrice = plan.price - discountAmount;
     if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
       finalPrice = finalPrice * 1.18;
     }
 
-    await prisma.payment.create({
-      data: {
-        tenantId,
-        clientId: client.id,
-        planId,
-        amount: finalPrice,
-        couponId: appliedCouponId,
-        discountApplied: discountAmount,
-        paymentMode: 'ONLINE_RAZORPAY',
-        transactionRef: razorpay_payment_id,
-        status: 'SUCCESS'
-      }
+    await dynamicDb.Payment.create({
+      tenantId,
+      clientId: client._id || client.id,
+      planId,
+      amount: finalPrice,
+      couponId: appliedCouponId,
+      discountApplied: discountAmount,
+      paymentMode: 'ONLINE_RAZORPAY',
+      transactionRef: razorpay_payment_id,
+      status: 'SUCCESS'
     });
 
-    const existingSub = await prisma.subscription.findFirst({
-      where: { clientId: client.id, planId, status: 'ACTIVE', endDate: { gt: new Date() } },
-      orderBy: { endDate: 'desc' }
-    });
+    const existingSub: any = await dynamicDb.Subscription.findOne({
+      clientId: client._id || client.id,
+      planId,
+      status: 'ACTIVE',
+      endDate: { $gt: new Date() }
+    }).sort({ endDate: -1 }).lean();
 
     let startDate = new Date();
     if (existingSub) startDate = new Date(existingSub.endDate);
     const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
-    await prisma.subscription.create({
-      data: { clientId: client.id, planId, startDate, endDate, status: 'ACTIVE' }
+    await dynamicDb.Subscription.create({
+      clientId: client._id || client.id,
+      planId,
+      startDate,
+      endDate,
+      status: 'ACTIVE'
     });
 
-    await prisma.client.update({
-      where: { id: client.id },
-      data: { status: 'ACTIVE' }
+    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+      $set: { status: 'ACTIVE' }
     });
 
     return res.status(200).json({ success: true, message: 'Payment verified successfully' });
@@ -1036,26 +1081,58 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
 export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Response) => {
   const { planId, couponCode } = req.body;
   try {
-    const client = await prisma.client.findUnique({
-      where: { userId: req.user!.id },
-      include: { profile: true }
-    });
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    const tenantId = req.user!.tenantId!;
-    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey) {
-      return res.status(400).json({ success: false, message: 'CCAvenue credentials not configured' });
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.id) {
+      if (client?.tenantId) tenantId = client.tenantId;
+      if (!tenantId) {
+        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
+        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
+      }
     }
 
-    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    let tenantObj: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
+      return res.status(400).json({ 
+        success: false, 
+        isConfigured: false,
+        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+      });
+    }
+
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+      });
+    }
+
+    const plan: any = await dynamicDb.Plan.findById(planId).lean();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
     let finalPrice = plan.price;
-    let appliedCouponId = null;
+    let appliedCouponId: any = null;
 
     if (couponCode) {
-      const coupon = await prisma.coupon.findFirst({ where: { code: couponCode, tenantId } });
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
         if (coupon.discountType === 'FLAT') {
           finalPrice = Math.max(0, finalPrice - coupon.discountValue);
@@ -1066,7 +1143,7 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
           }
           finalPrice = Math.max(0, finalPrice - discount);
         }
-        appliedCouponId = coupon.id;
+        appliedCouponId = coupon._id || coupon.id;
       }
     }
     
@@ -1078,12 +1155,12 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     const amount = finalPrice.toFixed(2);
     
     const origin = req.headers.origin || 'http://localhost:3000';
-    const redirectUrl = `${req.protocol}://${req.get('host')}/api/payment/ccavenue/response?tenantId=${tenantId}`;
+    const redirectUrl = `${req.protocol}://${req.get('host')}/api/v1/payment/ccavenue/response?tenantId=${tenantObj._id || tenantObj.id || tenantId}`;
     const cancelUrl = `${origin}/client`;
 
     let merchantData = `merchant_id=${tenantObj.ccavenueMerchantId}&order_id=${orderId}&currency=INR&amount=${amount}&redirect_url=${redirectUrl}&cancel_url=${cancelUrl}&language=EN`;
     merchantData += `&billing_name=${encodeURIComponent(client.name)}&billing_email=${encodeURIComponent(client.email)}&billing_tel=${encodeURIComponent(client.pan)}`;
-    merchantData += `&merchant_param1=${client.id}&merchant_param2=${plan.id}&merchant_param3=${appliedCouponId || ''}&merchant_param4=${origin}`;
+    merchantData += `&merchant_param1=${client._id || client.id}&merchant_param2=${plan._id || plan.id}&merchant_param3=${appliedCouponId || ''}&merchant_param4=${origin}`;
 
     const encRequest = encryptCCAvenue(merchantData, tenantObj.ccavenueWorkingKey);
 
@@ -1105,7 +1182,7 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
   if (!encResp || !tenantId) return res.status(400).send('Invalid response');
 
   try {
-    const tenantObj = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
     if (!tenantObj || !tenantObj.ccavenueWorkingKey) return res.status(400).send('Tenant configuration error');
 
     const decryptedStr = decryptCCAvenue(encResp, tenantObj.ccavenueWorkingKey);
@@ -1115,48 +1192,50 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
     const clientId = parsedData.merchant_param1 as string;
     const planId = parsedData.merchant_param2 as string;
     const appliedCouponId = parsedData.merchant_param3 as string;
-    const origin = parsedData.merchant_param4 as string || 'http://localhost:3000';
+    const origin = (parsedData.merchant_param4 as string) || 'http://localhost:3000';
 
     if (status === 'Success') {
-      const client = await prisma.client.findUnique({ where: { id: clientId } });
-      const plan = await prisma.plan.findUnique({ where: { id: planId } });
+      const client: any = await dynamicDb.Client.findById(clientId).lean();
+      const plan: any = await dynamicDb.Plan.findById(planId).lean();
       
       if (client && plan) {
-        await prisma.payment.create({
-          data: {
-            tenantId,
-            clientId,
-            planId,
-            amount: parseFloat(parsedData.amount as string) || 0,
-            couponId: appliedCouponId ? appliedCouponId : null,
-            paymentMode: 'ONLINE_CCAVENUE',
-            transactionRef: (parsedData.tracking_id as string) || (parsedData.order_id as string),
-            status: 'SUCCESS'
-          }
+        await dynamicDb.Payment.create({
+          tenantId,
+          clientId,
+          planId,
+          amount: parseFloat(parsedData.amount as string) || 0,
+          couponId: appliedCouponId || null,
+          paymentMode: 'ONLINE_CCAVENUE',
+          transactionRef: (parsedData.tracking_id as string) || (parsedData.order_id as string),
+          status: 'SUCCESS'
         });
 
-        const existingSub = await prisma.subscription.findFirst({
-          where: { clientId, planId, status: 'ACTIVE', endDate: { gt: new Date() } },
-          orderBy: { endDate: 'desc' }
-        });
+        const existingSub: any = await dynamicDb.Subscription.findOne({
+          clientId,
+          planId,
+          status: 'ACTIVE',
+          endDate: { $gt: new Date() }
+        }).sort({ endDate: -1 }).lean();
 
         let startDate = new Date();
         if (existingSub) startDate = new Date(existingSub.endDate);
         const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
-        await prisma.subscription.create({
-          data: { clientId, planId, startDate, endDate, status: 'ACTIVE' }
+        await dynamicDb.Subscription.create({
+          clientId,
+          planId,
+          startDate,
+          endDate,
+          status: 'ACTIVE'
         });
 
-        await prisma.client.update({
-          where: { id: clientId },
-          data: { status: 'ACTIVE' }
+        await dynamicDb.Client.findByIdAndUpdate(clientId, {
+          $set: { status: 'ACTIVE' }
         });
 
         if (appliedCouponId) {
-          await prisma.coupon.update({
-             where: { id: appliedCouponId },
-             data: { usedCount: { increment: 1 } }
+          await dynamicDb.Coupon.findByIdAndUpdate(appliedCouponId, {
+            $inc: { usedCount: 1 }
           });
         }
       }
@@ -1169,3 +1248,98 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
     return res.status(500).send('Internal Server Error');
   }
 };
+
+export const getPaymentGatewayStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let tenantId = req.user?.tenantId;
+    if (!tenantId && req.user?.id) {
+      const clientDoc: any = await dynamicDb.Client.findOne({ userId: req.user.id }).lean();
+      if (clientDoc?.tenantId) tenantId = clientDoc.tenantId;
+      if (!tenantId) {
+        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
+        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
+      }
+    }
+
+    let tenantObj: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj && tenantId) {
+      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenantObj) {
+      tenantObj = await centralModels.AllCompany.findOne({ deletedAt: null }).lean();
+    }
+
+    if (!tenantObj) {
+      return res.status(200).json({
+        success: true,
+        isConfigured: false,
+        activeGateway: 'RAZORPAY',
+        message: 'Administrator has not configured a payment gateway. Please contact admin to buy this plan.',
+        adminContact: {
+          companyName: 'Advisory Administration',
+          email: null,
+          mobile: null,
+          sebiRegistration: null,
+          address: null,
+          website: null,
+          bankDetails: null
+        }
+      });
+    }
+
+    const activeGateway = (tenantObj.activePaymentGateway || 'RAZORPAY').toUpperCase();
+    let isConfigured = false;
+
+    if (activeGateway === 'RAZORPAY') {
+      isConfigured = !!(tenantObj.razorpayKeyId && tenantObj.razorpayKeySecret && tenantObj.razorpayKeyId.trim() && tenantObj.razorpayKeySecret.trim());
+    } else if (activeGateway === 'CCAVENUE') {
+      isConfigured = !!(tenantObj.ccavenueMerchantId && tenantObj.ccavenueAccessCode && tenantObj.ccavenueWorkingKey && tenantObj.ccavenueMerchantId.trim() && tenantObj.ccavenueWorkingKey.trim());
+    } else if (activeGateway === 'CASHFREE') {
+      isConfigured = !!(tenantObj.cashfreeAppId && tenantObj.cashfreeSecretKey && tenantObj.cashfreeAppId.trim() && tenantObj.cashfreeSecretKey.trim());
+    } else if (activeGateway === 'STRIPE') {
+      isConfigured = !!(tenantObj.stripePublishableKey && tenantObj.stripeSecretKey && tenantObj.stripePublishableKey.trim() && tenantObj.stripeSecretKey.trim());
+    } else {
+      isConfigured = false;
+    }
+
+    const adminContact = {
+      companyName: tenantObj.companyName || 'Advisory Team',
+      email: tenantObj.companyEmail || tenantObj.email || null,
+      mobile: tenantObj.mobile || null,
+      sebiRegistration: tenantObj.sebiRegistration || null,
+      address: tenantObj.address || null,
+      website: tenantObj.website || null,
+      bankDetails: (tenantObj.bankAccountNo && tenantObj.bankIfsc) ? {
+        bankAccountName: tenantObj.bankAccountName || tenantObj.companyName,
+        bankAccountNo: tenantObj.bankAccountNo,
+        bankAccountType: tenantObj.bankAccountType || 'Current',
+        bankIfsc: tenantObj.bankIfsc,
+        bankName: tenantObj.bankName,
+        bankBranch: tenantObj.bankBranch
+      } : null
+    };
+
+    return res.status(200).json({
+      success: true,
+      isConfigured,
+      activeGateway,
+      adminContact,
+      message: isConfigured 
+        ? `Payment gateway (${activeGateway}) is ready.`
+        : `Payment gateway credentials are not configured by the administrator for ${activeGateway}. Please contact administrator to purchase this plan.`
+    });
+  } catch (error: any) {
+    console.error('Payment gateway status error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+

@@ -25,6 +25,7 @@ import OnboardingWizard from '../../components/client/OnboardingWizard';
 import WelcomeInstructionModal from '../../components/client/WelcomeInstructionModal';
 import CustomPageView from '../../components/client/CustomPageView';
 import { ThemeToggle } from '../../components/ThemeToggle';
+import UserProfileDropdown from '../../components/UserProfileDropdown';
 import { useBranding } from '../../contexts/BrandingContext';
 
 import dynamic from 'next/dynamic';
@@ -59,48 +60,74 @@ function ClientPortalContent() {
   const [policiesExpanded, setPoliciesExpanded] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
-  useEffect(() => {
-    // Let ThemeProvider handle theme
+  const fetchData = async () => {
+    try {
+      const [profileRes, subRes, pagesRes] = await Promise.all([
+        api.getClientProfile().catch(() => ({ success: false, data: null })),
+        api.getClientSubscriptions().catch(() => ({ success: false, data: [] })),
+        api.request('/pages').catch(() => ({ success: false, data: [] }))
+      ]);
 
-    const fetchData = async () => {
-      try {
-        const [profileRes, subRes, pagesRes] = await Promise.all([
-          api.getClientProfile().catch(() => ({ success: false, data: null })),
-          api.getClientSubscriptions().catch(() => ({ success: false, data: [] })),
-          api.request('/pages').catch(() => ({ success: false, data: [] }))
-        ]);
-
-        if (pagesRes?.success && pagesRes.data) {
-          setPages(pagesRes.data);
-        }
-
-        if (profileRes?.success && profileRes.data) {
-          const p = profileRes.data;
-          setProfile(p);
-
-          // Determine if user needs onboarding
-          // Criteria: Needs VERIFIED KYC, signed agreement, and at least 1 active subscription.
-          const isKycDone = p.kycStatus === 'VERIFIED' || p.kycStatus === 'APPROVED' || p.status === 'ACTIVE' || p.status === 'PAYMENT_PENDING' || p.status === 'AGREEMENT_PENDING';
-          const isAgreementDone = !!p.agreementSigned || p.status === 'ACTIVE' || p.status === 'PAYMENT_PENDING';
-          const hasActivePlan = subRes.success && subRes.data.length > 0;
-
-          if (hasActivePlan && (!isKycDone || !isAgreementDone)) {
-            // Force onboarding if they have a plan (e.g. assigned by admin) but missing KYC/Agreement
-            setShowOnboarding(true);
-          } else {
-            // If they don't have a plan, let them browse the dashboard.
-            setShowOnboarding(false);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch data', err);
-      } finally {
-        // Simulate a smooth loading experience
-        setTimeout(() => setLoading(false), 800);
+      if (pagesRes?.success && pagesRes.data) {
+        setPages(pagesRes.data);
       }
-    };
+
+      if (profileRes?.success && profileRes.data) {
+        const p = profileRes.data;
+        setProfile(p);
+
+        // Determine if user has an active assigned plan (from admin or purchase)
+        const hasPlan = Boolean(
+          (subRes?.success && Array.isArray(subRes.data) && subRes.data.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+          (p.subscriptions && Array.isArray(p.subscriptions) && p.subscriptions.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+          (p.status === 'ACTIVE' && (p.subscriptions?.length > 0 || p.plan))
+        );
+
+        // Determine if compliance onboarding is fully completed
+        const isKycDone = Boolean(p.kraVerified === true || p.kycStatus === 'VERIFIED' || p.kycStatus === 'APPROVED');
+        const isAgreementDone = Boolean(p.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') || p.agreementSigned);
+        const isFully = isKycDone && isAgreementDone;
+
+        // User requirement: Modal only shows if plan is assigned AND KYC/Agreement is pending
+        if (hasPlan && !isFully) {
+          setShowOnboarding(true);
+        } else {
+          setShowOnboarding(false);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch data', err);
+    } finally {
+      setTimeout(() => setLoading(false), 800);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
   }, []);
+
+  // Check if client has an active assigned plan
+  const hasAssignedPlan = Boolean(
+    (profile?.subscriptions && Array.isArray(profile.subscriptions) && profile.subscriptions.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+    (profile?.status === 'ACTIVE' && (profile?.subscriptions?.length > 0 || profile?.plan))
+  );
+
+  // Check if compliance onboarding is fully completed
+  const isKycDone = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
+  const isAgreementDone = Boolean(profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') || profile?.agreementSigned);
+  const isFullyOnboarded = isKycDone && isAgreementDone;
+
+  const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab);
+    setMobileMenuOpen(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('clientActiveTab', newTab);
+    }
+    // Re-open onboarding modal on tab switch ONLY if plan is assigned and onboarding is incomplete
+    if (hasAssignedPlan && !isFullyOnboarded) {
+      setShowOnboarding(true);
+    }
+  };
 
   const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: Layers },
@@ -119,7 +146,7 @@ function ClientPortalContent() {
   const handleLogout = async (allDevices = false) => {
     setIsLogoutModalOpen(false);
     await api.logout(allDevices);
-    router.push('/client/login');
+    router.push('/login');
   };
 
   const getFullUrl = (url?: string | null) => {
@@ -130,10 +157,10 @@ function ClientPortalContent() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <Dashboard profile={profile} setActiveTab={setActiveTab} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+      case 'dashboard': return <Dashboard profile={profile} setActiveTab={handleTabChange} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'signals': return <MarketSignals />;
       case 'research': return <ResearchReports />;
-      case 'subscriptions': return <SubscriptionCenter profile={profile} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+      case 'subscriptions': return <SubscriptionCenter profile={profile} onNavigateToKyc={() => handleTabChange('kyc')} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'payments': return <PaymentCenter profile={profile} />;
       case 'kyc': return <KYCCenter onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'complaints': return <ComplaintsCenter profile={profile} />;
@@ -162,7 +189,7 @@ function ClientPortalContent() {
               if (page.type === 'URL' && page.externalUrl) {
                 window.open(page.externalUrl, '_blank');
               } else {
-                setActiveTab(page.slug);
+                handleTabChange(page.slug);
               }
             }}
           />
@@ -172,7 +199,7 @@ function ClientPortalContent() {
         if (page) {
           return <CustomPageView page={page} />;
         }
-        return <Dashboard profile={profile} setActiveTab={setActiveTab} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+        return <Dashboard profile={profile} setActiveTab={handleTabChange} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       }
     }
   };
@@ -188,13 +215,19 @@ function ClientPortalContent() {
     );
   }
 
-  if (showOnboarding) {
-    return <OnboardingWizard profile={profile} onComplete={() => setShowOnboarding(false)} />;
-  }
-
   return (
-    <div className="h-dvh bg-premium-bg text-premium-text flex font-sans overflow-hidden">
-
+    <div className="h-dvh bg-premium-bg text-premium-text flex font-sans overflow-hidden relative">
+      {/* Onboarding Wizard Modal Overlay */}
+      {showOnboarding && (
+        <OnboardingWizard
+          profile={profile}
+          onClose={() => setShowOnboarding(false)}
+          onComplete={() => {
+            setShowOnboarding(false);
+            fetchData();
+          }}
+        />
+      )}
 
       <WelcomeInstructionModal
         profile={profile}
@@ -202,20 +235,13 @@ function ClientPortalContent() {
         onStart={() => setShowOnboarding(true)}
       />
 
-      {/* Mobile Menu Toggle */}
-      <button
-        className="md:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
-        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-      >
-        {mobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
-      </button>
 
       {/* Premium Sidebar */}
       <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col ${mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
         } ${!mobileMenuOpen && isSidebarCollapsed ? 'md:w-20' : 'md:w-72'}`}>
 
         {/* Brand */}
-        <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
+        <div className={`h-20 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
             {logoUrl && logoUrl !== '/logo-light.png' ? (
               <img src={logoUrl} alt={appName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
@@ -232,6 +258,7 @@ function ClientPortalContent() {
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="hidden md:flex items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors shrink-0"
+              title="Toggle Sidebar"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -240,6 +267,7 @@ function ClientPortalContent() {
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="hidden md:flex w-full items-center justify-center p-2 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+              title="Expand Sidebar"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -253,14 +281,12 @@ function ClientPortalContent() {
             return (
               <button
                 key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id);
-                  setMobileMenuOpen(false);
-                }}
+                onClick={() => handleTabChange(item.id)}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                  ? 'bg-white/10 text-white font-semibold'
+                  ? 'bg-white/15 text-white font-bold shadow-md shadow-black/10'
                   : 'text-white/70 hover:bg-white/5 hover:text-white'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                title={isSidebarCollapsed ? item.label : undefined}
               >
                 <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`} />
                 {!isSidebarCollapsed && <span>{item.label}</span>}
@@ -272,80 +298,77 @@ function ClientPortalContent() {
           })}
 
           {profile?.user?.tenant?.termsPdfUrl && (
-            <a href={getFullUrl(profile.user.tenant.termsPdfUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}>
+            <a href={getFullUrl(profile.user.tenant.termsPdfUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`} title={isSidebarCollapsed ? "Terms & Conditions" : undefined}>
               <FileText className="w-5 h-5 transition-colors shrink-0 text-white/50 group-hover:text-white/80" />
               {!isSidebarCollapsed && <span>Terms & Conditions</span>}
             </a>
           )}
           
           {profile?.user?.tenant?.privacyPdfUrl && (
-            <a href={getFullUrl(profile.user.tenant.privacyPdfUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}>
+            <a href={getFullUrl(profile.user.tenant.privacyPdfUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`} title={isSidebarCollapsed ? "Privacy Policy" : undefined}>
               <FileText className="w-5 h-5 transition-colors shrink-0 text-white/50 group-hover:text-white/80" />
               {!isSidebarCollapsed && <span>Privacy Policy</span>}
             </a>
           )}
           
           {profile?.user?.tenant?.internalPolicyUrl && (
-            <a href={getFullUrl(profile.user.tenant.internalPolicyUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}>
+            <a href={getFullUrl(profile.user.tenant.internalPolicyUrl)} target="_blank" rel="noreferrer" className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/5 hover:text-white ${isSidebarCollapsed ? 'justify-center px-2' : ''}`} title={isSidebarCollapsed ? "Internal Policy" : undefined}>
               <FileText className="w-5 h-5 transition-colors shrink-0 text-white/50 group-hover:text-white/80" />
               {!isSidebarCollapsed && <span>Internal Policy</span>}
             </a>
           )}
         </div>
-
-        {/* User Footer */}
-        <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-          {/* Subtle background glow */}
-          <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
-
-          <div
-            onClick={() => { setActiveTab('profile' as any); setMobileMenuOpen(false); }}
-            className={`bg-white/5 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-
-            {/* Shimmer effect inside the card */}
-            <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-            <div className="relative shrink-0">
-              {/* Pulsing ring around avatar */}
-              <div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-ping opacity-75" />
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(251,191,36,0.5)] relative z-10">
-                {profile?.name ? profile.name.charAt(0).toUpperCase() : 'H'}
-              </div>
-              {/* Online/Verified indicator */}
-              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-blue-900 rounded-full z-20" />
-            </div>
-
-            {!isSidebarCollapsed && (
-              <div className="flex-1 min-w-0 relative z-10">
-                <p className="font-bold text-sm truncate text-white">{profile?.name}</p>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <ShieldCheck className="w-3 h-3 text-amber-400" />
-                  <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-amber-200 to-amber-400 animate-pulse">
-                    Premium Member
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {!isSidebarCollapsed && (
-              <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
-            )}
-          </div>
-          <div className={`flex-1 mt-4 border-t border-blue-800/50 dark:border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-            <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-red-500/10 rounded-xl text-white/60 hover:text-red-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`}>
-              {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-              <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-            </button>
-          </div>
-        </div>
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 h-dvh overflow-y-auto custom-scrollbar bg-premium-bg relative">
+      <main className="flex-1 h-dvh flex flex-col overflow-hidden bg-premium-bg relative">
         {/* Subtle background glow for main content */}
         <div className="absolute top-[-20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-premium-primary/5 blur-[150px] pointer-events-none" />
 
-        <div className="p-6 md:p-10 max-w-7xl mx-auto min-h-full relative z-10">
+        {/* Top Header Bar with Theme, User & Logout */}
+        <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+          <div className="flex items-center gap-3">
+            {/* Mobile menu toggle */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+              title="Open Navigation"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+            <div>
+              <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                {NAV_ITEMS.find(n => n.id === activeTab)?.label || (activeTab === 'profile' ? 'Profile Settings' : activeTab.replace(/-/g, ' '))}
+              </h1>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                {currentUser?.tenantName ? `${currentUser.tenantName} Client Portal` : 'Client Investment & Research Dashboard'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 md:gap-4">
+            {/* Theme Toggle */}
+            <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+              <ThemeToggle />
+            </div>
+
+            {/* Profile Dropdown with Username & Logout */}
+            <UserProfileDropdown
+              user={{
+                name: profile?.name || 'Client',
+                email: profile?.email || profile?.user?.email,
+                role: 'Client'
+              }}
+              badgeLabel="Premium Member"
+              badgeColor="amber"
+              onProfileClick={() => handleTabChange('profile')}
+              onLogoutClick={() => setIsLogoutModalOpen(true)}
+            />
+          </div>
+        </header>
+
+        {/* Content Scroll View */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar relative p-4 md:p-8 max-w-7xl w-full mx-auto">
           {renderContent()}
         </div>
       </main>

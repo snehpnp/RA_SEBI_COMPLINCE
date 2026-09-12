@@ -1,28 +1,46 @@
 import { Response } from 'express';
-import prisma from '../config/db';
+import mongoose from 'mongoose';
+import dynamicDb from '../config/db';
 import { calculateNextDueDate, getCompliancePeriod } from '../utils/complianceDateHelper';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { calculateCompleteness } from './adminController';
+import { syncTenantToRemote, syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 
-export const checkComplianceForTenant = async (tenantId: string) => {
+export const checkComplianceForTenant = async (tenantId?: string) => {
+  try {
+    let tenant: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenant && tenantId) {
+      tenant = await dynamicDb.Tenant.findOne({
+        $or: [{ id: tenantId }, { tenantId: tenantId }]
+      }).lean();
+    }
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenant) return [];
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    include: { users: { include: { staff: true, client: true } } }
-  });
-  if (!tenant) throw new Error('Tenant not found.');
+    const resolvedTenantId = String(tenant._id || tenantId || '');
 
-  // DO NOT run compliance checks for tenants that haven't finished onboarding
-  const completeness = await calculateCompleteness(tenantId);
-  if (completeness === 0 || completeness.score < 100) {
-    return []; // Return empty alerts, skipping all checks
-  }
+    // DO NOT run compliance checks for tenants that haven't finished onboarding
+    const completeness = await calculateCompleteness(resolvedTenantId);
+    if (!completeness || completeness.score < 100) {
+      return []; // Return empty alerts, skipping all checks
+    }
 
-  const alertsCreated = [];
+  const alertsCreated: any[] = [];
+
+  const tenantUsers = await dynamicDb.User.find({ tenantId, deletedAt: null }).select('_id').lean();
+  const tenantUserIds = tenantUsers.map(u => u._id);
 
   // 1. DEPOSIT RULE CHECK
-  const activeClientsCount = await prisma.client.count({ where: { user: { tenantId }, status: 'ACTIVE' } });
+  const activeClientsCount = await dynamicDb.Client.countDocuments({
+    userId: { $in: tenantUserIds },
+    status: 'ACTIVE'
+  });
   
   let requiredDeposit = 100000;
   if (activeClientsCount <= 150) {
@@ -35,23 +53,34 @@ export const checkComplianceForTenant = async (tenantId: string) => {
     requiredDeposit = 1000000;
   }
 
-  if (tenant.depositAmount < requiredDeposit) {
-    const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${tenant.depositAmount}. Please submit deposit proof.`;
-    const existingAlert = await prisma.complianceAlert.findFirst({ where: { tenantId, alertType: 'DEPOSIT_LOW', status: 'OPEN' } });
+  if ((tenant.depositAmount || 0) < requiredDeposit) {
+    const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${tenant.depositAmount || 0}. Please submit deposit proof.`;
+    const existingAlert = await dynamicDb.ComplianceAlert.findOne({
+      tenantId,
+      alertType: 'DEPOSIT_LOW',
+      status: 'OPEN'
+    }).lean();
+
     if (!existingAlert) {
-      alertsCreated.push(await prisma.complianceAlert.create({ data: { tenantId, alertType: 'DEPOSIT_LOW', severity: 'HIGH', description } }));
+      const newAlert = await dynamicDb.ComplianceAlert.create({
+        tenantId,
+        alertType: 'DEPOSIT_LOW',
+        severity: 'HIGH',
+        description
+      });
+      alertsCreated.push(newAlert.toObject());
     }
   }
 
   // 1B. PART-TIME RA LIMIT CHECK
-  if ((tenant as any).raType === 'PART_TIME') {
+  if (tenant.raType === 'PART_TIME') {
     const isOverLimit = activeClientsCount > 75;
     
     // Find the latest penalty alert to check status
-    const latestPenaltyAlert = await prisma.complianceAlert.findFirst({
-      where: { tenantId, alertType: 'PART_TIME_LIMIT_EXCEEDED' },
-      orderBy: { createdAt: 'desc' }
-    });
+    const latestPenaltyAlert = await dynamicDb.ComplianceAlert.findOne({
+      tenantId,
+      alertType: 'PART_TIME_LIMIT_EXCEEDED'
+    }).sort({ createdAt: -1 }).lean();
 
     if (isOverLimit) {
       // Create new penalty only if no alert exists, or it's CLOSED, or it was OPEN but marked as DROPPED
@@ -61,34 +90,33 @@ export const checkComplianceForTenant = async (tenantId: string) => {
 
       if (needsNewPenalty) {
         const description = `Code of Conduct Violation: Part-time RA active clients limit (75) exceeded. Current active clients: ${activeClientsCount}. You must apply for a Full-Time RA or reduce clients to avoid further penalties.`;
-        const newAlert = await prisma.complianceAlert.create({
-          data: { tenantId, alertType: 'PART_TIME_LIMIT_EXCEEDED', severity: 'HIGH', description }
+        const newAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'PART_TIME_LIMIT_EXCEEDED',
+          severity: 'HIGH',
+          description
         });
-        alertsCreated.push(newAlert);
+        alertsCreated.push(newAlert.toObject());
         
         // Find requirement for Part-time limit (usually serialNo: 12)
-        const requirement = await prisma.complianceRequirement.findFirst({
-          where: { serialNo: 12 }
-        });
+        const requirement = await dynamicDb.ComplianceRequirement.findOne({
+          serialNo: 12
+        }).lean();
 
         if (requirement) {
-          const audit = await prisma.complianceAudit.create({
-            data: {
-              tenantId,
-              requirementId: requirement.id,
-              status: 'NON_COMPLIANT',
-              officerRemarks: 'System auto-generated penalty: Part-time RA client limit exceeded.',
-            }
+          const audit = await dynamicDb.ComplianceAudit.create({
+            tenantId,
+            requirementId: requirement._id,
+            status: 'NON_COMPLIANT',
+            officerRemarks: 'System auto-generated penalty: Part-time RA client limit exceeded.'
           });
 
-          await prisma.penalty.create({
-            data: {
-              tenantId,
-              auditId: audit.id,
-              amount: 10000,
-              reason: 'Code of Conduct Violation: Part-time RA client limit exceeded.',
-              status: 'PENDING_PAYMENT'
-            }
+          await dynamicDb.Penalty.create({
+            tenantId,
+            auditId: audit._id,
+            amount: 10000,
+            reason: 'Code of Conduct Violation: Part-time RA client limit exceeded.',
+            status: 'PENDING_PAYMENT'
           });
         }
       }
@@ -96,9 +124,8 @@ export const checkComplianceForTenant = async (tenantId: string) => {
       // activeClientsCount <= 75
       // If there's an OPEN alert and it hasn't been marked yet, mark it as DROPPED.
       if (latestPenaltyAlert && latestPenaltyAlert.status === 'OPEN' && !(latestPenaltyAlert.remarks || '').includes('[COUNT_DROPPED]')) {
-        await prisma.complianceAlert.update({
-          where: { id: latestPenaltyAlert.id },
-          data: { remarks: ((latestPenaltyAlert.remarks || '') + ' [COUNT_DROPPED]').trim() }
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(latestPenaltyAlert._id, {
+          $set: { remarks: ((latestPenaltyAlert.remarks || '') + ' [COUNT_DROPPED]').trim() }
         });
       }
     }
@@ -106,54 +133,63 @@ export const checkComplianceForTenant = async (tenantId: string) => {
 
   // 2. SEBI CERTIFICATE EXPIRY CHECK (90-day warning)
   if (tenant.certificateValidity) {
-    const daysLeft = Math.ceil((tenant.certificateValidity.getTime() - Date.now()) / (1000 * 3600 * 24));
+    const certDate = new Date(tenant.certificateValidity);
+    const daysLeft = Math.ceil((certDate.getTime() - Date.now()) / (1000 * 3600 * 24));
     if (daysLeft <= 90) {
-      const description = `SEBI Certificate validity expires in ${daysLeft} days (valid until: ${tenant.certificateValidity.toDateString()}).`;
+      const description = `SEBI Certificate validity expires in ${daysLeft} days (valid until: ${certDate.toDateString()}).`;
       const severity = daysLeft <= 15 ? 'HIGH' : 'MEDIUM';
-      const existingAlert = await prisma.complianceAlert.findFirst({ where: { tenantId, alertType: 'CERTIFICATE_EXPIRY', status: 'OPEN' } });
+      const existingAlert = await dynamicDb.ComplianceAlert.findOne({
+        tenantId,
+        alertType: 'CERTIFICATE_EXPIRY',
+        status: 'OPEN'
+      }).lean();
+
       if (!existingAlert) {
-        alertsCreated.push(await prisma.complianceAlert.create({ data: { tenantId, alertType: 'CERTIFICATE_EXPIRY', severity, description } }));
-      } else {
-        const updated = await prisma.complianceAlert.update({
-          where: { id: existingAlert.id },
-          data: { severity, description }
+        const newAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'CERTIFICATE_EXPIRY',
+          severity,
+          description
         });
+        alertsCreated.push(newAlert.toObject());
+      } else {
+        const updated = await dynamicDb.ComplianceAlert.findByIdAndUpdate(
+          existingAlert._id,
+          { $set: { severity, description } },
+          { returnDocument: 'after', lean: true }
+        );
         alertsCreated.push(updated);
       }
     }
   }
 
   // 3. NISM STAFF EXPIRY CHECK (90-day warning, severity levels: LOW/MEDIUM/HIGH)
-  const rawStaffMembers = await prisma.staff.findMany({
-    where: {
-      user: {
-        tenantId,
-      },
-      status: 'ACTIVE'
-    },
-    include: {
-      user: {
-        include: { role: true }
-      }
-    }
-  });
-  const staffMembers = rawStaffMembers.filter(st => st.user && !st.user.deletedAt);
+  const rawStaffMembers = await dynamicDb.Staff.find({
+    userId: { $in: tenantUserIds },
+    status: 'ACTIVE'
+  })
+    .populate({
+      path: 'userId',
+      populate: { path: 'role' }
+    })
+    .lean();
+
+  const staffMembers = rawStaffMembers.filter((st: any) => st.userId && !st.userId.deletedAt);
 
   for (const staff of staffMembers) {
     if (staff.nismValidity) {
-      const daysLeft = Math.ceil((staff.nismValidity.getTime() - Date.now()) / (1000 * 3600 * 24));
+      const nismDate = new Date(staff.nismValidity);
+      const daysLeft = Math.ceil((nismDate.getTime() - Date.now()) / (1000 * 3600 * 24));
       
-      const existingAlert = await prisma.complianceAlert.findFirst({
-        where: {
-          tenantId,
-          alertType: 'NISM_EXPIRY',
-          status: 'OPEN',
-          description: { contains: `Staff "${staff.name}"` }
-        }
-      });
+      const existingAlert = await dynamicDb.ComplianceAlert.findOne({
+        tenantId,
+        alertType: 'NISM_EXPIRY',
+        status: 'OPEN',
+        description: { $regex: `Staff "${staff.name}"`, $options: 'i' }
+      }).lean();
 
       if (daysLeft <= 90) {
-        const formattedExpiryDate = staff.nismValidity.toLocaleDateString('en-IN', {
+        const formattedExpiryDate = nismDate.toLocaleDateString('en-IN', {
           day: '2-digit',
           month: '2-digit',
           year: 'numeric'
@@ -169,21 +205,27 @@ export const checkComplianceForTenant = async (tenantId: string) => {
 
         if (existingAlert) {
           if (existingAlert.description !== description || existingAlert.severity !== severity) {
-            await prisma.complianceAlert.update({
-              where: { id: existingAlert.id },
-              data: { description, severity }
+            await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingAlert._id, {
+              $set: { description, severity }
             });
           }
         } else {
-          alertsCreated.push(await prisma.complianceAlert.create({
-            data: { tenantId, alertType: 'NISM_EXPIRY', severity, description }
-          }));
+          const newAlert = await dynamicDb.ComplianceAlert.create({
+            tenantId,
+            alertType: 'NISM_EXPIRY',
+            severity,
+            description
+          });
+          alertsCreated.push(newAlert.toObject());
         }
       } else {
         if (existingAlert) {
-          await prisma.complianceAlert.update({
-            where: { id: existingAlert.id },
-            data: { status: 'CLOSED', remarks: 'NISM Certificate validity updated/renewed.', closedAt: new Date() }
+          await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingAlert._id, {
+            $set: {
+              status: 'CLOSED',
+              remarks: 'NISM Certificate validity updated/renewed.',
+              closedAt: new Date()
+            }
           });
         }
       }
@@ -191,81 +233,125 @@ export const checkComplianceForTenant = async (tenantId: string) => {
   }
 
   // Clean up alerts for staff members who are no longer active or present
-  const openNismAlerts = await prisma.complianceAlert.findMany({
-    where: { tenantId, alertType: 'NISM_EXPIRY', status: 'OPEN' }
-  });
+  const openNismAlerts = await dynamicDb.ComplianceAlert.find({
+    tenantId,
+    alertType: 'NISM_EXPIRY',
+    status: 'OPEN'
+  }).lean();
+
   for (const alert of openNismAlerts) {
-    const matchesActiveStaff = staffMembers.some(st => alert.description.includes(`Staff "${st.name}"`));
+    const matchesActiveStaff = staffMembers.some((st: any) => alert.description.includes(`Staff "${st.name}"`));
     if (!matchesActiveStaff) {
-      await prisma.complianceAlert.update({
-        where: { id: alert.id },
-        data: { status: 'CLOSED', remarks: 'Staff member is no longer active or has been removed.', closedAt: new Date() }
+      await dynamicDb.ComplianceAlert.findByIdAndUpdate(alert._id, {
+        $set: {
+          status: 'CLOSED',
+          remarks: 'Staff member is no longer active or has been removed.',
+          closedAt: new Date()
+        }
       });
     }
   }
 
   // 4. MISSING KYC / AGREEMENT CHECK for active subscribers
-  const rawClientsWithSubscriptions = await prisma.client.findMany({
-    where: { 
-      user: { tenantId },
-      subscriptions: { some: { status: 'ACTIVE' } }
-    },
-    include: { agreements: true, subscriptions: true, user: true }
-  });
-  const clientsWithSubscriptions = rawClientsWithSubscriptions.filter(c => c.user && !c.user.deletedAt);
+  const rawClientsWithSubscriptions = await dynamicDb.Client.find({
+    userId: { $in: tenantUserIds }
+  })
+    .populate('agreements')
+    .populate('subscriptions')
+    .populate('userId')
+    .lean();
 
-  for (const client of clientsWithSubscriptions) {
+  const clientsWithSubscriptions = rawClientsWithSubscriptions.filter((c: any) => {
+    const hasActiveSub = (c.subscriptions || []).some((s: any) => s.status === 'ACTIVE');
+    return hasActiveSub && c.userId && !c.userId.deletedAt;
+  });
+
+  for (const clientItem of clientsWithSubscriptions) {
+    const client: any = clientItem;
+    const clientId = client._id;
     // 4a. KYC Check
     const isKycPending = ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
     const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (Status: ${client.status}).`;
-    const existingKycAlert = await prisma.complianceAlert.findFirst({ where: { tenantId, alertType: 'KYC_MISSING', status: 'OPEN', clientId: client.id } });
+    const existingKycAlert = await dynamicDb.ComplianceAlert.findOne({
+      tenantId,
+      alertType: 'KYC_MISSING',
+      status: 'OPEN',
+      clientId
+    }).lean();
     
     if (isKycPending) {
       if (!existingKycAlert) {
-        alertsCreated.push(await prisma.complianceAlert.create({
-          data: { tenantId, alertType: 'KYC_MISSING', severity: 'MEDIUM', description: kycDescription, clientId: client.id }
-        }));
+        const newAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'KYC_MISSING',
+          severity: 'MEDIUM',
+          description: kycDescription,
+          clientId
+        });
+        alertsCreated.push(newAlert.toObject());
       }
     } else {
       if (existingKycAlert) {
-        await prisma.complianceAlert.update({
-          where: { id: existingKycAlert.id },
-          data: { status: 'CLOSED', remarks: 'Daily auto-sweep: resolved as client completed KYC.', closedAt: new Date() }
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingKycAlert._id, {
+          $set: {
+            status: 'CLOSED',
+            remarks: 'Daily auto-sweep: resolved as client completed KYC.',
+            closedAt: new Date()
+          }
         });
       }
     }
 
     // 4b. Agreement Check
-    if (client.agreements.length === 0) {
+    const hasAgreements = Array.isArray(client.agreements) && client.agreements.length > 0;
+    if (!hasAgreements) {
       const aggDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but no signed agreement.`;
-      const existingAggAlert = await prisma.complianceAlert.findFirst({ where: { tenantId, alertType: 'AGREEMENT_MISSING', status: 'OPEN', description: aggDescription } });
+      const existingAggAlert = await dynamicDb.ComplianceAlert.findOne({
+        tenantId,
+        alertType: 'AGREEMENT_MISSING',
+        status: 'OPEN',
+        description: aggDescription
+      }).lean();
+
       if (!existingAggAlert) {
-        alertsCreated.push(await prisma.complianceAlert.create({
-          data: { tenantId, alertType: 'AGREEMENT_MISSING', severity: 'HIGH', description: aggDescription, clientId: client.id }
-        }));
+        const newAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'AGREEMENT_MISSING',
+          severity: 'HIGH',
+          description: aggDescription,
+          clientId
+        });
+        alertsCreated.push(newAlert.toObject());
       }
     }
   }
 
   // 4c. AUTO-CLOSE RESOLVED KYC/AGREEMENT ALERTS
   // For agreements
-  const openAgreementAlerts = await prisma.complianceAlert.findMany({
-    where: { tenantId, alertType: 'AGREEMENT_MISSING', status: 'OPEN' }
-  });
+  const openAgreementAlerts = await dynamicDb.ComplianceAlert.find({
+    tenantId,
+    alertType: 'AGREEMENT_MISSING',
+    status: 'OPEN'
+  }).lean();
+
   for (const alert of openAgreementAlerts) {
     if (alert.clientId) {
-      const client = await prisma.client.findUnique({
-        where: { id: alert.clientId },
-        include: { agreements: true, subscriptions: true }
-      });
+      const client: any = await dynamicDb.Client.findById(alert.clientId)
+        .populate('agreements')
+        .populate('subscriptions')
+        .lean();
+
       if (client) {
         const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-        const isAgreementComplete = client.agreements.length > 0;
-        const hasActiveSub = client.subscriptions.some((s: any) => s.status === 'ACTIVE');
+        const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
+        const hasActiveSub = (client.subscriptions || []).some((s: any) => s.status === 'ACTIVE');
         if ((isKycComplete && isAgreementComplete) || !hasActiveSub) {
-          await prisma.complianceAlert.update({
-            where: { id: alert.id },
-            data: { status: 'CLOSED', remarks: 'Daily auto-sweep: resolved or subscription ended.', closedAt: new Date() }
+          await dynamicDb.ComplianceAlert.findByIdAndUpdate(alert._id, {
+            $set: {
+              status: 'CLOSED',
+              remarks: 'Daily auto-sweep: resolved or subscription ended.',
+              closedAt: new Date()
+            }
           });
         }
       }
@@ -273,22 +359,28 @@ export const checkComplianceForTenant = async (tenantId: string) => {
   }
 
   // For KYC
-  const openKycAlerts = await prisma.complianceAlert.findMany({
-    where: { tenantId, alertType: 'KYC_MISSING', status: 'OPEN' }
-  });
+  const openKycAlerts = await dynamicDb.ComplianceAlert.find({
+    tenantId,
+    alertType: 'KYC_MISSING',
+    status: 'OPEN'
+  }).lean();
+
   for (const alert of openKycAlerts) {
     if (alert.clientId) {
-      const client = await prisma.client.findUnique({
-        where: { id: alert.clientId },
-        include: { subscriptions: true }
-      });
+      const client: any = await dynamicDb.Client.findById(alert.clientId)
+        .populate('subscriptions')
+        .lean();
+
       if (client) {
         const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-        const hasActiveSub = client.subscriptions.some((s: any) => s.status === 'ACTIVE');
+        const hasActiveSub = (client.subscriptions || []).some((s: any) => s.status === 'ACTIVE');
         if (isKycComplete || !hasActiveSub) {
-          await prisma.complianceAlert.update({
-            where: { id: alert.id },
-            data: { status: 'CLOSED', remarks: 'Resolved or client no longer has active subscription.', closedAt: new Date() }
+          await dynamicDb.ComplianceAlert.findByIdAndUpdate(alert._id, {
+            $set: {
+              status: 'CLOSED',
+              remarks: 'Resolved or client no longer has active subscription.',
+              closedAt: new Date()
+            }
           });
         }
       }
@@ -296,99 +388,84 @@ export const checkComplianceForTenant = async (tenantId: string) => {
   }
 
   // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 incl. GST per client per financial year
-  // Financial year: April 1 to March 31
   const today = new Date();
-  const fyStart = today.getMonth() >= 3  // April = month index 3
-    ? new Date(today.getFullYear(), 3, 1)        // Current year April 1
-    : new Date(today.getFullYear() - 1, 3, 1);   // Previous year April 1
-  const fyEnd = new Date(fyStart.getFullYear() + 1, 2, 31, 23, 59, 59); // March 31
+  const fyStart = today.getMonth() >= 3
+    ? new Date(today.getFullYear(), 3, 1)
+    : new Date(today.getFullYear() - 1, 3, 1);
+  const fyEnd = new Date(fyStart.getFullYear() + 1, 2, 31, 23, 59, 59);
 
-  const SEBI_FEE_CAP = 151000; // ₹1,51,000 incl. GST
+  const SEBI_FEE_CAP = 151000;
 
-  // Get all active clients for this tenant
-  const rawAllTenantClients = await prisma.client.findMany({
-    where: { user: { tenantId } },
-    select: { id: true, name: true, pan: true, user: true }
-  });
-  const allTenantClients = rawAllTenantClients.filter(c => c.user && !c.user.deletedAt);
+  const rawAllTenantClients = await dynamicDb.Client.find({
+    userId: { $in: tenantUserIds }
+  }).populate('userId').lean();
+
+  const allTenantClients = rawAllTenantClients.filter((c: any) => c.userId && !c.userId.deletedAt);
 
   for (const client of allTenantClients) {
-    // Sum all SUCCESS payments for this client in current FY
-    const clientPayments = await prisma.payment.findMany({
-      where: {
-        tenantId,
-        clientId: client.id,
-        status: 'SUCCESS',
-        createdAt: { gte: fyStart, lte: fyEnd }
-      },
-      select: { amount: true }
-    });
+    const clientId = client._id;
+    const clientPayments = await dynamicDb.Payment.find({
+      tenantId,
+      clientId,
+      status: 'SUCCESS',
+      createdAt: { $gte: fyStart, $lte: fyEnd }
+    }).select('amount').lean();
 
     const totalPaidFY = clientPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
 
-    const existingFeeAlert = await prisma.complianceAlert.findFirst({
-      where: {
-        tenantId,
-        alertType: 'SEBI_FEE_EXCEEDED',
-        status: 'OPEN',
-        clientId: client.id
-      }
-    });
+    const existingFeeAlert = await dynamicDb.ComplianceAlert.findOne({
+      tenantId,
+      alertType: 'SEBI_FEE_EXCEEDED',
+      status: 'OPEN',
+      clientId
+    }).lean();
 
     if (totalPaidFY > SEBI_FEE_CAP) {
       const excessAmount = totalPaidFY - SEBI_FEE_CAP;
       const description = `SEBI Fee Cap Violation (SR.17): Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has been charged ₹${totalPaidFY.toLocaleString('en-IN')} (incl. GST) in FY ${fyStart.getFullYear()}-${fyEnd.getFullYear()} — exceeds the SEBI limit of ₹1,51,000 by ₹${excessAmount.toLocaleString('en-IN')}. Refund or rectify immediately.`;
 
       if (!existingFeeAlert) {
-        const newAlert = await prisma.complianceAlert.create({
-          data: {
-            tenantId,
-            alertType: 'SEBI_FEE_EXCEEDED',
-            severity: 'HIGH',
-            description,
-            clientId: client.id
-          }
+        const newAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'SEBI_FEE_EXCEEDED',
+          severity: 'HIGH',
+          description,
+          clientId
         });
-        alertsCreated.push(newAlert);
+        alertsCreated.push(newAlert.toObject());
 
         // Auto-penalty for SR.17 violation — ₹10,000 per violation
-        const feeRequirement = await prisma.complianceRequirement.findFirst({
-          where: { serialNo: 17 }
-        });
+        const feeRequirement = await dynamicDb.ComplianceRequirement.findOne({
+          serialNo: 17
+        }).lean();
+
         if (feeRequirement) {
-          const feeAudit = await prisma.complianceAudit.create({
-            data: {
-              tenantId,
-              requirementId: feeRequirement.id,
-              status: 'NON_COMPLIANT',
-              officerRemarks: `System auto-generated: SEBI fee cap exceeded for client "${client.name}". Total charged: ₹${totalPaidFY.toLocaleString('en-IN')}`,
-            }
+          const feeAudit = await dynamicDb.ComplianceAudit.create({
+            tenantId,
+            requirementId: feeRequirement._id,
+            status: 'NON_COMPLIANT',
+            officerRemarks: `System auto-generated: SEBI fee cap exceeded for client "${client.name}". Total charged: ₹${totalPaidFY.toLocaleString('en-IN')}`
           });
-          await prisma.penalty.create({
-            data: {
-              tenantId,
-              auditId: feeAudit.id,
-              amount: 10000,
-              reason: `SEBI Fee Framework Violation (SR.17): Client "${client.name}" charged ₹${totalPaidFY.toLocaleString('en-IN')} incl. GST — exceeds ₹1,51,000 annual cap.`,
-              status: 'PENDING_PAYMENT'
-            }
+
+          await dynamicDb.Penalty.create({
+            tenantId,
+            auditId: feeAudit._id,
+            amount: 10000,
+            reason: `SEBI Fee Framework Violation (SR.17): Client "${client.name}" charged ₹${totalPaidFY.toLocaleString('en-IN')} incl. GST — exceeds ₹1,51,000 annual cap.`,
+            status: 'PENDING_PAYMENT'
           });
         }
       } else {
-        // Update alert description if amount changed
         if (existingFeeAlert.description !== description) {
-          await prisma.complianceAlert.update({
-            where: { id: existingFeeAlert.id },
-            data: { description }
+          await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingFeeAlert._id, {
+            $set: { description }
           });
         }
       }
     } else {
-      // Client is within limit — close any open alert
       if (existingFeeAlert) {
-        await prisma.complianceAlert.update({
-          where: { id: existingFeeAlert.id },
-          data: {
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingFeeAlert._id, {
+          $set: {
             status: 'CLOSED',
             remarks: `Auto-resolved: Client "${client.name}" total FY payment ₹${totalPaidFY.toLocaleString('en-IN')} is now within ₹1,51,000 cap.`,
             closedAt: new Date()
@@ -399,63 +476,67 @@ export const checkComplianceForTenant = async (tenantId: string) => {
   }
 
   // 5B. PAN COLLECTION FOR SEGREGATION CHECK (SR.48)
-  // Rule: Client has active subscription + KYC complete + PAN missing = alert + penalty
   const KYC_COMPLETE_STATUSES = ['AGREEMENT_PENDING', 'PAYMENT_PENDING', 'ACTIVE', 'INACTIVE'];
 
-  const rawClientsWithActivePlans = await prisma.client.findMany({
-    where: {
-      user: { tenantId },
-      subscriptions: { some: { status: 'ACTIVE' } },
-      status: { in: KYC_COMPLETE_STATUSES }
-    },
-    select: { id: true, name: true, pan: true, status: true, user: true }
+  const rawClientsWithActivePlans = await dynamicDb.Client.find({
+    userId: { $in: tenantUserIds },
+    status: { $in: KYC_COMPLETE_STATUSES }
+  })
+    .populate('subscriptions')
+    .populate('userId')
+    .lean();
+
+  const clientsWithActivePlans = rawClientsWithActivePlans.filter((c: any) => {
+    const hasActiveSub = (c.subscriptions || []).some((s: any) => s.status === 'ACTIVE');
+    return hasActiveSub && c.userId && !c.userId.deletedAt;
   });
-  const clientsWithActivePlans = rawClientsWithActivePlans.filter(c => c.user && !c.user.deletedAt);
 
   for (const client of clientsWithActivePlans) {
     const isPanMissing = !client.pan || client.pan.trim() === '';
+    const clientId = client._id;
 
-    const existingPanAlert = await prisma.complianceAlert.findFirst({
-      where: { tenantId, alertType: 'PAN_MISSING', status: 'OPEN', clientId: client.id }
-    });
+    const existingPanAlert = await dynamicDb.ComplianceAlert.findOne({
+      tenantId,
+      alertType: 'PAN_MISSING',
+      status: 'OPEN',
+      clientId
+    }).lean();
 
     if (isPanMissing) {
       const description = `PAN Collection Violation (SR.48): Client "${client.name}" has an active subscription and completed KYC, but PAN details are missing. PAN is mandatory for family/dependent segregation compliance under SEBI regulations.`;
 
       if (!existingPanAlert) {
-        const newPanAlert = await prisma.complianceAlert.create({
-          data: { tenantId, alertType: 'PAN_MISSING', severity: 'HIGH', description, clientId: client.id }
+        const newPanAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'PAN_MISSING',
+          severity: 'HIGH',
+          description,
+          clientId
         });
-        alertsCreated.push(newPanAlert);
+        alertsCreated.push(newPanAlert.toObject());
 
-        // Auto-penalty for SR.48 violation — ₹5,000
-        const panRequirement = await prisma.complianceRequirement.findFirst({ where: { serialNo: 48 } });
+        const panRequirement = await dynamicDb.ComplianceRequirement.findOne({ serialNo: 48 }).lean();
         if (panRequirement) {
-          const panAudit = await prisma.complianceAudit.create({
-            data: {
-              tenantId,
-              requirementId: panRequirement.id,
-              status: 'NON_COMPLIANT',
-              officerRemarks: `System auto-generated: PAN missing for client "${client.name}" with active subscription and completed KYC.`
-            }
+          const panAudit = await dynamicDb.ComplianceAudit.create({
+            tenantId,
+            requirementId: panRequirement._id,
+            status: 'NON_COMPLIANT',
+            officerRemarks: `System auto-generated: PAN missing for client "${client.name}" with active subscription and completed KYC.`
           });
-          await prisma.penalty.create({
-            data: {
-              tenantId,
-              auditId: panAudit.id,
-              amount: 5000,
-              reason: `PAN Collection Violation (SR.48): Client "${client.name}" — active subscription + KYC complete but PAN missing.`,
-              status: 'PENDING_PAYMENT'
-            }
+
+          await dynamicDb.Penalty.create({
+            tenantId,
+            auditId: panAudit._id,
+            amount: 5000,
+            reason: `PAN Collection Violation (SR.48): Client "${client.name}" — active subscription + KYC complete but PAN missing.`,
+            status: 'PENDING_PAYMENT'
           });
         }
       }
     } else {
-      // PAN exists — auto-close any open alert
       if (existingPanAlert) {
-        await prisma.complianceAlert.update({
-          where: { id: existingPanAlert.id },
-          data: {
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingPanAlert._id, {
+          $set: {
             status: 'CLOSED',
             remarks: `Auto-resolved: PAN "${client.pan}" collected for client "${client.name}".`,
             closedAt: new Date()
@@ -466,255 +547,301 @@ export const checkComplianceForTenant = async (tenantId: string) => {
   }
 
   // 5C. MISSING PRINCIPAL OFFICER CHECK (SR.7)
-  const hasPrincipalOfficer = staffMembers.some(st => st.user?.role?.name === 'PRINCIPAL_OFFICER');
-  const existingPoAlert = await prisma.complianceAlert.findFirst({
-    where: { tenantId, alertType: 'MISSING_PRINCIPAL_OFFICER', status: 'OPEN' }
+  const hasPrincipalOfficer = staffMembers.some((st: any) => {
+    const role = st.userId?.role || {};
+    return role.name === 'PRINCIPAL_OFFICER';
   });
+
+  const existingPoAlert = await dynamicDb.ComplianceAlert.findOne({
+    tenantId,
+    alertType: 'MISSING_PRINCIPAL_OFFICER',
+    status: 'OPEN'
+  }).lean();
+
   if (!hasPrincipalOfficer) {
     if (!existingPoAlert) {
       const description = `Compliance Alert: No Principal Officer found. Please designate a Principal Officer within 10 days to avoid a penalty.`;
-      const newAlert = await prisma.complianceAlert.create({
-        data: { tenantId, alertType: 'MISSING_PRINCIPAL_OFFICER', severity: 'MEDIUM', description }
+      const newAlert = await dynamicDb.ComplianceAlert.create({
+        tenantId,
+        alertType: 'MISSING_PRINCIPAL_OFFICER',
+        severity: 'MEDIUM',
+        description
       });
-      alertsCreated.push(newAlert);
+      alertsCreated.push(newAlert.toObject());
     } else {
       const ageInDays = (Date.now() - new Date(existingPoAlert.createdAt).getTime()) / (1000 * 3600 * 24);
       
       if (ageInDays >= 7 && ageInDays < 10 && existingPoAlert.severity !== 'HIGH') {
-         await prisma.complianceAlert.update({
-            where: { id: existingPoAlert.id },
-            data: { severity: 'HIGH', description: 'CRITICAL: No Principal Officer found. Appoint within 3 days to avoid a ₹5,000 penalty.' }
-         });
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingPoAlert._id, {
+          $set: {
+            severity: 'HIGH',
+            description: 'CRITICAL: No Principal Officer found. Appoint within 3 days to avoid a ₹5,000 penalty.'
+          }
+        });
       } else if (ageInDays >= 10) {
-         const poReq = await prisma.complianceRequirement.findFirst({ where: { serialNo: 7 } });
-         if (poReq) {
-            const existingAudit = await prisma.complianceAudit.findFirst({ 
-              where: { tenantId, requirementId: poReq.id, status: 'NON_COMPLIANT' } 
+        const poReq = await dynamicDb.ComplianceRequirement.findOne({ serialNo: 7 }).lean();
+        if (poReq) {
+          const existingAudit = await dynamicDb.ComplianceAudit.findOne({ 
+            tenantId,
+            requirementId: poReq._id,
+            status: 'NON_COMPLIANT'
+          }).lean();
+
+          if (!existingAudit) {
+            const penaltyDesc = `Compliance Violation (SR.7): No Principal Officer found after 10-day grace period. Designation is mandatory.`;
+            const poAudit = await dynamicDb.ComplianceAudit.create({
+              tenantId,
+              requirementId: poReq._id,
+              status: 'NON_COMPLIANT',
+              officerRemarks: 'System auto-generated: No Principal Officer designated after grace period.'
             });
-            if (!existingAudit) {
-                const penaltyDesc = `Compliance Violation (SR.7): No Principal Officer found after 10-day grace period. Designation is mandatory.`;
-                const poAudit = await prisma.complianceAudit.create({
-                  data: {
-                    tenantId,
-                    requirementId: poReq.id,
-                    status: 'NON_COMPLIANT',
-                    officerRemarks: 'System auto-generated: No Principal Officer designated after grace period.'
-                  }
-                });
-                await prisma.penalty.create({
-                  data: { tenantId, auditId: poAudit.id, amount: 5000, reason: penaltyDesc, status: 'PENDING_PAYMENT' }
-                });
-                await prisma.complianceAlert.update({
-                  where: { id: existingPoAlert.id },
-                  data: { description: penaltyDesc }
-                });
-            }
-         }
+            await dynamicDb.Penalty.create({
+              tenantId,
+              auditId: poAudit._id,
+              amount: 5000,
+              reason: penaltyDesc,
+              status: 'PENDING_PAYMENT'
+            });
+            await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingPoAlert._id, {
+              $set: { description: penaltyDesc }
+            });
+          }
+        }
       }
     }
   } else if (existingPoAlert) {
-    await prisma.complianceAlert.update({
-      where: { id: existingPoAlert.id },
-      data: { status: 'CLOSED', remarks: 'Auto-resolved: Principal Officer is now designated.', closedAt: new Date() }
+    await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingPoAlert._id, {
+      $set: {
+        status: 'CLOSED',
+        remarks: 'Auto-resolved: Principal Officer is now designated.',
+        closedAt: new Date()
+      }
     });
-    // Auto-resolve associated audit & penalty
-    const poReq = await prisma.complianceRequirement.findFirst({ where: { serialNo: 7 } });
+
+    const poReq = await dynamicDb.ComplianceRequirement.findOne({ serialNo: 7 }).lean();
     if (poReq) {
-      await prisma.complianceAudit.updateMany({
-        where: { tenantId, requirementId: poReq.id, status: { in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } },
-        data: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Principal Officer designated.' }
-      });
-      const poAudit = await prisma.complianceAudit.findFirst({ where: { tenantId, requirementId: poReq.id }, orderBy: { updatedAt: 'desc' } });
+      await dynamicDb.ComplianceAudit.updateMany(
+        { tenantId, requirementId: poReq._id, status: { $in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } },
+        { $set: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Principal Officer designated.' } }
+      );
+      const poAudit = await dynamicDb.ComplianceAudit.findOne({ tenantId, requirementId: poReq._id }).sort({ updatedAt: -1 }).lean();
       if (poAudit) {
-        await prisma.penalty.updateMany({
-          where: { auditId: poAudit.id, status: 'PENDING_PAYMENT' },
-          data: { status: 'WAIVED', remarks: 'Auto-waived: PO added' }
-        });
+        await dynamicDb.Penalty.updateMany(
+          { auditId: poAudit._id, status: 'PENDING_PAYMENT' },
+          { $set: { status: 'WAIVED', remarks: 'Auto-waived: PO added' } }
+        );
       }
     }
   }
 
   // 5D. MISSING COMPLIANCE OFFICER CHECK (SR.8)
-  const hasComplianceOfficer = staffMembers.some(st => st.user?.role?.name === 'COMPLIANCE_OFFICER');
- const existingCoAlert = await prisma.complianceAlert.findFirst({
-    where: { tenantId, alertType: 'MISSING_COMPLIANCE_OFFICER', status: 'OPEN' }
+  const hasComplianceOfficer = staffMembers.some((st: any) => {
+    const role = st.userId?.role || {};
+    return role.name === 'COMPLIANCE_OFFICER';
   });
+
+  const existingCoAlert = await dynamicDb.ComplianceAlert.findOne({
+    tenantId,
+    alertType: 'MISSING_COMPLIANCE_OFFICER',
+    status: 'OPEN'
+  }).lean();
+
   if (!hasComplianceOfficer) {
     if (!existingCoAlert) {
       const description = `Compliance Alert: No Compliance Officer found. Please designate a Compliance Officer within 10 days to avoid a penalty.`;
-      const newAlert = await prisma.complianceAlert.create({
-        data: { tenantId, alertType: 'MISSING_COMPLIANCE_OFFICER', severity: 'MEDIUM', description }
+      const newAlert = await dynamicDb.ComplianceAlert.create({
+        tenantId,
+        alertType: 'MISSING_COMPLIANCE_OFFICER',
+        severity: 'MEDIUM',
+        description
       });
-      alertsCreated.push(newAlert);
+      alertsCreated.push(newAlert.toObject());
     } else {
       const ageInDays = (Date.now() - new Date(existingCoAlert.createdAt).getTime()) / (1000 * 3600 * 24);
       
       if (ageInDays >= 7 && ageInDays < 10 && existingCoAlert.severity !== 'HIGH') {
-         await prisma.complianceAlert.update({
-            where: { id: existingCoAlert.id },
-            data: { severity: 'HIGH', description: 'CRITICAL: No Compliance Officer found. Appoint within 3 days to avoid a ₹20,000 penalty.' }
-         });
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingCoAlert._id, {
+          $set: {
+            severity: 'HIGH',
+            description: 'CRITICAL: No Compliance Officer found. Appoint within 3 days to avoid a ₹20,000 penalty.'
+          }
+        });
       } else if (ageInDays >= 10) {
-         const coReq = await prisma.complianceRequirement.findFirst({ where: { serialNo: 8 } });
-         if (coReq) {
-            const existingAudit = await prisma.complianceAudit.findFirst({ 
-              where: { tenantId, requirementId: coReq.id, status: 'NON_COMPLIANT' } 
+        const coReq = await dynamicDb.ComplianceRequirement.findOne({ serialNo: 8 }).lean();
+        if (coReq) {
+          const existingAudit = await dynamicDb.ComplianceAudit.findOne({ 
+            tenantId,
+            requirementId: coReq._id,
+            status: 'NON_COMPLIANT'
+          }).lean();
+
+          if (!existingAudit) {
+            const penaltyDesc = `Compliance Violation (SR.8): No Compliance Officer found after 10-day grace period. Appointment is mandatory.`;
+            const coAudit = await dynamicDb.ComplianceAudit.create({
+              tenantId,
+              requirementId: coReq._id,
+              status: 'NON_COMPLIANT',
+              officerRemarks: 'System auto-generated: No Compliance Officer designated after grace period.'
             });
-            if (!existingAudit) {
-                const penaltyDesc = `Compliance Violation (SR.8): No Compliance Officer found after 10-day grace period. Appointment is mandatory.`;
-                const coAudit = await prisma.complianceAudit.create({
-                  data: {
-                    tenantId,
-                    requirementId: coReq.id,
-                    status: 'NON_COMPLIANT',
-                    officerRemarks: 'System auto-generated: No Compliance Officer designated after grace period.'
-                  }
-                });
-                await prisma.penalty.create({
-                  data: { tenantId, auditId: coAudit.id, amount: 20000, reason: penaltyDesc, status: 'PENDING_PAYMENT' }
-                });
-                await prisma.complianceAlert.update({
-                  where: { id: existingCoAlert.id },
-                  data: { description: penaltyDesc }
-                });
-            }
-         }
+            await dynamicDb.Penalty.create({
+              tenantId,
+              auditId: coAudit._id,
+              amount: 20000,
+              reason: penaltyDesc,
+              status: 'PENDING_PAYMENT'
+            });
+            await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingCoAlert._id, {
+              $set: { description: penaltyDesc }
+            });
+          }
+        }
       }
     }
   } else if (existingCoAlert) {
-    await prisma.complianceAlert.update({
-      where: { id: existingCoAlert.id },
-      data: { status: 'CLOSED', remarks: 'Auto-resolved: Compliance Officer is now designated.', closedAt: new Date() }
+    await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingCoAlert._id, {
+      $set: {
+        status: 'CLOSED',
+        remarks: 'Auto-resolved: Compliance Officer is now designated.',
+        closedAt: new Date()
+      }
     });
-    // Auto-resolve associated audit & penalty
-    const coReq = await prisma.complianceRequirement.findFirst({ where: { serialNo: 8 } });
+
+    const coReq = await dynamicDb.ComplianceRequirement.findOne({ serialNo: 8 }).lean();
     if (coReq) {
-      await prisma.complianceAudit.updateMany({
-        where: { tenantId, requirementId: coReq.id, status: { in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } },
-        data: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Compliance Officer designated.' }
-      });
-      const coAudit = await prisma.complianceAudit.findFirst({ where: { tenantId, requirementId: coReq.id }, orderBy: { updatedAt: 'desc' } });
+      await dynamicDb.ComplianceAudit.updateMany(
+        { tenantId, requirementId: coReq._id, status: { $in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } },
+        { $set: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Compliance Officer designated.' } }
+      );
+      const coAudit = await dynamicDb.ComplianceAudit.findOne({ tenantId, requirementId: coReq._id }).sort({ updatedAt: -1 }).lean();
       if (coAudit) {
-        await prisma.penalty.updateMany({
-          where: { auditId: coAudit.id, status: 'PENDING_PAYMENT' },
-          data: { status: 'WAIVED', remarks: 'Auto-waived: CO added' }
-        });
+        await dynamicDb.Penalty.updateMany(
+          { auditId: coAudit._id, status: 'PENDING_PAYMENT' },
+          { $set: { status: 'WAIVED', remarks: 'Auto-waived: CO added' } }
+        );
       }
     }
   }
 
   // 5E. INTERNAL POLICIES URL MISSING (SR.11)
   const isPolicyMissing = !tenant.internalPolicyUrl || tenant.internalPolicyUrl.trim() === '';
-  const existingPolicyAlert = await prisma.complianceAlert.findFirst({
-    where: { tenantId, alertType: 'MISSING_INTERNAL_POLICY', status: 'OPEN' }
-  });
+  const existingPolicyAlert = await dynamicDb.ComplianceAlert.findOne({
+    tenantId,
+    alertType: 'MISSING_INTERNAL_POLICY',
+    status: 'OPEN'
+  }).lean();
+
   if (isPolicyMissing) {
     if (!existingPolicyAlert) {
       const description = `Compliance Violation (SR.11): Written internal policies and controls are missing. Please upload/provide the Internal Policy URL in Settings.`;
-      alertsCreated.push(await prisma.complianceAlert.create({
-        data: { tenantId, alertType: 'MISSING_INTERNAL_POLICY', severity: 'MEDIUM', description }
-      }));
+      const newAlert = await dynamicDb.ComplianceAlert.create({
+        tenantId,
+        alertType: 'MISSING_INTERNAL_POLICY',
+        severity: 'MEDIUM',
+        description
+      });
+      alertsCreated.push(newAlert.toObject());
     }
   } else if (existingPolicyAlert) {
-    await prisma.complianceAlert.update({
-      where: { id: existingPolicyAlert.id },
-      data: { status: 'CLOSED', remarks: 'Auto-resolved: Internal policy provided.', closedAt: new Date() }
+    await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingPolicyAlert._id, {
+      $set: {
+        status: 'CLOSED',
+        remarks: 'Auto-resolved: Internal policy provided.',
+        closedAt: new Date()
+      }
     });
   }
 
   // 5F. COMPLAINT RESOLUTION TIMELINE (SR.28)
-  // Check complaints unresolved for > 21 days
-  const overdueComplaints = await prisma.complaint.findMany({
-    where: {
-      tenantId,
-      status: 'OPEN',
-      receivedAt: { lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
-    }
-  });
+  const overdueComplaints = await dynamicDb.Complaint.find({
+    tenantId,
+    status: 'OPEN',
+    receivedAt: { $lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
+  }).lean();
 
   for (const complaint of overdueComplaints) {
+    const complaintIdStr = complaint._id.toString();
     const description = `Compliance Violation (SR.28): Complaint (${complaint.subject}) is unresolved for over 21 days. Penalty of ₹100 per complaint applies.`;
-    const existingOverdueComplaintAlert = await prisma.complianceAlert.findFirst({
-      where: { tenantId, alertType: 'COMPLAINT_OVERDUE', status: 'OPEN', description: { contains: complaint.id } }
-    });
+    const existingOverdueComplaintAlert = await dynamicDb.ComplianceAlert.findOne({
+      tenantId,
+      alertType: 'COMPLAINT_OVERDUE',
+      status: 'OPEN',
+      description: { $regex: complaintIdStr, $options: 'i' }
+    }).lean();
 
     if (!existingOverdueComplaintAlert) {
-      const newAlert = await prisma.complianceAlert.create({
-        data: { tenantId, alertType: 'COMPLAINT_OVERDUE', severity: 'HIGH', description: `${description} [Ref: ${complaint.id}]` }
+      const newAlert = await dynamicDb.ComplianceAlert.create({
+        tenantId,
+        alertType: 'COMPLAINT_OVERDUE',
+        severity: 'HIGH',
+        description: `${description} [Ref: ${complaintIdStr}]`
       });
-      alertsCreated.push(newAlert);
+      alertsCreated.push(newAlert.toObject());
 
-      const overdueReq = await prisma.complianceRequirement.findFirst({ where: { serialNo: 28 } });
+      const overdueReq = await dynamicDb.ComplianceRequirement.findOne({ serialNo: 28 }).lean();
       if (overdueReq) {
-        const audit = await prisma.complianceAudit.create({
-          data: {
-            tenantId,
-            requirementId: overdueReq.id,
-            status: 'NON_COMPLIANT',
-            officerRemarks: `System auto-generated: Complaint ${complaint.id} unresolved > 21 days.`
-          }
+        const audit = await dynamicDb.ComplianceAudit.create({
+          tenantId,
+          requirementId: overdueReq._id,
+          status: 'NON_COMPLIANT',
+          officerRemarks: `System auto-generated: Complaint ${complaintIdStr} unresolved > 21 days.`
         });
-        await prisma.penalty.create({
-          data: {
-            tenantId,
-            auditId: audit.id,
-            amount: 100,
-            reason: `Complaint resolution timeline exceeded for complaint ${complaint.id}`,
-            status: 'PENDING_PAYMENT'
-          }
+        await dynamicDb.Penalty.create({
+          tenantId,
+          auditId: audit._id,
+          amount: 100,
+          reason: `Complaint resolution timeline exceeded for complaint ${complaintIdStr}`,
+          status: 'PENDING_PAYMENT'
         });
       }
     }
   }
 
   // 6. PREEMPTIVE COMPLIANCE AUDIT GENERATION & OVERDUE STATUS MANAGEMENT
-  const activeRules = await prisma.complianceRequirement.findMany({ where: { isActive: true } });
+  const activeRules = await dynamicDb.ComplianceRequirement.find({ isActive: true }).lean();
   const now = new Date();
 
   for (const rule of activeRules) {
     const initialNextDueDate = calculateNextDueDate(rule.frequencyType, rule.serialNo, new Date(), tenant.createdAt);
     if (!initialNextDueDate) continue;
 
-    // Find the latest audit for this requirement and tenant
-    let latestAudit = await prisma.complianceAudit.findFirst({
-      where: {
-        tenantId,
-        requirementId: rule.id
-      },
-      orderBy: { dueDate: 'desc' }
-    });
+    let latestAudit: any = await dynamicDb.ComplianceAudit.findOne({
+      tenantId,
+      requirementId: rule._id
+    }).sort({ dueDate: -1 }).lean();
 
     if (!latestAudit) {
-      // Create initial pending audit
-      latestAudit = await prisma.complianceAudit.create({
-        data: {
-          tenantId,
-          requirementId: rule.id,
-          status: 'PENDING',
-          dueDate: initialNextDueDate
-        }
+      const created = await dynamicDb.ComplianceAudit.create({
+        tenantId,
+        requirementId: rule._id,
+        status: 'PENDING',
+        dueDate: initialNextDueDate
       });
+      latestAudit = created.toObject();
     }
 
-    // Catch-up Loop: process overdue audits and stack penalties
     let keepCatchingUp = true;
     while (keepCatchingUp) {
-      // If latestAudit is in the future or current period (not past due), we are caught up
-      if (!latestAudit.dueDate || latestAudit.dueDate.getTime() >= now.getTime()) {
+      const latestDueDate = latestAudit.dueDate ? new Date(latestAudit.dueDate) : null;
+      if (!latestDueDate || latestDueDate.getTime() >= now.getTime()) {
         keepCatchingUp = false;
 
-        // If the latest audit is ALREADY resolved, spawn the next one preemptively
         if (latestAudit.status === 'COMPLIANT' || latestAudit.status === 'PENALTY_RESOLVED' || latestAudit.status === 'PENALIZED') {
-          if (latestAudit.dueDate) {
-            const nextRefDate = new Date(latestAudit.dueDate.getTime() + 24 * 60 * 60 * 1000);
+          if (latestDueDate) {
+            const nextRefDate = new Date(latestDueDate.getTime() + 24 * 60 * 60 * 1000);
             const nextDueDate = calculateNextDueDate(rule.frequencyType, rule.serialNo, nextRefDate);
-            if (nextDueDate && nextDueDate.getTime() > latestAudit.dueDate.getTime()) {
-              const existingNext = await prisma.complianceAudit.findFirst({
-                where: { tenantId, requirementId: rule.id, dueDate: nextDueDate }
-              });
+            if (nextDueDate && nextDueDate.getTime() > latestDueDate.getTime()) {
+              const existingNext = await dynamicDb.ComplianceAudit.findOne({
+                tenantId,
+                requirementId: rule._id,
+                dueDate: nextDueDate
+              }).lean();
+
               if (!existingNext) {
-                await prisma.complianceAudit.create({
-                  data: { tenantId, requirementId: rule.id, status: 'PENDING', dueDate: nextDueDate }
+                await dynamicDb.ComplianceAudit.create({
+                  tenantId,
+                  requirementId: rule._id,
+                  status: 'PENDING',
+                  dueDate: nextDueDate
                 });
               }
             }
@@ -723,69 +850,67 @@ export const checkComplianceForTenant = async (tenantId: string) => {
         break;
       }
 
-      // At this point, latestAudit is past due.
-      // 1. Mark as OVERDUE and apply penalty if it's still PENDING
+      // Past due
       if (latestAudit.status === 'PENDING') {
-        latestAudit = await prisma.complianceAudit.update({
-          where: { id: latestAudit.id },
-          data: { status: 'OVERDUE' }
-        });
+        latestAudit = await dynamicDb.ComplianceAudit.findByIdAndUpdate(
+          latestAudit._id,
+          { $set: { status: 'OVERDUE' } },
+          { returnDocument: 'after', lean: true }
+        );
 
-        // Trigger penalty if defined
         if (rule.penaltyAmount) {
           const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
           const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
 
-          const existingPenalty = await prisma.penalty.findUnique({
-            where: { auditId: latestAudit.id }
-          });
+          const existingPenalty = await dynamicDb.Penalty.findOne({
+            auditId: latestAudit._id
+          }).lean();
 
           if (!existingPenalty) {
-            await prisma.penalty.create({
-              data: {
-                tenantId,
-                auditId: latestAudit.id,
-                amount: penaltyAmt,
-                reason: `Overdue compliance: ${rule.requirement}`,
-                status: 'PENDING_PAYMENT'
-              }
+            await dynamicDb.Penalty.create({
+              tenantId,
+              auditId: latestAudit._id,
+              amount: penaltyAmt,
+              reason: `Overdue compliance: ${rule.requirement}`,
+              status: 'PENDING_PAYMENT'
             });
           }
         }
       }
 
-      // 2. Generate the next period's audit REGARDLESS of its resolution status
-      const nextRefDate = new Date(latestAudit.dueDate!.getTime() + 24 * 60 * 60 * 1000);
+      const nextRefDate = new Date(latestDueDate.getTime() + 24 * 60 * 60 * 1000);
       const nextDueDate = calculateNextDueDate(rule.frequencyType, rule.serialNo, nextRefDate);
 
-      // Guard against infinite loop
-      if (!nextDueDate || nextDueDate.getTime() <= latestAudit.dueDate!.getTime()) {
+      if (!nextDueDate || nextDueDate.getTime() <= latestDueDate.getTime()) {
         keepCatchingUp = false;
         break;
       }
 
-      // Check if audit for nextDueDate already exists
-      const existingNext = await prisma.complianceAudit.findFirst({
-        where: { tenantId, requirementId: rule.id, dueDate: nextDueDate }
-      });
+      const existingNext = await dynamicDb.ComplianceAudit.findOne({
+        tenantId,
+        requirementId: rule._id,
+        dueDate: nextDueDate
+      }).lean();
 
       if (existingNext) {
         latestAudit = existingNext;
       } else {
-        // Create new PENDING audit for the next period
-        latestAudit = await prisma.complianceAudit.create({
-          data: {
-            tenantId,
-            requirementId: rule.id,
-            status: 'PENDING',
-            dueDate: nextDueDate
-          }
+        const created = await dynamicDb.ComplianceAudit.create({
+          tenantId,
+          requirementId: rule._id,
+          status: 'PENDING',
+          dueDate: nextDueDate
         });
+        latestAudit = created.toObject();
       }
     }
   }
 
   return alertsCreated;
+} catch (err: any) {
+  console.error('checkComplianceForTenant error:', err?.message);
+  return [];
+}
 };
 
 export const runComplianceCheck = async (req: AuthenticatedRequest, res: Response) => {
@@ -796,15 +921,26 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
       const queryTenant = req.query.tenantId as string;
       if (queryTenant) {
         const alertsCreated = await checkComplianceForTenant(queryTenant);
-        return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
+        syncTenantToRemote(queryTenant, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+        return res.status(200).json({
+          success: true,
+          message: 'Compliance verification completed successfully.',
+          alertsGenerated: alertsCreated.length,
+          data: alertsCreated
+        });
       } else {
-        const tenants = await prisma.tenant.findMany({ where: { deletedAt: null } });
+        const tenants = await dynamicDb.Tenant.find({ deletedAt: null }).lean();
         let totalAlerts = 0;
         for (const t of tenants) {
-          const alerts = await checkComplianceForTenant(t.id);
+          const alerts = await checkComplianceForTenant(t._id.toString());
           totalAlerts += alerts.length;
         }
-        return res.status(200).json({ success: true, message: 'Compliance verification completed for all companies.', alertsGenerated: totalAlerts });
+        syncAllTenantsToRemote({ reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+        return res.status(200).json({
+          success: true,
+          message: 'Compliance verification completed for all companies.',
+          alertsGenerated: totalAlerts
+        });
       }
     }
 
@@ -813,7 +949,13 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
     }
 
     const alertsCreated = await checkComplianceForTenant(tenantId);
-    return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
+    syncTenantToRemote(tenantId, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+    return res.status(200).json({
+      success: true,
+      message: 'Compliance verification completed successfully.',
+      alertsGenerated: alertsCreated.length,
+      data: alertsCreated
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -823,25 +965,31 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   try {
-    const alerts = await prisma.complianceAlert.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } });
+    const alerts = await dynamicDb.ComplianceAlert.find({ tenantId })
+      .sort({ createdAt: -1 })
+      .lean();
     
-    const alertsWithPenalty = await Promise.all(alerts.map(async (alert) => {
+    const alertsWithPenalty = await Promise.all(alerts.map(async (alert: any) => {
       if (alert.alertType === 'PENALTY_LEVIED' && alert.remarks) {
         const match = alert.remarks.match(/Associated with Audit ID:\s*([a-f0-9\-]+)/i);
         if (match && match[1]) {
           const auditId = match[1].trim();
-          const penalty = await prisma.penalty.findFirst({
-            where: { auditId }
-          });
+          const penalty = await dynamicDb.Penalty.findOne({
+            auditId
+          }).lean();
           if (penalty) {
             return {
               ...alert,
-              penaltyId: penalty.id
+              id: alert._id?.toString() || alert.id,
+              penaltyId: penalty._id?.toString() || penalty.id
             };
           }
         }
       }
-      return alert;
+      return {
+        ...alert,
+        id: alert._id?.toString() || alert.id
+      };
     }));
 
     return res.status(200).json({ success: true, data: alertsWithPenalty });
@@ -855,7 +1003,7 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
   const { remarks, actualDepositAmount } = req.body;
   const proofUrl = req.file ? `/uploads/compliance/${req.file.filename}` : undefined;
   try {
-    const alert = await prisma.complianceAlert.findUnique({ where: { id } });
+    const alert = await dynamicDb.ComplianceAlert.findById(id).lean();
     if (!alert) return res.status(404).json({ success: false, message: 'Compliance alert not found.' });
 
     // Validate if client's KYC/Agreement/PAN is complete for DB-backed alerts
@@ -863,15 +1011,14 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
       if (!alert.clientId) {
         return res.status(400).json({ success: false, message: 'This alert is not linked to a valid client ID.' });
       }
-      const client = await prisma.client.findUnique({
-        where: { id: alert.clientId },
-        include: { agreements: true }
-      });
+      const client: any = await dynamicDb.Client.findById(alert.clientId)
+        .populate('agreements')
+        .lean();
       if (!client) {
         return res.status(404).json({ success: false, message: 'Client associated with this alert not found.' });
       }
       const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-      const isAgreementComplete = client.agreements.length > 0;
+      const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
       const isPanComplete = !!(client.pan && client.pan.trim() !== '');
 
       if (alert.alertType === 'AGREEMENT_MISSING') {
@@ -897,38 +1044,71 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      if (alert.alertType === 'DEPOSIT_LOW' && actualDepositAmount) {
-        await tx.tenant.update({ where: { id: alert.tenantId }, data: { depositAmount: { increment: parseFloat(actualDepositAmount) } } });
-      }
-      
-      const updatedAlert = await tx.complianceAlert.update({ where: { id }, data: { status: 'CLOSED', remarks, proofUrl, closedAt: new Date() } });
+    if (alert.alertType === 'DEPOSIT_LOW' && actualDepositAmount) {
+      await dynamicDb.Tenant.findByIdAndUpdate(alert.tenantId, {
+        $inc: { depositAmount: parseFloat(actualDepositAmount) }
+      });
+    }
+    
+    const updatedAlert = await dynamicDb.ComplianceAlert.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: 'CLOSED',
+          remarks,
+          proofUrl,
+          closedAt: new Date()
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
 
-      if (alert.alertType === 'DEADLINE_UPCOMING') {
-        const requirements = await tx.complianceRequirement.findMany();
-        const matchedReq = requirements.find(r => alert.description.includes(r.requirement));
-        if (matchedReq) {
-           const tenant = await tx.tenant.findUnique({ where: { id: alert.tenantId }});
-           const p = getCompliancePeriod(matchedReq.frequencyType, new Date(), tenant?.createdAt);
-           let audit = await tx.complianceAudit.findFirst({
-              where: { tenantId: alert.tenantId, requirementId: matchedReq.id, dueDate: { gte: p.startDate, lte: p.dueDate } }
-           });
-           if (!audit) {
-               await tx.complianceAudit.create({
-                  data: { tenantId: alert.tenantId, requirementId: matchedReq.id, status: 'COMPLIANT', officerRemarks: remarks || 'Resolved from alerts desk', proofDocumentUrl: proofUrl, dueDate: p.dueDate, resolvedAt: new Date(), updatedByUserId: req.user!.id }
-               });
-           } else if (audit.status !== 'COMPLIANT') {
-               await tx.complianceAudit.update({
-                  where: { id: audit.id },
-                  data: { status: 'COMPLIANT', officerRemarks: remarks || 'Resolved from alerts desk', proofDocumentUrl: proofUrl || audit.proofDocumentUrl, resolvedAt: new Date(), updatedByUserId: req.user!.id }
-               });
-           }
+    if (alert.alertType === 'DEADLINE_UPCOMING') {
+      const requirements = await dynamicDb.ComplianceRequirement.find().lean();
+      const matchedReq = requirements.find((r: any) => alert.description.includes(r.requirement));
+      if (matchedReq) {
+        const tenant = await dynamicDb.Tenant.findById(alert.tenantId).lean();
+        const p = getCompliancePeriod(matchedReq.frequencyType, new Date(), tenant?.createdAt);
+        let audit = await dynamicDb.ComplianceAudit.findOne({
+          tenantId: alert.tenantId,
+          requirementId: matchedReq._id,
+          dueDate: { $gte: p.startDate, $lte: p.dueDate }
+        }).lean();
+
+        if (!audit) {
+          await dynamicDb.ComplianceAudit.create({
+            tenantId: alert.tenantId,
+            requirementId: matchedReq._id,
+            status: 'COMPLIANT',
+            officerRemarks: remarks || 'Resolved from alerts desk',
+            proofDocumentUrl: proofUrl,
+            dueDate: p.dueDate,
+            resolvedAt: new Date(),
+            updatedByUserId: req.user!.id
+          });
+        } else if (audit.status !== 'COMPLIANT') {
+          await dynamicDb.ComplianceAudit.findByIdAndUpdate(audit._id, {
+            $set: {
+              status: 'COMPLIANT',
+              officerRemarks: remarks || 'Resolved from alerts desk',
+              proofDocumentUrl: proofUrl || audit.proofDocumentUrl,
+              resolvedAt: new Date(),
+              updatedByUserId: req.user!.id
+            }
+          });
         }
       }
+    }
 
-      return updatedAlert;
+    await logAudit({
+      tenantId: alert.tenantId.toString(),
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'COMPLIANCE',
+      oldValue: alert,
+      newValue: updatedAlert,
+      ipAddress: req.ip
     });
-    await logAudit({ tenantId: alert.tenantId, userId: req.user!.id, action: 'UPDATE', module: 'COMPLIANCE', oldValue: alert, newValue: result, ipAddress: req.ip });
 
     // Write to ComplianceAuditHistory for alert resolution
     const alertTypeToSerialNo: Record<string, number> = {
@@ -943,33 +1123,43 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
     const serialNo = alertTypeToSerialNo[alert.alertType];
     if (serialNo) {
       try {
-        const requirement = await prisma.complianceRequirement.findFirst({ where: { serialNo } });
-        const tenant = await prisma.tenant.findUnique({ where: { id: alert.tenantId } });
+        const requirement = await dynamicDb.ComplianceRequirement.findOne({ serialNo }).lean();
+        const tenant = await dynamicDb.Tenant.findById(alert.tenantId).lean();
         if (requirement) {
           const period = getCompliancePeriod(requirement.frequencyType, new Date(), tenant?.createdAt);
-          let audit = await prisma.complianceAudit.findFirst({
-            where: { tenantId: alert.tenantId, requirementId: requirement.id, dueDate: { gte: period.startDate, lte: period.dueDate } }
-          });
+          let audit = await dynamicDb.ComplianceAudit.findOne({
+            tenantId: alert.tenantId,
+            requirementId: requirement._id,
+            dueDate: { $gte: period.startDate, $lte: period.dueDate }
+          }).lean();
+
           if (!audit) {
-            audit = await prisma.complianceAudit.create({
-              data: { tenantId: alert.tenantId, requirementId: requirement.id, status: 'COMPLIANT', dueDate: period.dueDate, resolvedAt: new Date(), updatedByUserId: req.user!.id, officerRemarks: `Auto-resolved via alert closure: ${alert.alertType}` }
-            });
-          }
-          const updaterUser = await prisma.user.findUnique({ where: { id: req.user!.id } });
-          const updatedByName = updaterUser ? `${updaterUser.firstName} ${updaterUser.lastName}` : 'System';
-          await prisma.complianceAuditHistory.create({
-            data: {
+            const created = await dynamicDb.ComplianceAudit.create({
               tenantId: alert.tenantId,
-              requirementId: requirement.id,
-              auditId: audit.id,
-              previousStatus: audit.status,
-              newStatus: 'COMPLIANT',
-              officerRemarks: `Alert resolved: ${alert.alertType.replace(/_/g, ' ')}. ${remarks || ''}`,
-              proofDocumentUrl: proofUrl,
+              requirementId: requirement._id,
+              status: 'COMPLIANT',
+              dueDate: period.dueDate,
+              resolvedAt: new Date(),
               updatedByUserId: req.user!.id,
-              updatedByName,
-              periodLabel: period.label
-            }
+              officerRemarks: `Auto-resolved via alert closure: ${alert.alertType}`
+            });
+            audit = created.toObject();
+          }
+
+          const updaterUser = await dynamicDb.User.findById(req.user!.id).lean();
+          const updatedByName = updaterUser ? `${updaterUser.firstName || ''} ${updaterUser.lastName || ''}`.trim() : 'System';
+
+          await dynamicDb.ComplianceAuditHistory.create({
+            tenantId: alert.tenantId,
+            requirementId: requirement._id,
+            auditId: audit._id,
+            previousStatus: audit.status,
+            newStatus: 'COMPLIANT',
+            officerRemarks: `Alert resolved: ${alert.alertType.replace(/_/g, ' ')}. ${remarks || ''}`,
+            proofDocumentUrl: proofUrl,
+            updatedByUserId: req.user!.id,
+            updatedByName,
+            periodLabel: period.label
           });
         }
       } catch (historyErr: any) {
@@ -977,7 +1167,13 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    return res.status(200).json({ success: true, message: 'Alert resolved successfully.', data: result });
+    syncTenantToRemote(alert.tenantId.toString(), { reason: 'ALERT_RESOLVED' }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      message: 'Alert resolved successfully.',
+      data: updatedAlert ? { ...updatedAlert, id: updatedAlert._id?.toString() || updatedAlert.id } : null
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -991,34 +1187,51 @@ export const getChecklist = async (req: AuthenticatedRequest, res: Response) => 
     return res.status(200).json({ success: true, data: [] });
   }
   try {
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found.' });
-    const requirements = await prisma.complianceRequirement.findMany({ 
-      where: { isActive: true },
-      orderBy: { serialNo: 'asc' } 
-    });
+    let tenant: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenant && tenantId) {
+      tenant = await dynamicDb.Tenant.findOne({
+        $or: [{ id: tenantId }, { tenantId: tenantId }]
+      }).lean();
+    }
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenant) {
+      tenant = { createdAt: new Date() };
+    }
 
-    const checklist = [];
+    const requirements = await dynamicDb.ComplianceRequirement.find({ isActive: true })
+      .sort({ serialNo: 1 })
+      .lean();
+
+    const checklist: any[] = [];
     const now = new Date();
 
-    for (const req of requirements) {
-      const period = getCompliancePeriod(req.frequencyType, now, tenant.createdAt);
+    for (const reqItem of requirements) {
+      const period = getCompliancePeriod(reqItem.frequencyType, now, tenant.createdAt);
       
-      const audit = await prisma.complianceAudit.findFirst({
-        where: {
-          tenantId,
-          requirementId: req.id,
-          dueDate: {
-            gte: period.startDate,
-            lte: period.dueDate
-          }
-        },
-        include: { penalty: true }
-      });
+      const audit: any = await dynamicDb.ComplianceAudit.findOne({
+        tenantId,
+        requirementId: reqItem._id,
+        dueDate: {
+          $gte: period.startDate,
+          $lte: period.dueDate
+        }
+      })
+        .populate('penalty')
+        .lean();
 
       checklist.push({
-        ...req,
-        audit: audit || null,
+        ...reqItem,
+        id: reqItem._id?.toString() || reqItem.id,
+        audit: audit ? {
+          ...audit,
+          id: audit._id?.toString() || audit.id,
+          penalty: audit.penalty ? { ...audit.penalty, id: (audit.penalty as any)._id?.toString() || (audit.penalty as any).id } : null
+        } : null,
         currentPeriod: period
       });
     }
@@ -1036,11 +1249,11 @@ export const updateAuditStatus = async (req: AuthenticatedRequest, res: Response
   const proofDocumentUrl = req.file ? `/uploads/compliance/${req.file.filename}` : undefined;
 
   try {
-    const requirement = await prisma.complianceRequirement.findUnique({ where: { id: requirementId } });
+    const requirement = await dynamicDb.ComplianceRequirement.findById(requirementId).lean();
     if (!requirement) {
       return res.status(404).json({ success: false, message: 'Compliance requirement not found.' });
     }
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const tenant = await dynamicDb.Tenant.findById(tenantId).lean();
 
     let parsedAmount = 5000;
     if (requirement.penaltyAmount) {
@@ -1053,16 +1266,14 @@ export const updateAuditStatus = async (req: AuthenticatedRequest, res: Response
     const period = getCompliancePeriod(requirement.frequencyType, new Date(), tenant?.createdAt);
 
     // Find the audit record for the current period
-    let audit = await prisma.complianceAudit.findFirst({
-      where: {
-        tenantId,
-        requirementId,
-        dueDate: {
-          gte: period.startDate,
-          lte: period.dueDate
-        }
+    let audit: any = await dynamicDb.ComplianceAudit.findOne({
+      tenantId,
+      requirementId,
+      dueDate: {
+        $gte: period.startDate,
+        $lte: period.dueDate
       }
-    });
+    }).lean();
 
     const previousStatus = audit ? audit.status : 'PENDING';
 
@@ -1072,96 +1283,98 @@ export const updateAuditStatus = async (req: AuthenticatedRequest, res: Response
     }
 
     if (!audit) {
-      audit = await prisma.complianceAudit.create({ 
-        data: { 
-          tenantId, 
-          requirementId, 
-          status, 
-          officerRemarks,
-          proofDocumentUrl,
-          dueDate: period.dueDate,
-          resolvedAt: status === 'COMPLIANT' ? new Date() : null,
-          updatedByUserId: req.user!.id
-        } 
-      });
-    } else {
-      audit = await prisma.complianceAudit.update({ 
-        where: { id: audit.id }, 
-        data: { 
-          status, 
-          officerRemarks,
-          ...(proofDocumentUrl && { proofDocumentUrl }),
-          dueDate: period.dueDate,
-          resolvedAt: status === 'COMPLIANT' ? new Date() : null,
-          updatedByUserId: req.user!.id
-        } 
-      });
-    }
-
-    const updaterUser = await prisma.user.findUnique({
-      where: { id: req.user!.id }
-    });
-    const updatedByName = updaterUser ? `${updaterUser.firstName} ${updaterUser.lastName}` : 'System';
-
-    // Write to ComplianceAuditHistory
-    await prisma.complianceAuditHistory.create({
-      data: {
-        tenantId,
-        requirementId,
-        auditId: audit.id,
-        previousStatus,
-        newStatus: status,
+      const created = await dynamicDb.ComplianceAudit.create({ 
+        tenantId, 
+        requirementId, 
+        status, 
         officerRemarks,
         proofDocumentUrl,
-        updatedByUserId: req.user!.id,
-        updatedByName,
-        periodLabel: period.label
-      }
+        dueDate: period.dueDate,
+        resolvedAt: status === 'COMPLIANT' ? new Date() : null,
+        updatedByUserId: req.user!.id
+      });
+      audit = created.toObject();
+    } else {
+      audit = await dynamicDb.ComplianceAudit.findByIdAndUpdate(
+        audit._id,
+        { 
+          $set: {
+            status, 
+            officerRemarks,
+            ...(proofDocumentUrl && { proofDocumentUrl }),
+            dueDate: period.dueDate,
+            resolvedAt: status === 'COMPLIANT' ? new Date() : null,
+            updatedByUserId: req.user!.id
+          }
+        },
+        { returnDocument: 'after', lean: true }
+      );
+    }
+
+    const updaterUser = await dynamicDb.User.findById(req.user!.id).lean();
+    const updatedByName = updaterUser ? `${updaterUser.firstName || ''} ${updaterUser.lastName || ''}`.trim() : 'System';
+
+    // Write to ComplianceAuditHistory
+    await dynamicDb.ComplianceAuditHistory.create({
+      tenantId,
+      requirementId,
+      auditId: audit._id,
+      previousStatus,
+      newStatus: status,
+      officerRemarks,
+      proofDocumentUrl,
+      updatedByUserId: req.user!.id,
+      updatedByName,
+      periodLabel: period.label
     });
 
     // Auto-levy penalty and compliance alert if marked NON_COMPLIANT
     if (status === 'NON_COMPLIANT') {
-      const existingPenalty = await prisma.penalty.findUnique({ where: { auditId: audit.id } });
+      const existingPenalty = await dynamicDb.Penalty.findOne({ auditId: audit._id }).lean();
       if (!existingPenalty) {
-        await prisma.penalty.create({
-          data: {
-            tenantId,
-            auditId: audit.id,
-            amount: parsedAmount,
-            reason: `Non-compliance with rule: ${requirement.requirement}`,
-            status: 'PENDING_PAYMENT'
-          }
+        await dynamicDb.Penalty.create({
+          tenantId,
+          auditId: audit._id,
+          amount: parsedAmount,
+          reason: `Non-compliance with rule: ${requirement.requirement}`,
+          status: 'PENDING_PAYMENT'
         });
 
-        await prisma.complianceAlert.create({
-          data: {
-            tenantId,
-            alertType: 'PENALTY_LEVIED',
-            severity: requirement.severityLevel || 'HIGH',
-            description: `SEBI Penalty Risk: Rs.${parsedAmount.toLocaleString()} can be levied for non-compliance with rule: "${requirement.requirement}". Please upload payment proof and reference to close this penalty.`,
-            status: 'OPEN',
-            remarks: `Associated with Audit ID: ${audit.id}`
-          }
+        await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'PENALTY_LEVIED',
+          severity: requirement.severityLevel || 'HIGH',
+          description: `SEBI Penalty Risk: Rs.${parsedAmount.toLocaleString()} can be levied for non-compliance with rule: "${requirement.requirement}". Please upload payment proof and reference to close this penalty.`,
+          status: 'OPEN',
+          remarks: `Associated with Audit ID: ${audit._id.toString()}`
         });
       }
     } else if (status === 'COMPLIANT') {
       // Auto-resolve any DEADLINE_UPCOMING alerts for this requirement
-      await prisma.complianceAlert.updateMany({
-        where: { 
+      await dynamicDb.ComplianceAlert.updateMany(
+        { 
           tenantId, 
           alertType: 'DEADLINE_UPCOMING', 
           status: 'OPEN',
-          description: { contains: requirement.requirement }
+          description: { $regex: requirement.requirement, $options: 'i' }
         },
-        data: { 
-          status: 'CLOSED', 
-          remarks: 'Auto-resolved: Checklist marked as COMPLIANT.', 
-          closedAt: new Date() 
+        { 
+          $set: {
+            status: 'CLOSED', 
+            remarks: 'Auto-resolved: Checklist marked as COMPLIANT.', 
+            closedAt: new Date()
+          }
         }
-      });
+      );
     }
 
-    return res.status(200).json({ success: true, message: 'Compliance task resolved.', data: audit });
+    syncTenantToRemote(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      message: 'Compliance task resolved.',
+      data: audit ? { ...audit, id: audit._id?.toString() || audit.id } : null
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -1173,16 +1386,24 @@ export const getChecklistHistory = async (req: AuthenticatedRequest, res: Respon
     return res.status(200).json({ success: true, data: [] });
   }
   try {
-    const history = await prisma.complianceAuditHistory.findMany({
-      where: { tenantId },
-      include: {
-        requirement: true
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
+    const history = await dynamicDb.ComplianceAuditHistory.find({ tenantId })
+      .populate('requirementId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formattedHistory = history.map((h: any) => {
+      const reqDoc = h.requirementId || h.requirement;
+      return {
+        ...h,
+        id: h._id?.toString() || h.id,
+        requirement: reqDoc ? {
+          ...reqDoc,
+          id: reqDoc._id?.toString() || reqDoc.id
+        } : null
+      };
     });
-    return res.status(200).json({ success: true, data: history });
+
+    return res.status(200).json({ success: true, data: formattedHistory });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -1196,12 +1417,32 @@ export const getPenalties = async (req: AuthenticatedRequest, res: Response) => 
     return res.status(200).json({ success: true, data: [] });
   }
   try {
-    const penalties = await (prisma as any).penalty.findMany({
-      where: { tenantId },
-      include: { audit: { include: { requirement: true } } },
-      orderBy: { audit: { updatedAt: 'desc' } }
+    const penalties = await dynamicDb.Penalty.find({ tenantId })
+      .populate({
+        path: 'auditId',
+        populate: { path: 'requirementId' }
+      })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const formattedPenalties = penalties.map((p: any) => {
+      const audit = p.auditId || p.audit;
+      const reqDoc = audit?.requirementId || audit?.requirement;
+      return {
+        ...p,
+        id: p._id?.toString() || p.id,
+        audit: audit ? {
+          ...audit,
+          id: audit._id?.toString() || audit.id,
+          requirement: reqDoc ? {
+            ...reqDoc,
+            id: reqDoc._id?.toString() || reqDoc.id
+          } : null
+        } : null
+      };
     });
-    return res.status(200).json({ success: true, data: penalties });
+
+    return res.status(200).json({ success: true, data: formattedPenalties });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -1220,7 +1461,6 @@ export const resolvePenalty = async (req: AuthenticatedRequest, res: Response) =
     if (!paymentRef || !paymentRef.trim()) {
       return res.status(400).json({ success: false, message: 'Payment Reference ID is mandatory.' });
     }
-
   }
 
   if (!remarks || !remarks.trim()) {
@@ -1228,73 +1468,81 @@ export const resolvePenalty = async (req: AuthenticatedRequest, res: Response) =
   }
 
   try {
-    const penalty = await prisma.penalty.findUnique({
-      where: { id },
-      include: {
-        audit: {
-          include: {
-            requirement: true
-          }
+    const penalty: any = await dynamicDb.Penalty.findById(id)
+      .populate({
+        path: 'auditId',
+        populate: { path: 'requirementId' }
+      })
+      .lean();
+
+    const audit = penalty?.auditId || penalty?.audit;
+    if (!penalty || !audit) return res.status(404).json({ success: false, message: 'Penalty not found.' });
+    
+    const updated = await dynamicDb.Penalty.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: 'PAID', 
+          paymentRef: resolutionType === 'Paid' ? paymentRef : 'WAIVED_COMPLIANT', 
+          proofUrl, 
+          remarks, 
+          paidAt: new Date() 
         }
-      }
-    });
-    if (!penalty || !penalty.audit) return res.status(404).json({ success: false, message: 'Penalty not found.' });
+      },
+      { returnDocument: 'after', lean: true }
+    );
     
-    const updated = await prisma.penalty.update({
-      where: { id },
-      data: { 
-        status: 'PAID', 
-        paymentRef: resolutionType === 'Paid' ? paymentRef : 'WAIVED_COMPLIANT', 
-        proofUrl, 
-        remarks, 
-        paidAt: new Date() 
+    await dynamicDb.ComplianceAudit.findByIdAndUpdate(audit._id, {
+      $set: {
+        status: resolutionType.toUpperCase(),
+        officerRemarks: `Penalty resolved as ${resolutionType}. ${remarks || ''}`
       }
-    });
-    
-    await prisma.complianceAudit.update({
-      where: { id: penalty.auditId },
-      data: { status: resolutionType.toUpperCase(), officerRemarks: `Penalty resolved as ${resolutionType}. ${remarks || ''}` }
     });
 
-    const updaterUser = await prisma.user.findUnique({
-      where: { id: req.user!.id }
-    });
-    const updatedByName = updaterUser ? `${updaterUser.firstName} ${updaterUser.lastName}` : 'System';
-    const period = getCompliancePeriod(penalty.audit.requirement.frequencyType, penalty.audit.updatedAt || new Date());
+    const updaterUser = await dynamicDb.User.findById(req.user!.id).lean();
+    const updatedByName = updaterUser ? `${updaterUser.firstName || ''} ${updaterUser.lastName || ''}`.trim() : 'System';
+    const requirement = audit.requirementId || audit.requirement;
+    const period = getCompliancePeriod(requirement?.frequencyType || 'CONTINUOUS', audit.updatedAt || new Date());
 
     // Write to ComplianceAuditHistory when resolving penalty
-    await prisma.complianceAuditHistory.create({
-      data: {
-        tenantId: penalty.tenantId,
-        requirementId: penalty.audit.requirementId,
-        auditId: penalty.auditId,
-        previousStatus: penalty.audit.status,
-        newStatus: resolutionType.toUpperCase(),
-        officerRemarks: `Penalty paid. Ref: ${paymentRef}. ${remarks || ''}`,
-        proofDocumentUrl: proofUrl,
-        updatedByUserId: req.user!.id,
-        updatedByName,
-        periodLabel: period.label
-      }
+    await dynamicDb.ComplianceAuditHistory.create({
+      tenantId: penalty.tenantId,
+      requirementId: audit.requirementId?._id || audit.requirementId,
+      auditId: audit._id,
+      previousStatus: audit.status,
+      newStatus: resolutionType.toUpperCase(),
+      officerRemarks: `Penalty paid. Ref: ${paymentRef}. ${remarks || ''}`,
+      proofDocumentUrl: proofUrl,
+      updatedByUserId: req.user!.id,
+      updatedByName,
+      periodLabel: period.label
     });
 
     // Close the corresponding compliance alert
-    await prisma.complianceAlert.updateMany({
-      where: { 
+    await dynamicDb.ComplianceAlert.updateMany(
+      { 
         tenantId: penalty.tenantId, 
         alertType: 'PENALTY_LEVIED', 
         status: 'OPEN',
-        remarks: { contains: penalty.auditId }
+        remarks: { $regex: audit._id.toString(), $options: 'i' }
       },
-      data: {
-        status: 'CLOSED',
-        closedAt: new Date(),
-        remarks: `Resolved via Penalty Payment. Ref: ${paymentRef}. ${remarks || ''}`,
-        proofUrl
+      {
+        $set: {
+          status: 'CLOSED',
+          closedAt: new Date(),
+          remarks: `Resolved via Penalty Payment. Ref: ${paymentRef}. ${remarks || ''}`,
+          proofUrl
+        }
       }
-    });
+    );
     
-    return res.status(200).json({ success: true, message: 'Penalty resolved successfully.', data: updated });
+    syncTenantToRemote(penalty.tenantId.toString(), { reason: 'PENALTY_RESOLVED' }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      message: 'Penalty resolved successfully.',
+      data: updated ? { ...updated, id: updated._id?.toString() || updated.id } : null
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -1305,33 +1553,61 @@ const getMetricsForTenant = async (tenantId: string, res: Response) => {
     const now = new Date();
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    const audits = await prisma.complianceAudit.findMany({
-      where: { tenantId },
-      include: { requirement: true, penalty: true }
-    });
+    const audits = await dynamicDb.ComplianceAudit.find({ tenantId })
+      .populate('requirementId')
+      .populate('penalty')
+      .populate('tenantId')
+      .lean();
 
-    const upcoming = audits.filter(a => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      a.dueDate && a.dueDate >= now && a.dueDate <= thirtyDaysFromNow
-    );
+    const normalizeAudit = (a: any) => {
+      const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+      const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || {});
+      return {
+        ...a,
+        id: a._id ? a._id.toString() : a.id,
+        requirement: {
+          id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+          serialNo: reqObj.serialNo,
+          requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+          frequency: reqObj.frequency,
+          frequencyType: reqObj.frequencyType,
+          severityLevel: reqObj.severityLevel,
+          penaltyAmount: reqObj.penaltyAmount
+        },
+        requirementId: reqObj,
+        tenant: {
+          id: tenObj._id ? tenObj._id.toString() : (tenObj.id || tenantId),
+          companyName: tenObj.companyName || '—',
+          sebiRegistration: tenObj.sebiRegistration || '—',
+          domainUrl: tenObj.domainUrl || null,
+          website: tenObj.website || null
+        },
+        penalty: a.penalty || null
+      };
+    };
 
-    const due = audits.filter(a => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      a.dueDate && a.dueDate >= now
-    );
+    const upcoming = audits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
+      a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
+    ).map(normalizeAudit);
 
-    const overdue = audits.filter(a => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      ((a.dueDate && a.dueDate < now) || a.status === 'OVERDUE')
-    );
+    const due = audits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
+      a.dueDate && new Date(a.dueDate) >= now
+    ).map(normalizeAudit);
 
-    const penalty = audits.filter(a => 
-      a.penalty && a.penalty.status === 'PENDING_PAYMENT'
-    );
+    const overdue = audits.filter((a: any) => 
+      ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+      a.status === 'OVERDUE'
+    ).map(normalizeAudit);
 
-    const closed = audits.filter(a => 
-      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED'
-    );
+    const penalty = audits.filter((a: any) => 
+      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+    ).map(normalizeAudit);
+
+    const closed = audits.filter((a: any) => 
+      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+    ).map(normalizeAudit);
 
     return res.status(200).json({
       success: true,
@@ -1346,7 +1622,8 @@ const getMetricsForTenant = async (tenantId: string, res: Response) => {
           due: due.length,
           overdue: overdue.length,
           penalty: penalty.length,
-          closed: closed.length
+          closed: closed.length,
+          total: audits.length
         }
       }
     });
@@ -1360,32 +1637,61 @@ const getGlobalComplianceMetrics = async (res: Response) => {
     const now = new Date();
     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    const audits = await prisma.complianceAudit.findMany({
-      include: { requirement: true, penalty: true, tenant: true }
-    });
+    const audits = await dynamicDb.ComplianceAudit.find()
+      .populate('requirementId')
+      .populate('penalty')
+      .populate('tenantId')
+      .lean();
 
-    const upcoming = audits.filter(a => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      a.dueDate && a.dueDate >= now && a.dueDate <= thirtyDaysFromNow
-    );
+    const normalizeAudit = (a: any) => {
+      const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+      const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || {});
+      return {
+        ...a,
+        id: a._id ? a._id.toString() : a.id,
+        requirement: {
+          id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+          serialNo: reqObj.serialNo,
+          requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+          frequency: reqObj.frequency,
+          frequencyType: reqObj.frequencyType,
+          severityLevel: reqObj.severityLevel,
+          penaltyAmount: reqObj.penaltyAmount
+        },
+        requirementId: reqObj,
+        tenant: {
+          id: tenObj._id ? tenObj._id.toString() : (tenObj.id || ''),
+          companyName: tenObj.companyName || '—',
+          sebiRegistration: tenObj.sebiRegistration || '—',
+          domainUrl: tenObj.domainUrl || null,
+          website: tenObj.website || null
+        },
+        penalty: a.penalty || null
+      };
+    };
 
-    const due = audits.filter(a => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      a.dueDate && a.dueDate >= now
-    );
+    const upcoming = audits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') && 
+      a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow
+    ).map(normalizeAudit);
 
-    const overdue = audits.filter(a => 
-      (a.status === 'PENDING' || a.status === 'OVERDUE') && 
-      ((a.dueDate && a.dueDate < now) || a.status === 'OVERDUE')
-    );
+    const due = audits.filter((a: any) => 
+      (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') && 
+      a.dueDate && new Date(a.dueDate) >= now
+    ).map(normalizeAudit);
 
-    const penalty = audits.filter(a => 
-      a.penalty && a.penalty.status === 'PENDING_PAYMENT'
-    );
+    const overdue = audits.filter((a: any) => 
+      ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) || 
+      a.status === 'OVERDUE'
+    ).map(normalizeAudit);
 
-    const closed = audits.filter(a => 
-      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED'
-    );
+    const penalty = audits.filter((a: any) => 
+      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+    ).map(normalizeAudit);
+
+    const closed = audits.filter((a: any) => 
+      a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED'
+    ).map(normalizeAudit);
 
     return res.status(200).json({
       success: true,
@@ -1400,7 +1706,8 @@ const getGlobalComplianceMetrics = async (res: Response) => {
           due: due.length,
           overdue: overdue.length,
           penalty: penalty.length,
-          closed: closed.length
+          closed: closed.length,
+          total: audits.length
         }
       }
     });
@@ -1435,87 +1742,111 @@ export const getPeriodicReportData = async (req: AuthenticatedRequest, res: Resp
     const end = endDate ? new Date(endDate as string) : new Date();
     const start = startDate ? new Date(startDate as string) : new Date(end.getFullYear(), end.getMonth() - 6, end.getDate());
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      include: {
-        users: { include: { staff: true, client: true } }
-      }
-    });
+    let tenant: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenant && tenantId) {
+      tenant = await dynamicDb.Tenant.findOne({
+        $or: [{ id: tenantId }, { tenantId: tenantId }]
+      }).lean();
+    }
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenant) {
+      tenant = { createdAt: new Date() };
+    }
 
-    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
+    const tenantUsers = await dynamicDb.User.find({ tenantId, deletedAt: null }).select('_id roleId').populate('role').lean();
+    const tenantUserIds = tenantUsers.map(u => u._id);
 
     // 1. Half Yearly Report Data
-    const reportsPublished = await prisma.researchReport.count({
-      where: {
-        tenantId,
-        status: 'PUBLISHED',
-        publishedAt: { gte: start, lte: end }
-      }
+    const reportsPublished = await dynamicDb.ResearchReport.countDocuments({
+      tenantId,
+      status: 'PUBLISHED',
+      publishedAt: { $gte: start, $lte: end }
     });
 
-    const staffMembers = await prisma.staff.findMany({
-      where: { user: { tenantId, deletedAt: null }, status: 'ACTIVE' },
-      include: { user: { include: { role: true } } }
-    });
+    const staffMembers = await dynamicDb.Staff.find({
+      userId: { $in: tenantUserIds },
+      status: 'ACTIVE'
+    })
+      .populate({
+        path: 'userId',
+        populate: { path: 'role' }
+      })
+      .lean();
 
-    const raCount = staffMembers.filter(s => s.user.role.name === 'RESEARCHER' || s.user.role.name === 'ADMIN').length;
-    const parsCount = staffMembers.filter(s => ['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(s.user.role.name)).length;
+    const raCount = staffMembers.filter((s: any) => {
+      const roleName = s.userId?.role?.name;
+      return roleName === 'RESEARCHER' || roleName === 'ADMIN';
+    }).length;
+
+    const parsCount = staffMembers.filter((s: any) => {
+      const roleName = s.userId?.role?.name;
+      return ['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(roleName);
+    }).length;
+
     const totalEmployees = staffMembers.length;
     
-    const complianceOfficer = staffMembers.find(s => s.user.role.name === 'COMPLIANCE_OFFICER');
-    const principalOfficer = staffMembers.find(s => s.user.role.name === 'PRINCIPAL_OFFICER');
+    const complianceOfficer = staffMembers.find((s: any) => s.userId?.role?.name === 'COMPLIANCE_OFFICER');
+    const principalOfficer = staffMembers.find((s: any) => s.userId?.role?.name === 'PRINCIPAL_OFFICER');
 
     // 2. Complaints Data
-    const complaintsReceived = await prisma.complaint.count({
-      where: { tenantId, receivedAt: { gte: start, lte: end } }
+    const complaintsReceived = await dynamicDb.Complaint.countDocuments({
+      tenantId,
+      receivedAt: { $gte: start, $lte: end }
     });
-    const complaintsResolved = await prisma.complaint.count({
-      where: { tenantId, resolvedAt: { gte: start, lte: end } }
+    const complaintsResolved = await dynamicDb.Complaint.countDocuments({
+      tenantId,
+      resolvedAt: { $gte: start, $lte: end }
     });
     
-    const complaintsPendingStart = await prisma.complaint.count({
-      where: { 
-        tenantId, 
-        receivedAt: { lt: start },
-        OR: [
-          { status: 'OPEN' },
-          { resolvedAt: { gte: start } }
-        ]
-      }
+    const complaintsPendingStart = await dynamicDb.Complaint.countDocuments({
+      tenantId,
+      receivedAt: { $lt: start },
+      $or: [
+        { status: 'OPEN' },
+        { resolvedAt: { $gte: start } }
+      ]
     });
 
     const complaintsPendingEnd = complaintsPendingStart + complaintsReceived - complaintsResolved;
 
     // 3. Clients and Fees
-    const clientsAtStart = await prisma.client.count({
-      where: { 
-        user: { tenantId, deletedAt: null },
-        subscriptions: { some: { startDate: { lt: start }, endDate: { gte: start }, status: 'ACTIVE' } }
-      }
-    });
+    const allClients = await dynamicDb.Client.find({
+      userId: { $in: tenantUserIds }
+    }).populate('subscriptions').lean();
 
-    const clientsAcquired = await prisma.client.count({
-      where: {
-        user: { tenantId, deletedAt: null },
-        subscriptions: { some: { startDate: { gte: start, lte: end }, status: 'ACTIVE' } }
-      }
-    });
+    const clientsAtStart = allClients.filter((c: any) => {
+      return (c.subscriptions || []).some((s: any) =>
+        new Date(s.startDate) < start && new Date(s.endDate) >= start && s.status === 'ACTIVE'
+      );
+    }).length;
+
+    const clientsAcquired = allClients.filter((c: any) => {
+      return (c.subscriptions || []).some((s: any) =>
+        new Date(s.startDate) >= start && new Date(s.startDate) <= end && s.status === 'ACTIVE'
+      );
+    }).length;
     
-    const clientsAtEnd = await prisma.client.count({
-      where: {
-        user: { tenantId, deletedAt: null },
-        subscriptions: { some: { startDate: { lte: end }, endDate: { gte: end }, status: 'ACTIVE' } }
-      }
-    });
+    const clientsAtEnd = allClients.filter((c: any) => {
+      return (c.subscriptions || []).some((s: any) =>
+        new Date(s.startDate) <= end && new Date(s.endDate) >= end && s.status === 'ACTIVE'
+      );
+    }).length;
 
     let clientsExpired = clientsAtStart + clientsAcquired - clientsAtEnd;
     if (clientsExpired < 0) clientsExpired = 0;
 
-    const payments = await prisma.payment.aggregate({
-      where: { tenantId, status: 'SUCCESS', createdAt: { gte: start, lte: end } },
-      _sum: { amount: true }
-    });
-    const feesCollected = payments._sum.amount || 0;
+    const payments = await dynamicDb.Payment.find({
+      tenantId,
+      status: 'SUCCESS',
+      createdAt: { $gte: start, $lte: end }
+    }).select('amount').lean();
+
+    const feesCollected = payments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
 
     const reportData = {
       tenant: {
@@ -1557,10 +1888,10 @@ export const getPeriodicReportData = async (req: AuthenticatedRequest, res: Resp
           mobile: principalOfficer.mobile,
           nismNumber: principalOfficer.nismNumber
         } : null,
-        allStaff: staffMembers.map(s => ({
+        allStaff: staffMembers.map((s: any) => ({
           name: s.name,
           email: s.email,
-          role: s.user.role.name,
+          role: s.userId?.role?.name,
           nismNumber: s.nismNumber,
           nismValidity: s.nismValidity
         }))
@@ -1591,15 +1922,22 @@ export const getPeriodicReportData = async (req: AuthenticatedRequest, res: Resp
 
 export const getPeriodicReportMeta = async (req: any, res: Response) => {
   try {
-    const tenantId = req.user!.tenantId;
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { createdAt: true }
-    });
-    if (!tenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
+    const tenantId = req.user?.tenantId;
+    let tenant: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenant = await dynamicDb.Tenant.findById(tenantId).select('createdAt').lean();
+    }
+    if (!tenant && tenantId) {
+      tenant = await dynamicDb.Tenant.findOne({
+        $or: [{ id: tenantId }, { tenantId: tenantId }]
+      }).select('createdAt').lean();
+    }
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).select('createdAt').lean();
+    }
     
     // The registration date's financial year
-    const regDate = tenant.createdAt;
+    const regDate = tenant?.createdAt ? new Date(tenant.createdAt) : new Date();
     const regFinYear = regDate.getMonth() >= 3 ? regDate.getFullYear() : regDate.getFullYear() - 1;
     
     return res.status(200).json({ success: true, data: { startYear: regFinYear } });

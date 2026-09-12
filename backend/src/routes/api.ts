@@ -3,10 +3,11 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp } from '../controllers/authController';
-import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory } from '../controllers/superAdminController';
+import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
+import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
-import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse } from '../controllers/clientController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
+import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
 import { createTicket, listTickets, getTicket, replyTicket, listAdminTickets, getAdminTicket, replyAdminTicket, closeAdminTicket } from '../controllers/ticketController';
@@ -25,6 +26,8 @@ import { getMarketOverview } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
 import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
 import { getGlobalBranding, updateGlobalBranding, testSmtpConnection } from '../controllers/systemSettingController';
+import { getTenantPermissions, updateTenantPermissions } from '../controllers/permissionController';
+import { bootstrapTenant, syncTenantUpdate, syncTenantStatus, syncTenantDelete, getTenantSyncConfig } from '../controllers/tenantSyncController';
 
 const router = Router();
 
@@ -68,7 +71,7 @@ const fileFilter = (req: any, file: any, cb: any) => {
   ];
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv'];
-  
+
   if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
     cb(null, true);
   } else {
@@ -94,6 +97,8 @@ router.get('/auth/me', authenticateJWT, getMe);
 router.post('/auth/change-password', authenticateJWT, changePassword);
 router.post('/auth/logout', authenticateJWT, logout);
 router.get('/public/tenants', getPublicTenants);
+router.get('/public/clients', getThirdPartyClients);
+router.get('/clients', getThirdPartyClients);
 router.post('/public/request-otp', requestOtp);
 router.post('/public/verify-otp', verifyOtp);
 // ----------------------------------------------------
@@ -138,6 +143,7 @@ router.get(
   requireRoles(['SUPER_ADMIN']),
   getTenants
 );
+
 router.post(
   '/super-admin/tenants/:id/status',
   authenticateJWT,
@@ -190,6 +196,100 @@ router.put(
   ]),
   updateTenantDetails
 );
+router.post(
+  '/super-admin/tenants/:id/provision-db',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  provisionTenantDb
+);
+router.post(
+  '/super-admin/tenants/:id/sync-api',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncTenantApi
+);
+router.post(
+  '/super-admin/test-mongo-connection',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  testMongoConnection
+);
+router.post(
+  '/super-admin/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/tenants/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/verify-domain',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  verifyDomainUrl
+);
+// Universal Remote Instance Webhook Sync Endpoints
+router.post('/sync/bootstrap', bootstrapTenant);
+router.post('/sync/tenant', bootstrapTenant);
+router.post('/sync/update', syncTenantUpdate);
+router.post('/sync/status', syncTenantStatus);
+router.post('/sync/delete', syncTenantDelete);
+router.get('/sync/config', getTenantSyncConfig);
+router.get('/tenant/sync-config', getTenantSyncConfig);
+
+router.get(
+  '/super-admin/tenants/:id/clients',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyClients
+);
+router.get(
+  '/super-admin/tenants/:id/staff',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyStaff
+);
+router.get(
+  '/super-admin/tenants/:id/compliance',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyCompliance
+);
+router.post(
+  '/super-admin/tenants/:id/compliance/sweep',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  runCompanyComplianceSweep
+);
+router.use('/third-party-api', thirdPartyRoutes);
+router.get(
+  '/super-admin/tenants/:tenantId/permissions',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getTenantPermissions
+);
+router.put(
+  '/super-admin/tenants/:tenantId/permissions',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  updateTenantPermissions
+);
+router.post(
+  '/super-admin/tenants/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/verify-domain',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  verifyDomainUrl
+);
 router.put(
   '/super-admin/password',
   authenticateJWT,
@@ -219,6 +319,24 @@ router.get(
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   getGlobalTelemetry
+);
+router.get(
+  '/super-admin/dashboard',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getGlobalTelemetry
+);
+router.get(
+  '/super-admin/dashboard-stats',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getGlobalTelemetry
+);
+router.get(
+  '/super-admin/companies/:id/panel-stats',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyPanelStats
 );
 
 // ----------------------------------------------------
@@ -251,7 +369,7 @@ router.put(
   authenticateJWT,
   requirePermission('ACCESS_SETTINGS'),
   upload.fields([
-    { name: 'logo', maxCount: 1 }, 
+    { name: 'logo', maxCount: 1 },
     { name: 'favicon', maxCount: 1 },
     { name: 'termsPdf', maxCount: 1 },
     { name: 'privacyPdf', maxCount: 1 },
@@ -264,6 +382,7 @@ router.get('/admin/email-templates', authenticateJWT, requireRoles(['ADMIN', 'PR
 router.put('/admin/email-templates/:type', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), updateEmailTemplate);
 router.post('/admin/test-smtp', authenticateJWT, requireRoles(['ADMIN']), testSmtp);
 router.post('/admin/test-smtp-connection', authenticateJWT, requireRoles(['ADMIN']), testSmtpConnection);
+router.post('/admin/verify-payment-gateway', authenticateJWT, requireRoles(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), verifyPaymentGateway);
 
 // Bulk Exports
 router.get('/admin/exports/invoices', authenticateJWT, requirePermission('EXPORT_DATA'), exportInvoicesZip);
@@ -383,6 +502,13 @@ router.delete(
   deleteStaff
 );
 router.post(
+  '/admin/staff/:id/delete',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  deleteStaff
+);
+router.post(
   '/admin/staff/:id/restore',
   authenticateJWT,
   requirePermission('ACCESS_STAFF'),
@@ -442,6 +568,13 @@ router.put(
 );
 router.delete(
   '/admin/clients/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_CLIENTS'),
+  enforceTenantIsolation,
+  deleteClient
+);
+router.post(
+  '/admin/clients/:id/delete',
   authenticateJWT,
   requirePermission('ACCESS_CLIENTS'),
   enforceTenantIsolation,
@@ -516,6 +649,13 @@ router.put(
 );
 router.delete(
   '/admin/plans/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_PLANS'),
+  enforceTenantIsolation,
+  deletePlan
+);
+router.post(
+  '/admin/plans/:id/delete',
   authenticateJWT,
   requirePermission('ACCESS_PLANS'),
   enforceTenantIsolation,
@@ -713,6 +853,15 @@ router.get(
 // PAYMENTS WEBHOOK (RAZORPAY SIMULATOR)
 // ----------------------------------------------------
 router.post('/webhook/razorpay', handleRazorpayWebhook);
+
+// ----------------------------------------------------
+// PAYMENT GATEWAY STATUS CHECK
+// ----------------------------------------------------
+router.get(
+  '/payment/gateway-status',
+  authenticateJWT,
+  getPaymentGatewayStatus
+);
 
 // ----------------------------------------------------
 // RAZORPAY REAL PAYMENT INTEGRATION
@@ -1079,7 +1228,6 @@ router.delete(
 router.get(
   '/resources',
   authenticateJWT,
-  requireRoles(['SUPER_ADMIN', 'ADMIN', 'COMPLIANCE_OFFICER', 'PRINCIPAL_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'SALES', 'MARKETING']),
   getResources
 );
 
@@ -1100,18 +1248,36 @@ router.get('/download', (req, res) => {
     if (!fileUrl || !fileUrl.startsWith('/uploads/')) {
       return res.status(400).json({ success: false, message: 'Invalid file path' });
     }
-    
+
     // Prevent directory traversal
     const normalizedUrl = path.normalize(fileUrl).replace(/^(\.\.[\/\\])+/, '');
-    
-    // Strip the leading slash or /uploads/ so path.join doesn't treat it as absolute
-    // Using the pre-computed uploadRoot from the top of the file
     const relativePath = normalizedUrl.replace(/^[\/\\]?uploads[\/\\]/, '');
-    const uploadRoot = path.join(__dirname, '../../../uploads'); // re-declaring in scope just in case
-    const filePath = path.join(uploadRoot, relativePath);
-    
-    if (fs.existsSync(filePath)) {
-      res.download(filePath);
+    const fileName = path.basename(normalizedUrl);
+
+    const candidatePaths = [
+      path.resolve(__dirname, '../../../uploads', relativePath),
+      path.resolve(process.cwd(), '../uploads', relativePath),
+      path.resolve(process.cwd(), 'uploads', relativePath),
+      path.resolve(__dirname, '../../..', normalizedUrl.replace(/^[/\\]+/, '')),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads', relativePath),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/policies', fileName),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
+      path.resolve('a:/RA_SEBI_COMPLINCE/uploads/agreements', fileName),
+    ];
+
+    let foundPath: string | null = null;
+    for (const candidate of candidatePaths) {
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          foundPath = candidate;
+          break;
+        }
+      } catch {}
+    }
+
+    if (foundPath) {
+      res.download(foundPath, fileName);
     } else {
       res.status(404).json({ success: false, message: 'File not found on server' });
     }

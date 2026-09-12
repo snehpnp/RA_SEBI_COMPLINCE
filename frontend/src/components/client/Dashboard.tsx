@@ -75,13 +75,18 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
   }, []);
 
   // Derive KYC status from profile
+  const isKraVerified = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
+  const isAgreementSigned = profile?.agreements?.some(
+    (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
+  ) || !!profile?.agreementSigned;
   const kycStatus: string = profile?.status || 'PENDING_ONBOARDING';
+
   const getKycDisplay = () => {
-    if ((kycStatus === 'ACTIVE' && !!profile?.agreementSigned) || kycStatus === 'PAYMENT_PENDING' || profile?.kycStatus === 'VERIFIED') return { label: 'Verified', color: 'text-premium-success', bg: 'bg-premium-success/20', Icon: ShieldCheck };
+    if (isKraVerified && isAgreementSigned) return { label: 'Fully Verified', color: 'text-premium-success', bg: 'bg-premium-success/20', Icon: ShieldCheck };
     if (kycStatus === 'KYC_FAILED') return { label: 'KYC Failed', color: 'text-premium-danger', bg: 'bg-premium-danger/20', Icon: XCircle };
-    if (kycStatus === 'KYC_PENDING' || (kycStatus === 'ACTIVE' && !profile?.agreementSigned)) return { label: 'Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: Clock };
-    if (kycStatus === 'AGREEMENT_PENDING') return { label: 'Agreement Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: AlertCircle };
-    return { label: 'Not Started', color: 'text-premium-text/50', bg: 'bg-premium-text/10', Icon: AlertCircle };
+    if (isKraVerified && !isAgreementSigned) return { label: 'Agreement Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: AlertCircle };
+    if (kycStatus === 'KYC_PENDING') return { label: 'KYC Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: Clock };
+    return { label: 'KYC Required', color: 'text-amber-500', bg: 'bg-amber-500/20', Icon: AlertCircle };
   };
   const kyc = getKycDisplay();
 

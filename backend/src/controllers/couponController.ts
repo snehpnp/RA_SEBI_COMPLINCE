@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 
 export const getCoupons = async (req: AuthenticatedRequest, res: Response) => {
@@ -7,7 +7,7 @@ export const getCoupons = async (req: AuthenticatedRequest, res: Response) => {
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const coupons = await prisma.coupon.findMany({ where: { tenantId } });
+    const coupons = await dynamicDb.Coupon.find({ tenantId }).lean();
     return res.status(200).json({ success: true, data: coupons });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -21,22 +21,20 @@ export const createCoupon = async (req: AuthenticatedRequest, res: Response) => 
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
   
   try {
-    const coupon = await prisma.coupon.create({
-      data: {
-        tenantId,
-        code: code.toUpperCase(),
-        discountType,
-        discountValue: parseFloat(discountValue),
-        percentageType: percentageType || null,
-        minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
-        maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
-        usageLimit: usageLimit ? parseInt(usageLimit) : null,
-        clientId: clientId || null,
-        planId: planId || null,
-        categoryId: categoryId || null,
-        isPublic: !!isPublic,
-      }
+    const coupon = await dynamicDb.Coupon.create({
+      tenantId,
+      code: code.toUpperCase(),
+      discountType,
+      discountValue: parseFloat(discountValue),
+      percentageType: percentageType || null,
+      minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
+      maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
+      expiryDate: expiryDate ? new Date(expiryDate) : null,
+      usageLimit: usageLimit ? parseInt(usageLimit) : null,
+      clientId: clientId || null,
+      planId: planId || null,
+      categoryId: categoryId || null,
+      isPublic: !!isPublic,
     });
     return res.status(201).json({ success: true, data: coupon });
   } catch (error: any) {
@@ -49,50 +47,68 @@ export const updateCoupon = async (req: AuthenticatedRequest, res: Response) => 
   const { discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId } = req.body;
   
   try {
-    const existing = await prisma.coupon.findUnique({ where: { id } });
+    const existing = await dynamicDb.Coupon.findById(id);
     if (!existing) return res.status(404).json({ success: false, message: 'Coupon not found' });
     
     if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
       return res.status(400).json({ success: false, message: 'Expired coupons cannot be edited' });
     }
 
-    const coupon = await prisma.coupon.update({
-      where: { id },
-      data: {
-        discountType,
-        discountValue: parseFloat(discountValue),
-        percentageType: percentageType || null,
-        minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
-        maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
-        usageLimit: usageLimit ? parseInt(usageLimit) : null,
-        clientId: clientId || null,
-        planId: planId || null,
-        categoryId: categoryId || null,
-      }
-    });
+    const coupon = await dynamicDb.Coupon.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          discountType,
+          discountValue: parseFloat(discountValue),
+          percentageType: percentageType || null,
+          minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
+          maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
+          expiryDate: expiryDate ? new Date(expiryDate) : null,
+          usageLimit: usageLimit ? parseInt(usageLimit) : null,
+          clientId: clientId || null,
+          planId: planId || null,
+          categoryId: categoryId || null,
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
     return res.status(200).json({ success: true, data: coupon });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
 };
 
-export const toggleCouponVisibility = async (req: AuthenticatedRequest, res: Response) => { const { id } = req.params; try { const coupon = await prisma.coupon.findUnique({ where: { id } }); if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' }); const updated = await prisma.coupon.update({ where: { id }, data: { isPublic: !coupon.isPublic } }); return res.status(200).json({ success: true, data: updated }); } catch (error: any) { return res.status(500).json({ success: false, errors: [error.message] }); } };
+export const toggleCouponVisibility = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const coupon = await dynamicDb.Coupon.findById(id);
+    if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' });
+    const updated = await dynamicDb.Coupon.findByIdAndUpdate(
+      id,
+      { $set: { isPublic: !coupon.isPublic } },
+      { returnDocument: 'after', lean: true }
+    );
+    return res.status(200).json({ success: true, data: updated });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
 
 export const toggleCouponStatus = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   try {
-    const existing = await prisma.coupon.findUnique({ where: { id } });
+    const existing = await dynamicDb.Coupon.findById(id);
     if (!existing) return res.status(404).json({ success: false, message: 'Not found' });
     
     if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
       return res.status(400).json({ success: false, message: 'Expired coupons cannot be toggled' });
     }
 
-    const coupon = await prisma.coupon.update({
-      where: { id },
-      data: { status: existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }
-    });
+    const coupon = await dynamicDb.Coupon.findByIdAndUpdate(
+      id,
+      { $set: { status: existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' } },
+      { returnDocument: 'after', lean: true }
+    );
     return res.status(200).json({ success: true, data: coupon });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -105,20 +121,18 @@ export const applyCoupon = async (req: AuthenticatedRequest, res: Response) => {
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
   
   try {
-    const coupon = await prisma.coupon.findFirst({
-      where: { tenantId, code: code.toUpperCase(), status: 'ACTIVE' }
-    });
+    const coupon = await dynamicDb.Coupon.findOne({
+      tenantId,
+      code: code.toUpperCase(),
+      status: 'ACTIVE'
+    }).lean();
     if (!coupon) return res.status(404).json({ success: false, message: 'Invalid or inactive coupon' });
 
     if (coupon.expiryDate && new Date(coupon.expiryDate).getTime() < Date.now()) {
       return res.status(400).json({ success: false, message: 'Coupon has expired' });
     }
     
-    if (coupon.expiryDate && new Date(coupon.expiryDate) < new Date()) {
-      return res.status(400).json({ success: false, message: 'Coupon expired' });
-    }
-    
-    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+    if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
       return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
     }
 
@@ -127,12 +141,13 @@ export const applyCoupon = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     if (coupon.planId && planId) {
+      const planIdStr = coupon.planId.toString();
       let allowedPlans: string[] = [];
       try {
-        allowedPlans = JSON.parse(coupon.planId);
-        if (!Array.isArray(allowedPlans)) allowedPlans = [coupon.planId];
+        allowedPlans = JSON.parse(planIdStr);
+        if (!Array.isArray(allowedPlans)) allowedPlans = [planIdStr];
       } catch (e) {
-        allowedPlans = [coupon.planId];
+        allowedPlans = [planIdStr];
       }
       if (allowedPlans.length > 0 && !allowedPlans.includes(planId)) {
         return res.status(400).json({ success: false, message: 'Coupon is not applicable for this plan' });
@@ -140,12 +155,13 @@ export const applyCoupon = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     if (coupon.categoryId && categoryId) {
+      const catIdStr = coupon.categoryId.toString();
       let allowedCats: string[] = [];
       try {
-        allowedCats = JSON.parse(coupon.categoryId);
-        if (!Array.isArray(allowedCats)) allowedCats = [coupon.categoryId];
+        allowedCats = JSON.parse(catIdStr);
+        if (!Array.isArray(allowedCats)) allowedCats = [catIdStr];
       } catch (e) {
-        allowedCats = [coupon.categoryId];
+        allowedCats = [catIdStr];
       }
       if (allowedCats.length > 0 && !allowedCats.includes(categoryId)) {
         return res.status(400).json({ success: false, message: 'Coupon is not applicable for this segment' });
@@ -185,20 +201,18 @@ export const getClientCoupons = async (req: AuthenticatedRequest, res: Response)
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const coupons = await prisma.coupon.findMany({
-      where: { 
-        tenantId, 
-        status: 'ACTIVE',
-        isPublic: true,
-        OR: [
-          { expiryDate: null }, 
-          { expiryDate: { gt: new Date() } }
-        ]
-      } 
-    });
+    const coupons = await dynamicDb.Coupon.find({
+      tenantId, 
+      status: 'ACTIVE',
+      isPublic: true,
+      $or: [
+        { expiryDate: null }, 
+        { expiryDate: { $gt: new Date() } }
+      ]
+    }).lean();
 
     // Optionally filter by clientId matching
-    const validCoupons = coupons.filter(c => !c.clientId || c.clientId === clientId);
+    const validCoupons = coupons.filter((c: any) => !c.clientId || c.clientId === clientId);
 
     return res.status(200).json({ success: true, data: validCoupons });
   } catch (error: any) {

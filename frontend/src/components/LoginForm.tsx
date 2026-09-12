@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, Handshake, CheckCircle2, Shield } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ShieldAlert, AlertTriangle, X } from 'lucide-react';
 import api from '../services/api';
 import { useBranding } from '@/contexts/BrandingContext';
 
@@ -18,9 +17,9 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<'suspended' | 'inactive' | 'expired' | null>(null);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null);
-  const [inactivePopup, setInactivePopup] = useState(false);
   const [loadingTextIndex, setLoadingTextIndex] = useState(0);
   const [tenantName, setTenantName] = useState('RAGCP');
   const [tenantLogo, setTenantLogo] = useState<string | null>(null);
@@ -44,18 +43,29 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
     return () => clearInterval(interval);
   }, [loading]);
 
+  const dismissAlert = () => {
+    setErrorType(null);
+    setError(null);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('error');
+      window.history.replaceState({}, '', url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : ''));
+    }
+  };
+
   useEffect(() => {
-    const errorParam = searchParams.get('error');
-    if (errorParam === 'inactive') {
-      setInactivePopup(true);
-    } else if (errorParam === 'expired') {
-      setError('Session expired. Please log in again.');
+    const errorParam = searchParams?.get('error') || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('error') : null);
+    if (errorParam === 'suspended' || errorParam === 'inactive' || errorParam === 'expired') {
+      setErrorType(errorParam);
+      setError(null);
+    } else {
+      setErrorType(null);
     }
 
-    const roleParam = defaultRole || searchParams.get('role');
+    const roleParam = defaultRole || searchParams?.get('role') || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('role') : null);
     if (roleParam === 'super-admin') {
-      setEmail('superadmin@ragcp.com');
-      setPassword('Admin@12345');
+      setEmail('superadmin@gmail.com');
+      setPassword('Admin@987');
     } else if (roleParam === 'admin') {
       setEmail('admin@alpharesearch.com');
       setPassword('Admin@12345');
@@ -69,6 +79,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setErrorType(null);
 
     try {
       const res = await api.login({ email, password });
@@ -103,6 +114,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
+    setErrorType(null);
     setForgotSuccess(null);
 
     try {
@@ -122,7 +134,6 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
   return (
     <>
       <div className="w-full">
-
         <div className="mb-6">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Access Platform</h2>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -130,15 +141,91 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
           </p>
         </div>
 
+        {/* ── INLINE ALERTS (Replacing disruptive modals) ── */}
+        {errorType === 'inactive' && (
+          <div className="mb-5 p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-2xl flex items-start justify-between space-x-3 text-amber-900 dark:text-amber-200 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="text-xs leading-relaxed">
+                <p className="font-bold text-amber-900 dark:text-amber-100 text-sm mb-0.5">Account Deactivated or Inactive</p>
+                <p className="text-amber-700 dark:text-amber-300/90">
+                  Your account credentials or entity access is currently deactivated or pending review. Please reach out to your organization administrator or compliance desk.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissAlert}
+              className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-200 p-1 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {errorType === 'suspended' && (
+          <div className="mb-5 p-4 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 rounded-2xl flex items-start justify-between space-x-3 text-rose-900 dark:text-rose-200 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-start space-x-3">
+              <ShieldAlert className="h-5 w-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+              <div className="text-xs leading-relaxed">
+                <p className="font-bold text-rose-900 dark:text-rose-100 text-sm mb-0.5">Organization Portal Suspended</p>
+                <p className="text-rose-700 dark:text-rose-300/90">
+                  This portal has been suspended by Super Admin. Please contact Super Admin compliance support to reactivate your entity.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissAlert}
+              className="text-rose-500 hover:text-rose-700 dark:hover:text-rose-200 p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {errorType === 'expired' && (
+          <div className="mb-5 p-4 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-2xl flex items-start justify-between space-x-3 text-blue-900 dark:text-blue-200 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-start space-x-3">
+              <Lock className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+              <div className="text-xs leading-relaxed">
+                <p className="font-bold text-blue-900 dark:text-blue-100 text-sm mb-0.5">Session Expired</p>
+                <p className="text-blue-700 dark:text-blue-300/90">
+                  Your session has expired. Please authenticate your credentials to log in again.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissAlert}
+              className="text-blue-500 hover:text-blue-700 dark:hover:text-blue-200 p-1 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors"
+              title="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         {error && (
-          <div className="mb-5 p-3.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-300 text-xs rounded-xl flex items-center space-x-2.5">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{error}</span>
+          <div className="mb-5 p-3.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-600 dark:text-red-300 text-xs rounded-2xl flex items-center justify-between space-x-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center space-x-2.5">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span className="font-medium">{error}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="text-red-400 hover:text-red-600 dark:hover:text-red-200 p-1 rounded hover:bg-red-100 dark:hover:bg-red-500/20"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
         )}
 
         {forgotSuccess && (
-          <div className="mb-5 p-3.5 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-xs rounded-xl flex items-center space-x-2.5">
+          <div className="mb-5 p-3.5 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-xs rounded-2xl flex items-center space-x-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span>{forgotSuccess}</span>
           </div>
@@ -215,7 +302,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
                 Forgot Password?
               </button>
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                Don't have an account?{' '}
+                Don&apos;t have an account?{' '}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -226,7 +313,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
                       router.push('/register');
                     }
                   }}
-                  className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                  className="text-blue-600 dark:text-blue-400 font-semibold hover:underline cursor-pointer"
                 >
                   Sign up here
                 </button>
@@ -256,7 +343,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm transition"
+              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm transition cursor-pointer"
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Send Reset Link'}
             </button>
@@ -264,7 +351,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
               <button
                 type="button"
                 onClick={() => { setIsForgotPassword(false); setError(null); }}
-                className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white"
+                className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
               >
                 Back to Login
               </button>
@@ -273,7 +360,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
         )}
       </div>
 
-      {/* ── Loading Overlay Modal ── */}
+      {/* ── Loading Overlay Modal (Active during successful login transition) ── */}
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl transition-all duration-500">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-8 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 text-center transform scale-100 opacity-100 transition-all duration-300">
@@ -291,31 +378,6 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
             <p className="text-xs text-slate-500 dark:text-blue-400 font-medium mb-6 h-6 transition-all duration-300">{loadingMessages[loadingTextIndex]}</p>
             <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden relative shadow-inner">
               <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-indigo-600 dark:from-blue-400 dark:to-indigo-500 h-full rounded-full animate-[progress_6s_ease-in-out_infinite]" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Inactive Account Popup ── */}
-      {inactivePopup && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-2xl">
-            <div className="p-5 bg-red-50 dark:bg-red-500/10 border-b border-red-100 dark:border-red-500/20 flex items-center space-x-3">
-              <AlertCircle className="h-5 w-5 text-red-500" />
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Account Inactive</h3>
-            </div>
-            <div className="p-5">
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Your account is currently inactive or suspended. Please contact the administrator.
-              </p>
-              <div className="mt-5 flex justify-end">
-                <button
-                  onClick={() => setInactivePopup(false)}
-                  className="px-4 py-2 bg-slate-900 dark:bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-800"
-                >
-                  Close
-                </button>
-              </div>
             </div>
           </div>
         </div>

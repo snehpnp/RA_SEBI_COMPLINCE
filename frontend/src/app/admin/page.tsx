@@ -9,8 +9,10 @@ import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
+import { base_ra_url } from '@/utils/config';
 import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
@@ -396,7 +398,7 @@ function AdminDashboardContent() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const { appName, logoUrl: appLogo } = useBranding();
+  const { appName, logoUrl: appLogo, refreshBranding } = useBranding();
   const router = useRouter();
 
   // Dashboard & Auth states
@@ -918,6 +920,7 @@ function AdminDashboardContent() {
   const [termsPdf, setTermsPdf] = useState(null);
   const [internalPolicyPdf, setInternalPolicyPdf] = useState(null);
   const [logoFile, setLogoFile] = useState<any>(null);
+  const [tenantLogoUrl, setTenantLogoUrl] = useState<string>('');
   const [privacyPdf, setPrivacyPdf] = useState(null);
   const [termsPdfUrl, setTermsPdfUrl] = useState('');
   const [privacyPdfUrl, setPrivacyPdfUrl] = useState('');
@@ -955,6 +958,8 @@ function AdminDashboardContent() {
   const [ccavenueWorkingKey, setCcavenueWorkingKey] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [verifyingGateway, setVerifyingGateway] = useState(false);
+  const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
@@ -1137,7 +1142,7 @@ function AdminDashboardContent() {
     try {
       const tab = activeTabRef.current;
 
-      if (initStep) {
+      if (initStep || tab === 'settings') {
         try {
           const comp = await api.getProfileCompleteness();
           if (comp.success) {
@@ -1146,6 +1151,7 @@ function AdminDashboardContent() {
 
             const t = comp.data.data;
             if (t) {
+              if (t.logoUrl) setTenantLogoUrl(t.logoUrl);
               if (t.address) setOrgAddress(t.address);
               if (t.website) setOrgWebsite(t.website);
               if (t.mobile) setOrgMobile(t.mobile);
@@ -1365,7 +1371,7 @@ function AdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
+        router.push('/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);
@@ -1609,8 +1615,8 @@ function AdminDashboardContent() {
 
 
   const handleTestSmtp = async () => {
-    if (!smtpHost || !smtpPort || !smtpUser || !smtpPassword || !testSmtpEmail) {
-      toast.error('Please fill all SMTP details and the Test Email Address');
+    if (!testSmtpEmail || !testSmtpEmail.trim()) {
+      toast.error('Please enter the Test Email Address to receive the test email');
       return;
     }
     setIsTestingSmtp(true);
@@ -1620,10 +1626,10 @@ function AdminDashboardContent() {
         port: smtpPort,
         user: smtpUser,
         password: smtpPassword,
-        testEmail: testSmtpEmail
+        testEmail: testSmtpEmail.trim()
       });
       if (data.success) {
-        toast.success(data.message || 'Test email sent successfully!');
+        toast.success(data.message || 'Test email sent successfully! Please check your inbox.');
       } else {
         toast.error(data.message || 'Failed to send test email');
       }
@@ -1650,11 +1656,13 @@ function AdminDashboardContent() {
       if (internalPolicyPdf) formData.append('internalPolicyPdf', internalPolicyPdf);
       if (logoFile) formData.append('logo', logoFile);
       if (privacyPdf) formData.append('privacyPdf', privacyPdf);
-      if (smtpHost) formData.append('smtpHost', smtpHost);
-      if (smtpPort) formData.append('smtpPort', smtpPort);
-      if (smtpUser) formData.append('smtpUser', smtpUser);
-      if (smtpPassword) formData.append('smtpPassword', smtpPassword);
-      if (smtpFrom) formData.append('smtpFrom', smtpFrom);
+      formData.append('smtpHost', (smtpHost || '').trim());
+      formData.append('smtpPort', (smtpPort || '').toString().trim());
+      formData.append('smtpUser', (smtpUser || '').trim());
+      if (smtpPassword && smtpPassword.trim()) {
+        formData.append('smtpPassword', smtpPassword.trim());
+      }
+      formData.append('smtpFrom', (smtpFrom || smtpUser || '').trim());
       if (bankAccountName) formData.append('bankAccountName', bankAccountName);
       if (bankAccountNo) formData.append('bankAccountNo', bankAccountNo);
       if (bankAccountType) formData.append('bankAccountType', bankAccountType);
@@ -1680,18 +1688,71 @@ function AdminDashboardContent() {
 
       const data = await api.updateTenantSettings(formData);
       if (data.success) {
-        toast('Settings saved!');
+        toast.success('Settings and logo saved successfully!');
         if (data.data) {
+          if (data.data.logoUrl) {
+            setTenantLogoUrl(data.data.logoUrl);
+          }
+          if (data.data.smtpHost) setSmtpHost(data.data.smtpHost);
+          if (data.data.smtpPort) setSmtpPort(data.data.smtpPort.toString());
+          if (data.data.smtpUser) setSmtpUser(data.data.smtpUser);
+          if (data.data.smtpPassword) setSmtpPassword(data.data.smtpPassword);
+          if (data.data.smtpFrom) setSmtpFrom(data.data.smtpFrom);
           setUser((prevUser: any) => {
             const updatedUser = { ...prevUser, tenant: data.data };
             localStorage.setItem('user', JSON.stringify(updatedUser));
             return updatedUser;
           });
         }
-        loadData();
+        setLogoFile(null);
+        if (refreshBranding) await refreshBranding();
+        await loadData(true);
       }
-      else { toast(data.message); }
-    } catch (err: any) { toast(err.message); }
+      else { toast.error(data.message || 'Failed to save settings'); }
+    } catch (err: any) { toast.error(err.message || 'Failed to save settings'); }
+  };
+
+  const handleVerifyPaymentGateway = async () => {
+    setVerifyingGateway(true);
+    setGatewayVerifyResult(null);
+    try {
+      const res: any = await api.verifyPaymentGateway({
+        gateway: activePaymentGateway,
+        razorpayKeyId,
+        razorpayKeySecret,
+        cashfreeAppId,
+        cashfreeSecretKey,
+        ccavenueMerchantId,
+        ccavenueAccessCode,
+        ccavenueWorkingKey,
+        stripePublishableKey,
+        stripeSecretKey
+      });
+
+      if (res.success) {
+        setGatewayVerifyResult({
+          success: true,
+          message: res.message || 'Payment Gateway Verified Successfully!',
+          mode: res.mode
+        });
+        toast.success(res.message || 'Payment Gateway connection verified!');
+      } else {
+        setGatewayVerifyResult({
+          success: false,
+          message: res.message || 'Payment Gateway Verification Failed.'
+        });
+        toast.error(res.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify payment gateway connection.';
+      setGatewayVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingGateway(false);
+    }
   };
 
 
@@ -3386,8 +3447,8 @@ function AdminDashboardContent() {
       width: '140px',
       cell: (row: any) => (
         <div className="flex flex-col gap-1.5 items-start">
-          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20' : (row.status && row.status !== 'PENDING_ONBOARDING' && row.status !== 'KYC_PENDING' && row.status !== 'KYC_FAILED') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
-            KRA: {row.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? 'FAILED' : (row.status && row.status !== 'PENDING_ONBOARDING' && row.status !== 'KYC_PENDING' && row.status !== 'KYC_FAILED') ? 'VERIFIED' : 'PENDING'}
+          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.kraVerified ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
+            KRA: {row.kraVerified ? 'VERIFIED' : 'PENDING'}
           </span>
           <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
             eSign: {row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
@@ -3615,71 +3676,62 @@ function AdminDashboardContent() {
               </button>
             )}
           </div>
-
-          {/* User Footer */}
-          <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-            {/* Subtle background glow */}
-            <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
-
-            <div
-              onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-
-              {/* Shimmer effect inside the card */}
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-              <div className="relative shrink-0">
-                {/* Pulsing ring around avatar */}
-                <div className="absolute inset-0 rounded-full border-2 border-rose-500/50 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_var(--tw-colors-rose-500)] relative z-10 text-lg">
-                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : (user?.name ? user.name.trim().charAt(0).toUpperCase() : 'A')}
-                </div>
-                {/* Online indicator */}
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
-              </div>
-
-              {!isSidebarCollapsed && (
-                <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-white">{user?.firstName || user?.name || 'Admin'}</p>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-rose-500" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-rose-500 via-orange-200 to-rose-500 animate-pulse">
-                      {user?.role || 'Staff'}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {!isSidebarCollapsed && (
-                <div
-                  className="relative z-10 shrink-0 mr-1"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ThemeToggle />
-                </div>
-              )}
-            </div>
-            <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
-                {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-                <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-              </button>
-            </div>
-          </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-          {user?.isImpersonated && (
-            <button
-              onClick={handleRevertImpersonate}
-              className="fixed top-4 right-16 z-50 px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition flex items-center space-x-1.5 font-semibold shadow-lg"
-              title="Back to Super Admin"
-            >
-              <LogOut className="h-3.5 w-3.5 rotate-180" />
-              <span className="hidden sm:inline">Back to Super Admin</span>
-            </button>
-          )}
+          {/* Top Header Bar with Theme, User & Logout */}
+          <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+            <div className="flex items-center gap-3">
+              {/* Mobile menu toggle */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                title="Open Navigation"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+              <div>
+                <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                  {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Dashboard'}
+                </h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                  {user?.tenant?.companyName ? `${user.tenant.companyName} Compliance Portal` : 'Research Analyst Governance & Compliance Platform'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 md:gap-4">
+              {user?.isImpersonated && (
+                <button
+                  onClick={handleRevertImpersonate}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 font-bold text-xs shadow-md shadow-indigo-600/20"
+                  title="Back to Super Admin"
+                >
+                  <LogOut className="h-3.5 w-3.5 rotate-180" />
+                  <span className="hidden sm:inline">Back to Super Admin</span>
+                </button>
+              )}
+
+              {/* Theme Toggle */}
+              <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                <ThemeToggle />
+              </div>
+
+              {/* Profile Dropdown with Username & Logout */}
+              <UserProfileDropdown
+                user={{
+                  name: user?.firstName || user?.name || 'Admin',
+                  firstName: user?.firstName,
+                  email: user?.email,
+                  role: user?.role || 'Staff'
+                }}
+                badgeColor="rose"
+                onProfileClick={() => setActiveTab('profile')}
+                onLogoutClick={() => setIsLogoutModalOpen(true)}
+              />
+            </div>
+          </header>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
             <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
@@ -3849,55 +3901,6 @@ function AdminDashboardContent() {
            ==================================================== */}
               {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
                 <div className="space-y-8">
-                  {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
-                  {(() => {
-                    const currentNav = NAV_CONFIG.find(n =>
-                      n.tab === activeTab ||
-                      (activeTab.startsWith('customPages_') && n.tab === 'customPages')
-                    );
-
-                    // if (!currentNav || activeTab === 'dashboard') return null;
-
-                    const tabsMissingHeader = [
-                      "dashboard",
-                      "staff",
-                      "clients",
-                      "plans",
-                      "research",
-                      "research-reports",
-                      "payments",
-                      "checklist",
-                      "compliance",
-                      "tickets",
-                      "settings",
-                      "customPages",
-                      "complaintReport",
-                      "roles",
-                      "auditLogs",
-                      "signature_settings",
-                      "resources"
-                    ];
-
-                    if (!tabsMissingHeader.includes(activeTab) && !activeTab.startsWith('customPages_')) {
-                      return null;
-                    }
-
-                    return (
-                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-2">
-                        <div>
-                          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {activeTab.startsWith('customPages_')
-                              ? adminPagesList?.find((p: any) => p.slug === activeTab.split('_')[1])?.title || 'Custom Page'
-                              : currentNav?.label}
-                          </h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                            {currentNav?.moduleDesc || 'Manage and view details for this section.'}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {/* PROFILE TAB */}
                   {activeTab === 'profile' && (
                     <>
@@ -6223,56 +6226,74 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Select Active Plan <span className="text-rose-600 dark:text-rose-400">*</span>
                                   </label>
-                                  {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).length === 0 ? (
-                                    <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
-                                      No active plans found in this category.
-                                    </div>
-                                  ) : (
-                                    <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
-                                      {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).map((p) => {
-                                        const isSelected = assignPlanId === p.id;
-                                        return (
-                                          <div
-                                            key={p.id}
-                                            onClick={() => {
-                                              setAssignPlanId(p.id);
-                                              setAssignCustomAmount('');
-                                              setAssignCustomDays('');
-                                            }}
-                                            className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
-                                          >
-                                            <div className="flex justify-between items-start">
-                                              <div>
-                                                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
-                                                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                  {(() => {
+                                    const selectedCat = categories.find((c: any) => String(c.id || c._id) === String(assignPlanCategoryId) || String(c.name).toUpperCase() === String(assignPlanCategoryId).toUpperCase());
+                                    const selectedCatName = (selectedCat?.name || '').toUpperCase();
+                                    const filteredPlans = adminPlans.filter((p: any) => {
+                                      const pCatId = typeof p.categoryId === 'object' && p.categoryId ? String(p.categoryId._id || p.categoryId.id) : String(p.categoryId || '');
+                                      const pCatObjId = p.category ? (typeof p.category === 'object' ? String(p.category.id || p.category._id) : String(p.category)) : '';
+                                      const pCatName = (p.category?.name || (typeof p.categoryId === 'object' ? p.categoryId.name : '') || '').toUpperCase();
+                                      
+                                      const matchesCategory = 
+                                        pCatId === String(assignPlanCategoryId) ||
+                                        pCatObjId === String(assignPlanCategoryId) ||
+                                        (selectedCatName && (pCatName === selectedCatName || pCatId === selectedCatName)) ||
+                                        (pCatName && pCatName === String(assignPlanCategoryId).toUpperCase());
+
+                                      return matchesCategory && p.status === 'ACTIVE' && !p.deletedAt;
+                                    });
+
+                                    return filteredPlans.length === 0 ? (
+                                      <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+                                        No active plans found in this category.
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
+                                        {filteredPlans.map((p: any) => {
+                                          const isSelected = assignPlanId === p.id;
+                                          return (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                setAssignPlanId(p.id);
+                                                setAssignCustomAmount('');
+                                                setAssignCustomDays('');
+                                              }}
+                                              className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
+                                            >
+                                              <div className="flex justify-between items-start">
+                                                <div>
+                                                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
+                                                  <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                                </div>
+                                                <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
+                                                  {gstCalculationType === 'EXCLUSIVE' ? (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
+                                                    </div>
+                                                  )}
+                                                  <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
+                                                </div>
                                               </div>
-                                              <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
-                                                {gstCalculationType === 'EXCLUSIVE' ? (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
-                                                  </div>
-                                                ) : (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
-                                                  </div>
-                                                )}
-                                                <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
-                                              </div>
+                                              {isSelected && (
+                                                <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
+                                                  <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
+                                                </div>
+                                              )}
                                             </div>
-                                            {isSelected && (
-                                              <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
-                                                <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
 
@@ -7432,7 +7453,7 @@ function AdminDashboardContent() {
                                   {plan.status === 'ACTIVE' && !isDeleted && (
                                     <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#E1F13D] to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                                   )}
-                                  
+
                                   <div className="flex justify-between items-start mb-4">
                                     <div className="pr-4">
                                       <span className="inline-block px-2 py-1 rounded-md bg-primary-50 dark:bg-primary-900/20 text-[10px] font-bold text-primary-700 dark:text-primary-400 tracking-wider mb-2">{plan.category?.name || 'UNCATEGORIZED'}</span>
@@ -7445,23 +7466,23 @@ function AdminDashboardContent() {
                                       </span>
                                     </div>
                                   </div>
-                                  
+
                                   <div className="flex items-center space-x-2 mb-4">
                                     <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${isDeleted ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                                       {isDeleted ? 'DELETED' : plan.status}
                                     </span>
                                   </div>
-                                  
+
                                   <div className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: plan.description }} />
-                                  
+
                                   <div className="space-y-3 mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700/50">
                                     <div className="flex justify-between items-center">
-                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</span> 
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</span>
                                       <strong className="text-sm text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong>
                                     </div>
                                     <div className="h-px w-full bg-slate-200 dark:bg-slate-700/50"></div>
                                     <div className="flex justify-between items-start">
-                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium pt-0.5">Segments</span> 
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium pt-0.5">Segments</span>
                                       <div className="flex flex-wrap justify-end gap-1 ml-4">
                                         {(plan.researchSegments || '').split(',').map((seg: string, idx: number) => (
                                           <span key={idx} className="text-[10px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 rounded text-emerald-700 dark:text-emerald-400 font-bold">{seg.trim()}</span>
@@ -7469,7 +7490,7 @@ function AdminDashboardContent() {
                                       </div>
                                     </div>
                                   </div>
-                                  
+
                                   <div className="flex space-x-3 mt-auto pt-2">
                                     {!isDeleted ? (
                                       <>
@@ -7548,31 +7569,50 @@ function AdminDashboardContent() {
 
                               <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Company Logo</label>
                               <div className="flex items-start gap-6">
-                                {(logoFile || appLogo) && (
+                                {(logoFile || tenantLogoUrl || appLogo) && (
                                   <div className="shrink-0 p-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
-                                    <img src={logoFile ? URL.createObjectURL(logoFile) : appLogo} alt="Company Logo" className="h-16 w-auto object-contain max-w-[120px]" />
+                                    <img
+                                      src={
+                                        logoFile
+                                          ? URL.createObjectURL(logoFile)
+                                          : tenantLogoUrl
+                                          ? (tenantLogoUrl.startsWith('http') ? tenantLogoUrl : `${base_ra_url}${tenantLogoUrl}`)
+                                          : appLogo
+                                      }
+                                      alt="Company Logo"
+                                      className="h-16 w-auto object-contain max-w-[140px]"
+                                    />
                                   </div>
                                 )}
-                                <div className="flex-1">
-                                  <input type="file" accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] as any)} className="w-full max-w-md text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                  <p className="text-xs text-slate-500 mt-2">Appears on Research Reports & Invoices.</p>
+                                <div className="flex-1 space-y-2">
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                                    onChange={e => {
+                                      if (e.target.files && e.target.files[0]) {
+                                        setLogoFile(e.target.files[0]);
+                                      }
+                                    }}
+                                    className="w-full max-w-md text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 cursor-pointer"
+                                  />
+                                  <p className="text-xs text-slate-500">Appears on Research Reports, Client Portal & Invoices (PNG, JPG, SVG, WebP).</p>
+                                  {logoFile && (
+                                    <div className="flex items-center space-x-2 text-xs text-emerald-600 font-semibold">
+                                      <span>✓ New file selected: {logoFile.name} (Click "Save Settings" below to apply)</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setLogoFile(null)}
+                                        className="text-red-500 hover:underline font-bold ml-2"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
 
-                            <div className="border-t border-slate-400 dark:border-white/10 pt-6">
-                              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4">Signal Management Options</h3>
-                              <div className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800/50 rounded-xl">
-                                <div>
-                                  <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">Show Mobile Preview</h4>
-                                  <p className="text-xs text-slate-500 mt-1">Enable live mobile app preview panel when managing signals.</p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                  <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary-600"></div>
-                                </label>
-                              </div>
-                            </div>
+                        
 
                             <div className="border-t border-slate-400 dark:border-white/10 pt-6">
                               <div className="flex justify-between items-center border-b border-slate-200 dark:border-white/10 pb-2 mb-4">
@@ -7665,23 +7705,62 @@ function AdminDashboardContent() {
                                 <p className="text-[11px] text-slate-500 mb-2">
                                   Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
                                 </p>
-                                <textarea
-                                  value={agreementContent}
-                                  onChange={e => setAgreementContent(e.target.value)}
-                                  rows={6}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={agreementContent}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setAgreementContent(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={agreementContent}
+                                      onChange={e => setAgreementContent(e.target.value)}
+                                      rows={6}
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
+                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={welcomeEmailText}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setWelcomeEmailText(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={reportDisclaimer}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setReportDisclaimer(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -7876,6 +7955,48 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Gateway Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {gatewayVerifyResult ? (
+                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                        {gatewayVerifyResult.mode && (
+                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                            Status: {gatewayVerifyResult.mode} MODE
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyPaymentGateway}
+                                  disabled={verifyingGateway}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingGateway ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Verifying Credentials...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      <span>Verify Gateway Connection</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -7897,10 +8018,13 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Username (Email)</label>
                                   <input type="email" value={smtpUser} onChange={e => setSmtpUser(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. you@gmail.com" />
                                 </div>
-
                                 <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Password (App Password)</label>
                                   <input type="password" value={smtpPassword} onChange={e => setSmtpPassword(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Enter password to update" />
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Sender Name / From Header (Optional)</label>
+                                  <input type="text" value={smtpFrom} onChange={e => setSmtpFrom(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. RAGCP Support or leave blank to use Username" />
                                 </div>
                               </div>
 
@@ -8022,68 +8146,58 @@ function AdminDashboardContent() {
                         )}
                       </div>
 
-                      <div className="space-y-6">
-                        {/* Horizontal Roles List (Carousel) */}
-                        <div className="bg-white dark:bg-[#0F172A] p-3 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-sm flex items-center relative group">
-                          {/* Carousel Prev Button */}
-                          <button
-                            onClick={() => {
-                              if (rolesScrollRef.current) {
-                                rolesScrollRef.current.scrollBy({ left: -300, behavior: 'smooth' });
-                              }
-                            }}
-                            className="absolute left-2 z-10 p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-600 dark:text-slate-400 hover:text-primary-600 transition opacity-0 group-hover:opacity-100 hidden md:block"
-                          >
-                            <ChevronLeft className="h-5 w-5" />
-                          </button>
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                        {/* Roles List Sidebar (Left Column) */}
+                        <div className="lg:col-span-4 xl:col-span-3 space-y-4 lg:sticky lg:top-6">
+                          <div className="bg-white dark:bg-[#0F172A] p-4 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-3">
+                            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800/60">
+                              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Available Roles</h3>
+                              <span className="text-[10px] font-mono font-bold bg-primary-500/10 text-primary-600 dark:text-primary-400 px-2 py-0.5 rounded-full">
+                                {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).length} Roles
+                              </span>
+                            </div>
 
-                          <div
-                            ref={rolesScrollRef}
-                            className="flex gap-3 px-2 md:px-10 pb-1 pt-1 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] scroll-smooth w-full"
-                          >
-                            {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
-                              const isSelected = selectedRole?.id === r.id;
-                              const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
-                              return (
-                                <button
-                                  key={r.id}
-                                  onClick={() => setSelectedRole(r)}
-                                  className={`shrink-0 text-left px-4 py-3 rounded-xl border transition-all duration-200 flex flex-col w-[200px] ${isSelected ? 'bg-primary-50/50 dark:bg-primary-900/10 border-primary-500/50 ring-1 ring-primary-500/20 shadow-sm' : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 hover:border-primary-500/30 hover:bg-white dark:hover:bg-slate-800/50'}`}
-                                >
-                                  <span className="font-bold text-xs text-slate-900 dark:text-slate-100 tracking-wide font-mono uppercase truncate w-full mb-2">
-                                    {r.name.replace(/_/g, ' ')}
-                                  </span>
-                                  <div className="flex items-center justify-between w-full">
-                                    <div className="flex items-center text-[10px] text-slate-500 dark:text-slate-500 font-mono">
-                                      <ShieldCheck className="h-3 w-3 mr-1 text-slate-600 dark:text-slate-400" />
-                                      <span>{r.permissions?.length || 0} perms</span>
+                            <div className="space-y-2.5 max-h-[480px] overflow-y-auto custom-scrollbar pr-1.5">
+                              {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
+                                const isSelected = selectedRole?.id === r.id;
+                                const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
+                                return (
+                                  <button
+                                    key={r.id}
+                                    onClick={() => setSelectedRole(r)}
+                                    className={`w-full text-left p-3.5 rounded-xl border transition-all duration-200 flex flex-col ${
+                                      isSelected
+                                        ? 'bg-primary-50/80 dark:bg-primary-950/40 border-primary-500 ring-1 ring-primary-500/40 shadow-md shadow-primary-500/10'
+                                        : 'bg-slate-50/50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800/60 hover:border-primary-500/40 hover:bg-white dark:hover:bg-slate-800/60'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between w-full mb-1.5">
+                                      <span className={`font-bold text-xs tracking-wide font-mono uppercase truncate ${isSelected ? 'text-primary-700 dark:text-primary-300' : 'text-slate-900 dark:text-slate-100'}`}>
+                                        {r.name.replace(/_/g, ' ')}
+                                      </span>
+                                      {isSystemRole ? (
+                                        <span className="text-[9px] bg-slate-500/10 border border-slate-500/20 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded font-mono shrink-0">System</span>
+                                      ) : (
+                                        <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">Custom</span>
+                                      )}
                                     </div>
-                                    {isSystemRole ? (
-                                      <span className="text-[9px] bg-slate-500/10 border border-slate-500/20 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded font-mono shrink-0">System</span>
-                                    ) : (
-                                      <span className="text-[9px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono shrink-0">Custom</span>
-                                    )}
-                                  </div>
-                                </button>
-                              );
-                            })}
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mb-2">{r.description || 'Access controls and dashboard view'}</p>
+                                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                                      <div className="flex items-center">
+                                        <ShieldCheck className={`h-3.5 w-3.5 mr-1.5 ${isSelected ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}`} />
+                                        <span>{r.permissions?.length || 0} perms</span>
+                                      </div>
+                                      <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isSelected ? 'text-primary-600 dark:text-primary-400 translate-x-0.5' : 'text-slate-300 dark:text-slate-600'}`} />
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-
-                          {/* Carousel Next Button */}
-                          <button
-                            onClick={() => {
-                              if (rolesScrollRef.current) {
-                                rolesScrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
-                              }
-                            }}
-                            className="absolute right-2 z-10 p-1.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-md text-slate-600 dark:text-slate-400 hover:text-primary-600 transition opacity-0 group-hover:opacity-100 hidden md:block"
-                          >
-                            <ChevronRight className="h-5 w-5" />
-                          </button>
                         </div>
 
-                        {/* Permissions Configuration (Full Width Below) */}
-                        <div className="w-full space-y-6">
+                        {/* Permissions Configuration (Right Column) */}
+                        <div className="lg:col-span-8 xl:col-span-9 space-y-6">
                           {!selectedRole ? (
                             <div className="bg-white dark:bg-[#0F172A] p-12 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none text-center flex flex-col items-center justify-center space-y-4">
                               <ShieldCheck className="h-16 w-16 text-slate-400 dark:text-slate-600 animate-pulse" />
@@ -8341,7 +8455,7 @@ function AdminDashboardContent() {
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Category</label>
                           <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
                             <option value="">Select Category</option>
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name} ({c.segments})</option>)}
+                            {categories.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name} ({c.segments})</option>)}
                           </select>
                         </div>
 

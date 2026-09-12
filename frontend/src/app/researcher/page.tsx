@@ -9,6 +9,7 @@ import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
 import api from '../../services/api';
@@ -19,6 +20,7 @@ import ComplaintReportAdmin from '../../components/admin/ComplaintReportAdmin';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
 import AdminResearchReports from '../../components/admin/AdminResearchReports';
+import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import CustomPageView from '../../components/client/CustomPageView';
 import Legal from '../../components/client/Legal';
 import MobilePreview from '../../components/MobilePreview';
@@ -111,12 +113,12 @@ const NAV_CONFIG: NavModule[] = [
   },
 
   {
-    tab: 'settings',
-    label: 'Personal Setting',
+    tab: 'signature_settings',
+    label: 'Personal Settings',
     icon: 'Settings',
-    accessKey: 'ACCESS_SETTINGS',
-    moduleLabel: 'Personal Setting',
-    moduleDesc: 'Manage personal settings',
+    accessKey: 'ACCESS_DASHBOARD',
+    moduleLabel: 'Personal Settings',
+    moduleDesc: 'Configure your signature and UI preferences',
   },
 ];
 
@@ -248,7 +250,7 @@ function AdminDashboardContent() {
     return 'dashboard';
   });
   const activeTabRef = useRef<string>(activeTab);
-  useEffect(() => { 
+  useEffect(() => {
     activeTabRef.current = activeTab;
     if (typeof window !== 'undefined') {
       localStorage.setItem('researcherActiveTab', activeTab);
@@ -776,6 +778,8 @@ function AdminDashboardContent() {
   const [ccavenueWorkingKey, setCcavenueWorkingKey] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [verifyingGateway, setVerifyingGateway] = useState(false);
+  const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
@@ -1177,7 +1181,7 @@ function AdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
+        router.push('/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);
@@ -1519,6 +1523,49 @@ function AdminDashboardContent() {
       }
       else { toast(data.message); }
     } catch (err: any) { toast(err.message); }
+  };
+
+  const handleVerifyPaymentGateway = async () => {
+    setVerifyingGateway(true);
+    setGatewayVerifyResult(null);
+    try {
+      const res: any = await api.verifyPaymentGateway({
+        gateway: activePaymentGateway,
+        razorpayKeyId,
+        razorpayKeySecret,
+        cashfreeAppId,
+        cashfreeSecretKey,
+        ccavenueMerchantId,
+        ccavenueAccessCode,
+        ccavenueWorkingKey,
+        stripePublishableKey,
+        stripeSecretKey
+      });
+
+      if (res.success) {
+        setGatewayVerifyResult({
+          success: true,
+          message: res.message || 'Payment Gateway Verified Successfully!',
+          mode: res.mode
+        });
+        toast.success(res.message || 'Payment Gateway connection verified!');
+      } else {
+        setGatewayVerifyResult({
+          success: false,
+          message: res.message || 'Payment Gateway Verification Failed.'
+        });
+        toast.error(res.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify payment gateway connection.';
+      setGatewayVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingGateway(false);
+    }
   };
 
   const handleTestSmtp = async () => {
@@ -2649,8 +2696,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                                ? 'bg-white/20 text-white font-medium'
-                                : 'text-blue-200 hover:text-white hover:bg-white/10'
+                              ? 'bg-white/20 text-white font-medium'
+                              : 'text-blue-200 hover:text-white hover:bg-white/10'
                               }`}
                           >
                             {page.title}
@@ -2710,60 +2757,62 @@ function AdminDashboardContent() {
               </button>
             )}
           </div>
-
-          {/* User Footer */}
-          <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-            <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
-            <div
-              onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-              <div className="relative shrink-0">
-                <div className="absolute inset-0 rounded-full border-2 border-white/30 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(99,102,241,0.6)] relative z-10">
-                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : 'A'}
-                </div>
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-blue-900 rounded-full z-20" />
-              </div>
-
-              {!isSidebarCollapsed && (
-                <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-white">{user?.firstName || 'Staff'}</p>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-blue-300" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase text-blue-200">
-                      {user?.role || 'RESEARCHER'}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {!isSidebarCollapsed && (
-                <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
-              )}
-            </div>
-            <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
-                {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-                <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-              </button>
-            </div>
-          </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-          {user?.isImpersonated && (
-            <button
-              onClick={handleRevertImpersonate}
-              className="fixed top-4 right-16 z-50 px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition flex items-center space-x-1.5 font-semibold shadow-lg"
-              title="Back to Super Admin"
-            >
-              <LogOut className="h-3.5 w-3.5 rotate-180" />
-              <span className="hidden sm:inline">Back to Super Admin</span>
-            </button>
-          )}
+          {/* Top Header Bar with Theme, User & Logout */}
+          <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+            <div className="flex items-center gap-3">
+              {/* Mobile menu toggle */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                title="Open Navigation"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+              <div>
+                <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                  {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Researcher Portal'}
+                </h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                  {user?.tenant?.companyName ? `${user.tenant.companyName} Research Workspace` : 'Research Analyst Portal'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 md:gap-4">
+              {user?.isImpersonated && (
+                <button
+                  onClick={handleRevertImpersonate}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 font-bold text-xs shadow-md shadow-indigo-600/20"
+                  title="Back to Super Admin"
+                >
+                  <LogOut className="h-3.5 w-3.5 rotate-180" />
+                  <span className="hidden sm:inline">Back to Super Admin</span>
+                </button>
+              )}
+
+              {/* Theme Toggle */}
+              <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                <ThemeToggle />
+              </div>
+
+              {/* Profile Dropdown with Username & Logout */}
+              <UserProfileDropdown
+                user={{
+                  name: user?.firstName || 'Researcher',
+                  firstName: user?.firstName,
+                  email: user?.email,
+                  role: user?.role || 'RESEARCHER'
+                }}
+                badgeColor="indigo"
+                onProfileClick={() => setActiveTab('profile')}
+                onLogoutClick={() => setIsLogoutModalOpen(true)}
+              />
+            </div>
+          </header>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
             <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
@@ -2933,66 +2982,7 @@ function AdminDashboardContent() {
            ==================================================== */}
               {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
                 <div className="space-y-8">
-                  {/* UNIFIED PAGE HEADER — shown on all tabs */}
-                  {(() => {
-                    // Tabs that have their own header / don't need one
-                    const tabsWithOwnHeader = ['research', 'dashboard'];
-                    if (tabsWithOwnHeader.includes(activeTab)) return null;
-
-                    // Build label + description for every possible tab
-                    const tabMeta: Record<string, { title: string; desc: string }> = {
-                      'research-reports': { title: 'Research Reports', desc: 'Manage and upload PDF research reports for clients' },
-                      clients: { title: 'Client Management', desc: 'View, add, and manage client profiles and subscriptions' },
-                      settings: { title: 'Settings', desc: 'Configure organization, integrations, billing and security settings' },
-                      profile: { title: 'My Profile', desc: 'View and update your personal profile and password' },
-                      legalView: { title: 'Legal & Disclosures', desc: 'View legal pages and regulatory disclosures' },
-                      compliance: { title: 'Compliance Center', desc: 'Track compliance checklists, alerts and penalties' },
-                      plans: { title: 'Plan Management', desc: 'Manage subscription categories and plans' },
-                      checklist: { title: 'Compliance Checklist', desc: 'Track and complete regulatory compliance tasks' },
-                      activeClientSummary: { title: 'Active Client Summary', desc: 'View active client subscription metrics' },
-                      complaintDataView: { title: 'Complaints', desc: 'Review and manage client complaints' },
-                      signature_settings: { title: 'Signature Settings', desc: 'Manage your research analyst co-signature' },
-                    };
-
-                    // Determine title/desc
-                    let title = '';
-                    let desc = '';
-
-                    if (activeTab.startsWith('customPages_')) {
-                      const slug = activeTab.replace('customPages_', '');
-                      const page = adminPagesList?.find((p: any) => p.slug === slug);
-                      title = page?.title || 'Custom Page';
-                      desc = 'Custom content page';
-                    } else {
-                      const meta = tabMeta[activeTab];
-                      if (meta) {
-                        title = meta.title;
-                        desc = meta.desc;
-                      } else {
-                        // fallback to NAV_CONFIG
-                        const navItem = NAV_CONFIG.find(n => n.tab === activeTab);
-                        title = navItem?.label || activeTab;
-                        desc = navItem?.moduleDesc || '';
-                      }
-                    }
-
-                    if (!title) return null;
-
-                    return (
-                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-5 mb-6">
-                        <div>
-                          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {title}
-                          </h2>
-                          {desc && (
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                              {desc}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {/* TABS CONTENT */}
 
 
 
@@ -5733,19 +5723,11 @@ function AdminDashboardContent() {
                                             <td className="py-4 px-5">
                                               <div className="flex flex-col gap-1.5 items-start">
                                                 {/* KRA Status Badge */}
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                                  : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                    : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
+                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.kraVerified
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                  : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
                                                   }`}>
-                                                  KRA: {
-                                                    cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                      ? 'FAILED'
-                                                      : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                        ? 'VERIFIED'
-                                                        : 'PENDING'
-                                                  }
+                                                  KRA: {cl.kraVerified ? 'VERIFIED' : 'PENDING'}
                                                 </span>
                                                 {/* eSign Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
@@ -5924,56 +5906,74 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Select Active Plan <span className="text-rose-600 dark:text-rose-400">*</span>
                                   </label>
-                                  {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).length === 0 ? (
-                                    <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
-                                      No active plans found in this category.
-                                    </div>
-                                  ) : (
-                                    <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
-                                      {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).map((p) => {
-                                        const isSelected = assignPlanId === p.id;
-                                        return (
-                                          <div
-                                            key={p.id}
-                                            onClick={() => {
-                                              setAssignPlanId(p.id);
-                                              setAssignCustomAmount('');
-                                              setAssignCustomDays('');
-                                            }}
-                                            className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
-                                          >
-                                            <div className="flex justify-between items-start">
-                                              <div>
-                                                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
-                                                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                  {(() => {
+                                    const selectedCat = categories.find((c: any) => String(c.id || c._id) === String(assignPlanCategoryId) || String(c.name).toUpperCase() === String(assignPlanCategoryId).toUpperCase());
+                                    const selectedCatName = (selectedCat?.name || '').toUpperCase();
+                                    const filteredPlans = adminPlans.filter((p: any) => {
+                                      const pCatId = typeof p.categoryId === 'object' && p.categoryId ? String(p.categoryId._id || p.categoryId.id) : String(p.categoryId || '');
+                                      const pCatObjId = p.category ? (typeof p.category === 'object' ? String(p.category.id || p.category._id) : String(p.category)) : '';
+                                      const pCatName = (p.category?.name || (typeof p.categoryId === 'object' ? p.categoryId.name : '') || '').toUpperCase();
+                                      
+                                      const matchesCategory = 
+                                        pCatId === String(assignPlanCategoryId) ||
+                                        pCatObjId === String(assignPlanCategoryId) ||
+                                        (selectedCatName && (pCatName === selectedCatName || pCatId === selectedCatName)) ||
+                                        (pCatName && pCatName === String(assignPlanCategoryId).toUpperCase());
+
+                                      return matchesCategory && p.status === 'ACTIVE' && !p.deletedAt;
+                                    });
+
+                                    return filteredPlans.length === 0 ? (
+                                      <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+                                        No active plans found in this category.
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
+                                        {filteredPlans.map((p: any) => {
+                                          const isSelected = assignPlanId === p.id;
+                                          return (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                setAssignPlanId(p.id);
+                                                setAssignCustomAmount('');
+                                                setAssignCustomDays('');
+                                              }}
+                                              className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
+                                            >
+                                              <div className="flex justify-between items-start">
+                                                <div>
+                                                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
+                                                  <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                                </div>
+                                                <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
+                                                  {gstCalculationType === 'EXCLUSIVE' ? (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
+                                                    </div>
+                                                  )}
+                                                  <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
+                                                </div>
                                               </div>
-                                              <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
-                                                {gstCalculationType === 'EXCLUSIVE' ? (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
-                                                  </div>
-                                                ) : (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
-                                                  </div>
-                                                )}
-                                                <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
-                                              </div>
+                                              {isSelected && (
+                                                <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
+                                                  <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
+                                                </div>
+                                              )}
                                             </div>
-                                            {isSelected && (
-                                              <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
-                                                <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
 
@@ -7311,25 +7311,64 @@ function AdminDashboardContent() {
                                   <span className="text-[10px] bg-primary-100 text-primary-700 px-2 py-1 rounded">Supports Variables</span>
                                 </div>
                                 <p className="text-[11px] text-slate-500 mb-2">
-                                  Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
+                                  Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
                                 </p>
-                                <textarea
-                                  value={agreementContent}
-                                  onChange={e => setAgreementContent(e.target.value)}
-                                  rows={6}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={agreementContent}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setAgreementContent(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={agreementContent}
+                                      onChange={e => setAgreementContent(e.target.value)}
+                                      rows={6}
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
+                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={welcomeEmailText}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setWelcomeEmailText(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={reportDisclaimer}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setReportDisclaimer(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -7524,6 +7563,48 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Gateway Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {gatewayVerifyResult ? (
+                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                        {gatewayVerifyResult.mode && (
+                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                            Status: {gatewayVerifyResult.mode} MODE
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyPaymentGateway}
+                                  disabled={verifyingGateway}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingGateway ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Verifying Credentials...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      <span>Verify Gateway Connection</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -7635,89 +7716,13 @@ function AdminDashboardContent() {
                   {activeTab === 'complaintReport' && <ComplaintReportAdmin />}
 
                   {activeTab === 'signature_settings' && (
-                    <div className="max-w-4xl mx-auto space-y-6 pb-20">
-                      <div className="flex items-center space-x-3 mb-6">
-                        <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                          <Settings className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Personal Settings</h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Configure your UI preferences and signature</p>
-                        </div>
-                      </div>
-
-                      {/* UI Preferences Section */}
-                      <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/10 p-6">
-                        <h3 className="text-lg font-bold mb-4">UI Preferences</h3>
-                        <div className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                          <div>
-                            <h4 className="font-bold text-sm">Show Mobile Preview in Signal Desk</h4>
-                            <p className="text-xs text-slate-500 mt-1">Enable or disable the right-side mobile app preview panel when managing signals.</p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
-                          </label>
-                        </div>
-                      </div>
-
-                      {/* Signature Section */}
-                      {(user?.role === 'RESEARCHER' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                        <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/10 p-6">
-                          <h3 className="text-lg font-bold mb-4">Research Analyst Signature</h3>
-                          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 p-4 rounded-xl mb-6 flex items-start space-x-3">
-                            <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <h4 className="font-bold text-sm">Why is this required?</h4>
-                              <p className="text-xs mt-1 leading-relaxed">
-                                As per SEBI guidelines, every Research Report generated must bear the signature of the responsible Research Analyst.
-                                When you upload your signature here, it will be securely saved and automatically appended to the footer of all PDF
-                                Research Reports generated from the Signal Management desk.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="space-y-4">
-                            {user?.tenant?.coSignatureUrl && (
-                              <div className="mb-4 p-4 bg-slate-50 dark:bg-[#1A2235] rounded-xl border border-slate-200 dark:border-white/10 inline-block">
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2 font-bold uppercase">Current Signature</p>
-                                <img
-                                  src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${api.getBaseUrl()}${user.tenant.coSignatureUrl}`}
-                                  alt="Current Signature"
-                                  className="h-20 object-contain mix-blend-multiply dark:mix-blend-normal bg-white"
-                                />
-                              </div>
-                            )}
-                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Upload Your Signature</label>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Accepted formats: PNG, JPG, JPEG (Max 2MB). A clear signature on a white background is recommended.</p>
-
-                            <div className="mt-2">
-                              <input
-                                type="file"
-                                id="coSignatureUploadSettings"
-                                className="hidden"
-                                accept="image/*"
-                                onChange={(e) => {
-                                  if (window.confirm("Notice: This signature will be applied to all your generated PDF Research Reports. Do you want to proceed?")) {
-                                    handleUploadCoSignature(e);
-                                  } else {
-                                    e.target.value = '';
-                                  }
-                                }}
-                                disabled={uploadingCoSignature}
-                              />
-                              <label
-                                htmlFor="coSignatureUploadSettings"
-                                className={`inline-flex px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer ${uploadingCoSignature ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              >
-                                {uploadingCoSignature ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                                <span>Select & Upload Signature File</span>
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <SignatureSettingsTab
+                      user={user}
+                      setUser={setUser}
+                      loadData={loadData}
+                      showMobilePreview={showMobilePreview}
+                      toggleMobilePreview={toggleMobilePreview}
+                    />
                   )}
 
                   {activeTab === 'resources' && (
@@ -7764,7 +7769,7 @@ function AdminDashboardContent() {
                             )}
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-2 max-h-[480px] overflow-y-auto custom-scrollbar pr-1.5">
                             {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
                               const isSelected = selectedRole?.id === r.id;
                               const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
@@ -8004,7 +8009,7 @@ function AdminDashboardContent() {
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Category</label>
                           <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
                             <option value="">Select Category</option>
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name} ({c.segments})</option>)}
+                            {categories.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name} ({c.segments})</option>)}
                           </select>
                         </div>
 

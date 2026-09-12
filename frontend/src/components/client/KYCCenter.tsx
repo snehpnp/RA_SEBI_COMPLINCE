@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   ShieldCheck, FileText, CheckCircle2, AlertTriangle,
   UploadCloud, PenTool, ExternalLink, Clock, XCircle,
-  AlertCircle, Loader2, RefreshCw, Check, Download
+  AlertCircle, Loader2, RefreshCw, Check, Download, ChevronRight
 } from 'lucide-react';
 import api from '../../services/api';
 
@@ -42,15 +42,12 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
     (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
   ) ?? false;
 
-  // KRA is verified when status is past KYC stages
-  const isKraVerified =
-    status !== 'PENDING_ONBOARDING' &&
-    status !== 'KYC_PENDING' &&
-    status !== 'KYC_FAILED';
+  // KRA is verified from dedicated kraVerified boolean or kycStatus
+  const isKraVerified = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
 
   const getStatusBanner = () => {
     // Fully verified: KRA done + agreement signed
-    if (status === 'ACTIVE' && isAgreementSigned) {
+    if (isKraVerified && isAgreementSigned) {
       return {
         border: 'border-premium-success/30',
         glow: 'bg-premium-success/5',
@@ -61,10 +58,11 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         titleColor: 'text-premium-success',
         desc: 'Your KYC and onboarding are complete. You have full access to all premium features and research services.',
         showDownload: true,
+        showAction: false,
       };
     }
-    // ACTIVE but agreement not yet signed
-    if (status === 'ACTIVE' && !isAgreementSigned) {
+    // KRA verified but agreement not yet signed
+    if (isKraVerified && !isAgreementSigned) {
       return {
         border: 'border-premium-warning/30',
         glow: 'bg-premium-warning/5',
@@ -75,82 +73,54 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         titleColor: 'text-premium-warning',
         desc: 'KYC verified. Please sign the Research Analyst Advisory Agreement to complete your onboarding.',
         showDownload: false,
+        showAction: true,
+        actionLabel: 'Sign Agreement'
       };
     }
-    switch (status) {
-      case 'ACTIVE': // fallback (already handled above)
-        return {
-          border: 'border-premium-success/30',
-          glow: 'bg-premium-success/5',
-          iconBg: 'bg-premium-success/20',
-          Icon: ShieldCheck,
-          iconColor: 'text-premium-success',
-          title: 'Fully Verified',
-          titleColor: 'text-premium-success',
-          desc: 'Your KYC and onboarding are complete.',
-          showDownload: true,
-        };
-      case 'KYC_FAILED':
-        return {
-          border: 'border-premium-danger/30',
-          glow: 'bg-premium-danger/5',
-          iconBg: 'bg-premium-danger/20',
-          Icon: XCircle,
-          iconColor: 'text-premium-danger',
-          title: 'KYC Failed',
-          titleColor: 'text-premium-danger',
-          desc: 'Your KYC verification failed. Please re-upload your documents or contact support.',
-          showDownload: false,
-        };
-      case 'KYC_PENDING':
-        return {
-          border: 'border-premium-warning/30',
-          glow: 'bg-premium-warning/5',
-          iconBg: 'bg-premium-warning/20',
-          Icon: Clock,
-          iconColor: 'text-premium-warning',
-          title: 'KYC Pending',
-          titleColor: 'text-premium-warning',
-          desc: 'Your KYC documents have been submitted and are under review. This usually takes 1–2 business days.',
-          showDownload: false,
-        };
-      case 'AGREEMENT_PENDING':
-        return {
-          border: 'border-premium-warning/30',
-          glow: 'bg-premium-warning/5',
-          iconBg: 'bg-premium-warning/20',
-          Icon: AlertCircle,
-          iconColor: 'text-premium-warning',
-          title: 'Agreement Pending',
-          titleColor: 'text-premium-warning',
-          desc: 'KYC verified. Please sign the Research Analyst Advisory Agreement to complete onboarding.',
-          showDownload: false,
-        };
-      case 'PAYMENT_PENDING':
-        return {
-          border: 'border-blue-400/30',
-          glow: 'bg-blue-400/5',
-          iconBg: 'bg-blue-400/20',
-          Icon: AlertCircle,
-          iconColor: 'text-blue-400',
-          title: 'Payment Pending',
-          titleColor: 'text-blue-400',
-          desc: 'KYC & agreement are complete. Please purchase a plan to activate your account.',
-          showDownload: false,
-        };
-      default: // PENDING_ONBOARDING
-        return {
-          border: 'border-premium-border',
-          glow: 'bg-premium-primary/5',
-          iconBg: 'bg-premium-primary/10',
-          Icon: AlertTriangle,
-          iconColor: 'text-premium-text/40',
-          title: 'KYC Not Started',
-          titleColor: 'text-premium-text/60',
-          desc: 'You have not started KYC yet. Please complete your identity verification to access all features.',
-          showDownload: false,
-        };
+    if (status === 'KYC_FAILED') {
+      return {
+        border: 'border-premium-danger/30',
+        glow: 'bg-premium-danger/5',
+        iconBg: 'bg-premium-danger/20',
+        Icon: XCircle,
+        iconColor: 'text-premium-danger',
+        title: 'KYC Verification Failed',
+        titleColor: 'text-premium-danger',
+        desc: 'Your KYC verification could not be completed. Please re-verify your identity documents or contact support.',
+        showDownload: false,
+        showAction: true,
+        actionLabel: 'Retry KYC'
+      };
     }
+    if (status === 'KYC_PENDING') {
+      return {
+        border: 'border-premium-warning/30',
+        glow: 'bg-premium-warning/5',
+        iconBg: 'bg-premium-warning/20',
+        Icon: Clock,
+        iconColor: 'text-premium-warning',
+        title: 'KYC Pending',
+        titleColor: 'text-premium-warning',
+        desc: 'Your KYC documents have been submitted and are under review. This usually takes 1–2 business days.',
+        showDownload: false,
+        showAction: true,
+        actionLabel: 'Complete KYC'
+      };
+    }
+    // KYC not completed
+    return {
+      border: 'border-amber-500/30',
+      glow: 'bg-amber-500/5',
+      iconBg: 'bg-amber-500/20',
+      Icon: AlertTriangle,
+      iconColor: 'text-amber-500',
+      title: 'KYC Verification Required',
+      titleColor: 'text-amber-500',
+      desc: 'You have not completed identity KYC verification yet. Complete your KYC to unlock plan subscriptions and advisory services.',
+      showDownload: false,
+      showAction: true,
+      actionLabel: 'Start KYC Verification'
+    };
   };
 
   const banner = getStatusBanner();
@@ -223,10 +193,21 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
             <p className="text-sm text-premium-text/70 mt-1">{banner.desc}</p>
           </div>
 
-          {banner.showDownload && (
+          {/* {banner.showDownload && (
             <div className="shrink-0">
               <button className="bg-premium-bg border border-premium-border hover:border-premium-text/30 px-6 py-3 rounded-xl text-sm font-medium transition-colors">
                 Download Certificate
+              </button>
+            </div>
+          )} */}
+
+          {banner.showAction && (
+            <div className="shrink-0">
+              <button
+                onClick={onTriggerOnboarding}
+                className="bg-premium-primary hover:bg-premium-primary/90 text-white font-bold px-6 py-3.5 rounded-xl text-sm transition-all shadow-md flex items-center gap-2"
+              >
+                {banner.actionLabel || 'Start Verification'} <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -314,12 +295,12 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
 
               {/* Step 1: KYC Verification */}
               <div className="flex items-start gap-4 relative z-10 group">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : status === 'KYC_PENDING' ? 'bg-premium-warning text-premium-bg animate-pulse ring-4 ring-premium-warning/20' : 'bg-premium-cards border border-premium-border'}`}>
-                  {(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? <Check className="w-3 h-3" /> : (status === 'KYC_PENDING' ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${isKraVerified ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : status === 'KYC_PENDING' ? 'bg-premium-warning text-premium-bg animate-pulse ring-4 ring-premium-warning/20' : 'bg-premium-cards border border-premium-border'}`}>
+                  {isKraVerified ? <Check className="w-3 h-3" /> : (status === 'KYC_PENDING' ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
                 </div>
                 <div>
-                  <p className={`text-sm font-bold ${(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'text-premium-success' : 'text-premium-text'}`}>KYC Verification</p>
-                  <p className="text-xs text-premium-text/60 mt-0.5">{(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'Verified successfully' : status === 'KYC_PENDING' ? 'Pending Completion' : 'Pending submission'}</p>
+                  <p className={`text-sm font-bold ${isKraVerified ? 'text-premium-success' : 'text-premium-text'}`}>KYC Verification</p>
+                  <p className="text-xs text-premium-text/60 mt-0.5">{isKraVerified ? 'Verified successfully' : status === 'KYC_PENDING' ? 'Pending Completion' : 'Pending verification'}</p>
                 </div>
               </div>
 
@@ -346,7 +327,14 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
             </div>
           </div>
 
-          {latestAgreement?.agreementUrl ? (
+          {!isKraVerified ? (
+            <button
+              onClick={onTriggerOnboarding}
+              className="w-full bg-premium-primary hover:bg-premium-primary/90 text-white py-3.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 relative z-10 transition-all shadow-md"
+            >
+              Start KYC Verification <ChevronRight className="w-4 h-4" />
+            </button>
+          ) : latestAgreement?.agreementUrl ? (
             <a
               href={latestAgreement.agreementUrl}
               target="_blank"

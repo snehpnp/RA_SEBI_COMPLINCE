@@ -4,746 +4,826 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPeriodicReportMeta = exports.getPeriodicReportData = exports.getComplianceDashboardMetrics = exports.resolvePenalty = exports.getPenalties = exports.getChecklistHistory = exports.updateAuditStatus = exports.getChecklist = exports.closeAlert = exports.getAlerts = exports.runComplianceCheck = exports.checkComplianceForTenant = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
 const adminController_1 = require("./adminController");
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const checkComplianceForTenant = async (tenantId) => {
-    const tenant = await db_1.default.tenant.findUnique({
-        where: { id: tenantId },
-        include: { users: { include: { staff: true, client: true } } }
-    });
-    if (!tenant)
-        throw new Error('Tenant not found.');
-    // DO NOT run compliance checks for tenants that haven't finished onboarding
-    const completeness = await (0, adminController_1.calculateCompleteness)(tenantId);
-    if (completeness === 0 || completeness.score < 100) {
-        return []; // Return empty alerts, skipping all checks
-    }
-    const alertsCreated = [];
-    // 1. DEPOSIT RULE CHECK
-    const activeClientsCount = await db_1.default.client.count({ where: { user: { tenantId }, status: 'ACTIVE' } });
-    let requiredDeposit = 100000;
-    if (activeClientsCount <= 150) {
-        requiredDeposit = 100000;
-    }
-    else if (activeClientsCount <= 300) {
-        requiredDeposit = 200000;
-    }
-    else if (activeClientsCount <= 1000) {
-        requiredDeposit = 500000;
-    }
-    else {
-        requiredDeposit = 1000000;
-    }
-    if (tenant.depositAmount < requiredDeposit) {
-        const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${tenant.depositAmount}. Please submit deposit proof.`;
-        const existingAlert = await db_1.default.complianceAlert.findFirst({ where: { tenantId, alertType: 'DEPOSIT_LOW', status: 'OPEN' } });
-        if (!existingAlert) {
-            alertsCreated.push(await db_1.default.complianceAlert.create({ data: { tenantId, alertType: 'DEPOSIT_LOW', severity: 'HIGH', description } }));
+    try {
+        let tenant = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenant = await db_1.default.Tenant.findById(tenantId).lean();
         }
-    }
-    // 1B. PART-TIME RA LIMIT CHECK
-    if (tenant.raType === 'PART_TIME') {
-        const isOverLimit = activeClientsCount > 75;
-        // Find the latest penalty alert to check status
-        const latestPenaltyAlert = await db_1.default.complianceAlert.findFirst({
-            where: { tenantId, alertType: 'PART_TIME_LIMIT_EXCEEDED' },
-            orderBy: { createdAt: 'desc' }
+        if (!tenant && tenantId) {
+            tenant = await db_1.default.Tenant.findOne({
+                $or: [{ id: tenantId }, { tenantId: tenantId }]
+            }).lean();
+        }
+        if (!tenant) {
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenant)
+            return [];
+        const resolvedTenantId = String(tenant._id || tenantId || '');
+        // DO NOT run compliance checks for tenants that haven't finished onboarding
+        const completeness = await (0, adminController_1.calculateCompleteness)(resolvedTenantId);
+        if (!completeness || completeness.score < 100) {
+            return []; // Return empty alerts, skipping all checks
+        }
+        const alertsCreated = [];
+        const tenantUsers = await db_1.default.User.find({ tenantId, deletedAt: null }).select('_id').lean();
+        const tenantUserIds = tenantUsers.map(u => u._id);
+        // 1. DEPOSIT RULE CHECK
+        const activeClientsCount = await db_1.default.Client.countDocuments({
+            userId: { $in: tenantUserIds },
+            status: 'ACTIVE'
         });
-        if (isOverLimit) {
-            // Create new penalty only if no alert exists, or it's CLOSED, or it was OPEN but marked as DROPPED
-            const needsNewPenalty = !latestPenaltyAlert ||
-                latestPenaltyAlert.status === 'CLOSED' ||
-                (latestPenaltyAlert.remarks || '').includes('[COUNT_DROPPED]');
-            if (needsNewPenalty) {
-                const description = `Code of Conduct Violation: Part-time RA active clients limit (75) exceeded. Current active clients: ${activeClientsCount}. You must apply for a Full-Time RA or reduce clients to avoid further penalties.`;
-                const newAlert = await db_1.default.complianceAlert.create({
-                    data: { tenantId, alertType: 'PART_TIME_LIMIT_EXCEEDED', severity: 'HIGH', description }
+        let requiredDeposit = 100000;
+        if (activeClientsCount <= 150) {
+            requiredDeposit = 100000;
+        }
+        else if (activeClientsCount <= 300) {
+            requiredDeposit = 200000;
+        }
+        else if (activeClientsCount <= 1000) {
+            requiredDeposit = 500000;
+        }
+        else {
+            requiredDeposit = 1000000;
+        }
+        if ((tenant.depositAmount || 0) < requiredDeposit) {
+            const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${tenant.depositAmount || 0}. Please submit deposit proof.`;
+            const existingAlert = await db_1.default.ComplianceAlert.findOne({
+                tenantId,
+                alertType: 'DEPOSIT_LOW',
+                status: 'OPEN'
+            }).lean();
+            if (!existingAlert) {
+                const newAlert = await db_1.default.ComplianceAlert.create({
+                    tenantId,
+                    alertType: 'DEPOSIT_LOW',
+                    severity: 'HIGH',
+                    description
                 });
-                alertsCreated.push(newAlert);
-                // Find requirement for Part-time limit (usually serialNo: 12)
-                const requirement = await db_1.default.complianceRequirement.findFirst({
-                    where: { serialNo: 12 }
-                });
-                if (requirement) {
-                    const audit = await db_1.default.complianceAudit.create({
-                        data: {
-                            tenantId,
-                            requirementId: requirement.id,
-                            status: 'NON_COMPLIANT',
-                            officerRemarks: 'System auto-generated penalty: Part-time RA client limit exceeded.',
-                        }
+                alertsCreated.push(newAlert.toObject());
+            }
+        }
+        // 1B. PART-TIME RA LIMIT CHECK
+        if (tenant.raType === 'PART_TIME') {
+            const isOverLimit = activeClientsCount > 75;
+            // Find the latest penalty alert to check status
+            const latestPenaltyAlert = await db_1.default.ComplianceAlert.findOne({
+                tenantId,
+                alertType: 'PART_TIME_LIMIT_EXCEEDED'
+            }).sort({ createdAt: -1 }).lean();
+            if (isOverLimit) {
+                // Create new penalty only if no alert exists, or it's CLOSED, or it was OPEN but marked as DROPPED
+                const needsNewPenalty = !latestPenaltyAlert ||
+                    latestPenaltyAlert.status === 'CLOSED' ||
+                    (latestPenaltyAlert.remarks || '').includes('[COUNT_DROPPED]');
+                if (needsNewPenalty) {
+                    const description = `Code of Conduct Violation: Part-time RA active clients limit (75) exceeded. Current active clients: ${activeClientsCount}. You must apply for a Full-Time RA or reduce clients to avoid further penalties.`;
+                    const newAlert = await db_1.default.ComplianceAlert.create({
+                        tenantId,
+                        alertType: 'PART_TIME_LIMIT_EXCEEDED',
+                        severity: 'HIGH',
+                        description
                     });
-                    await db_1.default.penalty.create({
-                        data: {
+                    alertsCreated.push(newAlert.toObject());
+                    // Find requirement for Part-time limit (usually serialNo: 12)
+                    const requirement = await db_1.default.ComplianceRequirement.findOne({
+                        serialNo: 12
+                    }).lean();
+                    if (requirement) {
+                        const audit = await db_1.default.ComplianceAudit.create({
                             tenantId,
-                            auditId: audit.id,
+                            requirementId: requirement._id,
+                            status: 'NON_COMPLIANT',
+                            officerRemarks: 'System auto-generated penalty: Part-time RA client limit exceeded.'
+                        });
+                        await db_1.default.Penalty.create({
+                            tenantId,
+                            auditId: audit._id,
                             amount: 10000,
                             reason: 'Code of Conduct Violation: Part-time RA client limit exceeded.',
                             status: 'PENDING_PAYMENT'
+                        });
+                    }
+                }
+            }
+            else {
+                // activeClientsCount <= 75
+                // If there's an OPEN alert and it hasn't been marked yet, mark it as DROPPED.
+                if (latestPenaltyAlert && latestPenaltyAlert.status === 'OPEN' && !(latestPenaltyAlert.remarks || '').includes('[COUNT_DROPPED]')) {
+                    await db_1.default.ComplianceAlert.findByIdAndUpdate(latestPenaltyAlert._id, {
+                        $set: { remarks: ((latestPenaltyAlert.remarks || '') + ' [COUNT_DROPPED]').trim() }
+                    });
+                }
+            }
+        }
+        // 2. SEBI CERTIFICATE EXPIRY CHECK (90-day warning)
+        if (tenant.certificateValidity) {
+            const certDate = new Date(tenant.certificateValidity);
+            const daysLeft = Math.ceil((certDate.getTime() - Date.now()) / (1000 * 3600 * 24));
+            if (daysLeft <= 90) {
+                const description = `SEBI Certificate validity expires in ${daysLeft} days (valid until: ${certDate.toDateString()}).`;
+                const severity = daysLeft <= 15 ? 'HIGH' : 'MEDIUM';
+                const existingAlert = await db_1.default.ComplianceAlert.findOne({
+                    tenantId,
+                    alertType: 'CERTIFICATE_EXPIRY',
+                    status: 'OPEN'
+                }).lean();
+                if (!existingAlert) {
+                    const newAlert = await db_1.default.ComplianceAlert.create({
+                        tenantId,
+                        alertType: 'CERTIFICATE_EXPIRY',
+                        severity,
+                        description
+                    });
+                    alertsCreated.push(newAlert.toObject());
+                }
+                else {
+                    const updated = await db_1.default.ComplianceAlert.findByIdAndUpdate(existingAlert._id, { $set: { severity, description } }, { returnDocument: 'after', lean: true });
+                    alertsCreated.push(updated);
+                }
+            }
+        }
+        // 3. NISM STAFF EXPIRY CHECK (90-day warning, severity levels: LOW/MEDIUM/HIGH)
+        const rawStaffMembers = await db_1.default.Staff.find({
+            userId: { $in: tenantUserIds },
+            status: 'ACTIVE'
+        })
+            .populate({
+            path: 'userId',
+            populate: { path: 'role' }
+        })
+            .lean();
+        const staffMembers = rawStaffMembers.filter((st) => st.userId && !st.userId.deletedAt);
+        for (const staff of staffMembers) {
+            if (staff.nismValidity) {
+                const nismDate = new Date(staff.nismValidity);
+                const daysLeft = Math.ceil((nismDate.getTime() - Date.now()) / (1000 * 3600 * 24));
+                const existingAlert = await db_1.default.ComplianceAlert.findOne({
+                    tenantId,
+                    alertType: 'NISM_EXPIRY',
+                    status: 'OPEN',
+                    description: { $regex: `Staff "${staff.name}"`, $options: 'i' }
+                }).lean();
+                if (daysLeft <= 90) {
+                    const formattedExpiryDate = nismDate.toLocaleDateString('en-IN', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric'
+                    });
+                    const description = `NISM Certificate of Staff "${staff.name}" (Expiry Date: ${formattedExpiryDate}) expires in ${daysLeft} day(s). Please renew before expiry.`;
+                    let severity = 'LOW';
+                    if (daysLeft <= 30) {
+                        severity = 'HIGH';
+                    }
+                    else if (daysLeft <= 60) {
+                        severity = 'MEDIUM';
+                    }
+                    if (existingAlert) {
+                        if (existingAlert.description !== description || existingAlert.severity !== severity) {
+                            await db_1.default.ComplianceAlert.findByIdAndUpdate(existingAlert._id, {
+                                $set: { description, severity }
+                            });
+                        }
+                    }
+                    else {
+                        const newAlert = await db_1.default.ComplianceAlert.create({
+                            tenantId,
+                            alertType: 'NISM_EXPIRY',
+                            severity,
+                            description
+                        });
+                        alertsCreated.push(newAlert.toObject());
+                    }
+                }
+                else {
+                    if (existingAlert) {
+                        await db_1.default.ComplianceAlert.findByIdAndUpdate(existingAlert._id, {
+                            $set: {
+                                status: 'CLOSED',
+                                remarks: 'NISM Certificate validity updated/renewed.',
+                                closedAt: new Date()
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        // Clean up alerts for staff members who are no longer active or present
+        const openNismAlerts = await db_1.default.ComplianceAlert.find({
+            tenantId,
+            alertType: 'NISM_EXPIRY',
+            status: 'OPEN'
+        }).lean();
+        for (const alert of openNismAlerts) {
+            const matchesActiveStaff = staffMembers.some((st) => alert.description.includes(`Staff "${st.name}"`));
+            if (!matchesActiveStaff) {
+                await db_1.default.ComplianceAlert.findByIdAndUpdate(alert._id, {
+                    $set: {
+                        status: 'CLOSED',
+                        remarks: 'Staff member is no longer active or has been removed.',
+                        closedAt: new Date()
+                    }
+                });
+            }
+        }
+        // 4. MISSING KYC / AGREEMENT CHECK for active subscribers
+        const rawClientsWithSubscriptions = await db_1.default.Client.find({
+            userId: { $in: tenantUserIds }
+        })
+            .populate('agreements')
+            .populate('subscriptions')
+            .populate('userId')
+            .lean();
+        const clientsWithSubscriptions = rawClientsWithSubscriptions.filter((c) => {
+            const hasActiveSub = (c.subscriptions || []).some((s) => s.status === 'ACTIVE');
+            return hasActiveSub && c.userId && !c.userId.deletedAt;
+        });
+        for (const clientItem of clientsWithSubscriptions) {
+            const client = clientItem;
+            const clientId = client._id;
+            // 4a. KYC Check
+            const isKycPending = ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+            const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (Status: ${client.status}).`;
+            const existingKycAlert = await db_1.default.ComplianceAlert.findOne({
+                tenantId,
+                alertType: 'KYC_MISSING',
+                status: 'OPEN',
+                clientId
+            }).lean();
+            if (isKycPending) {
+                if (!existingKycAlert) {
+                    const newAlert = await db_1.default.ComplianceAlert.create({
+                        tenantId,
+                        alertType: 'KYC_MISSING',
+                        severity: 'MEDIUM',
+                        description: kycDescription,
+                        clientId
+                    });
+                    alertsCreated.push(newAlert.toObject());
+                }
+            }
+            else {
+                if (existingKycAlert) {
+                    await db_1.default.ComplianceAlert.findByIdAndUpdate(existingKycAlert._id, {
+                        $set: {
+                            status: 'CLOSED',
+                            remarks: 'Daily auto-sweep: resolved as client completed KYC.',
+                            closedAt: new Date()
                         }
                     });
                 }
             }
-        }
-        else {
-            // activeClientsCount <= 75
-            // If there's an OPEN alert and it hasn't been marked yet, mark it as DROPPED.
-            if (latestPenaltyAlert && latestPenaltyAlert.status === 'OPEN' && !(latestPenaltyAlert.remarks || '').includes('[COUNT_DROPPED]')) {
-                await db_1.default.complianceAlert.update({
-                    where: { id: latestPenaltyAlert.id },
-                    data: { remarks: ((latestPenaltyAlert.remarks || '') + ' [COUNT_DROPPED]').trim() }
-                });
-            }
-        }
-    }
-    // 2. SEBI CERTIFICATE EXPIRY CHECK (90-day warning)
-    if (tenant.certificateValidity) {
-        const daysLeft = Math.ceil((tenant.certificateValidity.getTime() - Date.now()) / (1000 * 3600 * 24));
-        if (daysLeft <= 90) {
-            const description = `SEBI Certificate validity expires in ${daysLeft} days (valid until: ${tenant.certificateValidity.toDateString()}).`;
-            const severity = daysLeft <= 15 ? 'HIGH' : 'MEDIUM';
-            const existingAlert = await db_1.default.complianceAlert.findFirst({ where: { tenantId, alertType: 'CERTIFICATE_EXPIRY', status: 'OPEN' } });
-            if (!existingAlert) {
-                alertsCreated.push(await db_1.default.complianceAlert.create({ data: { tenantId, alertType: 'CERTIFICATE_EXPIRY', severity, description } }));
-            }
-            else {
-                const updated = await db_1.default.complianceAlert.update({
-                    where: { id: existingAlert.id },
-                    data: { severity, description }
-                });
-                alertsCreated.push(updated);
-            }
-        }
-    }
-    // 3. NISM STAFF EXPIRY CHECK (90-day warning, severity levels: LOW/MEDIUM/HIGH)
-    const rawStaffMembers = await db_1.default.staff.findMany({
-        where: {
-            user: {
-                tenantId,
-            },
-            status: 'ACTIVE'
-        },
-        include: {
-            user: {
-                include: { role: true }
-            }
-        }
-    });
-    const staffMembers = rawStaffMembers.filter(st => st.user && !st.user.deletedAt);
-    for (const staff of staffMembers) {
-        if (staff.nismValidity) {
-            const daysLeft = Math.ceil((staff.nismValidity.getTime() - Date.now()) / (1000 * 3600 * 24));
-            const existingAlert = await db_1.default.complianceAlert.findFirst({
-                where: {
+            // 4b. Agreement Check
+            const hasAgreements = Array.isArray(client.agreements) && client.agreements.length > 0;
+            if (!hasAgreements) {
+                const aggDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but no signed agreement.`;
+                const existingAggAlert = await db_1.default.ComplianceAlert.findOne({
                     tenantId,
-                    alertType: 'NISM_EXPIRY',
+                    alertType: 'AGREEMENT_MISSING',
                     status: 'OPEN',
-                    description: { contains: `Staff "${staff.name}"` }
+                    description: aggDescription
+                }).lean();
+                if (!existingAggAlert) {
+                    const newAlert = await db_1.default.ComplianceAlert.create({
+                        tenantId,
+                        alertType: 'AGREEMENT_MISSING',
+                        severity: 'HIGH',
+                        description: aggDescription,
+                        clientId
+                    });
+                    alertsCreated.push(newAlert.toObject());
                 }
-            });
-            if (daysLeft <= 90) {
-                const formattedExpiryDate = staff.nismValidity.toLocaleDateString('en-IN', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric'
-                });
-                const description = `NISM Certificate of Staff "${staff.name}" (Expiry Date: ${formattedExpiryDate}) expires in ${daysLeft} day(s). Please renew before expiry.`;
-                let severity = 'LOW';
-                if (daysLeft <= 30) {
-                    severity = 'HIGH';
-                }
-                else if (daysLeft <= 60) {
-                    severity = 'MEDIUM';
-                }
-                if (existingAlert) {
-                    if (existingAlert.description !== description || existingAlert.severity !== severity) {
-                        await db_1.default.complianceAlert.update({
-                            where: { id: existingAlert.id },
-                            data: { description, severity }
+            }
+        }
+        // 4c. AUTO-CLOSE RESOLVED KYC/AGREEMENT ALERTS
+        // For agreements
+        const openAgreementAlerts = await db_1.default.ComplianceAlert.find({
+            tenantId,
+            alertType: 'AGREEMENT_MISSING',
+            status: 'OPEN'
+        }).lean();
+        for (const alert of openAgreementAlerts) {
+            if (alert.clientId) {
+                const client = await db_1.default.Client.findById(alert.clientId)
+                    .populate('agreements')
+                    .populate('subscriptions')
+                    .lean();
+                if (client) {
+                    const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+                    const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
+                    const hasActiveSub = (client.subscriptions || []).some((s) => s.status === 'ACTIVE');
+                    if ((isKycComplete && isAgreementComplete) || !hasActiveSub) {
+                        await db_1.default.ComplianceAlert.findByIdAndUpdate(alert._id, {
+                            $set: {
+                                status: 'CLOSED',
+                                remarks: 'Daily auto-sweep: resolved or subscription ended.',
+                                closedAt: new Date()
+                            }
                         });
                     }
                 }
-                else {
-                    alertsCreated.push(await db_1.default.complianceAlert.create({
-                        data: { tenantId, alertType: 'NISM_EXPIRY', severity, description }
-                    }));
-                }
-            }
-            else {
-                if (existingAlert) {
-                    await db_1.default.complianceAlert.update({
-                        where: { id: existingAlert.id },
-                        data: { status: 'CLOSED', remarks: 'NISM Certificate validity updated/renewed.', closedAt: new Date() }
-                    });
-                }
             }
         }
-    }
-    // Clean up alerts for staff members who are no longer active or present
-    const openNismAlerts = await db_1.default.complianceAlert.findMany({
-        where: { tenantId, alertType: 'NISM_EXPIRY', status: 'OPEN' }
-    });
-    for (const alert of openNismAlerts) {
-        const matchesActiveStaff = staffMembers.some(st => alert.description.includes(`Staff "${st.name}"`));
-        if (!matchesActiveStaff) {
-            await db_1.default.complianceAlert.update({
-                where: { id: alert.id },
-                data: { status: 'CLOSED', remarks: 'Staff member is no longer active or has been removed.', closedAt: new Date() }
-            });
-        }
-    }
-    // 4. MISSING KYC / AGREEMENT CHECK for active subscribers
-    const rawClientsWithSubscriptions = await db_1.default.client.findMany({
-        where: {
-            user: { tenantId },
-            subscriptions: { some: { status: 'ACTIVE' } }
-        },
-        include: { agreements: true, subscriptions: true, user: true }
-    });
-    const clientsWithSubscriptions = rawClientsWithSubscriptions.filter(c => c.user && !c.user.deletedAt);
-    for (const client of clientsWithSubscriptions) {
-        // 4a. KYC Check
-        const isKycPending = ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-        const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (Status: ${client.status}).`;
-        const existingKycAlert = await db_1.default.complianceAlert.findFirst({ where: { tenantId, alertType: 'KYC_MISSING', status: 'OPEN', clientId: client.id } });
-        if (isKycPending) {
-            if (!existingKycAlert) {
-                alertsCreated.push(await db_1.default.complianceAlert.create({
-                    data: { tenantId, alertType: 'KYC_MISSING', severity: 'MEDIUM', description: kycDescription, clientId: client.id }
-                }));
-            }
-        }
-        else {
-            if (existingKycAlert) {
-                await db_1.default.complianceAlert.update({
-                    where: { id: existingKycAlert.id },
-                    data: { status: 'CLOSED', remarks: 'Daily auto-sweep: resolved as client completed KYC.', closedAt: new Date() }
-                });
-            }
-        }
-        // 4b. Agreement Check
-        if (client.agreements.length === 0) {
-            const aggDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but no signed agreement.`;
-            const existingAggAlert = await db_1.default.complianceAlert.findFirst({ where: { tenantId, alertType: 'AGREEMENT_MISSING', status: 'OPEN', description: aggDescription } });
-            if (!existingAggAlert) {
-                alertsCreated.push(await db_1.default.complianceAlert.create({
-                    data: { tenantId, alertType: 'AGREEMENT_MISSING', severity: 'HIGH', description: aggDescription, clientId: client.id }
-                }));
-            }
-        }
-    }
-    // 4c. AUTO-CLOSE RESOLVED KYC/AGREEMENT ALERTS
-    // For agreements
-    const openAgreementAlerts = await db_1.default.complianceAlert.findMany({
-        where: { tenantId, alertType: 'AGREEMENT_MISSING', status: 'OPEN' }
-    });
-    for (const alert of openAgreementAlerts) {
-        if (alert.clientId) {
-            const client = await db_1.default.client.findUnique({
-                where: { id: alert.clientId },
-                include: { agreements: true, subscriptions: true }
-            });
-            if (client) {
-                const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-                const isAgreementComplete = client.agreements.length > 0;
-                const hasActiveSub = client.subscriptions.some((s) => s.status === 'ACTIVE');
-                if ((isKycComplete && isAgreementComplete) || !hasActiveSub) {
-                    await db_1.default.complianceAlert.update({
-                        where: { id: alert.id },
-                        data: { status: 'CLOSED', remarks: 'Daily auto-sweep: resolved or subscription ended.', closedAt: new Date() }
-                    });
+        // For KYC
+        const openKycAlerts = await db_1.default.ComplianceAlert.find({
+            tenantId,
+            alertType: 'KYC_MISSING',
+            status: 'OPEN'
+        }).lean();
+        for (const alert of openKycAlerts) {
+            if (alert.clientId) {
+                const client = await db_1.default.Client.findById(alert.clientId)
+                    .populate('subscriptions')
+                    .lean();
+                if (client) {
+                    const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+                    const hasActiveSub = (client.subscriptions || []).some((s) => s.status === 'ACTIVE');
+                    if (isKycComplete || !hasActiveSub) {
+                        await db_1.default.ComplianceAlert.findByIdAndUpdate(alert._id, {
+                            $set: {
+                                status: 'CLOSED',
+                                remarks: 'Resolved or client no longer has active subscription.',
+                                closedAt: new Date()
+                            }
+                        });
+                    }
                 }
             }
         }
-    }
-    // For KYC
-    const openKycAlerts = await db_1.default.complianceAlert.findMany({
-        where: { tenantId, alertType: 'KYC_MISSING', status: 'OPEN' }
-    });
-    for (const alert of openKycAlerts) {
-        if (alert.clientId) {
-            const client = await db_1.default.client.findUnique({
-                where: { id: alert.clientId },
-                include: { subscriptions: true }
-            });
-            if (client) {
-                const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-                const hasActiveSub = client.subscriptions.some((s) => s.status === 'ACTIVE');
-                if (isKycComplete || !hasActiveSub) {
-                    await db_1.default.complianceAlert.update({
-                        where: { id: alert.id },
-                        data: { status: 'CLOSED', remarks: 'Resolved or client no longer has active subscription.', closedAt: new Date() }
-                    });
-                }
-            }
-        }
-    }
-    // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 incl. GST per client per financial year
-    // Financial year: April 1 to March 31
-    const today = new Date();
-    const fyStart = today.getMonth() >= 3 // April = month index 3
-        ? new Date(today.getFullYear(), 3, 1) // Current year April 1
-        : new Date(today.getFullYear() - 1, 3, 1); // Previous year April 1
-    const fyEnd = new Date(fyStart.getFullYear() + 1, 2, 31, 23, 59, 59); // March 31
-    const SEBI_FEE_CAP = 151000; // ₹1,51,000 incl. GST
-    // Get all active clients for this tenant
-    const rawAllTenantClients = await db_1.default.client.findMany({
-        where: { user: { tenantId } },
-        select: { id: true, name: true, pan: true, user: true }
-    });
-    const allTenantClients = rawAllTenantClients.filter(c => c.user && !c.user.deletedAt);
-    for (const client of allTenantClients) {
-        // Sum all SUCCESS payments for this client in current FY
-        const clientPayments = await db_1.default.payment.findMany({
-            where: {
+        // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 incl. GST per client per financial year
+        const today = new Date();
+        const fyStart = today.getMonth() >= 3
+            ? new Date(today.getFullYear(), 3, 1)
+            : new Date(today.getFullYear() - 1, 3, 1);
+        const fyEnd = new Date(fyStart.getFullYear() + 1, 2, 31, 23, 59, 59);
+        const SEBI_FEE_CAP = 151000;
+        const rawAllTenantClients = await db_1.default.Client.find({
+            userId: { $in: tenantUserIds }
+        }).populate('userId').lean();
+        const allTenantClients = rawAllTenantClients.filter((c) => c.userId && !c.userId.deletedAt);
+        for (const client of allTenantClients) {
+            const clientId = client._id;
+            const clientPayments = await db_1.default.Payment.find({
                 tenantId,
-                clientId: client.id,
+                clientId,
                 status: 'SUCCESS',
-                createdAt: { gte: fyStart, lte: fyEnd }
-            },
-            select: { amount: true }
-        });
-        const totalPaidFY = clientPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-        const existingFeeAlert = await db_1.default.complianceAlert.findFirst({
-            where: {
+                createdAt: { $gte: fyStart, $lte: fyEnd }
+            }).select('amount').lean();
+            const totalPaidFY = clientPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+            const existingFeeAlert = await db_1.default.ComplianceAlert.findOne({
                 tenantId,
                 alertType: 'SEBI_FEE_EXCEEDED',
                 status: 'OPEN',
-                clientId: client.id
-            }
-        });
-        if (totalPaidFY > SEBI_FEE_CAP) {
-            const excessAmount = totalPaidFY - SEBI_FEE_CAP;
-            const description = `SEBI Fee Cap Violation (SR.17): Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has been charged ₹${totalPaidFY.toLocaleString('en-IN')} (incl. GST) in FY ${fyStart.getFullYear()}-${fyEnd.getFullYear()} — exceeds the SEBI limit of ₹1,51,000 by ₹${excessAmount.toLocaleString('en-IN')}. Refund or rectify immediately.`;
-            if (!existingFeeAlert) {
-                const newAlert = await db_1.default.complianceAlert.create({
-                    data: {
+                clientId
+            }).lean();
+            if (totalPaidFY > SEBI_FEE_CAP) {
+                const excessAmount = totalPaidFY - SEBI_FEE_CAP;
+                const description = `SEBI Fee Cap Violation (SR.17): Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has been charged ₹${totalPaidFY.toLocaleString('en-IN')} (incl. GST) in FY ${fyStart.getFullYear()}-${fyEnd.getFullYear()} — exceeds the SEBI limit of ₹1,51,000 by ₹${excessAmount.toLocaleString('en-IN')}. Refund or rectify immediately.`;
+                if (!existingFeeAlert) {
+                    const newAlert = await db_1.default.ComplianceAlert.create({
                         tenantId,
                         alertType: 'SEBI_FEE_EXCEEDED',
                         severity: 'HIGH',
                         description,
-                        clientId: client.id
-                    }
-                });
-                alertsCreated.push(newAlert);
-                // Auto-penalty for SR.17 violation — ₹10,000 per violation
-                const feeRequirement = await db_1.default.complianceRequirement.findFirst({
-                    where: { serialNo: 17 }
-                });
-                if (feeRequirement) {
-                    const feeAudit = await db_1.default.complianceAudit.create({
-                        data: {
-                            tenantId,
-                            requirementId: feeRequirement.id,
-                            status: 'NON_COMPLIANT',
-                            officerRemarks: `System auto-generated: SEBI fee cap exceeded for client "${client.name}". Total charged: ₹${totalPaidFY.toLocaleString('en-IN')}`,
-                        }
+                        clientId
                     });
-                    await db_1.default.penalty.create({
-                        data: {
+                    alertsCreated.push(newAlert.toObject());
+                    // Auto-penalty for SR.17 violation — ₹10,000 per violation
+                    const feeRequirement = await db_1.default.ComplianceRequirement.findOne({
+                        serialNo: 17
+                    }).lean();
+                    if (feeRequirement) {
+                        const feeAudit = await db_1.default.ComplianceAudit.create({
                             tenantId,
-                            auditId: feeAudit.id,
+                            requirementId: feeRequirement._id,
+                            status: 'NON_COMPLIANT',
+                            officerRemarks: `System auto-generated: SEBI fee cap exceeded for client "${client.name}". Total charged: ₹${totalPaidFY.toLocaleString('en-IN')}`
+                        });
+                        await db_1.default.Penalty.create({
+                            tenantId,
+                            auditId: feeAudit._id,
                             amount: 10000,
                             reason: `SEBI Fee Framework Violation (SR.17): Client "${client.name}" charged ₹${totalPaidFY.toLocaleString('en-IN')} incl. GST — exceeds ₹1,51,000 annual cap.`,
                             status: 'PENDING_PAYMENT'
-                        }
-                    });
+                        });
+                    }
+                }
+                else {
+                    if (existingFeeAlert.description !== description) {
+                        await db_1.default.ComplianceAlert.findByIdAndUpdate(existingFeeAlert._id, {
+                            $set: { description }
+                        });
+                    }
                 }
             }
             else {
-                // Update alert description if amount changed
-                if (existingFeeAlert.description !== description) {
-                    await db_1.default.complianceAlert.update({
-                        where: { id: existingFeeAlert.id },
-                        data: { description }
+                if (existingFeeAlert) {
+                    await db_1.default.ComplianceAlert.findByIdAndUpdate(existingFeeAlert._id, {
+                        $set: {
+                            status: 'CLOSED',
+                            remarks: `Auto-resolved: Client "${client.name}" total FY payment ₹${totalPaidFY.toLocaleString('en-IN')} is now within ₹1,51,000 cap.`,
+                            closedAt: new Date()
+                        }
                     });
                 }
             }
         }
-        else {
-            // Client is within limit — close any open alert
-            if (existingFeeAlert) {
-                await db_1.default.complianceAlert.update({
-                    where: { id: existingFeeAlert.id },
-                    data: {
-                        status: 'CLOSED',
-                        remarks: `Auto-resolved: Client "${client.name}" total FY payment ₹${totalPaidFY.toLocaleString('en-IN')} is now within ₹1,51,000 cap.`,
-                        closedAt: new Date()
-                    }
-                });
-            }
-        }
-    }
-    // 5B. PAN COLLECTION FOR SEGREGATION CHECK (SR.48)
-    // Rule: Client has active subscription + KYC complete + PAN missing = alert + penalty
-    const KYC_COMPLETE_STATUSES = ['AGREEMENT_PENDING', 'PAYMENT_PENDING', 'ACTIVE', 'INACTIVE'];
-    const rawClientsWithActivePlans = await db_1.default.client.findMany({
-        where: {
-            user: { tenantId },
-            subscriptions: { some: { status: 'ACTIVE' } },
-            status: { in: KYC_COMPLETE_STATUSES }
-        },
-        select: { id: true, name: true, pan: true, status: true, user: true }
-    });
-    const clientsWithActivePlans = rawClientsWithActivePlans.filter(c => c.user && !c.user.deletedAt);
-    for (const client of clientsWithActivePlans) {
-        const isPanMissing = !client.pan || client.pan.trim() === '';
-        const existingPanAlert = await db_1.default.complianceAlert.findFirst({
-            where: { tenantId, alertType: 'PAN_MISSING', status: 'OPEN', clientId: client.id }
+        // 5B. PAN COLLECTION FOR SEGREGATION CHECK (SR.48)
+        const KYC_COMPLETE_STATUSES = ['AGREEMENT_PENDING', 'PAYMENT_PENDING', 'ACTIVE', 'INACTIVE'];
+        const rawClientsWithActivePlans = await db_1.default.Client.find({
+            userId: { $in: tenantUserIds },
+            status: { $in: KYC_COMPLETE_STATUSES }
+        })
+            .populate('subscriptions')
+            .populate('userId')
+            .lean();
+        const clientsWithActivePlans = rawClientsWithActivePlans.filter((c) => {
+            const hasActiveSub = (c.subscriptions || []).some((s) => s.status === 'ACTIVE');
+            return hasActiveSub && c.userId && !c.userId.deletedAt;
         });
-        if (isPanMissing) {
-            const description = `PAN Collection Violation (SR.48): Client "${client.name}" has an active subscription and completed KYC, but PAN details are missing. PAN is mandatory for family/dependent segregation compliance under SEBI regulations.`;
-            if (!existingPanAlert) {
-                const newPanAlert = await db_1.default.complianceAlert.create({
-                    data: { tenantId, alertType: 'PAN_MISSING', severity: 'HIGH', description, clientId: client.id }
-                });
-                alertsCreated.push(newPanAlert);
-                // Auto-penalty for SR.48 violation — ₹5,000
-                const panRequirement = await db_1.default.complianceRequirement.findFirst({ where: { serialNo: 48 } });
-                if (panRequirement) {
-                    const panAudit = await db_1.default.complianceAudit.create({
-                        data: {
+        for (const client of clientsWithActivePlans) {
+            const isPanMissing = !client.pan || client.pan.trim() === '';
+            const clientId = client._id;
+            const existingPanAlert = await db_1.default.ComplianceAlert.findOne({
+                tenantId,
+                alertType: 'PAN_MISSING',
+                status: 'OPEN',
+                clientId
+            }).lean();
+            if (isPanMissing) {
+                const description = `PAN Collection Violation (SR.48): Client "${client.name}" has an active subscription and completed KYC, but PAN details are missing. PAN is mandatory for family/dependent segregation compliance under SEBI regulations.`;
+                if (!existingPanAlert) {
+                    const newPanAlert = await db_1.default.ComplianceAlert.create({
+                        tenantId,
+                        alertType: 'PAN_MISSING',
+                        severity: 'HIGH',
+                        description,
+                        clientId
+                    });
+                    alertsCreated.push(newPanAlert.toObject());
+                    const panRequirement = await db_1.default.ComplianceRequirement.findOne({ serialNo: 48 }).lean();
+                    if (panRequirement) {
+                        const panAudit = await db_1.default.ComplianceAudit.create({
                             tenantId,
-                            requirementId: panRequirement.id,
+                            requirementId: panRequirement._id,
                             status: 'NON_COMPLIANT',
                             officerRemarks: `System auto-generated: PAN missing for client "${client.name}" with active subscription and completed KYC.`
-                        }
-                    });
-                    await db_1.default.penalty.create({
-                        data: {
+                        });
+                        await db_1.default.Penalty.create({
                             tenantId,
-                            auditId: panAudit.id,
+                            auditId: panAudit._id,
                             amount: 5000,
                             reason: `PAN Collection Violation (SR.48): Client "${client.name}" — active subscription + KYC complete but PAN missing.`,
                             status: 'PENDING_PAYMENT'
+                        });
+                    }
+                }
+            }
+            else {
+                if (existingPanAlert) {
+                    await db_1.default.ComplianceAlert.findByIdAndUpdate(existingPanAlert._id, {
+                        $set: {
+                            status: 'CLOSED',
+                            remarks: `Auto-resolved: PAN "${client.pan}" collected for client "${client.name}".`,
+                            closedAt: new Date()
                         }
                     });
                 }
             }
         }
-        else {
-            // PAN exists — auto-close any open alert
-            if (existingPanAlert) {
-                await db_1.default.complianceAlert.update({
-                    where: { id: existingPanAlert.id },
-                    data: {
-                        status: 'CLOSED',
-                        remarks: `Auto-resolved: PAN "${client.pan}" collected for client "${client.name}".`,
-                        closedAt: new Date()
-                    }
+        // 5C. MISSING PRINCIPAL OFFICER CHECK (SR.7)
+        const hasPrincipalOfficer = staffMembers.some((st) => {
+            const role = st.userId?.role || {};
+            return role.name === 'PRINCIPAL_OFFICER';
+        });
+        const existingPoAlert = await db_1.default.ComplianceAlert.findOne({
+            tenantId,
+            alertType: 'MISSING_PRINCIPAL_OFFICER',
+            status: 'OPEN'
+        }).lean();
+        if (!hasPrincipalOfficer) {
+            if (!existingPoAlert) {
+                const description = `Compliance Alert: No Principal Officer found. Please designate a Principal Officer within 10 days to avoid a penalty.`;
+                const newAlert = await db_1.default.ComplianceAlert.create({
+                    tenantId,
+                    alertType: 'MISSING_PRINCIPAL_OFFICER',
+                    severity: 'MEDIUM',
+                    description
                 });
+                alertsCreated.push(newAlert.toObject());
             }
-        }
-    }
-    // 5C. MISSING PRINCIPAL OFFICER CHECK (SR.7)
-    const hasPrincipalOfficer = staffMembers.some(st => st.user?.role?.name === 'PRINCIPAL_OFFICER');
-    const existingPoAlert = await db_1.default.complianceAlert.findFirst({
-        where: { tenantId, alertType: 'MISSING_PRINCIPAL_OFFICER', status: 'OPEN' }
-    });
-    if (!hasPrincipalOfficer) {
-        if (!existingPoAlert) {
-            const description = `Compliance Alert: No Principal Officer found. Please designate a Principal Officer within 10 days to avoid a penalty.`;
-            const newAlert = await db_1.default.complianceAlert.create({
-                data: { tenantId, alertType: 'MISSING_PRINCIPAL_OFFICER', severity: 'MEDIUM', description }
-            });
-            alertsCreated.push(newAlert);
-        }
-        else {
-            const ageInDays = (Date.now() - new Date(existingPoAlert.createdAt).getTime()) / (1000 * 3600 * 24);
-            if (ageInDays >= 7 && ageInDays < 10 && existingPoAlert.severity !== 'HIGH') {
-                await db_1.default.complianceAlert.update({
-                    where: { id: existingPoAlert.id },
-                    data: { severity: 'HIGH', description: 'CRITICAL: No Principal Officer found. Appoint within 3 days to avoid a ₹5,000 penalty.' }
-                });
-            }
-            else if (ageInDays >= 10) {
-                const poReq = await db_1.default.complianceRequirement.findFirst({ where: { serialNo: 7 } });
-                if (poReq) {
-                    const existingAudit = await db_1.default.complianceAudit.findFirst({
-                        where: { tenantId, requirementId: poReq.id, status: 'NON_COMPLIANT' }
+            else {
+                const ageInDays = (Date.now() - new Date(existingPoAlert.createdAt).getTime()) / (1000 * 3600 * 24);
+                if (ageInDays >= 7 && ageInDays < 10 && existingPoAlert.severity !== 'HIGH') {
+                    await db_1.default.ComplianceAlert.findByIdAndUpdate(existingPoAlert._id, {
+                        $set: {
+                            severity: 'HIGH',
+                            description: 'CRITICAL: No Principal Officer found. Appoint within 3 days to avoid a ₹5,000 penalty.'
+                        }
                     });
-                    if (!existingAudit) {
-                        const penaltyDesc = `Compliance Violation (SR.7): No Principal Officer found after 10-day grace period. Designation is mandatory.`;
-                        const poAudit = await db_1.default.complianceAudit.create({
-                            data: {
+                }
+                else if (ageInDays >= 10) {
+                    const poReq = await db_1.default.ComplianceRequirement.findOne({ serialNo: 7 }).lean();
+                    if (poReq) {
+                        const existingAudit = await db_1.default.ComplianceAudit.findOne({
+                            tenantId,
+                            requirementId: poReq._id,
+                            status: 'NON_COMPLIANT'
+                        }).lean();
+                        if (!existingAudit) {
+                            const penaltyDesc = `Compliance Violation (SR.7): No Principal Officer found after 10-day grace period. Designation is mandatory.`;
+                            const poAudit = await db_1.default.ComplianceAudit.create({
                                 tenantId,
-                                requirementId: poReq.id,
+                                requirementId: poReq._id,
                                 status: 'NON_COMPLIANT',
                                 officerRemarks: 'System auto-generated: No Principal Officer designated after grace period.'
-                            }
-                        });
-                        await db_1.default.penalty.create({
-                            data: { tenantId, auditId: poAudit.id, amount: 5000, reason: penaltyDesc, status: 'PENDING_PAYMENT' }
-                        });
-                        await db_1.default.complianceAlert.update({
-                            where: { id: existingPoAlert.id },
-                            data: { description: penaltyDesc }
-                        });
-                    }
-                }
-            }
-        }
-    }
-    else if (existingPoAlert) {
-        await db_1.default.complianceAlert.update({
-            where: { id: existingPoAlert.id },
-            data: { status: 'CLOSED', remarks: 'Auto-resolved: Principal Officer is now designated.', closedAt: new Date() }
-        });
-        // Auto-resolve associated audit & penalty
-        const poReq = await db_1.default.complianceRequirement.findFirst({ where: { serialNo: 7 } });
-        if (poReq) {
-            await db_1.default.complianceAudit.updateMany({
-                where: { tenantId, requirementId: poReq.id, status: { in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } },
-                data: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Principal Officer designated.' }
-            });
-            const poAudit = await db_1.default.complianceAudit.findFirst({ where: { tenantId, requirementId: poReq.id }, orderBy: { updatedAt: 'desc' } });
-            if (poAudit) {
-                await db_1.default.penalty.updateMany({
-                    where: { auditId: poAudit.id, status: 'PENDING_PAYMENT' },
-                    data: { status: 'WAIVED', remarks: 'Auto-waived: PO added' }
-                });
-            }
-        }
-    }
-    // 5D. MISSING COMPLIANCE OFFICER CHECK (SR.8)
-    const hasComplianceOfficer = staffMembers.some(st => st.user?.role?.name === 'COMPLIANCE_OFFICER');
-    const existingCoAlert = await db_1.default.complianceAlert.findFirst({
-        where: { tenantId, alertType: 'MISSING_COMPLIANCE_OFFICER', status: 'OPEN' }
-    });
-    if (!hasComplianceOfficer) {
-        if (!existingCoAlert) {
-            const description = `Compliance Alert: No Compliance Officer found. Please designate a Compliance Officer within 10 days to avoid a penalty.`;
-            const newAlert = await db_1.default.complianceAlert.create({
-                data: { tenantId, alertType: 'MISSING_COMPLIANCE_OFFICER', severity: 'MEDIUM', description }
-            });
-            alertsCreated.push(newAlert);
-        }
-        else {
-            const ageInDays = (Date.now() - new Date(existingCoAlert.createdAt).getTime()) / (1000 * 3600 * 24);
-            if (ageInDays >= 7 && ageInDays < 10 && existingCoAlert.severity !== 'HIGH') {
-                await db_1.default.complianceAlert.update({
-                    where: { id: existingCoAlert.id },
-                    data: { severity: 'HIGH', description: 'CRITICAL: No Compliance Officer found. Appoint within 3 days to avoid a ₹20,000 penalty.' }
-                });
-            }
-            else if (ageInDays >= 10) {
-                const coReq = await db_1.default.complianceRequirement.findFirst({ where: { serialNo: 8 } });
-                if (coReq) {
-                    const existingAudit = await db_1.default.complianceAudit.findFirst({
-                        where: { tenantId, requirementId: coReq.id, status: 'NON_COMPLIANT' }
-                    });
-                    if (!existingAudit) {
-                        const penaltyDesc = `Compliance Violation (SR.8): No Compliance Officer found after 10-day grace period. Appointment is mandatory.`;
-                        const coAudit = await db_1.default.complianceAudit.create({
-                            data: {
-                                tenantId,
-                                requirementId: coReq.id,
-                                status: 'NON_COMPLIANT',
-                                officerRemarks: 'System auto-generated: No Compliance Officer designated after grace period.'
-                            }
-                        });
-                        await db_1.default.penalty.create({
-                            data: { tenantId, auditId: coAudit.id, amount: 20000, reason: penaltyDesc, status: 'PENDING_PAYMENT' }
-                        });
-                        await db_1.default.complianceAlert.update({
-                            where: { id: existingCoAlert.id },
-                            data: { description: penaltyDesc }
-                        });
-                    }
-                }
-            }
-        }
-    }
-    else if (existingCoAlert) {
-        await db_1.default.complianceAlert.update({
-            where: { id: existingCoAlert.id },
-            data: { status: 'CLOSED', remarks: 'Auto-resolved: Compliance Officer is now designated.', closedAt: new Date() }
-        });
-        // Auto-resolve associated audit & penalty
-        const coReq = await db_1.default.complianceRequirement.findFirst({ where: { serialNo: 8 } });
-        if (coReq) {
-            await db_1.default.complianceAudit.updateMany({
-                where: { tenantId, requirementId: coReq.id, status: { in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } },
-                data: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Compliance Officer designated.' }
-            });
-            const coAudit = await db_1.default.complianceAudit.findFirst({ where: { tenantId, requirementId: coReq.id }, orderBy: { updatedAt: 'desc' } });
-            if (coAudit) {
-                await db_1.default.penalty.updateMany({
-                    where: { auditId: coAudit.id, status: 'PENDING_PAYMENT' },
-                    data: { status: 'WAIVED', remarks: 'Auto-waived: CO added' }
-                });
-            }
-        }
-    }
-    // 5E. INTERNAL POLICIES URL MISSING (SR.11)
-    const isPolicyMissing = !tenant.internalPolicyUrl || tenant.internalPolicyUrl.trim() === '';
-    const existingPolicyAlert = await db_1.default.complianceAlert.findFirst({
-        where: { tenantId, alertType: 'MISSING_INTERNAL_POLICY', status: 'OPEN' }
-    });
-    if (isPolicyMissing) {
-        if (!existingPolicyAlert) {
-            const description = `Compliance Violation (SR.11): Written internal policies and controls are missing. Please upload/provide the Internal Policy URL in Settings.`;
-            alertsCreated.push(await db_1.default.complianceAlert.create({
-                data: { tenantId, alertType: 'MISSING_INTERNAL_POLICY', severity: 'MEDIUM', description }
-            }));
-        }
-    }
-    else if (existingPolicyAlert) {
-        await db_1.default.complianceAlert.update({
-            where: { id: existingPolicyAlert.id },
-            data: { status: 'CLOSED', remarks: 'Auto-resolved: Internal policy provided.', closedAt: new Date() }
-        });
-    }
-    // 5F. COMPLAINT RESOLUTION TIMELINE (SR.28)
-    // Check complaints unresolved for > 21 days
-    const overdueComplaints = await db_1.default.complaint.findMany({
-        where: {
-            tenantId,
-            status: 'OPEN',
-            receivedAt: { lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
-        }
-    });
-    for (const complaint of overdueComplaints) {
-        const description = `Compliance Violation (SR.28): Complaint (${complaint.subject}) is unresolved for over 21 days. Penalty of ₹100 per complaint applies.`;
-        const existingOverdueComplaintAlert = await db_1.default.complianceAlert.findFirst({
-            where: { tenantId, alertType: 'COMPLAINT_OVERDUE', status: 'OPEN', description: { contains: complaint.id } }
-        });
-        if (!existingOverdueComplaintAlert) {
-            const newAlert = await db_1.default.complianceAlert.create({
-                data: { tenantId, alertType: 'COMPLAINT_OVERDUE', severity: 'HIGH', description: `${description} [Ref: ${complaint.id}]` }
-            });
-            alertsCreated.push(newAlert);
-            const overdueReq = await db_1.default.complianceRequirement.findFirst({ where: { serialNo: 28 } });
-            if (overdueReq) {
-                const audit = await db_1.default.complianceAudit.create({
-                    data: {
-                        tenantId,
-                        requirementId: overdueReq.id,
-                        status: 'NON_COMPLIANT',
-                        officerRemarks: `System auto-generated: Complaint ${complaint.id} unresolved > 21 days.`
-                    }
-                });
-                await db_1.default.penalty.create({
-                    data: {
-                        tenantId,
-                        auditId: audit.id,
-                        amount: 100,
-                        reason: `Complaint resolution timeline exceeded for complaint ${complaint.id}`,
-                        status: 'PENDING_PAYMENT'
-                    }
-                });
-            }
-        }
-    }
-    // 6. PREEMPTIVE COMPLIANCE AUDIT GENERATION & OVERDUE STATUS MANAGEMENT
-    const activeRules = await db_1.default.complianceRequirement.findMany({ where: { isActive: true } });
-    const now = new Date();
-    for (const rule of activeRules) {
-        const initialNextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, new Date(), tenant.createdAt);
-        if (!initialNextDueDate)
-            continue;
-        // Find the latest audit for this requirement and tenant
-        let latestAudit = await db_1.default.complianceAudit.findFirst({
-            where: {
-                tenantId,
-                requirementId: rule.id
-            },
-            orderBy: { dueDate: 'desc' }
-        });
-        if (!latestAudit) {
-            // Create initial pending audit
-            latestAudit = await db_1.default.complianceAudit.create({
-                data: {
-                    tenantId,
-                    requirementId: rule.id,
-                    status: 'PENDING',
-                    dueDate: initialNextDueDate
-                }
-            });
-        }
-        // Catch-up Loop: process overdue audits and stack penalties
-        let keepCatchingUp = true;
-        while (keepCatchingUp) {
-            // If latestAudit is in the future or current period (not past due), we are caught up
-            if (!latestAudit.dueDate || latestAudit.dueDate.getTime() >= now.getTime()) {
-                keepCatchingUp = false;
-                // If the latest audit is ALREADY resolved, spawn the next one preemptively
-                if (latestAudit.status === 'COMPLIANT' || latestAudit.status === 'PENALTY_RESOLVED' || latestAudit.status === 'PENALIZED') {
-                    if (latestAudit.dueDate) {
-                        const nextRefDate = new Date(latestAudit.dueDate.getTime() + 24 * 60 * 60 * 1000);
-                        const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate);
-                        if (nextDueDate && nextDueDate.getTime() > latestAudit.dueDate.getTime()) {
-                            const existingNext = await db_1.default.complianceAudit.findFirst({
-                                where: { tenantId, requirementId: rule.id, dueDate: nextDueDate }
                             });
-                            if (!existingNext) {
-                                await db_1.default.complianceAudit.create({
-                                    data: { tenantId, requirementId: rule.id, status: 'PENDING', dueDate: nextDueDate }
-                                });
-                            }
+                            await db_1.default.Penalty.create({
+                                tenantId,
+                                auditId: poAudit._id,
+                                amount: 5000,
+                                reason: penaltyDesc,
+                                status: 'PENDING_PAYMENT'
+                            });
+                            await db_1.default.ComplianceAlert.findByIdAndUpdate(existingPoAlert._id, {
+                                $set: { description: penaltyDesc }
+                            });
                         }
                     }
                 }
-                break;
             }
-            // At this point, latestAudit is past due.
-            // 1. Mark as OVERDUE and apply penalty if it's still PENDING
-            if (latestAudit.status === 'PENDING') {
-                latestAudit = await db_1.default.complianceAudit.update({
-                    where: { id: latestAudit.id },
-                    data: { status: 'OVERDUE' }
+        }
+        else if (existingPoAlert) {
+            await db_1.default.ComplianceAlert.findByIdAndUpdate(existingPoAlert._id, {
+                $set: {
+                    status: 'CLOSED',
+                    remarks: 'Auto-resolved: Principal Officer is now designated.',
+                    closedAt: new Date()
+                }
+            });
+            const poReq = await db_1.default.ComplianceRequirement.findOne({ serialNo: 7 }).lean();
+            if (poReq) {
+                await db_1.default.ComplianceAudit.updateMany({ tenantId, requirementId: poReq._id, status: { $in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } }, { $set: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Principal Officer designated.' } });
+                const poAudit = await db_1.default.ComplianceAudit.findOne({ tenantId, requirementId: poReq._id }).sort({ updatedAt: -1 }).lean();
+                if (poAudit) {
+                    await db_1.default.Penalty.updateMany({ auditId: poAudit._id, status: 'PENDING_PAYMENT' }, { $set: { status: 'WAIVED', remarks: 'Auto-waived: PO added' } });
+                }
+            }
+        }
+        // 5D. MISSING COMPLIANCE OFFICER CHECK (SR.8)
+        const hasComplianceOfficer = staffMembers.some((st) => {
+            const role = st.userId?.role || {};
+            return role.name === 'COMPLIANCE_OFFICER';
+        });
+        const existingCoAlert = await db_1.default.ComplianceAlert.findOne({
+            tenantId,
+            alertType: 'MISSING_COMPLIANCE_OFFICER',
+            status: 'OPEN'
+        }).lean();
+        if (!hasComplianceOfficer) {
+            if (!existingCoAlert) {
+                const description = `Compliance Alert: No Compliance Officer found. Please designate a Compliance Officer within 10 days to avoid a penalty.`;
+                const newAlert = await db_1.default.ComplianceAlert.create({
+                    tenantId,
+                    alertType: 'MISSING_COMPLIANCE_OFFICER',
+                    severity: 'MEDIUM',
+                    description
                 });
-                // Trigger penalty if defined
-                if (rule.penaltyAmount) {
-                    const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
-                    const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
-                    const existingPenalty = await db_1.default.penalty.findUnique({
-                        where: { auditId: latestAudit.id }
+                alertsCreated.push(newAlert.toObject());
+            }
+            else {
+                const ageInDays = (Date.now() - new Date(existingCoAlert.createdAt).getTime()) / (1000 * 3600 * 24);
+                if (ageInDays >= 7 && ageInDays < 10 && existingCoAlert.severity !== 'HIGH') {
+                    await db_1.default.ComplianceAlert.findByIdAndUpdate(existingCoAlert._id, {
+                        $set: {
+                            severity: 'HIGH',
+                            description: 'CRITICAL: No Compliance Officer found. Appoint within 3 days to avoid a ₹20,000 penalty.'
+                        }
                     });
-                    if (!existingPenalty) {
-                        await db_1.default.penalty.create({
-                            data: {
+                }
+                else if (ageInDays >= 10) {
+                    const coReq = await db_1.default.ComplianceRequirement.findOne({ serialNo: 8 }).lean();
+                    if (coReq) {
+                        const existingAudit = await db_1.default.ComplianceAudit.findOne({
+                            tenantId,
+                            requirementId: coReq._id,
+                            status: 'NON_COMPLIANT'
+                        }).lean();
+                        if (!existingAudit) {
+                            const penaltyDesc = `Compliance Violation (SR.8): No Compliance Officer found after 10-day grace period. Appointment is mandatory.`;
+                            const coAudit = await db_1.default.ComplianceAudit.create({
                                 tenantId,
-                                auditId: latestAudit.id,
+                                requirementId: coReq._id,
+                                status: 'NON_COMPLIANT',
+                                officerRemarks: 'System auto-generated: No Compliance Officer designated after grace period.'
+                            });
+                            await db_1.default.Penalty.create({
+                                tenantId,
+                                auditId: coAudit._id,
+                                amount: 20000,
+                                reason: penaltyDesc,
+                                status: 'PENDING_PAYMENT'
+                            });
+                            await db_1.default.ComplianceAlert.findByIdAndUpdate(existingCoAlert._id, {
+                                $set: { description: penaltyDesc }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        else if (existingCoAlert) {
+            await db_1.default.ComplianceAlert.findByIdAndUpdate(existingCoAlert._id, {
+                $set: {
+                    status: 'CLOSED',
+                    remarks: 'Auto-resolved: Compliance Officer is now designated.',
+                    closedAt: new Date()
+                }
+            });
+            const coReq = await db_1.default.ComplianceRequirement.findOne({ serialNo: 8 }).lean();
+            if (coReq) {
+                await db_1.default.ComplianceAudit.updateMany({ tenantId, requirementId: coReq._id, status: { $in: ['NON_COMPLIANT', 'PENDING', 'OVERDUE'] } }, { $set: { status: 'COMPLIANT', resolvedAt: new Date(), officerRemarks: 'Auto-resolved: Compliance Officer designated.' } });
+                const coAudit = await db_1.default.ComplianceAudit.findOne({ tenantId, requirementId: coReq._id }).sort({ updatedAt: -1 }).lean();
+                if (coAudit) {
+                    await db_1.default.Penalty.updateMany({ auditId: coAudit._id, status: 'PENDING_PAYMENT' }, { $set: { status: 'WAIVED', remarks: 'Auto-waived: CO added' } });
+                }
+            }
+        }
+        // 5E. INTERNAL POLICIES URL MISSING (SR.11)
+        const isPolicyMissing = !tenant.internalPolicyUrl || tenant.internalPolicyUrl.trim() === '';
+        const existingPolicyAlert = await db_1.default.ComplianceAlert.findOne({
+            tenantId,
+            alertType: 'MISSING_INTERNAL_POLICY',
+            status: 'OPEN'
+        }).lean();
+        if (isPolicyMissing) {
+            if (!existingPolicyAlert) {
+                const description = `Compliance Violation (SR.11): Written internal policies and controls are missing. Please upload/provide the Internal Policy URL in Settings.`;
+                const newAlert = await db_1.default.ComplianceAlert.create({
+                    tenantId,
+                    alertType: 'MISSING_INTERNAL_POLICY',
+                    severity: 'MEDIUM',
+                    description
+                });
+                alertsCreated.push(newAlert.toObject());
+            }
+        }
+        else if (existingPolicyAlert) {
+            await db_1.default.ComplianceAlert.findByIdAndUpdate(existingPolicyAlert._id, {
+                $set: {
+                    status: 'CLOSED',
+                    remarks: 'Auto-resolved: Internal policy provided.',
+                    closedAt: new Date()
+                }
+            });
+        }
+        // 5F. COMPLAINT RESOLUTION TIMELINE (SR.28)
+        const overdueComplaints = await db_1.default.Complaint.find({
+            tenantId,
+            status: 'OPEN',
+            receivedAt: { $lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
+        }).lean();
+        for (const complaint of overdueComplaints) {
+            const complaintIdStr = complaint._id.toString();
+            const description = `Compliance Violation (SR.28): Complaint (${complaint.subject}) is unresolved for over 21 days. Penalty of ₹100 per complaint applies.`;
+            const existingOverdueComplaintAlert = await db_1.default.ComplianceAlert.findOne({
+                tenantId,
+                alertType: 'COMPLAINT_OVERDUE',
+                status: 'OPEN',
+                description: { $regex: complaintIdStr, $options: 'i' }
+            }).lean();
+            if (!existingOverdueComplaintAlert) {
+                const newAlert = await db_1.default.ComplianceAlert.create({
+                    tenantId,
+                    alertType: 'COMPLAINT_OVERDUE',
+                    severity: 'HIGH',
+                    description: `${description} [Ref: ${complaintIdStr}]`
+                });
+                alertsCreated.push(newAlert.toObject());
+                const overdueReq = await db_1.default.ComplianceRequirement.findOne({ serialNo: 28 }).lean();
+                if (overdueReq) {
+                    const audit = await db_1.default.ComplianceAudit.create({
+                        tenantId,
+                        requirementId: overdueReq._id,
+                        status: 'NON_COMPLIANT',
+                        officerRemarks: `System auto-generated: Complaint ${complaintIdStr} unresolved > 21 days.`
+                    });
+                    await db_1.default.Penalty.create({
+                        tenantId,
+                        auditId: audit._id,
+                        amount: 100,
+                        reason: `Complaint resolution timeline exceeded for complaint ${complaintIdStr}`,
+                        status: 'PENDING_PAYMENT'
+                    });
+                }
+            }
+        }
+        // 6. PREEMPTIVE COMPLIANCE AUDIT GENERATION & OVERDUE STATUS MANAGEMENT
+        const activeRules = await db_1.default.ComplianceRequirement.find({ isActive: true }).lean();
+        const now = new Date();
+        for (const rule of activeRules) {
+            const initialNextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, new Date(), tenant.createdAt);
+            if (!initialNextDueDate)
+                continue;
+            let latestAudit = await db_1.default.ComplianceAudit.findOne({
+                tenantId,
+                requirementId: rule._id
+            }).sort({ dueDate: -1 }).lean();
+            if (!latestAudit) {
+                const created = await db_1.default.ComplianceAudit.create({
+                    tenantId,
+                    requirementId: rule._id,
+                    status: 'PENDING',
+                    dueDate: initialNextDueDate
+                });
+                latestAudit = created.toObject();
+            }
+            let keepCatchingUp = true;
+            while (keepCatchingUp) {
+                const latestDueDate = latestAudit.dueDate ? new Date(latestAudit.dueDate) : null;
+                if (!latestDueDate || latestDueDate.getTime() >= now.getTime()) {
+                    keepCatchingUp = false;
+                    if (latestAudit.status === 'COMPLIANT' || latestAudit.status === 'PENALTY_RESOLVED' || latestAudit.status === 'PENALIZED') {
+                        if (latestDueDate) {
+                            const nextRefDate = new Date(latestDueDate.getTime() + 24 * 60 * 60 * 1000);
+                            const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate);
+                            if (nextDueDate && nextDueDate.getTime() > latestDueDate.getTime()) {
+                                const existingNext = await db_1.default.ComplianceAudit.findOne({
+                                    tenantId,
+                                    requirementId: rule._id,
+                                    dueDate: nextDueDate
+                                }).lean();
+                                if (!existingNext) {
+                                    await db_1.default.ComplianceAudit.create({
+                                        tenantId,
+                                        requirementId: rule._id,
+                                        status: 'PENDING',
+                                        dueDate: nextDueDate
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+                // Past due
+                if (latestAudit.status === 'PENDING') {
+                    latestAudit = await db_1.default.ComplianceAudit.findByIdAndUpdate(latestAudit._id, { $set: { status: 'OVERDUE' } }, { returnDocument: 'after', lean: true });
+                    if (rule.penaltyAmount) {
+                        const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
+                        const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
+                        const existingPenalty = await db_1.default.Penalty.findOne({
+                            auditId: latestAudit._id
+                        }).lean();
+                        if (!existingPenalty) {
+                            await db_1.default.Penalty.create({
+                                tenantId,
+                                auditId: latestAudit._id,
                                 amount: penaltyAmt,
                                 reason: `Overdue compliance: ${rule.requirement}`,
                                 status: 'PENDING_PAYMENT'
-                            }
-                        });
+                            });
+                        }
                     }
                 }
-            }
-            // 2. Generate the next period's audit REGARDLESS of its resolution status
-            const nextRefDate = new Date(latestAudit.dueDate.getTime() + 24 * 60 * 60 * 1000);
-            const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate);
-            // Guard against infinite loop
-            if (!nextDueDate || nextDueDate.getTime() <= latestAudit.dueDate.getTime()) {
-                keepCatchingUp = false;
-                break;
-            }
-            // Check if audit for nextDueDate already exists
-            const existingNext = await db_1.default.complianceAudit.findFirst({
-                where: { tenantId, requirementId: rule.id, dueDate: nextDueDate }
-            });
-            if (existingNext) {
-                latestAudit = existingNext;
-            }
-            else {
-                // Create new PENDING audit for the next period
-                latestAudit = await db_1.default.complianceAudit.create({
-                    data: {
+                const nextRefDate = new Date(latestDueDate.getTime() + 24 * 60 * 60 * 1000);
+                const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate);
+                if (!nextDueDate || nextDueDate.getTime() <= latestDueDate.getTime()) {
+                    keepCatchingUp = false;
+                    break;
+                }
+                const existingNext = await db_1.default.ComplianceAudit.findOne({
+                    tenantId,
+                    requirementId: rule._id,
+                    dueDate: nextDueDate
+                }).lean();
+                if (existingNext) {
+                    latestAudit = existingNext;
+                }
+                else {
+                    const created = await db_1.default.ComplianceAudit.create({
                         tenantId,
-                        requirementId: rule.id,
+                        requirementId: rule._id,
                         status: 'PENDING',
                         dueDate: nextDueDate
-                    }
-                });
+                    });
+                    latestAudit = created.toObject();
+                }
             }
         }
+        return alertsCreated;
     }
-    return alertsCreated;
+    catch (err) {
+        console.error('checkComplianceForTenant error:', err?.message);
+        return [];
+    }
 };
 exports.checkComplianceForTenant = checkComplianceForTenant;
 const runComplianceCheck = async (req, res) => {
@@ -753,23 +833,40 @@ const runComplianceCheck = async (req, res) => {
             const queryTenant = req.query.tenantId;
             if (queryTenant) {
                 const alertsCreated = await (0, exports.checkComplianceForTenant)(queryTenant);
-                return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
+                (0, tenantSyncDispatcher_1.syncTenantToRemote)(queryTenant, { reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
+                return res.status(200).json({
+                    success: true,
+                    message: 'Compliance verification completed successfully.',
+                    alertsGenerated: alertsCreated.length,
+                    data: alertsCreated
+                });
             }
             else {
-                const tenants = await db_1.default.tenant.findMany({ where: { deletedAt: null } });
+                const tenants = await db_1.default.Tenant.find({ deletedAt: null }).lean();
                 let totalAlerts = 0;
                 for (const t of tenants) {
-                    const alerts = await (0, exports.checkComplianceForTenant)(t.id);
+                    const alerts = await (0, exports.checkComplianceForTenant)(t._id.toString());
                     totalAlerts += alerts.length;
                 }
-                return res.status(200).json({ success: true, message: 'Compliance verification completed for all companies.', alertsGenerated: totalAlerts });
+                (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
+                return res.status(200).json({
+                    success: true,
+                    message: 'Compliance verification completed for all companies.',
+                    alertsGenerated: totalAlerts
+                });
             }
         }
         if (!tenantId) {
             return res.status(400).json({ success: false, message: 'Invalid tenant context' });
         }
         const alertsCreated = await (0, exports.checkComplianceForTenant)(tenantId);
-        return res.status(200).json({ success: true, message: 'Compliance verification completed successfully.', alertsGenerated: alertsCreated.length, data: alertsCreated });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
+        return res.status(200).json({
+            success: true,
+            message: 'Compliance verification completed successfully.',
+            alertsGenerated: alertsCreated.length,
+            data: alertsCreated
+        });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -781,24 +878,30 @@ const getAlerts = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const alerts = await db_1.default.complianceAlert.findMany({ where: { tenantId }, orderBy: { createdAt: 'desc' } });
+        const alerts = await db_1.default.ComplianceAlert.find({ tenantId })
+            .sort({ createdAt: -1 })
+            .lean();
         const alertsWithPenalty = await Promise.all(alerts.map(async (alert) => {
             if (alert.alertType === 'PENALTY_LEVIED' && alert.remarks) {
                 const match = alert.remarks.match(/Associated with Audit ID:\s*([a-f0-9\-]+)/i);
                 if (match && match[1]) {
                     const auditId = match[1].trim();
-                    const penalty = await db_1.default.penalty.findFirst({
-                        where: { auditId }
-                    });
+                    const penalty = await db_1.default.Penalty.findOne({
+                        auditId
+                    }).lean();
                     if (penalty) {
                         return {
                             ...alert,
-                            penaltyId: penalty.id
+                            id: alert._id?.toString() || alert.id,
+                            penaltyId: penalty._id?.toString() || penalty.id
                         };
                     }
                 }
             }
-            return alert;
+            return {
+                ...alert,
+                id: alert._id?.toString() || alert.id
+            };
         }));
         return res.status(200).json({ success: true, data: alertsWithPenalty });
     }
@@ -812,7 +915,7 @@ const closeAlert = async (req, res) => {
     const { remarks, actualDepositAmount } = req.body;
     const proofUrl = req.file ? `/uploads/compliance/${req.file.filename}` : undefined;
     try {
-        const alert = await db_1.default.complianceAlert.findUnique({ where: { id } });
+        const alert = await db_1.default.ComplianceAlert.findById(id).lean();
         if (!alert)
             return res.status(404).json({ success: false, message: 'Compliance alert not found.' });
         // Validate if client's KYC/Agreement/PAN is complete for DB-backed alerts
@@ -820,15 +923,14 @@ const closeAlert = async (req, res) => {
             if (!alert.clientId) {
                 return res.status(400).json({ success: false, message: 'This alert is not linked to a valid client ID.' });
             }
-            const client = await db_1.default.client.findUnique({
-                where: { id: alert.clientId },
-                include: { agreements: true }
-            });
+            const client = await db_1.default.Client.findById(alert.clientId)
+                .populate('agreements')
+                .lean();
             if (!client) {
                 return res.status(404).json({ success: false, message: 'Client associated with this alert not found.' });
             }
             const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-            const isAgreementComplete = client.agreements.length > 0;
+            const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
             const isPanComplete = !!(client.pan && client.pan.trim() !== '');
             if (alert.alertType === 'AGREEMENT_MISSING') {
                 if (!isKycComplete || !isAgreementComplete) {
@@ -856,36 +958,64 @@ const closeAlert = async (req, res) => {
                 }
             }
         }
-        const result = await db_1.default.$transaction(async (tx) => {
-            if (alert.alertType === 'DEPOSIT_LOW' && actualDepositAmount) {
-                await tx.tenant.update({ where: { id: alert.tenantId }, data: { depositAmount: { increment: parseFloat(actualDepositAmount) } } });
+        if (alert.alertType === 'DEPOSIT_LOW' && actualDepositAmount) {
+            await db_1.default.Tenant.findByIdAndUpdate(alert.tenantId, {
+                $inc: { depositAmount: parseFloat(actualDepositAmount) }
+            });
+        }
+        const updatedAlert = await db_1.default.ComplianceAlert.findByIdAndUpdate(id, {
+            $set: {
+                status: 'CLOSED',
+                remarks,
+                proofUrl,
+                closedAt: new Date()
             }
-            const updatedAlert = await tx.complianceAlert.update({ where: { id }, data: { status: 'CLOSED', remarks, proofUrl, closedAt: new Date() } });
-            if (alert.alertType === 'DEADLINE_UPCOMING') {
-                const requirements = await tx.complianceRequirement.findMany();
-                const matchedReq = requirements.find(r => alert.description.includes(r.requirement));
-                if (matchedReq) {
-                    const tenant = await tx.tenant.findUnique({ where: { id: alert.tenantId } });
-                    const p = (0, complianceDateHelper_1.getCompliancePeriod)(matchedReq.frequencyType, new Date(), tenant?.createdAt);
-                    let audit = await tx.complianceAudit.findFirst({
-                        where: { tenantId: alert.tenantId, requirementId: matchedReq.id, dueDate: { gte: p.startDate, lte: p.dueDate } }
+        }, { returnDocument: 'after', lean: true });
+        if (alert.alertType === 'DEADLINE_UPCOMING') {
+            const requirements = await db_1.default.ComplianceRequirement.find().lean();
+            const matchedReq = requirements.find((r) => alert.description.includes(r.requirement));
+            if (matchedReq) {
+                const tenant = await db_1.default.Tenant.findById(alert.tenantId).lean();
+                const p = (0, complianceDateHelper_1.getCompliancePeriod)(matchedReq.frequencyType, new Date(), tenant?.createdAt);
+                let audit = await db_1.default.ComplianceAudit.findOne({
+                    tenantId: alert.tenantId,
+                    requirementId: matchedReq._id,
+                    dueDate: { $gte: p.startDate, $lte: p.dueDate }
+                }).lean();
+                if (!audit) {
+                    await db_1.default.ComplianceAudit.create({
+                        tenantId: alert.tenantId,
+                        requirementId: matchedReq._id,
+                        status: 'COMPLIANT',
+                        officerRemarks: remarks || 'Resolved from alerts desk',
+                        proofDocumentUrl: proofUrl,
+                        dueDate: p.dueDate,
+                        resolvedAt: new Date(),
+                        updatedByUserId: req.user.id
                     });
-                    if (!audit) {
-                        await tx.complianceAudit.create({
-                            data: { tenantId: alert.tenantId, requirementId: matchedReq.id, status: 'COMPLIANT', officerRemarks: remarks || 'Resolved from alerts desk', proofDocumentUrl: proofUrl, dueDate: p.dueDate, resolvedAt: new Date(), updatedByUserId: req.user.id }
-                        });
-                    }
-                    else if (audit.status !== 'COMPLIANT') {
-                        await tx.complianceAudit.update({
-                            where: { id: audit.id },
-                            data: { status: 'COMPLIANT', officerRemarks: remarks || 'Resolved from alerts desk', proofDocumentUrl: proofUrl || audit.proofDocumentUrl, resolvedAt: new Date(), updatedByUserId: req.user.id }
-                        });
-                    }
+                }
+                else if (audit.status !== 'COMPLIANT') {
+                    await db_1.default.ComplianceAudit.findByIdAndUpdate(audit._id, {
+                        $set: {
+                            status: 'COMPLIANT',
+                            officerRemarks: remarks || 'Resolved from alerts desk',
+                            proofDocumentUrl: proofUrl || audit.proofDocumentUrl,
+                            resolvedAt: new Date(),
+                            updatedByUserId: req.user.id
+                        }
+                    });
                 }
             }
-            return updatedAlert;
+        }
+        await (0, auditService_1.logAudit)({
+            tenantId: alert.tenantId.toString(),
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'COMPLIANCE',
+            oldValue: alert,
+            newValue: updatedAlert,
+            ipAddress: req.ip
         });
-        await (0, auditService_1.logAudit)({ tenantId: alert.tenantId, userId: req.user.id, action: 'UPDATE', module: 'COMPLIANCE', oldValue: alert, newValue: result, ipAddress: req.ip });
         // Write to ComplianceAuditHistory for alert resolution
         const alertTypeToSerialNo = {
             'DEPOSIT_LOW': 6,
@@ -899,33 +1029,40 @@ const closeAlert = async (req, res) => {
         const serialNo = alertTypeToSerialNo[alert.alertType];
         if (serialNo) {
             try {
-                const requirement = await db_1.default.complianceRequirement.findFirst({ where: { serialNo } });
-                const tenant = await db_1.default.tenant.findUnique({ where: { id: alert.tenantId } });
+                const requirement = await db_1.default.ComplianceRequirement.findOne({ serialNo }).lean();
+                const tenant = await db_1.default.Tenant.findById(alert.tenantId).lean();
                 if (requirement) {
                     const period = (0, complianceDateHelper_1.getCompliancePeriod)(requirement.frequencyType, new Date(), tenant?.createdAt);
-                    let audit = await db_1.default.complianceAudit.findFirst({
-                        where: { tenantId: alert.tenantId, requirementId: requirement.id, dueDate: { gte: period.startDate, lte: period.dueDate } }
-                    });
+                    let audit = await db_1.default.ComplianceAudit.findOne({
+                        tenantId: alert.tenantId,
+                        requirementId: requirement._id,
+                        dueDate: { $gte: period.startDate, $lte: period.dueDate }
+                    }).lean();
                     if (!audit) {
-                        audit = await db_1.default.complianceAudit.create({
-                            data: { tenantId: alert.tenantId, requirementId: requirement.id, status: 'COMPLIANT', dueDate: period.dueDate, resolvedAt: new Date(), updatedByUserId: req.user.id, officerRemarks: `Auto-resolved via alert closure: ${alert.alertType}` }
-                        });
-                    }
-                    const updaterUser = await db_1.default.user.findUnique({ where: { id: req.user.id } });
-                    const updatedByName = updaterUser ? `${updaterUser.firstName} ${updaterUser.lastName}` : 'System';
-                    await db_1.default.complianceAuditHistory.create({
-                        data: {
+                        const created = await db_1.default.ComplianceAudit.create({
                             tenantId: alert.tenantId,
-                            requirementId: requirement.id,
-                            auditId: audit.id,
-                            previousStatus: audit.status,
-                            newStatus: 'COMPLIANT',
-                            officerRemarks: `Alert resolved: ${alert.alertType.replace(/_/g, ' ')}. ${remarks || ''}`,
-                            proofDocumentUrl: proofUrl,
+                            requirementId: requirement._id,
+                            status: 'COMPLIANT',
+                            dueDate: period.dueDate,
+                            resolvedAt: new Date(),
                             updatedByUserId: req.user.id,
-                            updatedByName,
-                            periodLabel: period.label
-                        }
+                            officerRemarks: `Auto-resolved via alert closure: ${alert.alertType}`
+                        });
+                        audit = created.toObject();
+                    }
+                    const updaterUser = await db_1.default.User.findById(req.user.id).lean();
+                    const updatedByName = updaterUser ? `${updaterUser.firstName || ''} ${updaterUser.lastName || ''}`.trim() : 'System';
+                    await db_1.default.ComplianceAuditHistory.create({
+                        tenantId: alert.tenantId,
+                        requirementId: requirement._id,
+                        auditId: audit._id,
+                        previousStatus: audit.status,
+                        newStatus: 'COMPLIANT',
+                        officerRemarks: `Alert resolved: ${alert.alertType.replace(/_/g, ' ')}. ${remarks || ''}`,
+                        proofDocumentUrl: proofUrl,
+                        updatedByUserId: req.user.id,
+                        updatedByName,
+                        periodLabel: period.label
                     });
                 }
             }
@@ -933,7 +1070,12 @@ const closeAlert = async (req, res) => {
                 console.error('Failed to write alert history:', historyErr.message);
             }
         }
-        return res.status(200).json({ success: true, message: 'Alert resolved successfully.', data: result });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(alert.tenantId.toString(), { reason: 'ALERT_RESOLVED' }).catch(() => { });
+        return res.status(200).json({
+            success: true,
+            message: 'Alert resolved successfully.',
+            data: updatedAlert ? { ...updatedAlert, id: updatedAlert._id?.toString() || updatedAlert.id } : null
+        });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -947,31 +1089,46 @@ const getChecklist = async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
     }
     try {
-        const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
-        if (!tenant)
-            return res.status(404).json({ success: false, message: 'Tenant not found.' });
-        const requirements = await db_1.default.complianceRequirement.findMany({
-            where: { isActive: true },
-            orderBy: { serialNo: 'asc' }
-        });
+        let tenant = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!tenant && tenantId) {
+            tenant = await db_1.default.Tenant.findOne({
+                $or: [{ id: tenantId }, { tenantId: tenantId }]
+            }).lean();
+        }
+        if (!tenant) {
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenant) {
+            tenant = { createdAt: new Date() };
+        }
+        const requirements = await db_1.default.ComplianceRequirement.find({ isActive: true })
+            .sort({ serialNo: 1 })
+            .lean();
         const checklist = [];
         const now = new Date();
-        for (const req of requirements) {
-            const period = (0, complianceDateHelper_1.getCompliancePeriod)(req.frequencyType, now, tenant.createdAt);
-            const audit = await db_1.default.complianceAudit.findFirst({
-                where: {
-                    tenantId,
-                    requirementId: req.id,
-                    dueDate: {
-                        gte: period.startDate,
-                        lte: period.dueDate
-                    }
-                },
-                include: { penalty: true }
-            });
+        for (const reqItem of requirements) {
+            const period = (0, complianceDateHelper_1.getCompliancePeriod)(reqItem.frequencyType, now, tenant.createdAt);
+            const audit = await db_1.default.ComplianceAudit.findOne({
+                tenantId,
+                requirementId: reqItem._id,
+                dueDate: {
+                    $gte: period.startDate,
+                    $lte: period.dueDate
+                }
+            })
+                .populate('penalty')
+                .lean();
             checklist.push({
-                ...req,
-                audit: audit || null,
+                ...reqItem,
+                id: reqItem._id?.toString() || reqItem.id,
+                audit: audit ? {
+                    ...audit,
+                    id: audit._id?.toString() || audit.id,
+                    penalty: audit.penalty ? { ...audit.penalty, id: audit.penalty._id?.toString() || audit.penalty.id } : null
+                } : null,
                 currentPeriod: period
             });
         }
@@ -988,11 +1145,11 @@ const updateAuditStatus = async (req, res) => {
     const tenantId = req.user.tenantId;
     const proofDocumentUrl = req.file ? `/uploads/compliance/${req.file.filename}` : undefined;
     try {
-        const requirement = await db_1.default.complianceRequirement.findUnique({ where: { id: requirementId } });
+        const requirement = await db_1.default.ComplianceRequirement.findById(requirementId).lean();
         if (!requirement) {
             return res.status(404).json({ success: false, message: 'Compliance requirement not found.' });
         }
-        const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
+        const tenant = await db_1.default.Tenant.findById(tenantId).lean();
         let parsedAmount = 5000;
         if (requirement.penaltyAmount) {
             const cleanStr = requirement.penaltyAmount.replace(/[^\d]/g, '');
@@ -1002,39 +1159,35 @@ const updateAuditStatus = async (req, res) => {
         }
         const period = (0, complianceDateHelper_1.getCompliancePeriod)(requirement.frequencyType, new Date(), tenant?.createdAt);
         // Find the audit record for the current period
-        let audit = await db_1.default.complianceAudit.findFirst({
-            where: {
-                tenantId,
-                requirementId,
-                dueDate: {
-                    gte: period.startDate,
-                    lte: period.dueDate
-                }
+        let audit = await db_1.default.ComplianceAudit.findOne({
+            tenantId,
+            requirementId,
+            dueDate: {
+                $gte: period.startDate,
+                $lte: period.dueDate
             }
-        });
+        }).lean();
         const previousStatus = audit ? audit.status : 'PENDING';
         // Prevent editing if already resolved
         if (audit && (audit.status === 'COMPLIANT' || audit.status === 'PENALTY_RESOLVED')) {
             return res.status(400).json({ success: false, message: 'This compliance task has already been resolved and cannot be edited.' });
         }
         if (!audit) {
-            audit = await db_1.default.complianceAudit.create({
-                data: {
-                    tenantId,
-                    requirementId,
-                    status,
-                    officerRemarks,
-                    proofDocumentUrl,
-                    dueDate: period.dueDate,
-                    resolvedAt: status === 'COMPLIANT' ? new Date() : null,
-                    updatedByUserId: req.user.id
-                }
+            const created = await db_1.default.ComplianceAudit.create({
+                tenantId,
+                requirementId,
+                status,
+                officerRemarks,
+                proofDocumentUrl,
+                dueDate: period.dueDate,
+                resolvedAt: status === 'COMPLIANT' ? new Date() : null,
+                updatedByUserId: req.user.id
             });
+            audit = created.toObject();
         }
         else {
-            audit = await db_1.default.complianceAudit.update({
-                where: { id: audit.id },
-                data: {
+            audit = await db_1.default.ComplianceAudit.findByIdAndUpdate(audit._id, {
+                $set: {
                     status,
                     officerRemarks,
                     ...(proofDocumentUrl && { proofDocumentUrl }),
@@ -1042,69 +1195,65 @@ const updateAuditStatus = async (req, res) => {
                     resolvedAt: status === 'COMPLIANT' ? new Date() : null,
                     updatedByUserId: req.user.id
                 }
-            });
+            }, { returnDocument: 'after', lean: true });
         }
-        const updaterUser = await db_1.default.user.findUnique({
-            where: { id: req.user.id }
-        });
-        const updatedByName = updaterUser ? `${updaterUser.firstName} ${updaterUser.lastName}` : 'System';
+        const updaterUser = await db_1.default.User.findById(req.user.id).lean();
+        const updatedByName = updaterUser ? `${updaterUser.firstName || ''} ${updaterUser.lastName || ''}`.trim() : 'System';
         // Write to ComplianceAuditHistory
-        await db_1.default.complianceAuditHistory.create({
-            data: {
-                tenantId,
-                requirementId,
-                auditId: audit.id,
-                previousStatus,
-                newStatus: status,
-                officerRemarks,
-                proofDocumentUrl,
-                updatedByUserId: req.user.id,
-                updatedByName,
-                periodLabel: period.label
-            }
+        await db_1.default.ComplianceAuditHistory.create({
+            tenantId,
+            requirementId,
+            auditId: audit._id,
+            previousStatus,
+            newStatus: status,
+            officerRemarks,
+            proofDocumentUrl,
+            updatedByUserId: req.user.id,
+            updatedByName,
+            periodLabel: period.label
         });
         // Auto-levy penalty and compliance alert if marked NON_COMPLIANT
         if (status === 'NON_COMPLIANT') {
-            const existingPenalty = await db_1.default.penalty.findUnique({ where: { auditId: audit.id } });
+            const existingPenalty = await db_1.default.Penalty.findOne({ auditId: audit._id }).lean();
             if (!existingPenalty) {
-                await db_1.default.penalty.create({
-                    data: {
-                        tenantId,
-                        auditId: audit.id,
-                        amount: parsedAmount,
-                        reason: `Non-compliance with rule: ${requirement.requirement}`,
-                        status: 'PENDING_PAYMENT'
-                    }
+                await db_1.default.Penalty.create({
+                    tenantId,
+                    auditId: audit._id,
+                    amount: parsedAmount,
+                    reason: `Non-compliance with rule: ${requirement.requirement}`,
+                    status: 'PENDING_PAYMENT'
                 });
-                await db_1.default.complianceAlert.create({
-                    data: {
-                        tenantId,
-                        alertType: 'PENALTY_LEVIED',
-                        severity: requirement.severityLevel || 'HIGH',
-                        description: `SEBI Penalty Risk: Rs.${parsedAmount.toLocaleString()} can be levied for non-compliance with rule: "${requirement.requirement}". Please upload payment proof and reference to close this penalty.`,
-                        status: 'OPEN',
-                        remarks: `Associated with Audit ID: ${audit.id}`
-                    }
+                await db_1.default.ComplianceAlert.create({
+                    tenantId,
+                    alertType: 'PENALTY_LEVIED',
+                    severity: requirement.severityLevel || 'HIGH',
+                    description: `SEBI Penalty Risk: Rs.${parsedAmount.toLocaleString()} can be levied for non-compliance with rule: "${requirement.requirement}". Please upload payment proof and reference to close this penalty.`,
+                    status: 'OPEN',
+                    remarks: `Associated with Audit ID: ${audit._id.toString()}`
                 });
             }
         }
         else if (status === 'COMPLIANT') {
             // Auto-resolve any DEADLINE_UPCOMING alerts for this requirement
-            await db_1.default.complianceAlert.updateMany({
-                where: {
-                    tenantId,
-                    alertType: 'DEADLINE_UPCOMING',
-                    status: 'OPEN',
-                    description: { contains: requirement.requirement }
-                },
-                data: {
+            await db_1.default.ComplianceAlert.updateMany({
+                tenantId,
+                alertType: 'DEADLINE_UPCOMING',
+                status: 'OPEN',
+                description: { $regex: requirement.requirement, $options: 'i' }
+            }, {
+                $set: {
                     status: 'CLOSED',
                     remarks: 'Auto-resolved: Checklist marked as COMPLIANT.',
                     closedAt: new Date()
                 }
             });
         }
-        return res.status(200).json({ success: true, message: 'Compliance task resolved.', data: audit });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => { });
+        return res.status(200).json({
+            success: true,
+            message: 'Compliance task resolved.',
+            data: audit ? { ...audit, id: audit._id?.toString() || audit.id } : null
+        });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -1117,16 +1266,22 @@ const getChecklistHistory = async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
     }
     try {
-        const history = await db_1.default.complianceAuditHistory.findMany({
-            where: { tenantId },
-            include: {
-                requirement: true
-            },
-            orderBy: {
-                createdAt: 'desc'
-            }
+        const history = await db_1.default.ComplianceAuditHistory.find({ tenantId })
+            .populate('requirementId')
+            .sort({ createdAt: -1 })
+            .lean();
+        const formattedHistory = history.map((h) => {
+            const reqDoc = h.requirementId || h.requirement;
+            return {
+                ...h,
+                id: h._id?.toString() || h.id,
+                requirement: reqDoc ? {
+                    ...reqDoc,
+                    id: reqDoc._id?.toString() || reqDoc.id
+                } : null
+            };
         });
-        return res.status(200).json({ success: true, data: history });
+        return res.status(200).json({ success: true, data: formattedHistory });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -1140,12 +1295,30 @@ const getPenalties = async (req, res) => {
         return res.status(200).json({ success: true, data: [] });
     }
     try {
-        const penalties = await db_1.default.penalty.findMany({
-            where: { tenantId },
-            include: { audit: { include: { requirement: true } } },
-            orderBy: { audit: { updatedAt: 'desc' } }
+        const penalties = await db_1.default.Penalty.find({ tenantId })
+            .populate({
+            path: 'auditId',
+            populate: { path: 'requirementId' }
+        })
+            .sort({ updatedAt: -1 })
+            .lean();
+        const formattedPenalties = penalties.map((p) => {
+            const audit = p.auditId || p.audit;
+            const reqDoc = audit?.requirementId || audit?.requirement;
+            return {
+                ...p,
+                id: p._id?.toString() || p.id,
+                audit: audit ? {
+                    ...audit,
+                    id: audit._id?.toString() || audit.id,
+                    requirement: reqDoc ? {
+                        ...reqDoc,
+                        id: reqDoc._id?.toString() || reqDoc.id
+                    } : null
+                } : null
+            };
         });
-        return res.status(200).json({ success: true, data: penalties });
+        return res.status(200).json({ success: true, data: formattedPenalties });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -1168,68 +1341,67 @@ const resolvePenalty = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Remarks are mandatory.' });
     }
     try {
-        const penalty = await db_1.default.penalty.findUnique({
-            where: { id },
-            include: {
-                audit: {
-                    include: {
-                        requirement: true
-                    }
-                }
-            }
-        });
-        if (!penalty || !penalty.audit)
+        const penalty = await db_1.default.Penalty.findById(id)
+            .populate({
+            path: 'auditId',
+            populate: { path: 'requirementId' }
+        })
+            .lean();
+        const audit = penalty?.auditId || penalty?.audit;
+        if (!penalty || !audit)
             return res.status(404).json({ success: false, message: 'Penalty not found.' });
-        const updated = await db_1.default.penalty.update({
-            where: { id },
-            data: {
+        const updated = await db_1.default.Penalty.findByIdAndUpdate(id, {
+            $set: {
                 status: 'PAID',
                 paymentRef: resolutionType === 'Paid' ? paymentRef : 'WAIVED_COMPLIANT',
                 proofUrl,
                 remarks,
                 paidAt: new Date()
             }
-        });
-        await db_1.default.complianceAudit.update({
-            where: { id: penalty.auditId },
-            data: { status: resolutionType.toUpperCase(), officerRemarks: `Penalty resolved as ${resolutionType}. ${remarks || ''}` }
-        });
-        const updaterUser = await db_1.default.user.findUnique({
-            where: { id: req.user.id }
-        });
-        const updatedByName = updaterUser ? `${updaterUser.firstName} ${updaterUser.lastName}` : 'System';
-        const period = (0, complianceDateHelper_1.getCompliancePeriod)(penalty.audit.requirement.frequencyType, penalty.audit.updatedAt || new Date());
-        // Write to ComplianceAuditHistory when resolving penalty
-        await db_1.default.complianceAuditHistory.create({
-            data: {
-                tenantId: penalty.tenantId,
-                requirementId: penalty.audit.requirementId,
-                auditId: penalty.auditId,
-                previousStatus: penalty.audit.status,
-                newStatus: resolutionType.toUpperCase(),
-                officerRemarks: `Penalty paid. Ref: ${paymentRef}. ${remarks || ''}`,
-                proofDocumentUrl: proofUrl,
-                updatedByUserId: req.user.id,
-                updatedByName,
-                periodLabel: period.label
+        }, { returnDocument: 'after', lean: true });
+        await db_1.default.ComplianceAudit.findByIdAndUpdate(audit._id, {
+            $set: {
+                status: resolutionType.toUpperCase(),
+                officerRemarks: `Penalty resolved as ${resolutionType}. ${remarks || ''}`
             }
         });
+        const updaterUser = await db_1.default.User.findById(req.user.id).lean();
+        const updatedByName = updaterUser ? `${updaterUser.firstName || ''} ${updaterUser.lastName || ''}`.trim() : 'System';
+        const requirement = audit.requirementId || audit.requirement;
+        const period = (0, complianceDateHelper_1.getCompliancePeriod)(requirement?.frequencyType || 'CONTINUOUS', audit.updatedAt || new Date());
+        // Write to ComplianceAuditHistory when resolving penalty
+        await db_1.default.ComplianceAuditHistory.create({
+            tenantId: penalty.tenantId,
+            requirementId: audit.requirementId?._id || audit.requirementId,
+            auditId: audit._id,
+            previousStatus: audit.status,
+            newStatus: resolutionType.toUpperCase(),
+            officerRemarks: `Penalty paid. Ref: ${paymentRef}. ${remarks || ''}`,
+            proofDocumentUrl: proofUrl,
+            updatedByUserId: req.user.id,
+            updatedByName,
+            periodLabel: period.label
+        });
         // Close the corresponding compliance alert
-        await db_1.default.complianceAlert.updateMany({
-            where: {
-                tenantId: penalty.tenantId,
-                alertType: 'PENALTY_LEVIED',
-                status: 'OPEN',
-                remarks: { contains: penalty.auditId }
-            },
-            data: {
+        await db_1.default.ComplianceAlert.updateMany({
+            tenantId: penalty.tenantId,
+            alertType: 'PENALTY_LEVIED',
+            status: 'OPEN',
+            remarks: { $regex: audit._id.toString(), $options: 'i' }
+        }, {
+            $set: {
                 status: 'CLOSED',
                 closedAt: new Date(),
                 remarks: `Resolved via Penalty Payment. Ref: ${paymentRef}. ${remarks || ''}`,
                 proofUrl
             }
         });
-        return res.status(200).json({ success: true, message: 'Penalty resolved successfully.', data: updated });
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(penalty.tenantId.toString(), { reason: 'PENALTY_RESOLVED' }).catch(() => { });
+        return res.status(200).json({
+            success: true,
+            message: 'Penalty resolved successfully.',
+            data: updated ? { ...updated, id: updated._id?.toString() || updated.id } : null
+        });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -1240,18 +1412,45 @@ const getMetricsForTenant = async (tenantId, res) => {
     try {
         const now = new Date();
         const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const audits = await db_1.default.complianceAudit.findMany({
-            where: { tenantId },
-            include: { requirement: true, penalty: true }
-        });
-        const upcoming = audits.filter(a => (a.status === 'PENDING' || a.status === 'OVERDUE') &&
-            a.dueDate && a.dueDate >= now && a.dueDate <= thirtyDaysFromNow);
-        const due = audits.filter(a => (a.status === 'PENDING' || a.status === 'OVERDUE') &&
-            a.dueDate && a.dueDate >= now);
-        const overdue = audits.filter(a => (a.status === 'PENDING' || a.status === 'OVERDUE') &&
-            ((a.dueDate && a.dueDate < now) || a.status === 'OVERDUE'));
-        const penalty = audits.filter(a => a.penalty && a.penalty.status === 'PENDING_PAYMENT');
-        const closed = audits.filter(a => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED');
+        const audits = await db_1.default.ComplianceAudit.find({ tenantId })
+            .populate('requirementId')
+            .populate('penalty')
+            .populate('tenantId')
+            .lean();
+        const normalizeAudit = (a) => {
+            const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+            const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || {});
+            return {
+                ...a,
+                id: a._id ? a._id.toString() : a.id,
+                requirement: {
+                    id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+                    serialNo: reqObj.serialNo,
+                    requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+                    frequency: reqObj.frequency,
+                    frequencyType: reqObj.frequencyType,
+                    severityLevel: reqObj.severityLevel,
+                    penaltyAmount: reqObj.penaltyAmount
+                },
+                requirementId: reqObj,
+                tenant: {
+                    id: tenObj._id ? tenObj._id.toString() : (tenObj.id || tenantId),
+                    companyName: tenObj.companyName || '—',
+                    sebiRegistration: tenObj.sebiRegistration || '—',
+                    domainUrl: tenObj.domainUrl || null,
+                    website: tenObj.website || null
+                },
+                penalty: a.penalty || null
+            };
+        };
+        const upcoming = audits.filter((a) => (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') &&
+            a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow).map(normalizeAudit);
+        const due = audits.filter((a) => (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') &&
+            a.dueDate && new Date(a.dueDate) >= now).map(normalizeAudit);
+        const overdue = audits.filter((a) => ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) ||
+            a.status === 'OVERDUE').map(normalizeAudit);
+        const penalty = audits.filter((a) => a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
+        const closed = audits.filter((a) => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED').map(normalizeAudit);
         return res.status(200).json({
             success: true,
             data: {
@@ -1265,7 +1464,8 @@ const getMetricsForTenant = async (tenantId, res) => {
                     due: due.length,
                     overdue: overdue.length,
                     penalty: penalty.length,
-                    closed: closed.length
+                    closed: closed.length,
+                    total: audits.length
                 }
             }
         });
@@ -1278,17 +1478,45 @@ const getGlobalComplianceMetrics = async (res) => {
     try {
         const now = new Date();
         const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const audits = await db_1.default.complianceAudit.findMany({
-            include: { requirement: true, penalty: true, tenant: true }
-        });
-        const upcoming = audits.filter(a => (a.status === 'PENDING' || a.status === 'OVERDUE') &&
-            a.dueDate && a.dueDate >= now && a.dueDate <= thirtyDaysFromNow);
-        const due = audits.filter(a => (a.status === 'PENDING' || a.status === 'OVERDUE') &&
-            a.dueDate && a.dueDate >= now);
-        const overdue = audits.filter(a => (a.status === 'PENDING' || a.status === 'OVERDUE') &&
-            ((a.dueDate && a.dueDate < now) || a.status === 'OVERDUE'));
-        const penalty = audits.filter(a => a.penalty && a.penalty.status === 'PENDING_PAYMENT');
-        const closed = audits.filter(a => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED');
+        const audits = await db_1.default.ComplianceAudit.find()
+            .populate('requirementId')
+            .populate('penalty')
+            .populate('tenantId')
+            .lean();
+        const normalizeAudit = (a) => {
+            const reqObj = a.requirementId && typeof a.requirementId === 'object' ? a.requirementId : (a.requirement || {});
+            const tenObj = a.tenantId && typeof a.tenantId === 'object' ? a.tenantId : (a.tenant || {});
+            return {
+                ...a,
+                id: a._id ? a._id.toString() : a.id,
+                requirement: {
+                    id: reqObj._id ? reqObj._id.toString() : reqObj.id,
+                    serialNo: reqObj.serialNo,
+                    requirement: reqObj.requirement || reqObj.title || 'SEBI Regulation',
+                    frequency: reqObj.frequency,
+                    frequencyType: reqObj.frequencyType,
+                    severityLevel: reqObj.severityLevel,
+                    penaltyAmount: reqObj.penaltyAmount
+                },
+                requirementId: reqObj,
+                tenant: {
+                    id: tenObj._id ? tenObj._id.toString() : (tenObj.id || ''),
+                    companyName: tenObj.companyName || '—',
+                    sebiRegistration: tenObj.sebiRegistration || '—',
+                    domainUrl: tenObj.domainUrl || null,
+                    website: tenObj.website || null
+                },
+                penalty: a.penalty || null
+            };
+        };
+        const upcoming = audits.filter((a) => (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'UPCOMING') &&
+            a.dueDate && new Date(a.dueDate) >= now && new Date(a.dueDate) <= thirtyDaysFromNow).map(normalizeAudit);
+        const due = audits.filter((a) => (a.status === 'PENDING' || a.status === 'OVERDUE' || a.status === 'DUE') &&
+            a.dueDate && new Date(a.dueDate) >= now).map(normalizeAudit);
+        const overdue = audits.filter((a) => ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) ||
+            a.status === 'OVERDUE').map(normalizeAudit);
+        const penalty = audits.filter((a) => a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
+        const closed = audits.filter((a) => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED').map(normalizeAudit);
         return res.status(200).json({
             success: true,
             data: {
@@ -1302,7 +1530,8 @@ const getGlobalComplianceMetrics = async (res) => {
                     due: due.length,
                     overdue: overdue.length,
                     penalty: penalty.length,
-                    closed: closed.length
+                    closed: closed.length,
+                    total: audits.length
                 }
             }
         });
@@ -1335,76 +1564,89 @@ const getPeriodicReportData = async (req, res) => {
         // Default to last 6 months if not provided
         const end = endDate ? new Date(endDate) : new Date();
         const start = startDate ? new Date(startDate) : new Date(end.getFullYear(), end.getMonth() - 6, end.getDate());
-        const tenant = await db_1.default.tenant.findUnique({
-            where: { id: tenantId },
-            include: {
-                users: { include: { staff: true, client: true } }
-            }
-        });
-        if (!tenant)
-            return res.status(404).json({ success: false, message: 'Tenant not found' });
+        let tenant = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        }
+        if (!tenant && tenantId) {
+            tenant = await db_1.default.Tenant.findOne({
+                $or: [{ id: tenantId }, { tenantId: tenantId }]
+            }).lean();
+        }
+        if (!tenant) {
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        if (!tenant) {
+            tenant = { createdAt: new Date() };
+        }
+        const tenantUsers = await db_1.default.User.find({ tenantId, deletedAt: null }).select('_id roleId').populate('role').lean();
+        const tenantUserIds = tenantUsers.map(u => u._id);
         // 1. Half Yearly Report Data
-        const reportsPublished = await db_1.default.researchReport.count({
-            where: {
-                tenantId,
-                status: 'PUBLISHED',
-                publishedAt: { gte: start, lte: end }
-            }
+        const reportsPublished = await db_1.default.ResearchReport.countDocuments({
+            tenantId,
+            status: 'PUBLISHED',
+            publishedAt: { $gte: start, $lte: end }
         });
-        const staffMembers = await db_1.default.staff.findMany({
-            where: { user: { tenantId, deletedAt: null }, status: 'ACTIVE' },
-            include: { user: { include: { role: true } } }
-        });
-        const raCount = staffMembers.filter(s => s.user.role.name === 'RESEARCHER' || s.user.role.name === 'ADMIN').length;
-        const parsCount = staffMembers.filter(s => ['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(s.user.role.name)).length;
+        const staffMembers = await db_1.default.Staff.find({
+            userId: { $in: tenantUserIds },
+            status: 'ACTIVE'
+        })
+            .populate({
+            path: 'userId',
+            populate: { path: 'role' }
+        })
+            .lean();
+        const raCount = staffMembers.filter((s) => {
+            const roleName = s.userId?.role?.name;
+            return roleName === 'RESEARCHER' || roleName === 'ADMIN';
+        }).length;
+        const parsCount = staffMembers.filter((s) => {
+            const roleName = s.userId?.role?.name;
+            return ['PERSON_ASSOCIATED', 'SALES', 'MARKETING'].includes(roleName);
+        }).length;
         const totalEmployees = staffMembers.length;
-        const complianceOfficer = staffMembers.find(s => s.user.role.name === 'COMPLIANCE_OFFICER');
-        const principalOfficer = staffMembers.find(s => s.user.role.name === 'PRINCIPAL_OFFICER');
+        const complianceOfficer = staffMembers.find((s) => s.userId?.role?.name === 'COMPLIANCE_OFFICER');
+        const principalOfficer = staffMembers.find((s) => s.userId?.role?.name === 'PRINCIPAL_OFFICER');
         // 2. Complaints Data
-        const complaintsReceived = await db_1.default.complaint.count({
-            where: { tenantId, receivedAt: { gte: start, lte: end } }
+        const complaintsReceived = await db_1.default.Complaint.countDocuments({
+            tenantId,
+            receivedAt: { $gte: start, $lte: end }
         });
-        const complaintsResolved = await db_1.default.complaint.count({
-            where: { tenantId, resolvedAt: { gte: start, lte: end } }
+        const complaintsResolved = await db_1.default.Complaint.countDocuments({
+            tenantId,
+            resolvedAt: { $gte: start, $lte: end }
         });
-        const complaintsPendingStart = await db_1.default.complaint.count({
-            where: {
-                tenantId,
-                receivedAt: { lt: start },
-                OR: [
-                    { status: 'OPEN' },
-                    { resolvedAt: { gte: start } }
-                ]
-            }
+        const complaintsPendingStart = await db_1.default.Complaint.countDocuments({
+            tenantId,
+            receivedAt: { $lt: start },
+            $or: [
+                { status: 'OPEN' },
+                { resolvedAt: { $gte: start } }
+            ]
         });
         const complaintsPendingEnd = complaintsPendingStart + complaintsReceived - complaintsResolved;
         // 3. Clients and Fees
-        const clientsAtStart = await db_1.default.client.count({
-            where: {
-                user: { tenantId, deletedAt: null },
-                subscriptions: { some: { startDate: { lt: start }, endDate: { gte: start }, status: 'ACTIVE' } }
-            }
-        });
-        const clientsAcquired = await db_1.default.client.count({
-            where: {
-                user: { tenantId, deletedAt: null },
-                subscriptions: { some: { startDate: { gte: start, lte: end }, status: 'ACTIVE' } }
-            }
-        });
-        const clientsAtEnd = await db_1.default.client.count({
-            where: {
-                user: { tenantId, deletedAt: null },
-                subscriptions: { some: { startDate: { lte: end }, endDate: { gte: end }, status: 'ACTIVE' } }
-            }
-        });
+        const allClients = await db_1.default.Client.find({
+            userId: { $in: tenantUserIds }
+        }).populate('subscriptions').lean();
+        const clientsAtStart = allClients.filter((c) => {
+            return (c.subscriptions || []).some((s) => new Date(s.startDate) < start && new Date(s.endDate) >= start && s.status === 'ACTIVE');
+        }).length;
+        const clientsAcquired = allClients.filter((c) => {
+            return (c.subscriptions || []).some((s) => new Date(s.startDate) >= start && new Date(s.startDate) <= end && s.status === 'ACTIVE');
+        }).length;
+        const clientsAtEnd = allClients.filter((c) => {
+            return (c.subscriptions || []).some((s) => new Date(s.startDate) <= end && new Date(s.endDate) >= end && s.status === 'ACTIVE');
+        }).length;
         let clientsExpired = clientsAtStart + clientsAcquired - clientsAtEnd;
         if (clientsExpired < 0)
             clientsExpired = 0;
-        const payments = await db_1.default.payment.aggregate({
-            where: { tenantId, status: 'SUCCESS', createdAt: { gte: start, lte: end } },
-            _sum: { amount: true }
-        });
-        const feesCollected = payments._sum.amount || 0;
+        const payments = await db_1.default.Payment.find({
+            tenantId,
+            status: 'SUCCESS',
+            createdAt: { $gte: start, $lte: end }
+        }).select('amount').lean();
+        const feesCollected = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
         const reportData = {
             tenant: {
                 companyName: tenant.companyName,
@@ -1445,10 +1687,10 @@ const getPeriodicReportData = async (req, res) => {
                     mobile: principalOfficer.mobile,
                     nismNumber: principalOfficer.nismNumber
                 } : null,
-                allStaff: staffMembers.map(s => ({
+                allStaff: staffMembers.map((s) => ({
                     name: s.name,
                     email: s.email,
-                    role: s.user.role.name,
+                    role: s.userId?.role?.name,
                     nismNumber: s.nismNumber,
                     nismValidity: s.nismValidity
                 }))
@@ -1479,15 +1721,21 @@ const getPeriodicReportData = async (req, res) => {
 exports.getPeriodicReportData = getPeriodicReportData;
 const getPeriodicReportMeta = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
-        const tenant = await db_1.default.tenant.findUnique({
-            where: { id: tenantId },
-            select: { createdAt: true }
-        });
-        if (!tenant)
-            return res.status(404).json({ success: false, message: 'Tenant not found' });
+        const tenantId = req.user?.tenantId;
+        let tenant = null;
+        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+            tenant = await db_1.default.Tenant.findById(tenantId).select('createdAt').lean();
+        }
+        if (!tenant && tenantId) {
+            tenant = await db_1.default.Tenant.findOne({
+                $or: [{ id: tenantId }, { tenantId: tenantId }]
+            }).select('createdAt').lean();
+        }
+        if (!tenant) {
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).select('createdAt').lean();
+        }
         // The registration date's financial year
-        const regDate = tenant.createdAt;
+        const regDate = tenant?.createdAt ? new Date(tenant.createdAt) : new Date();
         const regFinYear = regDate.getMonth() >= 3 ? regDate.getFullYear() : regDate.getFullYear() - 1;
         return res.status(200).json({ success: true, data: { startYear: regFinYear } });
     }

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
 import { logAudit } from '../services/auditService';
 
 // Client creating a ticket
@@ -9,18 +9,16 @@ export const createTicket = async (req: Request, res: Response) => {
   const attachmentUrl = req.file ? `/uploads/tickets/${req.file.filename}` : null;
 
   try {
-    const client = await prisma.client.findUnique({ where: { userId } });
+    const client = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found.' });
     }
 
     // Check if the client has any active tickets (status "PENDING" or "OPEN")
-    const activeTicket = await prisma.supportTicket.findFirst({
-      where: {
-        clientId: client.id,
-        status: { in: ['PENDING', 'OPEN'] }
-      }
-    });
+    const activeTicket = await dynamicDb.SupportTicket.findOne({
+      clientId: client._id,
+      status: { $in: ['PENDING', 'OPEN'] }
+    }).lean();
 
     if (activeTicket) {
       return res.status(400).json({
@@ -29,24 +27,19 @@ export const createTicket = async (req: Request, res: Response) => {
       });
     }
 
-    const ticket = await prisma.supportTicket.create({
-      data: {
-        tenantId,
-        clientId: client.id,
-        subject,
-        priority: priority || 'NORMAL',
-        status: 'PENDING',
-        messages: {
-          create: {
-            senderId: userId,
-            message,
-            attachmentUrl
-          }
-        }
-      },
-      include: {
-        messages: true
-      }
+    const ticket = await dynamicDb.SupportTicket.create({
+      tenantId,
+      clientId: client._id,
+      subject,
+      priority: priority || 'NORMAL',
+      status: 'PENDING'
+    });
+
+    const ticketMessage = await dynamicDb.TicketMessage.create({
+      ticketId: ticket._id,
+      senderId: userId,
+      message,
+      attachmentUrl
     });
 
     await logAudit({
@@ -57,10 +50,21 @@ export const createTicket = async (req: Request, res: Response) => {
       ipAddress: req.ip
     });
 
+    const responseData = {
+      ...ticket.toObject(),
+      id: ticket._id.toString(),
+      messages: [
+        {
+          ...ticketMessage.toObject(),
+          id: ticketMessage._id.toString()
+        }
+      ]
+    };
+
     return res.status(201).json({
       success: true,
       message: 'Ticket created successfully',
-      data: ticket
+      data: responseData
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
@@ -72,22 +76,28 @@ export const listTickets = async (req: Request, res: Response) => {
   const { tenantId, id: userId } = (req as any).user;
 
   try {
-    const client = await prisma.client.findUnique({ where: { userId } });
+    const client = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found.' });
     }
 
-    const tickets = await prisma.supportTicket.findMany({
-      where: { tenantId, clientId: client.id },
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        _count: {
-          select: { messages: true }
-        }
-      }
-    });
+    const tickets = await dynamicDb.SupportTicket.find({
+      tenantId,
+      clientId: client._id
+    })
+      .populate('messages')
+      .sort({ updatedAt: -1 })
+      .lean();
 
-    return res.status(200).json({ success: true, data: tickets });
+    const formattedTickets = tickets.map((t: any) => ({
+      ...t,
+      id: t._id?.toString() || t.id,
+      _count: {
+        messages: Array.isArray(t.messages) ? t.messages.length : 0
+      }
+    }));
+
+    return res.status(200).json({ success: true, data: formattedTickets });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
@@ -99,22 +109,48 @@ export const getTicket = async (req: Request, res: Response) => {
   const { id } = req.params;
 
   try {
-    const client = await prisma.client.findUnique({ where: { userId } });
+    const client = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    const ticket = await prisma.supportTicket.findFirst({
-      where: { id, tenantId, clientId: client.id },
-      include: {
-        messages: {
-          orderBy: { createdAt: 'asc' },
-          include: { sender: { select: { firstName: true, lastName: true, role: { select: { name: true } } } } }
+    const ticket: any = await dynamicDb.SupportTicket.findOne({
+      _id: id,
+      tenantId,
+      clientId: client._id
+    })
+      .populate({
+        path: 'messages',
+        options: { sort: { createdAt: 1 } },
+        populate: {
+          path: 'senderId',
+          select: 'firstName lastName roleId',
+          populate: { path: 'role', select: 'name' }
         }
-      }
-    });
+      })
+      .lean();
 
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found.' });
 
-    return res.status(200).json({ success: true, data: ticket });
+    const formattedMessages = (ticket.messages || []).map((m: any) => {
+      const sender = m.senderId || m.sender || {};
+      return {
+        ...m,
+        id: m._id?.toString() || m.id,
+        sender: {
+          firstName: sender.firstName,
+          lastName: sender.lastName,
+          role: sender.role ? { name: sender.role.name } : null
+        }
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...ticket,
+        id: ticket._id?.toString() || ticket.id,
+        messages: formattedMessages
+      }
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
@@ -128,29 +164,28 @@ export const replyTicket = async (req: Request, res: Response) => {
   const attachmentUrl = req.file ? `/uploads/tickets/${req.file.filename}` : null;
 
   try {
-    const client = await prisma.client.findUnique({ where: { userId } });
+    const client = await dynamicDb.Client.findOne({ userId }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    const ticket = await prisma.supportTicket.findFirst({
-      where: { id, tenantId, clientId: client.id }
+    const ticket = await dynamicDb.SupportTicket.findOne({
+      _id: id,
+      tenantId,
+      clientId: client._id
     });
 
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found.' });
     if (ticket.status === 'CLOSED') return res.status(400).json({ success: false, message: 'Ticket is closed.' });
     if (ticket.status === 'PENDING') return res.status(400).json({ success: false, message: 'Please wait for an admin to reply before sending another message.' });
 
-    const reply = await prisma.ticketMessage.create({
-      data: {
-        ticketId: ticket.id,
-        senderId: userId,
-        message,
-        attachmentUrl
-      }
+    const reply = await dynamicDb.TicketMessage.create({
+      ticketId: ticket._id,
+      senderId: userId,
+      message,
+      attachmentUrl
     });
 
-    await prisma.supportTicket.update({
-      where: { id: ticket.id },
-      data: { updatedAt: new Date() }
+    await dynamicDb.SupportTicket.findByIdAndUpdate(ticket._id, {
+      $set: { updatedAt: new Date() }
     });
 
     await logAudit({
@@ -161,10 +196,33 @@ export const replyTicket = async (req: Request, res: Response) => {
       ipAddress: req.ip
     });
 
-    return res.status(200).json({ success: true, message: 'Reply sent.', data: reply });
+    return res.status(200).json({
+      success: true,
+      message: 'Reply sent.',
+      data: {
+        ...reply.toObject(),
+        id: reply._id.toString()
+      }
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
+};
+
+// Helper to check staff permissions for tickets
+const checkStaffTicketPermission = async (role: string, permissionCode: string) => {
+  const userRole = await dynamicDb.Role.findOne({ name: role }).lean();
+  if (!userRole) return false;
+
+  const perm = await dynamicDb.Permission.findOne({ code: permissionCode }).lean();
+  if (!perm) return false;
+
+  const rolePerm = await dynamicDb.RolePermission.findOne({
+    roleId: userRole._id,
+    permissionId: perm._id
+  }).lean();
+
+  return !!rolePerm;
 };
 
 // Admin / Staff: List tickets
@@ -177,43 +235,51 @@ export const listAdminTickets = async (req: Request, res: Response) => {
     let whereClause: any = { tenantId };
 
     if (!isFullAdmin) {
-      const hasAccess = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'ACCESS_TICKETS' } }
-      });
+      const hasAccess = await checkStaffTicketPermission(role, 'ACCESS_TICKETS');
       if (!hasAccess) {
         return res.status(403).json({ success: false, message: 'You do not have permission to access tickets.' });
       }
 
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_ALL_TICKETS' } }
-      });
-      const hasViewOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_OWN_TICKETS' } }
-      });
+      const hasViewAll = await checkStaffTicketPermission(role, 'VIEW_ALL_TICKETS');
+      const hasViewOwn = await checkStaffTicketPermission(role, 'VIEW_OWN_TICKETS');
 
       if (!hasViewAll && !hasViewOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to view tickets.' });
       }
 
       if (!hasViewAll && hasViewOwn) {
-        whereClause.client = { createdById: userId };
+        const ownClients = await dynamicDb.Client.find({ createdById: userId }).select('_id').lean();
+        whereClause.clientId = { $in: ownClients.map(c => c._id) };
       }
     }
 
-    const tickets = await prisma.supportTicket.findMany({
-      where: whereClause,
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        client: {
-          select: { name: true, email: true, mobile: true, status: true }
-        },
+    const tickets = await dynamicDb.SupportTicket.find(whereClause)
+      .populate({
+        path: 'clientId',
+        select: 'name email mobile status'
+      })
+      .populate('messages')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const formattedTickets = tickets.map((t: any) => {
+      const client = t.clientId || t.client;
+      return {
+        ...t,
+        id: t._id?.toString() || t.id,
+        client: client ? {
+          name: client.name,
+          email: client.email,
+          mobile: client.mobile,
+          status: client.status
+        } : null,
         _count: {
-          select: { messages: true }
+          messages: Array.isArray(t.messages) ? t.messages.length : 0
         }
-      }
+      };
     });
 
-    return res.status(200).json({ success: true, data: tickets });
+    return res.status(200).json({ success: true, data: formattedTickets });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
@@ -227,48 +293,73 @@ export const getAdminTicket = async (req: Request, res: Response) => {
 
   try {
     const isFullAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
-    let whereClause: any = { id, tenantId };
+    let whereClause: any = { _id: id, tenantId };
 
     if (!isFullAdmin) {
-      const hasAccess = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'ACCESS_TICKETS' } }
-      });
+      const hasAccess = await checkStaffTicketPermission(role, 'ACCESS_TICKETS');
       if (!hasAccess) {
         return res.status(403).json({ success: false, message: 'You do not have permission to access tickets.' });
       }
 
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_ALL_TICKETS' } }
-      });
-      const hasViewOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_OWN_TICKETS' } }
-      });
+      const hasViewAll = await checkStaffTicketPermission(role, 'VIEW_ALL_TICKETS');
+      const hasViewOwn = await checkStaffTicketPermission(role, 'VIEW_OWN_TICKETS');
 
       if (!hasViewAll && !hasViewOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to view tickets.' });
       }
 
       if (!hasViewAll && hasViewOwn) {
-        whereClause.client = { createdById: userId };
+        const ownClients = await dynamicDb.Client.find({ createdById: userId }).select('_id').lean();
+        whereClause.clientId = { $in: ownClients.map(c => c._id) };
       }
     }
 
-    const ticket = await prisma.supportTicket.findFirst({
-      where: whereClause,
-      include: {
-        client: {
-          select: { name: true, email: true, mobile: true, status: true }
-        },
-        messages: {
-          orderBy: { createdAt: 'asc' },
-          include: { sender: { select: { firstName: true, lastName: true, role: { select: { name: true } } } } }
+    const ticket: any = await dynamicDb.SupportTicket.findOne(whereClause)
+      .populate({
+        path: 'clientId',
+        select: 'name email mobile status'
+      })
+      .populate({
+        path: 'messages',
+        options: { sort: { createdAt: 1 } },
+        populate: {
+          path: 'senderId',
+          select: 'firstName lastName roleId',
+          populate: { path: 'role', select: 'name' }
         }
-      }
-    });
+      })
+      .lean();
 
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found.' });
 
-    return res.status(200).json({ success: true, data: ticket });
+    const client = ticket.clientId || ticket.client;
+    const formattedMessages = (ticket.messages || []).map((m: any) => {
+      const sender = m.senderId || m.sender || {};
+      return {
+        ...m,
+        id: m._id?.toString() || m.id,
+        sender: {
+          firstName: sender.firstName,
+          lastName: sender.lastName,
+          role: sender.role ? { name: sender.role.name } : null
+        }
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...ticket,
+        id: ticket._id?.toString() || ticket.id,
+        client: client ? {
+          name: client.name,
+          email: client.email,
+          mobile: client.mobile,
+          status: client.status
+        } : null,
+        messages: formattedMessages
+      }
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
@@ -284,49 +375,41 @@ export const replyAdminTicket = async (req: Request, res: Response) => {
 
   try {
     const isFullAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
-    let ticketWhere: any = { id, tenantId };
+    let ticketWhere: any = { _id: id, tenantId };
 
     if (!isFullAdmin) {
-      const hasAccess = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'ACCESS_TICKETS' } }
-      });
+      const hasAccess = await checkStaffTicketPermission(role, 'ACCESS_TICKETS');
       if (!hasAccess) {
         return res.status(403).json({ success: false, message: 'You do not have permission to access tickets.' });
       }
 
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_ALL_TICKETS' } }
-      });
-      const hasViewOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_OWN_TICKETS' } }
-      });
+      const hasViewAll = await checkStaffTicketPermission(role, 'VIEW_ALL_TICKETS');
+      const hasViewOwn = await checkStaffTicketPermission(role, 'VIEW_OWN_TICKETS');
 
       if (!hasViewAll && !hasViewOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to reply to tickets.' });
       }
 
       if (!hasViewAll && hasViewOwn) {
-        ticketWhere.client = { createdById: userId };
+        const ownClients = await dynamicDb.Client.find({ createdById: userId }).select('_id').lean();
+        ticketWhere.clientId = { $in: ownClients.map(c => c._id) };
       }
     }
 
-    const ticket = await prisma.supportTicket.findFirst({ where: ticketWhere });
+    const ticket = await dynamicDb.SupportTicket.findOne(ticketWhere);
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found.' });
     if (ticket.status === 'CLOSED') return res.status(400).json({ success: false, message: 'Ticket is closed.' });
 
-    const reply = await prisma.ticketMessage.create({
-      data: {
-        ticketId: ticket.id,
-        senderId: userId,
-        message,
-        attachmentUrl
-      }
+    const reply = await dynamicDb.TicketMessage.create({
+      ticketId: ticket._id,
+      senderId: userId,
+      message,
+      attachmentUrl
     });
 
     // Mark as OPEN on Admin/Staff reply
-    await prisma.supportTicket.update({
-      where: { id: ticket.id },
-      data: { status: 'OPEN', updatedAt: new Date() }
+    await dynamicDb.SupportTicket.findByIdAndUpdate(ticket._id, {
+      $set: { status: 'OPEN', updatedAt: new Date() }
     });
 
     await logAudit({
@@ -337,7 +420,14 @@ export const replyAdminTicket = async (req: Request, res: Response) => {
       ipAddress: req.ip
     });
 
-    return res.status(200).json({ success: true, message: 'Reply sent and ticket status updated to OPEN.', data: reply });
+    return res.status(200).json({
+      success: true,
+      message: 'Reply sent and ticket status updated to OPEN.',
+      data: {
+        ...reply.toObject(),
+        id: reply._id.toString()
+      }
+    });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
@@ -351,38 +441,32 @@ export const closeAdminTicket = async (req: Request, res: Response) => {
 
   try {
     const isFullAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
-    let ticketWhere: any = { id, tenantId };
+    let ticketWhere: any = { _id: id, tenantId };
 
     if (!isFullAdmin) {
-      const hasAccess = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'ACCESS_TICKETS' } }
-      });
+      const hasAccess = await checkStaffTicketPermission(role, 'ACCESS_TICKETS');
       if (!hasAccess) {
         return res.status(403).json({ success: false, message: 'You do not have permission to access tickets.' });
       }
 
-      const hasViewAll = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_ALL_TICKETS' } }
-      });
-      const hasViewOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: role }, permission: { code: 'VIEW_OWN_TICKETS' } }
-      });
+      const hasViewAll = await checkStaffTicketPermission(role, 'VIEW_ALL_TICKETS');
+      const hasViewOwn = await checkStaffTicketPermission(role, 'VIEW_OWN_TICKETS');
 
       if (!hasViewAll && !hasViewOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to close tickets.' });
       }
 
       if (!hasViewAll && hasViewOwn) {
-        ticketWhere.client = { createdById: userId };
+        const ownClients = await dynamicDb.Client.find({ createdById: userId }).select('_id').lean();
+        ticketWhere.clientId = { $in: ownClients.map(c => c._id) };
       }
     }
 
-    const ticket = await prisma.supportTicket.findFirst({ where: ticketWhere });
+    const ticket = await dynamicDb.SupportTicket.findOne(ticketWhere);
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found.' });
 
-    await prisma.supportTicket.update({
-      where: { id: ticket.id },
-      data: { status: 'CLOSED', updatedAt: new Date() }
+    await dynamicDb.SupportTicket.findByIdAndUpdate(ticket._id, {
+      $set: { status: 'CLOSED', updatedAt: new Date() }
     });
 
     await logAudit({

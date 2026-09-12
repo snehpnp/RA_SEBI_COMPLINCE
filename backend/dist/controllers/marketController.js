@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMarketOverview = void 0;
 const yahoo_finance2_1 = __importDefault(require("yahoo-finance2"));
-const yahooFinance = new yahoo_finance2_1.default();
 const getMarketOverview = async (req, res) => {
     try {
         const symbols = [
@@ -17,7 +16,7 @@ const getMarketOverview = async (req, res) => {
         ];
         const results = await Promise.all(symbols.map(async (item) => {
             try {
-                const quote = await yahooFinance.quote(item.symbol);
+                const quote = await yahoo_finance2_1.default.quote(item.symbol);
                 const price = quote.regularMarketPrice || 0;
                 const change = quote.regularMarketChange || 0;
                 let formattedValue = price.toFixed(2);
@@ -36,8 +35,13 @@ const getMarketOverview = async (req, res) => {
                 };
             }
             catch (error) {
-                console.error(`Failed to fetch quote for ${item.symbol}:`, error);
-                return null;
+                // Return fallback data instead of logging error to avoid spamming server logs
+                return {
+                    name: item.name,
+                    value: 'N/A',
+                    change: '+0.00',
+                    isUp: true,
+                };
             }
         }));
         const validResults = results.filter(r => r !== null);

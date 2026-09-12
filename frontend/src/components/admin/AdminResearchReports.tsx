@@ -5,7 +5,7 @@ import { FileText, Download, Loader2 } from 'lucide-react';
 import api from '../../services/api';
 import DataTable from 'react-data-table-component';
 
-const tableCustomStyles = {
+const getTableCustomStyles = (isDark: boolean) => ({
   table: {
     style: {
       backgroundColor: 'transparent',
@@ -13,45 +13,55 @@ const tableCustomStyles = {
   },
   headRow: {
     style: {
-      backgroundColor: 'rgba(241, 245, 249, 0.5)',
-      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      backgroundColor: isDark ? 'rgba(15, 23, 42, 0.6)' : 'rgba(241, 245, 249, 0.5)',
+      borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(203, 213, 225, 0.5)',
       minHeight: '44px',
     },
   },
   headCells: {
     style: {
-      fontSize: '10px',
+      fontSize: '11px',
       fontWeight: '800',
       textTransform: 'uppercase',
-      color: '#475569',
-      paddingLeft: '16px',
-      paddingRight: '16px',
+      color: isDark ? '#94a3b8' : '#475569',
+      paddingLeft: '14px',
+      paddingRight: '14px',
+      letterSpacing: '0.05em',
     },
   },
   cells: {
     style: {
-      paddingLeft: '16px',
-      paddingRight: '16px',
+      paddingLeft: '14px',
+      paddingRight: '14px',
       fontSize: '12px',
-      color: '#334155',
+      color: isDark ? '#cbd5e1' : '#334155',
     },
   },
   rows: {
     style: {
       backgroundColor: 'transparent',
-      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
+      borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(203, 213, 225, 0.5)',
       '&:hover': {
-        backgroundColor: 'rgba(241, 245, 249, 0.8)',
+        backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(241, 245, 249, 0.8)',
       },
     },
   },
   pagination: {
     style: {
       backgroundColor: 'transparent',
-      borderTopColor: 'rgba(203, 213, 225, 0.5)',
+      borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(203, 213, 225, 0.5)',
+      color: isDark ? '#94a3b8' : '#475569',
+    },
+    pageButtonsStyle: {
+      color: isDark ? '#94a3b8' : '#475569',
+      fill: isDark ? '#94a3b8' : '#475569',
+      '&:disabled': {
+        color: isDark ? '#475569' : '#cbd5e1',
+        fill: isDark ? '#475569' : '#cbd5e1',
+      },
     },
   },
-};
+});
 
 export default function AdminResearchReports() {
   const [activeCategory, setActiveCategory] = useState<'all' | 'cash' | 'future' | 'option'>('all');
@@ -88,18 +98,21 @@ export default function AdminResearchReports() {
       cell: (row: any) => renderDate(row.createdAt),
       sortable: true,
       sortFunction: (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      minWidth: '130px',
     },
     {
       name: 'Exit Date',
       cell: (row: any) => renderDate(row.closedAt),
       sortable: true,
       sortFunction: (a: any, b: any) => new Date(a.closedAt || 0).getTime() - new Date(b.closedAt || 0).getTime(),
+      minWidth: '120px',
     },
     {
       name: 'Report Date',
       cell: (row: any) => renderDate(row.updatedAt),
       sortable: true,
       sortFunction: (a: any, b: any) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(),
+      minWidth: '130px',
     },
     {
       name: 'Trade Name',
@@ -111,6 +124,7 @@ export default function AdminResearchReports() {
         </span>
       ),
       sortable: true,
+      minWidth: '140px',
     },
     {
       name: 'Status',
@@ -120,32 +134,45 @@ export default function AdminResearchReports() {
         </span>
       ),
       sortable: true,
+      minWidth: '95px',
     },
     {
       name: 'Segment',
       cell: (row: any) => (
-        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md text-xs border border-slate-200 dark:border-slate-700">{row.segment}</span>
+        <span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md text-xs border border-slate-200 dark:border-slate-700 font-semibold">{row.segment}</span>
       ),
       sortable: true,
+      minWidth: '100px',
     },
     {
       name: 'Plan Name',
       cell: (row: any) => <span className="text-slate-700 dark:text-slate-300 font-medium">{row.planName || '-'}</span>,
       sortable: true,
+      minWidth: '150px',
     },
     {
       name: 'Researcher Name',
       cell: (row: any) => <span className="text-slate-600 dark:text-slate-400">{row.createdByName || '-'}</span>,
       sortable: true,
+      minWidth: '170px',
     },
     {
       name: 'Action',
       cell: (row: any) => (
-        <a href={api.getDownloadUrl(row.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-500/10 dark:hover:bg-blue-600 dark:text-blue-400 dark:hover:text-white rounded-lg text-xs font-bold transition-all duration-300">
-          <Download className="w-4 h-4" /> Download
+        <a 
+          href={api.getDownloadUrl(row.reportUrl)} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-500/10 dark:hover:bg-blue-600 dark:text-blue-400 dark:hover:text-white rounded-lg text-xs font-bold transition-all duration-300 whitespace-nowrap"
+        >
+          <Download className="w-3.5 h-3.5 shrink-0" />
+          <span>Download</span>
         </a>
       ),
+      minWidth: '140px',
       center: true,
+      ignoreRowClick: true,
+      button: true,
     },
   ];
 
@@ -249,7 +276,7 @@ export default function AdminResearchReports() {
             paginationPerPage={10}
             highlightOnHover
             responsive
-            customStyles={tableCustomStyles}
+            customStyles={getTableCustomStyles(isDarkMode)}
             theme={isDarkMode ? 'dark' : 'default'}
             noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No research reports found in this category.</div>}
           />

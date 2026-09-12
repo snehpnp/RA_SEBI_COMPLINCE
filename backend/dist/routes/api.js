@@ -9,6 +9,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const authController_1 = require("../controllers/authController");
 const superAdminController_1 = require("../controllers/superAdminController");
+const third_party_api_1 = require("../third-party-api");
 const adminController_1 = require("../controllers/adminController");
 const clientController_1 = require("../controllers/clientController");
 const researchController_1 = require("../controllers/researchController");
@@ -29,6 +30,8 @@ const marketController_1 = require("../controllers/marketController");
 const pageController_1 = require("../controllers/pageController");
 const profileController_1 = require("../controllers/profileController");
 const systemSettingController_1 = require("../controllers/systemSettingController");
+const permissionController_1 = require("../controllers/permissionController");
+const tenantSyncController_1 = require("../controllers/tenantSyncController");
 const router = (0, express_1.Router)();
 // Create uploads subdirectories if they don't exist
 const uploadRoot = path_1.default.join(__dirname, '../../../uploads');
@@ -99,6 +102,8 @@ router.get('/auth/me', auth_1.authenticateJWT, authController_1.getMe);
 router.post('/auth/change-password', auth_1.authenticateJWT, authController_1.changePassword);
 router.post('/auth/logout', auth_1.authenticateJWT, authController_1.logout);
 router.get('/public/tenants', authController_1.getPublicTenants);
+router.get('/public/clients', third_party_api_1.getThirdPartyClients);
+router.get('/clients', third_party_api_1.getThirdPartyClients);
 router.post('/public/request-otp', authController_1.requestOtp);
 router.post('/public/verify-otp', authController_1.verifyOtp);
 // ----------------------------------------------------
@@ -128,11 +133,37 @@ router.put('/super-admin/tenants/:id', auth_1.authenticateJWT, (0, auth_1.requir
     { name: 'sebiCertificate', maxCount: 1 },
     { name: 'nismCertificate', maxCount: 1 }
 ]), superAdminController_1.updateTenantDetails);
+router.post('/super-admin/tenants/:id/provision-db', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.provisionTenantDb);
+router.post('/super-admin/tenants/:id/sync-api', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncTenantApi);
+router.post('/super-admin/test-mongo-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.testMongoConnection);
+router.post('/super-admin/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/tenants/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/verify-domain', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.verifyDomainUrl);
+// Universal Remote Instance Webhook Sync Endpoints
+router.post('/sync/bootstrap', tenantSyncController_1.bootstrapTenant);
+router.post('/sync/tenant', tenantSyncController_1.bootstrapTenant);
+router.post('/sync/update', tenantSyncController_1.syncTenantUpdate);
+router.post('/sync/status', tenantSyncController_1.syncTenantStatus);
+router.post('/sync/delete', tenantSyncController_1.syncTenantDelete);
+router.get('/sync/config', tenantSyncController_1.getTenantSyncConfig);
+router.get('/tenant/sync-config', tenantSyncController_1.getTenantSyncConfig);
+router.get('/super-admin/tenants/:id/clients', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyClients);
+router.get('/super-admin/tenants/:id/staff', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyStaff);
+router.get('/super-admin/tenants/:id/compliance', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyCompliance);
+router.post('/super-admin/tenants/:id/compliance/sweep', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.runCompanyComplianceSweep);
+router.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
+router.get('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.getTenantPermissions);
+router.put('/super-admin/tenants/:tenantId/permissions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), permissionController_1.updateTenantPermissions);
+router.post('/super-admin/tenants/sync-all', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.syncAllTenantsApi);
+router.post('/super-admin/verify-domain', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.verifyDomainUrl);
 router.put('/super-admin/password', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateSuperAdminPassword);
 router.get('/super-admin/logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getAuditLogs);
 router.get('/super-admin/compliance-rules', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getComplianceRules);
 router.put('/super-admin/compliance-rules/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateComplianceRule);
 router.get('/super-admin/telemetry', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
+router.get('/super-admin/dashboard', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
+router.get('/super-admin/dashboard-stats', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
+router.get('/super-admin/companies/:id/panel-stats', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getCompanyPanelStats);
 // ----------------------------------------------------
 // SYSTEM SETTINGS (GLOBAL BRANDING)
 // ----------------------------------------------------
@@ -154,6 +185,7 @@ router.get('/admin/email-templates', auth_1.authenticateJWT, (0, auth_1.requireR
 router.put('/admin/email-templates/:type', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.updateEmailTemplate);
 router.post('/admin/test-smtp', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), adminController_1.testSmtp);
 router.post('/admin/test-smtp-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), systemSettingController_1.testSmtpConnection);
+router.post('/admin/verify-payment-gateway', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), adminController_1.verifyPaymentGateway);
 // Bulk Exports
 router.get('/admin/exports/invoices', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EXPORT_DATA'), adminController_1.exportInvoicesZip);
 router.get('/admin/exports/agreements', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EXPORT_DATA'), adminController_1.exportAgreementsZip);
@@ -188,6 +220,7 @@ router.get('/admin/staff', auth_1.authenticateJWT, (0, auth_1.requireAnyPermissi
 router.put('/admin/staff/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, upload.single('nismUpload'), adminController_1.updateStaff);
 router.post('/admin/staff/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.toggleStaffStatus);
 router.delete('/admin/staff/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.deleteStaff);
+router.post('/admin/staff/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.deleteStaff);
 router.post('/admin/staff/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.restoreStaff);
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
@@ -198,6 +231,7 @@ router.get('/admin/clients/:id/communications', auth_1.authenticateJWT, (0, auth
 router.put('/admin/clients/:id/approve', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.approveClient);
 router.put('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.updateClient);
 router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
+router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
 // Admin Category Management
@@ -210,6 +244,7 @@ router.get('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requireAnyPermissi
 router.post('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createPlan);
 router.put('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.updatePlan);
 router.delete('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.deletePlan);
+router.post('/admin/plans/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.deletePlan);
 router.post('/admin/plans/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.restorePlan);
 router.post('/admin/plans/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.togglePlanStatus);
 // Admin Role Management
@@ -236,6 +271,7 @@ router.get('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)([
 router.put('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.updateClientProfile);
 router.delete('/client/account', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.deleteClientAccount);
 router.post('/client/documents', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.single('file'), clientController_1.uploadClientDocument);
+router.post('/client/kyc/initiate-digio', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.initiateDigioKyc);
 router.post('/client/kyc/verify', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.verifyKRA);
 router.post('/client/consent', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.acceptConsent);
 router.post('/client/esign', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.signAgreement);
@@ -249,6 +285,10 @@ router.get('/client/payments/:id/invoice', auth_1.authenticateJWT, clientControl
 // PAYMENTS WEBHOOK (RAZORPAY SIMULATOR)
 // ----------------------------------------------------
 router.post('/webhook/razorpay', clientController_1.handleRazorpayWebhook);
+// ----------------------------------------------------
+// PAYMENT GATEWAY STATUS CHECK
+// ----------------------------------------------------
+router.get('/payment/gateway-status', auth_1.authenticateJWT, clientController_1.getPaymentGatewayStatus);
 // ----------------------------------------------------
 // RAZORPAY REAL PAYMENT INTEGRATION
 // ----------------------------------------------------
@@ -324,7 +364,7 @@ router.put('/compliance/complaints/:id/resolve', auth_1.authenticateJWT, (0, aut
 // ----------------------------------------------------
 router.post('/super-admin/resources', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), upload.single('file'), resourceController_1.uploadResource);
 router.delete('/super-admin/resources/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), resourceController_1.deleteResource);
-router.get('/resources', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'COMPLIANCE_OFFICER', 'PRINCIPAL_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'SALES', 'MARKETING']), resourceController_1.getResources);
+router.get('/resources', auth_1.authenticateJWT, resourceController_1.getResources);
 // ----------------------------------------------------
 // LOCATIONS MANAGEMENT
 // ----------------------------------------------------
@@ -340,13 +380,31 @@ router.get('/download', (req, res) => {
         }
         // Prevent directory traversal
         const normalizedUrl = path_1.default.normalize(fileUrl).replace(/^(\.\.[\/\\])+/, '');
-        // Strip the leading slash or /uploads/ so path.join doesn't treat it as absolute
-        // Using the pre-computed uploadRoot from the top of the file
         const relativePath = normalizedUrl.replace(/^[\/\\]?uploads[\/\\]/, '');
-        const uploadRoot = path_1.default.join(__dirname, '../../../uploads'); // re-declaring in scope just in case
-        const filePath = path_1.default.join(uploadRoot, relativePath);
-        if (fs_1.default.existsSync(filePath)) {
-            res.download(filePath);
+        const fileName = path_1.default.basename(normalizedUrl);
+        const candidatePaths = [
+            path_1.default.resolve(__dirname, '../../../uploads', relativePath),
+            path_1.default.resolve(process.cwd(), '../uploads', relativePath),
+            path_1.default.resolve(process.cwd(), 'uploads', relativePath),
+            path_1.default.resolve(__dirname, '../../..', normalizedUrl.replace(/^[/\\]+/, '')),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads', relativePath),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/policies', fileName),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
+            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/agreements', fileName),
+        ];
+        let foundPath = null;
+        for (const candidate of candidatePaths) {
+            try {
+                if (fs_1.default.existsSync(candidate) && fs_1.default.statSync(candidate).isFile()) {
+                    foundPath = candidate;
+                    break;
+                }
+            }
+            catch { }
+        }
+        if (foundPath) {
+            res.download(foundPath, fileName);
         }
         else {
             res.status(404).json({ success: false, message: 'File not found on server' });

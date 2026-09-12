@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { ShieldCheck, User, Mail, Phone, Lock, Building, FileText, MapPin, Loader2, CheckCircle2, Eye, EyeOff, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
+import { User, Mail, Phone, Lock, Building, FileText, MapPin, Loader2, CheckCircle2, Eye, EyeOff, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
 import api from '../services/api';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
@@ -13,13 +12,11 @@ import { useBranding } from '@/contexts/BrandingContext';
 
 export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   const router = useRouter();
-  
+
   const [step, setStep] = useState(1);
-  const [tenants, setTenants] = useState<any[]>([]);
   const [showPassword, setShowPassword] = useState(false);
-  const [tenantId, setTenantId] = useState('');
   const [name, setName] = useState('');
-  
+
   // OTP States
   const [email, setEmail] = useState('');
   const [emailVerified, setEmailVerified] = useState(false);
@@ -27,7 +24,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   const [otp, setOtp] = useState('');
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
-  
+
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [pan, setPan] = useState('');
@@ -38,9 +35,8 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [zipCode, setZipCode] = useState('');
-  
+
   const [loading, setLoading] = useState(false);
-  const [loadingTenants, setLoadingTenants] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -48,24 +44,11 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   const { cities } = useCities(state);
   const { logoUrl, appName } = useBranding();
 
-  useEffect(() => {
-    // Load companies
-    api.getPublicTenants()
-      .then(res => {
-        if (res.success && res.data.length > 0) {
-          setTenants(res.data);
-          setTenantId(res.data[0].id);
-        }
-      })
-      .catch(err => console.error('Failed to load companies:', err))
-      .finally(() => setLoadingTenants(false));
-  }, []);
-
   const handleSendOtp = async () => {
     if (!email) return toast.error('Please enter an email address first.');
     setSendingOtp(true);
     try {
-      const res = await api.requestOtp(email, tenantId);
+      const res = await api.requestOtp(email);
       if (res.success) {
         setOtpSent(true);
         toast.success(res.message || 'OTP sent successfully!');
@@ -94,7 +77,6 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
   };
 
   const validateStep1 = () => {
-    if (!tenantId) return toast.error('Please select an Advisor.');
     if (!emailVerified) return toast.error('Please verify your email to continue.');
     if (!password || password.length < 8) return toast.error('Password must be at least 8 characters.');
     setStep(2);
@@ -113,12 +95,12 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
     e.preventDefault();
     if (step !== 3) return;
     if (!addressLine1 || !state || !city || !zipCode) return toast.error('Please fill all address fields.');
-    
+
     setLoading(true);
     setError(null);
 
     const payload = {
-      tenantId, name, email, mobile, password,
+      name, email, mobile, password,
       pan: pan.toUpperCase(), aadhaar, category, occupation,
       addressLine1, city, state, zipCode
     };
@@ -134,7 +116,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
         msg = `${msg} - ${err.errors[0]}`;
       }
       setError(msg);
-      
+
       // Navigate to the correct step if a specific field is duplicate
       if (err.duplicateField) {
         if (['email', 'password'].includes(err.duplicateField)) setStep(1);
@@ -155,7 +137,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
             </div>
             <h2 className="text-3xl font-bold text-slate-900 dark:text-white">Registration Successful!</h2>
             <p className="text-slate-700 dark:text-slate-300 text-sm leading-relaxed max-w-md mx-auto">
-              Your account has been registered successfully. It will be activated after admin approval. You will receive a welcome email once approved.
+              Your account has been registered and activated successfully. You can now log in with your credentials.
             </p>
             <div className="pt-6">
               <button onClick={() => {
@@ -192,11 +174,12 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
             )}
 
             <form onSubmit={handleRegister} className="space-y-4">
-              
+
               {/* STEP 1: Account Setup */}
               {step === 1 && (
                 <div className="animate-fade-in-up space-y-4">
-                  <div>
+
+                  {/* <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Select Advisor Partner</label>
                     <div className="relative">
                       <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400"><Building className="h-5 w-5" /></span>
@@ -213,7 +196,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
                         </select>
                       )}
                     </div>
-                  </div>
+                  </div> */}
 
                   <div className="bg-slate-50 dark:bg-slate-800/30 p-4 md:p-5 rounded-2xl border border-slate-200 dark:border-slate-700/50 space-y-4">
                     <div>
@@ -246,7 +229,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Enter 6-Digit OTP</label>
                         <div className="flex flex-col sm:flex-row gap-3">
                           <input
-                            type="text" required value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0,6))}
+                            type="text" required value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                             className="w-full bg-white dark:bg-slate-900/50 border border-primary-300 dark:border-primary-500/30 rounded-xl py-2 px-4 text-lg tracking-[0.5em] text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all text-slate-800 dark:text-white flex-1"
                             placeholder="------"
                           />
@@ -388,7 +371,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
                 </div>
               )}
             </form>
-            
+
             <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800 text-center">
               <p className="text-sm text-slate-600 dark:text-slate-400">
                 Already have an account?{' '}

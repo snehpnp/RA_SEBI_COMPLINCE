@@ -13,34 +13,35 @@ const createResearch = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Missing required research fields.' });
     }
     try {
-        const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
+        const tenant = await db_1.default.Tenant.findById(tenantId).lean();
         if (!tenant)
             return res.status(404).json({ success: false, message: 'Tenant company not found' });
         // Set disclaimer and conflict disclosure default text
         const disclaimer = 'Investments in securities market are subject to market risks. Read all the related documents carefully before investing.';
         const conflictDisclosure = 'The research analyst or their associates/relatives do not hold any financial interest in the subject company.';
-        const report = await db_1.default.researchReport.create({
-            data: {
-                tenantId,
-                segment,
-                type,
-                title,
-                summary,
-                details,
-                recommendation,
-                targetPrice: targetPrice ? parseFloat(targetPrice) : null,
-                disclaimer,
-                conflictDisclosure,
-                sebiRegNo: tenant.sebiRegistration,
-                version: 1,
-                status: 'DRAFT',
-                createdById: req.user.id
-            }
+        const report = await db_1.default.ResearchReport.create({
+            tenantId,
+            segment,
+            type,
+            title,
+            summary,
+            details,
+            recommendation,
+            targetPrice: targetPrice ? parseFloat(targetPrice) : null,
+            disclaimer,
+            conflictDisclosure,
+            sebiRegNo: tenant.sebiRegistration,
+            version: 1,
+            status: 'DRAFT',
+            createdById: req.user.id
         });
         return res.status(201).json({
             success: true,
             message: 'Research draft created successfully.',
-            data: report
+            data: {
+                ...report.toObject(),
+                id: report._id.toString()
+            }
         });
     }
     catch (error) {
@@ -52,45 +53,44 @@ const updateResearch = async (req, res) => {
     const { id } = req.params;
     const { segment, type, title, summary, details, recommendation, targetPrice } = req.body;
     try {
-        const existing = await db_1.default.researchReport.findUnique({ where: { id } });
+        const existing = await db_1.default.ResearchReport.findById(id).lean();
         if (!existing)
             return res.status(404).json({ success: false, message: 'Research report not found.' });
         // Version Control Rule: Published research is LOCKED. Cannot edit. Must create a new version.
         if (existing.status === 'PUBLISHED') {
-            const nextVersion = existing.version + 1;
-            const newVersionReport = await db_1.default.researchReport.create({
-                data: {
-                    tenantId: existing.tenantId,
-                    segment: segment || existing.segment,
-                    type: type || existing.type,
-                    title: title || existing.title,
-                    summary: summary || existing.summary,
-                    details: details || existing.details,
-                    recommendation: recommendation || existing.recommendation,
-                    targetPrice: targetPrice ? parseFloat(targetPrice) : existing.targetPrice,
-                    disclaimer: existing.disclaimer,
-                    conflictDisclosure: existing.conflictDisclosure,
-                    sebiRegNo: existing.sebiRegNo,
-                    version: nextVersion,
-                    status: 'DRAFT',
-                    createdById: req.user.id
-                }
+            const nextVersion = (existing.version || 1) + 1;
+            const newVersionReport = await db_1.default.ResearchReport.create({
+                tenantId: existing.tenantId,
+                segment: segment || existing.segment,
+                type: type || existing.type,
+                title: title || existing.title,
+                summary: summary || existing.summary,
+                details: details || existing.details,
+                recommendation: recommendation || existing.recommendation,
+                targetPrice: targetPrice ? parseFloat(targetPrice) : existing.targetPrice,
+                disclaimer: existing.disclaimer,
+                conflictDisclosure: existing.conflictDisclosure,
+                sebiRegNo: existing.sebiRegNo,
+                version: nextVersion,
+                status: 'DRAFT',
+                createdById: req.user.id
             });
             // Archive old one
-            await db_1.default.researchReport.update({
-                where: { id },
-                data: { status: 'ARCHIVED' }
+            await db_1.default.ResearchReport.findByIdAndUpdate(id, {
+                $set: { status: 'ARCHIVED' }
             });
             return res.status(200).json({
                 success: true,
                 message: 'Research is locked because it was already published. Created a new draft version.',
-                data: newVersionReport
+                data: {
+                    ...newVersionReport.toObject(),
+                    id: newVersionReport._id.toString()
+                }
             });
         }
         // Otherwise edit standard draft
-        const updated = await db_1.default.researchReport.update({
-            where: { id },
-            data: {
+        const updated = await db_1.default.ResearchReport.findByIdAndUpdate(id, {
+            $set: {
                 segment,
                 type,
                 title,
@@ -99,11 +99,11 @@ const updateResearch = async (req, res) => {
                 recommendation,
                 targetPrice: targetPrice ? parseFloat(targetPrice) : null
             }
-        });
+        }, { returnDocument: 'after', lean: true });
         return res.status(200).json({
             success: true,
             message: 'Research draft updated successfully.',
-            data: updated
+            data: updated ? { ...updated, id: updated._id?.toString() || updated.id } : null
         });
     }
     catch (error) {
@@ -123,48 +123,49 @@ const publishResearch = async (req, res) => {
         });
     }
     try {
-        const report = await db_1.default.researchReport.findUnique({ where: { id } });
+        const report = await db_1.default.ResearchReport.findById(id).lean();
         if (!report)
             return res.status(404).json({ success: false, message: 'Research report not found.' });
-        const published = await db_1.default.researchReport.update({
-            where: { id },
-            data: {
+        const published = await db_1.default.ResearchReport.findByIdAndUpdate(id, {
+            $set: {
                 status: 'PUBLISHED',
                 publishedAt: new Date()
             }
-        });
+        }, { returnDocument: 'after', lean: true });
         // Notify all active clients in this tenant
-        const subscribedClients = await db_1.default.client.findMany({
-            where: {
-                user: { tenantId: report.tenantId },
-                status: 'ACTIVE',
-                subscriptions: {
-                    some: {
-                        status: 'ACTIVE',
-                        plan: {
-                            researchSegments: {
-                                contains: report.segment
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        const tenantUsers = await db_1.default.User.find({ tenantId: report.tenantId }).select('_id').lean();
+        const userIds = tenantUsers.map(u => u._id);
+        const activeClients = await db_1.default.Client.find({
+            userId: { $in: userIds },
+            status: 'ACTIVE'
+        }).lean();
+        const clientIds = activeClients.map(c => c._id);
+        const activePlans = await db_1.default.Plan.find({
+            researchSegments: { $regex: report.segment, $options: 'i' }
+        }).select('_id').lean();
+        const planIds = activePlans.map(p => p._id);
+        const activeSubscriptions = await db_1.default.Subscription.find({
+            clientId: { $in: clientIds },
+            planId: { $in: planIds },
+            status: 'ACTIVE'
+        }).lean();
+        const eligibleClientIds = new Set(activeSubscriptions.map((s) => s.clientId.toString()));
+        const subscribedClients = activeClients.filter((c) => eligibleClientIds.has(c._id.toString()));
         // Create Notification Logs
         for (const client of subscribedClients) {
-            await db_1.default.notificationLog.create({
-                data: {
+            if (client.email) {
+                await db_1.default.NotificationLog.create({
                     tenantId: report.tenantId,
                     recipient: client.email,
                     channel: 'EMAIL',
                     title: `New Research Recommendation: ${report.title}`,
                     message: `Dear ${client.name}, a new research call has been published. Title: ${report.title}. Target: ${report.targetPrice}. Check the Client portal for details.`,
                     status: 'SENT'
-                }
-            });
+                });
+            }
         }
         await (0, auditService_1.logAudit)({
-            tenantId: report.tenantId,
+            tenantId: report.tenantId.toString(),
             userId: req.user.id,
             action: 'PUBLISH',
             module: 'RESEARCH',
@@ -174,7 +175,7 @@ const publishResearch = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: `Research call published successfully. Dispatched notifications to ${subscribedClients.length} clients.`,
-            data: published
+            data: published ? { ...published, id: published._id?.toString() || published.id } : null
         });
     }
     catch (error) {
@@ -192,7 +193,7 @@ const listResearch = async (req, res) => {
         let filter = { tenantId, deletedAt: null };
         // Strict Client Subscription and Web-only View Rules
         if (userRole === 'CLIENT') {
-            const client = await db_1.default.client.findFirst({ where: { userId: req.user.id } });
+            const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
             if (!client || client.status !== 'ACTIVE') {
                 return res.status(403).json({
                     success: false,
@@ -201,10 +202,10 @@ const listResearch = async (req, res) => {
                 });
             }
             // Filter only published reports matching the segment access from the active plan
-            const activeSub = await db_1.default.subscription.findFirst({
-                where: { clientId: client.id, status: 'ACTIVE' },
-                include: { plan: true }
-            });
+            const activeSub = await db_1.default.Subscription.findOne({
+                clientId: client._id,
+                status: 'ACTIVE'
+            }).populate('plan').lean();
             if (!activeSub) {
                 return res.status(403).json({
                     success: false,
@@ -212,19 +213,23 @@ const listResearch = async (req, res) => {
                     errors: ['No active subscription found.']
                 });
             }
-            const allowedSegments = activeSub.plan.researchSegments.split(',');
+            const plan = (activeSub.planId || activeSub.plan);
+            const allowedSegments = plan?.researchSegments ? plan.researchSegments.split(',').map((s) => s.trim()) : [];
             filter = {
                 tenantId,
                 status: 'PUBLISHED',
-                segment: { in: allowedSegments },
+                segment: { $in: allowedSegments },
                 deletedAt: null
             };
         }
-        const reports = await db_1.default.researchReport.findMany({
-            where: filter,
-            orderBy: { createdAt: 'desc' }
-        });
-        return res.status(200).json({ success: true, data: reports });
+        const reports = await db_1.default.ResearchReport.find(filter)
+            .sort({ createdAt: -1 })
+            .lean();
+        const formattedReports = reports.map((r) => ({
+            ...r,
+            id: r._id?.toString() || r.id
+        }));
+        return res.status(200).json({ success: true, data: formattedReports });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -235,27 +240,31 @@ const viewResearchDetail = async (req, res) => {
     const { id } = req.params;
     const userRole = req.user.role;
     try {
-        const report = await db_1.default.researchReport.findUnique({ where: { id } });
+        const report = await db_1.default.ResearchReport.findById(id).lean();
         if (!report || report.deletedAt) {
             return res.status(404).json({ success: false, message: 'Research recommendation not found.' });
         }
         // Client verification
         if (userRole === 'CLIENT') {
-            const client = await db_1.default.client.findFirst({ where: { userId: req.user.id } });
+            const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
             if (!client || client.status !== 'ACTIVE') {
                 return res.status(403).json({ success: false, message: 'Active subscription required.' });
             }
             // Save view analytics
-            await db_1.default.researchAnalytics.create({
-                data: {
-                    reportId: id,
-                    userId: req.user.id,
-                    action: 'VIEW',
-                    ipAddress: req.ip
-                }
+            await db_1.default.ResearchAnalytics.create({
+                reportId: id,
+                userId: req.user.id,
+                action: 'VIEW',
+                ipAddress: req.ip
             });
         }
-        return res.status(200).json({ success: true, data: report });
+        return res.status(200).json({
+            success: true,
+            data: {
+                ...report,
+                id: report._id?.toString() || report.id
+            }
+        });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
