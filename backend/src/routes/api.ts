@@ -502,6 +502,13 @@ router.delete(
   deleteStaff
 );
 router.post(
+  '/admin/staff/:id/delete',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  deleteStaff
+);
+router.post(
   '/admin/staff/:id/restore',
   authenticateJWT,
   requirePermission('ACCESS_STAFF'),
@@ -561,6 +568,13 @@ router.put(
 );
 router.delete(
   '/admin/clients/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_CLIENTS'),
+  enforceTenantIsolation,
+  deleteClient
+);
+router.post(
+  '/admin/clients/:id/delete',
   authenticateJWT,
   requirePermission('ACCESS_CLIENTS'),
   enforceTenantIsolation,
@@ -635,6 +649,13 @@ router.put(
 );
 router.delete(
   '/admin/plans/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_PLANS'),
+  enforceTenantIsolation,
+  deletePlan
+);
+router.post(
+  '/admin/plans/:id/delete',
   authenticateJWT,
   requirePermission('ACCESS_PLANS'),
   enforceTenantIsolation,

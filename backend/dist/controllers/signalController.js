@@ -1,10 +1,44 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.addSignalMessage = exports.uploadReport = exports.closeSignal = exports.listSignals = exports.createSignal = exports.getStocks = void 0;
-const db_1 = __importDefault(require("../config/db"));
+const mongoose_1 = __importDefault(require("mongoose"));
+const db_1 = __importStar(require("../config/db"));
 const getStocks = async (req, res) => {
     try {
         const { query } = req.query;
@@ -156,7 +190,6 @@ const listSignals = async (req, res) => {
             }
         }
         const signals = await db_1.default.Signal.find(whereClause)
-            .populate('stock')
             .populate({
             path: 'messages',
             options: { sort: { createdAt: -1 } }
@@ -174,17 +207,65 @@ const listSignals = async (req, res) => {
         const users = await db_1.default.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
         const userMap = new Map();
         users.forEach((u) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
+        // Manually fetch and resolve all Stock objects by stockId
+        const stockIdList = signals
+            .map((s) => s.stockId?._id || s.stockId || s.stock?._id || s.stock)
+            .filter(Boolean)
+            .map((id) => id.toString());
+        const uniqueStockIds = [...new Set(stockIdList)];
+        const validStockObjectIds = uniqueStockIds.filter((id) => mongoose_1.default.Types.ObjectId.isValid(id));
+        const stocks = await db_1.default.Stock.find({
+            $or: [
+                ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+                { id: { $in: uniqueStockIds } }
+            ]
+        }).lean();
+        const stockMap = new Map();
+        stocks.forEach((st) => {
+            const sId = String(st._id || st.id);
+            stockMap.set(sId, {
+                ...st,
+                id: sId
+            });
+        });
+        // Central fallback if not found in local tenant DB
+        if (stockMap.size < uniqueStockIds.length) {
+            try {
+                const centralStocks = await db_1.centralModels.Stock.find({
+                    $or: [
+                        ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+                        { id: { $in: uniqueStockIds } }
+                    ]
+                }).lean();
+                centralStocks.forEach((st) => {
+                    const sId = String(st._id || st.id);
+                    if (!stockMap.has(sId)) {
+                        stockMap.set(sId, {
+                            ...st,
+                            id: sId
+                        });
+                    }
+                });
+            }
+            catch { }
+        }
         const finalData = signals.map((s) => {
             const pIdStr = s.planId?.toString();
             const cIdStr = s.createdById?.toString();
-            const stock = s.stockId || s.stock;
+            const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+            const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+                (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
+                (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
             return {
                 ...s,
                 id: s._id?.toString() || s.id,
-                stock: stock ? {
-                    ...stock,
-                    id: stock._id?.toString() || stock.id
+                stockId: sIdStr,
+                stock: matchedStock ? {
+                    ...matchedStock,
+                    id: String(matchedStock._id || matchedStock.id)
                 } : null,
+                symbol: matchedStock?.symbol || '',
+                stockName: matchedStock?.name || '',
                 planName: (pIdStr && map.get(pIdStr)) || pIdStr || '',
                 createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher'
             };

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import dynamicDb from '../config/db';
+import mongoose from 'mongoose';
+import dynamicDb, { centralModels } from '../config/db';
 
 export const getStocks = async (req: Request, res: Response) => {
   try {
@@ -98,6 +99,7 @@ export const createSignal = async (req: Request, res: Response) => {
         createdById: userId,
         status: 'OPEN'
       });
+
       createdSignals.push({
         ...newSignal.toObject(),
         id: newSignal._id.toString()
@@ -171,7 +173,6 @@ export const listSignals = async (req: Request, res: Response) => {
     }
 
     const signals = await dynamicDb.Signal.find(whereClause)
-      .populate('stock')
       .populate({
         path: 'messages',
         options: { sort: { createdAt: -1 } }
@@ -193,17 +194,70 @@ export const listSignals = async (req: Request, res: Response) => {
     const userMap = new Map<string, string>();
     users.forEach((u: any) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
 
+    // Manually fetch and resolve all Stock objects by stockId
+    const stockIdList = signals
+      .map((s: any) => s.stockId?._id || s.stockId || s.stock?._id || s.stock)
+      .filter(Boolean)
+      .map((id: any) => id.toString());
+    const uniqueStockIds = [...new Set(stockIdList)];
+    const validStockObjectIds = uniqueStockIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+
+    const stocks = await dynamicDb.Stock.find({
+      $or: [
+        ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+        { id: { $in: uniqueStockIds } }
+      ]
+    }).lean();
+
+    const stockMap = new Map<string, any>();
+    stocks.forEach((st: any) => {
+      const sId = String(st._id || st.id);
+      stockMap.set(sId, {
+        ...st,
+        id: sId
+      });
+    });
+
+    // Central fallback if not found in local tenant DB
+    if (stockMap.size < uniqueStockIds.length) {
+      try {
+        const centralStocks = await centralModels.Stock.find({
+          $or: [
+            ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+            { id: { $in: uniqueStockIds } }
+          ]
+        }).lean();
+        centralStocks.forEach((st: any) => {
+          const sId = String(st._id || st.id);
+          if (!stockMap.has(sId)) {
+            stockMap.set(sId, {
+              ...st,
+              id: sId
+            });
+          }
+        });
+      } catch {}
+    }
+
     const finalData = signals.map((s: any) => {
       const pIdStr = s.planId?.toString();
       const cIdStr = s.createdById?.toString();
-      const stock = s.stockId || s.stock;
+      const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+      
+      const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+        (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
+        (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
+
       return {
         ...s,
         id: s._id?.toString() || s.id,
-        stock: stock ? {
-          ...stock,
-          id: stock._id?.toString() || stock.id
+        stockId: sIdStr,
+        stock: matchedStock ? {
+          ...matchedStock,
+          id: String(matchedStock._id || matchedStock.id)
         } : null,
+        symbol: matchedStock?.symbol || '',
+        stockName: matchedStock?.name || '',
         planName: (pIdStr && map.get(pIdStr)) || pIdStr || '',
         createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher'
       };

@@ -80,15 +80,15 @@ export const login = async (req: Request, res: Response) => {
     //   });
     // }
 
-    if (user.tenant) {
-      if (user.tenant.status === 'DELETED' || user.tenant.deletedAt) {
+    if (user?.tenant) {
+      if (user?.tenant?.status === 'DELETED' || user?.tenant?.deletedAt) {
         return res.status(403).json({
           success: false,
           message: 'Your company workspace has been removed. Please contact super admin.',
           errors: ['Tenant deleted', 'User inactive or suspended']
         });
       }
-      if (user.tenant.status === 'SUSPENDED' && user.role?.name !== 'SUPER_ADMIN') {
+      if (user?.tenant?.status === 'SUSPENDED' && user.role?.name !== 'SUPER_ADMIN') {
         return res.status(403).json({
           success: false,
           message: 'This company portal has been suspended by Super Admin. Access is disabled.',
@@ -97,9 +97,9 @@ export const login = async (req: Request, res: Response) => {
       }
     }
 
-    if (user.status === 'SUSPENDED') {
+    if (user?.status === 'SUSPENDED') {
       const suspendMsg =
-        user.role?.name === 'ADMIN'
+        user?.role?.name === 'ADMIN'
           ? 'Your account is suspended. Please contact super admin.'
           : 'Your account is suspended. Please contact admin.';
       return res.status(403).json({
@@ -109,12 +109,12 @@ export const login = async (req: Request, res: Response) => {
       });
     }
 
-    if (user.status === 'PENDING_APPROVAL') {
-      await User.findByIdAndUpdate(user._id || user.id, {
+    if (user?.status === 'PENDING_APPROVAL') {
+      await User.findByIdAndUpdate(user?._id || user?.id, {
         status: 'ACTIVE',
         tempPassword: null
       });
-      await Client.updateMany({ userId: user._id || user.id }, { status: 'ACTIVE' });
+      await Client.updateMany({ userId: user?._id || user?.id }, { status: 'ACTIVE' });
       user.status = 'ACTIVE';
     }
 
@@ -143,15 +143,15 @@ export const login = async (req: Request, res: Response) => {
       user.role?.permissions?.map((rp: any) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
 
     const sessionId = crypto.randomUUID();
-    const userId = (user._id || user.id).toString();
+    const userId = (user?._id || user?.id).toString();
 
-    let activeTenantId = user.tenantId ? user.tenantId.toString() : null;
-    let tenantInfo = user.tenant;
-    if (!activeTenantId && user.role?.name !== 'SUPER_ADMIN') {
+    let activeTenantId = user?.tenantId ? user?.tenantId.toString() : null;
+    let tenantInfo = user?.tenant;
+    if (!activeTenantId && user?.role?.name !== 'SUPER_ADMIN') {
       try {
         const defaultTenant: any = await centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await centralModels.Tenant.findOne().lean();
         if (defaultTenant) {
-          activeTenantId = (defaultTenant._id || defaultTenant.id).toString();
+          activeTenantId = (defaultTenant?._id || defaultTenant?.id).toString();
           tenantInfo = defaultTenant;
         }
       } catch {}
@@ -161,10 +161,10 @@ export const login = async (req: Request, res: Response) => {
     const accessToken = jwt.sign(
       {
         id: userId,
-        email: user.email,
-        role: user.role?.name,
+        email: user?.email,
+        role: user?.role?.name,
         tenantId: activeTenantId,
-        tokenVersion: user.tokenVersion || 0,
+        tokenVersion: user?.tokenVersion || 0,
         sessionId: sessionId
       },
       JWT_SECRET,
@@ -174,7 +174,7 @@ export const login = async (req: Request, res: Response) => {
     const refreshToken = jwt.sign(
       {
         id: userId,
-        tokenVersion: user.tokenVersion || 0,
+        tokenVersion: user?.tokenVersion || 0,
         sessionId: sessionId
       },
       REFRESH_SECRET,

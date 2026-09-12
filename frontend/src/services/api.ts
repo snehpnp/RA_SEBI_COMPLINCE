@@ -91,13 +91,26 @@ class ApiClient {
       }
     }
 
-    const data = await response.json();
+    let data: any = {};
+    const text = await response.text();
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {
+        message: text && text.length < 200 && !text.includes('<!DOCTYPE')
+          ? text
+          : (response.status === 404 ? 'Resource or API route not found.' : `Server returned error (${response.status}: ${response.statusText})`)
+      };
+    }
+
     if (!response.ok) {
-      const err = new Error(data.message || 'Something went wrong') as any;
-      err.response = { data };
-      err.duplicateField = data.duplicateField;
-      err.duplicateFields = data.duplicateFields || [];
-      err.errors = data.errors;
+      const errorMessage = data?.message || data?.error || (data?.errors && data.errors[0]) || `Request failed with status ${response.status}`;
+      const err = new Error(errorMessage) as any;
+      err.response = { data, status: response.status };
+      err.status = response.status;
+      err.duplicateField = data?.duplicateField;
+      err.duplicateFields = data?.duplicateFields || [];
+      err.errors = data?.errors;
       throw err;
     }
     return data;
@@ -427,9 +440,18 @@ class ApiClient {
   }
 
   async deleteStaff(id: string) {
-    return this.request(`/admin/staff/${id}`, {
-      method: 'DELETE'
-    });
+    try {
+      return await this.request(`/admin/staff/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err: any) {
+      if (err?.status === 404 || (err?.message && err.message.includes('404'))) {
+        return await this.request(`/admin/staff/${id}/delete`, {
+          method: 'POST'
+        });
+      }
+      throw err;
+    }
   }
 
   async restoreStaff(id: string) {
@@ -467,9 +489,18 @@ class ApiClient {
   }
 
   async deleteAdminClient(id: string) {
-    return this.request(`/admin/clients/${id}`, {
-      method: 'DELETE'
-    });
+    try {
+      return await this.request(`/admin/clients/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err: any) {
+      if (err?.status === 404 || (err?.message && err.message.includes('404'))) {
+        return await this.request(`/admin/clients/${id}/delete`, {
+          method: 'POST'
+        });
+      }
+      throw err;
+    }
   }
 
   async restoreAdminClient(id: string) {
@@ -538,7 +569,14 @@ class ApiClient {
   }
 
   async deletePlan(id: string) {
-    return this.request(`/admin/plans/${id}`, { method: 'DELETE' });
+    try {
+      return await this.request(`/admin/plans/${id}`, { method: 'DELETE' });
+    } catch (err: any) {
+      if (err?.status === 404 || (err?.message && err.message.includes('404'))) {
+        return await this.request(`/admin/plans/${id}/delete`, { method: 'POST' });
+      }
+      throw err;
+    }
   }
 
   async restorePlan(id: string) {

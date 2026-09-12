@@ -220,6 +220,7 @@ router.get('/admin/staff', auth_1.authenticateJWT, (0, auth_1.requireAnyPermissi
 router.put('/admin/staff/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, upload.single('nismUpload'), adminController_1.updateStaff);
 router.post('/admin/staff/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.toggleStaffStatus);
 router.delete('/admin/staff/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.deleteStaff);
+router.post('/admin/staff/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.deleteStaff);
 router.post('/admin/staff/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.restoreStaff);
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
@@ -230,6 +231,7 @@ router.get('/admin/clients/:id/communications', auth_1.authenticateJWT, (0, auth
 router.put('/admin/clients/:id/approve', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.approveClient);
 router.put('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.updateClient);
 router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
+router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
 // Admin Category Management
@@ -242,6 +244,7 @@ router.get('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requireAnyPermissi
 router.post('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createPlan);
 router.put('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.updatePlan);
 router.delete('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.deletePlan);
+router.post('/admin/plans/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.deletePlan);
 router.post('/admin/plans/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.restorePlan);
 router.post('/admin/plans/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.togglePlanStatus);
 // Admin Role Management

@@ -193,13 +193,13 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
             <p className="text-sm text-premium-text/70 mt-1">{banner.desc}</p>
           </div>
 
-          {banner.showDownload && (
+          {/* {banner.showDownload && (
             <div className="shrink-0">
               <button className="bg-premium-bg border border-premium-border hover:border-premium-text/30 px-6 py-3 rounded-xl text-sm font-medium transition-colors">
                 Download Certificate
               </button>
             </div>
-          )}
+          )} */}
 
           {banner.showAction && (
             <div className="shrink-0">

@@ -517,14 +517,21 @@ export default function SignalManagement({
         ),
       },
       {
-        name: 'Symbol',
-        minWidth: '150px',
-        selector: (row: any) => row.stock?.symbol,
+        name: 'Symbol / Stock',
+        minWidth: '180px',
+        selector: (row: any) => row.stock?.symbol || row.symbol || row.stockName || '',
         cell: (row: any) => (
-          <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap">
-            {row.stock?.symbol}
-            {row.strikePrice && <span className="ml-2 text-xs font-semibold text-slate-500">{row.strikePrice} {row.optionType || ''}</span>}
-          </span>
+          <div className="flex flex-col py-1">
+            <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap flex items-center gap-1.5">
+              {row.stock?.symbol || row.symbol || 'N/A'}
+              {row.strikePrice && <span className="text-xs font-semibold text-slate-500">({row.strikePrice} {row.optionType || ''})</span>}
+            </span>
+            {(row.stock?.name || row.stockName) && (
+              <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[200px]" title={row.stock?.name || row.stockName}>
+                {row.stock?.name || row.stockName}
+              </span>
+            )}
+          </div>
         ),
       },
       {
@@ -1396,7 +1403,13 @@ export default function SignalManagement({
               <div className="p-6 overflow-y-auto space-y-6 bg-white dark:bg-[#151c2c]">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Segment</p><p className="font-semibold">{viewSignalDetails.segment || 'N/A'}</p></div>
-                  <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Stock Symbol</p><p className="font-bold text-lime-700 dark:text-[#d4f23b]">{viewSignalDetails.stock?.symbol || 'N/A'}</p></div>
+                  <div>
+                    <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Stock Symbol</p>
+                    <p className="font-bold text-lime-700 dark:text-[#d4f23b]">{viewSignalDetails.stock?.symbol || viewSignalDetails.symbol || 'N/A'}</p>
+                    {(viewSignalDetails.stock?.name || viewSignalDetails.stockName) && (
+                      <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{viewSignalDetails.stock?.name || viewSignalDetails.stockName}</p>
+                    )}
+                  </div>
                   <div>
                     <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Strike Price</p>
                     <p className="font-semibold">{viewSignalDetails.strikePrice ? `${viewSignalDetails.strikePrice} ${viewSignalDetails.optionType || ''}` : 'N/A'}</p>

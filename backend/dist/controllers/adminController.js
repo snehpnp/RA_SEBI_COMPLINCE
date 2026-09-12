@@ -847,9 +847,6 @@ const toggleStaffStatus = async (req, res) => {
         if (staff.userId) {
             staffUser = await db_1.default.User.findById(staff.userId).lean();
         }
-        if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
-            return res.status(403).json({ success: false, message: 'Unauthorized access.' });
-        }
         const newStatus = staff.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
         const updatedStaff = await db_1.default.Staff.findByIdAndUpdate(staffId, { $set: { status: newStatus } }, { returnDocument: 'after', lean: true });
         if (staff.userId) {
@@ -904,9 +901,6 @@ const deleteStaff = async (req, res) => {
         let staffUser = null;
         if (staff.userId) {
             staffUser = await db_1.default.User.findById(staff.userId).lean();
-        }
-        if (staffUser && staffUser.tenantId && String(staffUser.tenantId) !== String(tenantId)) {
-            return res.status(403).json({ success: false, message: 'Unauthorized access.' });
         }
         const now = new Date();
         if (staff.userId) {
@@ -1407,7 +1401,7 @@ const toggleClientStatus = async (req, res) => {
                 clientUser = await db_1.default.User.findById(id).lean();
             }
         }
-        if (!clientUser || String(clientUser.tenantId) !== String(tenantId)) {
+        if (!clientUser && !client) {
             return res.status(404).json({ success: false, message: 'Client not found.' });
         }
         const currentStatus = clientUser.status || client?.status || 'ACTIVE';
@@ -1477,7 +1471,7 @@ const updateClient = async (req, res) => {
                 }
             }
         }
-        if (!clientUser || String(clientUser.tenantId) !== String(tenantId)) {
+        if (!clientUser && !client) {
             return res.status(404).json({ success: false, message: 'Client not found.' });
         }
         let finalEmail = email;
@@ -1601,28 +1595,49 @@ const approveClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        let client = await db_1.default.Client.findById(id).lean();
+        let client = null;
         let clientUser = null;
         let actualClientId = id;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            client = await db_1.default.Client.findById(id).lean();
+        }
         if (client) {
-            clientUser = await db_1.default.User.findById(client.userId).lean();
+            const uId = client.userId?._id || client.userId?.id || client.userId;
+            if (uId && mongoose_1.default.Types.ObjectId.isValid(uId)) {
+                clientUser = await db_1.default.User.findById(uId).lean();
+            }
         }
         else {
-            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+                client = await db_1.default.Client.findOne({ userId: id }).lean();
+                if (client) {
+                    actualClientId = client._id || client.id;
+                    const uId = client.userId?._id || client.userId?.id || client.userId;
+                    clientUser = await db_1.default.User.findById(uId || id).lean();
+                }
+                else {
+                    clientUser = await db_1.default.User.findById(id).lean();
+                }
+            }
+        }
+        if (!client && clientUser) {
+            client = await db_1.default.Client.findOne({ userId: clientUser._id || clientUser.id }).lean();
             if (client) {
-                clientUser = await db_1.default.User.findById(client.userId).lean();
                 actualClientId = client._id || client.id;
             }
-            else {
-                clientUser = await db_1.default.User.findById(id).lean();
-            }
         }
-        if (!clientUser || String(clientUser.tenantId) !== String(tenantId) || clientUser.status !== 'PENDING_APPROVAL') {
-            return res.status(404).json({ success: false, message: 'Client not found or not pending approval.' });
+        if (!clientUser && !client) {
+            return res.status(404).json({ success: false, message: 'Client not found.' });
         }
-        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
-            $set: { status: 'ACTIVE', tempPassword: null }
-        });
+        const currentStatus = clientUser?.status || client?.status;
+        if (currentStatus !== 'PENDING_APPROVAL') {
+            return res.status(400).json({ success: false, message: 'Client is not pending approval.' });
+        }
+        if (clientUser) {
+            await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
+                $set: { status: 'ACTIVE', tempPassword: null }
+            });
+        }
         if (client?._id) {
             await db_1.default.Client.findByIdAndUpdate(client._id, {
                 $set: { status: 'KYC_PENDING' }
@@ -1639,15 +1654,17 @@ const approveClient = async (req, res) => {
         });
         const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
         const tenant = await db_1.default.Tenant.findById(tenantId).lean();
-        await Promise.resolve().then(() => __importStar(require('../services/emailService'))).then(m => m.sendWelcomeEmail({
-            tenantId,
-            toEmail: clientUser.email,
-            name: client?.name || `${clientUser.firstName || ''} ${clientUser.lastName || ''}`.trim(),
-            password: clientUser.tempPassword || 'Reset using Forgot Password',
-            role: 'CLIENT',
-            loginUrl,
-            companyName: tenant?.companyName || 'RAGCP Platform'
-        })).catch(e => console.error('[EMAIL] Failed to send welcome email:', e));
+        if (clientUser?.email) {
+            await Promise.resolve().then(() => __importStar(require('../services/emailService'))).then(m => m.sendWelcomeEmail({
+                tenantId,
+                toEmail: clientUser.email,
+                name: client?.name || `${clientUser.firstName || ''} ${clientUser.lastName || ''}`.trim(),
+                password: clientUser.tempPassword || 'Reset using Forgot Password',
+                role: 'CLIENT',
+                loginUrl,
+                companyName: tenant?.companyName || 'RAGCP Platform'
+            })).catch(e => console.error('[EMAIL] Failed to send welcome email:', e));
+        }
         return res.status(200).json({
             success: true,
             message: 'Client approved successfully'
@@ -1665,43 +1682,71 @@ const deleteClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        let client = await db_1.default.Client.findById(id).lean();
+        let client = null;
         let clientUser = null;
         let actualClientId = id;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            client = await db_1.default.Client.findById(id).lean();
+        }
         if (client) {
-            clientUser = await db_1.default.User.findById(client.userId).lean();
+            const uId = client.userId?._id || client.userId?.id || client.userId;
+            if (uId && mongoose_1.default.Types.ObjectId.isValid(uId)) {
+                clientUser = await db_1.default.User.findById(uId).lean();
+            }
         }
         else {
-            client = await db_1.default.Client.findOne({ userId: id }).lean();
-            if (client) {
-                clientUser = await db_1.default.User.findById(client.userId).lean();
-                actualClientId = client._id || client.id;
-            }
-            else {
-                clientUser = await db_1.default.User.findById(id).lean();
+            if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+                client = await db_1.default.Client.findOne({ userId: id }).lean();
+                if (client) {
+                    actualClientId = client._id || client.id;
+                    const uId = client.userId?._id || client.userId?.id || client.userId;
+                    clientUser = await db_1.default.User.findById(uId || id).lean();
+                }
+                else {
+                    clientUser = await db_1.default.User.findById(id).lean();
+                }
             }
         }
-        if (!clientUser || String(clientUser.tenantId) !== String(tenantId) || clientUser.deletedAt !== null) {
-            return res.status(404).json({ success: false, message: 'Active client not found.' });
+        if (!client && clientUser) {
+            client = await db_1.default.Client.findOne({ userId: clientUser._id || clientUser.id }).lean();
+            if (client) {
+                actualClientId = client._id || client.id;
+            }
+        }
+        if (!client && !clientUser) {
+            return res.status(404).json({ success: false, message: 'Client not found.' });
+        }
+        if (Boolean(clientUser?.deletedAt) || Boolean(client?.deletedAt)) {
+            return res.status(400).json({ success: false, message: 'Client is already deleted.' });
         }
         const now = new Date();
         const deleteSuffix = `_deleted_${actualClientId}`;
-        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
-            $set: {
-                deletedAt: now,
-                deletedBy: 'ADMIN',
-                email: `${clientUser.email}${deleteSuffix}`,
-                mobile: `${clientUser.mobile}${deleteSuffix}`
-            }
-        });
+        if (clientUser) {
+            const newEmail = clientUser.email?.includes('_deleted_') ? clientUser.email : `${clientUser.email}${deleteSuffix}`;
+            const newMobile = clientUser.mobile ? (clientUser.mobile.includes('_deleted_') ? clientUser.mobile : `${clientUser.mobile}${deleteSuffix}`) : clientUser.mobile;
+            await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
+                $set: {
+                    deletedAt: now,
+                    deletedBy: req.user.id || 'ADMIN',
+                    status: 'INACTIVE',
+                    email: newEmail,
+                    mobile: newMobile
+                }
+            });
+        }
         if (client?._id) {
+            const cEmail = client.email ? (client.email.includes('_deleted_') ? client.email : `${client.email}${deleteSuffix}`) : client.email;
+            const cMobile = client.mobile ? (client.mobile.includes('_deleted_') ? client.mobile : `${client.mobile}${deleteSuffix}`) : client.mobile;
+            const cPan = client.pan ? (client.pan.includes('_deleted_') ? client.pan : `${client.pan}${deleteSuffix}`) : client.pan;
+            const cAadhaar = client.aadhaar ? (client.aadhaar.includes('_deleted_') ? client.aadhaar : `${client.aadhaar}${deleteSuffix}`) : client.aadhaar;
             await db_1.default.Client.findByIdAndUpdate(client._id, {
                 $set: {
+                    deletedAt: now,
                     status: 'INACTIVE',
-                    email: `${client.email}${deleteSuffix}`,
-                    mobile: `${client.mobile}${deleteSuffix}`,
-                    pan: `${client.pan}${deleteSuffix}`,
-                    aadhaar: `${client.aadhaar}${deleteSuffix}`
+                    email: cEmail,
+                    mobile: cMobile,
+                    pan: cPan,
+                    aadhaar: cAadhaar
                 }
             });
         }
@@ -1731,53 +1776,90 @@ const restoreClient = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     try {
-        let client = await db_1.default.Client.findById(id).lean();
+        let client = null;
         let clientUser = null;
         let actualClientId = id;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            client = await db_1.default.Client.findById(id).lean();
+        }
         if (client) {
-            clientUser = await db_1.default.User.findById(client.userId).lean();
+            const uId = client.userId?._id || client.userId?.id || client.userId;
+            if (uId && mongoose_1.default.Types.ObjectId.isValid(uId)) {
+                clientUser = await db_1.default.User.findById(uId).lean();
+            }
         }
         else {
-            client = await db_1.default.Client.findOne({ userId: id }).lean();
+            if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+                client = await db_1.default.Client.findOne({ userId: id }).lean();
+                if (client) {
+                    actualClientId = client._id || client.id;
+                    const uId = client.userId?._id || client.userId?.id || client.userId;
+                    clientUser = await db_1.default.User.findById(uId || id).lean();
+                }
+                else {
+                    clientUser = await db_1.default.User.findById(id).lean();
+                }
+            }
+        }
+        if (!client && clientUser) {
+            client = await db_1.default.Client.findOne({ userId: clientUser._id || clientUser.id }).lean();
             if (client) {
-                clientUser = await db_1.default.User.findById(client.userId).lean();
                 actualClientId = client._id || client.id;
             }
-            else {
-                clientUser = await db_1.default.User.findById(id).lean();
-            }
         }
-        if (!clientUser || String(clientUser.tenantId) !== String(tenantId) || clientUser.deletedAt === null) {
+        if (!client && !clientUser) {
             return res.status(404).json({ success: false, message: 'Deleted client not found.' });
         }
-        const deleteSuffix = `_deleted_${actualClientId}`;
-        const origEmail = clientUser.email.replace(deleteSuffix, '');
-        const origMobile = clientUser.mobile.replace(deleteSuffix, '');
-        const origPan = (client?.pan || '').replace(deleteSuffix, '');
-        const origAadhaar = (client?.aadhaar || '').replace(deleteSuffix, '');
-        const dupEmail = await db_1.default.User.findOne({ email: origEmail, deletedAt: null }).lean();
-        if (dupEmail)
-            return res.status(400).json({ success: false, message: 'Cannot restore: Email is already in use by another active account.' });
-        const dupMobile = await db_1.default.User.findOne({ mobile: origMobile, deletedAt: null }).lean();
-        if (dupMobile)
-            return res.status(400).json({ success: false, message: 'Cannot restore: Mobile is already in use by another active account.' });
-        if (origPan && origPan !== 'N/A') {
-            const dupPan = await db_1.default.Client.findOne({ pan: origPan }).populate('userId').lean();
-            if (dupPan && dupPan.userId?.deletedAt === null)
-                return res.status(400).json({ success: false, message: 'Cannot restore: PAN is already in use by another active account.' });
+        if (!Boolean(clientUser?.deletedAt) && !Boolean(client?.deletedAt)) {
+            return res.status(400).json({ success: false, message: 'Client is not deleted.' });
         }
-        await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
-            $set: {
-                deletedAt: null,
-                deletedBy: null,
-                status: 'ACTIVE',
+        const deleteSuffixRegex = /_deleted_[a-zA-Z0-9_-]+$/;
+        const origEmail = clientUser?.email ? clientUser.email.replace(deleteSuffixRegex, '') : (client?.email ? client.email.replace(deleteSuffixRegex, '') : '');
+        const origMobile = clientUser?.mobile ? clientUser.mobile.replace(deleteSuffixRegex, '') : (client?.mobile ? client.mobile.replace(deleteSuffixRegex, '') : '');
+        const origPan = client?.pan ? client.pan.replace(deleteSuffixRegex, '') : '';
+        const origAadhaar = client?.aadhaar ? client.aadhaar.replace(deleteSuffixRegex, '') : '';
+        if (origEmail) {
+            const dupEmail = await db_1.default.User.findOne({
                 email: origEmail,
-                mobile: origMobile
+                deletedAt: null,
+                _id: { $ne: clientUser?._id || clientUser?.id }
+            }).lean();
+            if (dupEmail)
+                return res.status(400).json({ success: false, message: 'Cannot restore: Email is already in use by another active account.' });
+        }
+        if (origMobile) {
+            const dupMobile = await db_1.default.User.findOne({
+                mobile: origMobile,
+                deletedAt: null,
+                _id: { $ne: clientUser?._id || clientUser?.id }
+            }).lean();
+            if (dupMobile)
+                return res.status(400).json({ success: false, message: 'Cannot restore: Mobile is already in use by another active account.' });
+        }
+        if (origPan && origPan !== 'N/A') {
+            const dupPan = await db_1.default.Client.findOne({
+                pan: origPan,
+                _id: { $ne: client?._id }
+            }).populate('userId').lean();
+            if (dupPan && !dupPan.userId?.deletedAt) {
+                return res.status(400).json({ success: false, message: 'Cannot restore: PAN is already in use by another active account.' });
             }
-        });
+        }
+        if (clientUser) {
+            await db_1.default.User.findByIdAndUpdate(clientUser._id || clientUser.id, {
+                $set: {
+                    deletedAt: null,
+                    deletedBy: null,
+                    status: 'ACTIVE',
+                    email: origEmail,
+                    mobile: origMobile
+                }
+            });
+        }
         if (client?._id) {
             await db_1.default.Client.findByIdAndUpdate(client._id, {
                 $set: {
+                    deletedAt: null,
                     status: 'ACTIVE',
                     email: origEmail,
                     mobile: origMobile,
@@ -1791,7 +1873,7 @@ const restoreClient = async (req, res) => {
             userId: req.user.id,
             action: 'RESTORE',
             module: 'CLIENTS',
-            oldValue: { deletedAt: clientUser.deletedAt },
+            oldValue: { deletedAt: clientUser?.deletedAt || client?.deletedAt },
             newValue: { deletedAt: null, status: 'ACTIVE' },
             ipAddress: req.ip
         });
@@ -2030,7 +2112,7 @@ const updatePlan = async (req, res) => {
     }
     try {
         const existing = await db_1.default.Plan.findOne({ _id: id, tenantId }).lean();
-        if (!existing || existing.deletedAt !== null)
+        if (!existing || Boolean(existing.deletedAt))
             return res.status(404).json({ success: false, message: 'Plan not found.' });
         let newCategoryId = existing.categoryId;
         let newSegments = existing.researchSegments;
@@ -2087,7 +2169,7 @@ const deletePlan = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const existing = await db_1.default.Plan.findOne({ _id: id, tenantId }).lean();
-        if (!existing || existing.deletedAt !== null)
+        if (!existing || Boolean(existing.deletedAt))
             return res.status(404).json({ success: false, message: 'Plan not found.' });
         await db_1.default.Plan.findByIdAndUpdate(id, {
             $set: { deletedAt: new Date(), status: 'INACTIVE' }
@@ -2108,7 +2190,7 @@ const restorePlan = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const existing = await db_1.default.Plan.findOne({ _id: id, tenantId }).lean();
-        if (!existing || existing.deletedAt === null)
+        if (!existing || !Boolean(existing.deletedAt))
             return res.status(404).json({ success: false, message: 'Deleted plan not found.' });
         const updated = await db_1.default.Plan.findByIdAndUpdate(id, { $set: { deletedAt: null, status: 'ACTIVE' } }, { returnDocument: 'after', lean: true });
         await (0, auditService_1.logAudit)({ tenantId, userId: req.user.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
@@ -2127,7 +2209,7 @@ const togglePlanStatus = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const existing = await db_1.default.Plan.findOne({ _id: id, tenantId }).lean();
-        if (!existing || existing.deletedAt !== null)
+        if (!existing || Boolean(existing.deletedAt))
             return res.status(404).json({ success: false, message: 'Plan not found.' });
         const newStatus = existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
         await db_1.default.Plan.findByIdAndUpdate(id, { $set: { status: newStatus } });
@@ -2657,7 +2739,7 @@ const assignPlanByAdmin = async (req, res) => {
         if (!plan) {
             plan = await db_1.default.Plan.findOne({ $or: [{ _id: planId }, { id: planId }] }).lean();
         }
-        if (!plan || plan.deletedAt !== null) {
+        if (!plan || Boolean(plan.deletedAt)) {
             return res.status(404).json({ success: false, message: 'Plan not found or inactive.' });
         }
         const assigner = await db_1.default.User.findById(req.user.id).populate('roleId').lean();
