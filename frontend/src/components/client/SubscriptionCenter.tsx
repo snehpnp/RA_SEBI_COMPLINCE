@@ -168,8 +168,18 @@ export default function SubscriptionCenter({
                 });
 
                 if (verifyRes.success) {
-                  toast.success('Payment successful!');
-                  window.location.href = '/client?payment=success';
+                  toast.success('Payment successful! Your subscription is now active.');
+                  setPaymentSuccess(true);
+                  const subRes = await api.getClientSubscriptions().catch(() => ({ success: false, data: [] }));
+                  if (subRes.success && Array.isArray(subRes.data)) {
+                    setActiveSubscriptions(subRes.data.filter((s: any) => s.status === 'ACTIVE' || s.status === 'active'));
+                  }
+                  setTimeout(() => {
+                    setCheckoutPlan(null);
+                    setPaymentSuccess(false);
+                    setActiveTab('active');
+                    window.location.href = '/client?payment=success';
+                  }, 1200);
                 } else {
                   throw new Error(verifyRes.message || 'Payment verification failed');
                 }
@@ -190,7 +200,7 @@ export default function SubscriptionCenter({
 
           const rzp = new (window as any).Razorpay(options);
           rzp.on('payment.failed', function (response: any) {
-            toast.error(response.error.description || 'Payment failed');
+            toast.error(response.error?.description || 'Payment failed');
           });
           rzp.open();
         } else {
@@ -276,6 +286,21 @@ export default function SubscriptionCenter({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paymentStatus = urlParams.get('payment');
+      if (paymentStatus === 'success') {
+        toast.success('Payment successful! Your subscription is now active.');
+        setActiveTab('active');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (paymentStatus === 'failed') {
+        toast.error('Payment was not completed or verification failed.');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (profile?.subscriptions && Array.isArray(profile.subscriptions) && profile.subscriptions.length > 0) {

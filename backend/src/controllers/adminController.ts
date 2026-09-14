@@ -2047,12 +2047,49 @@ export const restoreClient = async (req: AuthenticatedRequest, res: Response) =>
 // PLAN CATEGORY MANAGEMENT
 // =====================================================
 
+const getRelatedTenantIds = async (tenantId?: string | null, userId?: string | null): Promise<mongoose.Types.ObjectId[]> => {
+  const ids = new Set<string>();
+  if (tenantId) ids.add(String(tenantId));
+
+  if (userId) {
+    const clientDoc: any = await dynamicDb.Client.findOne({ userId }).lean();
+    if (clientDoc?.tenantId) ids.add(String(clientDoc.tenantId));
+    const userDoc: any = await dynamicDb.User.findById(userId).lean();
+    if (userDoc?.tenantId) ids.add(String(userDoc.tenantId));
+  }
+
+  const allTenants: any[] = await centralModels.Tenant.find({ deletedAt: null }).lean().catch(() => []);
+  const allCompanies: any[] = await centralModels.AllCompany.find({ deletedAt: null }).lean().catch(() => []);
+
+  allTenants.forEach((t: any) => {
+    if (t._id) ids.add(String(t._id));
+    if (t.id) ids.add(String(t.id));
+    if (t.tenantId) ids.add(String(t.tenantId));
+  });
+
+  allCompanies.forEach((c: any) => {
+    if (c._id) ids.add(String(c._id));
+    if (c.id) ids.add(String(c.id));
+    if (c.tenantId) ids.add(String(c.tenantId));
+  });
+
+  return Array.from(ids)
+    .filter(id => mongoose.Types.ObjectId.isValid(id))
+    .map(id => new mongoose.Types.ObjectId(id));
+};
+
 export const getAdminCategories = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const rawCategories = await dynamicDb.PlanCategory.find({ tenantId })
+    const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+    const rawCategories = await dynamicDb.PlanCategory.find({
+      $or: [
+        { tenantId: { $in: relatedTenantIds } },
+        { tenantId: null }
+      ]
+    })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -2158,7 +2195,14 @@ export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN' || req.user!.role === 'RESEARCHER';
-    let filterQuery: any = { tenantId, deletedAt: null };
+    const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+    let filterQuery: any = {
+      $or: [
+        { tenantId: { $in: relatedTenantIds } },
+        { tenantId: null }
+      ],
+      deletedAt: null
+    };
 
     if (!isFullAdmin) {
       const userRole = await dynamicDb.Role.findOne({ name: req.user!.role }).lean();

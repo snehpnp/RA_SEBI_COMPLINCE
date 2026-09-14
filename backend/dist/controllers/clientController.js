@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
+exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.getRelatedTenantIds = exports.getResolvedTenant = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -507,6 +507,7 @@ const submitManualPayment = async (req, res) => {
     }
 };
 exports.submitManualPayment = submitManualPayment;
+
 const verifyManualPayment = async (req, res) => {
     const { paymentId, status, remarks } = req.body;
     try {
@@ -582,25 +583,130 @@ const verifyManualPayment = async (req, res) => {
     }
 };
 exports.verifyManualPayment = verifyManualPayment;
+const getResolvedTenant = async (tenantId, userId) => {
+    let tid = tenantId;
+    if (!tid && userId) {
+        const clientDoc = await db_1.default.Client.findOne({ userId }).lean();
+        if (clientDoc?.tenantId)
+            tid = clientDoc.tenantId;
+        if (!tid) {
+            const userDoc = await db_1.default.User.findById(userId).lean();
+            if (userDoc?.tenantId)
+                tid = userDoc.tenantId;
+        }
+    }
+    let tenantObj = null;
+    if (tid && mongoose_1.default.Types.ObjectId.isValid(tid)) {
+        tenantObj = await db_1.default.Tenant.findById(tid).lean();
+        if (!tenantObj) {
+            tenantObj = await db_1.centralModels.Tenant.findById(tid).lean();
+        }
+    }
+    if (!tenantObj && tid) {
+        tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tid }, { tenantId: tid }] }).lean();
+    }
+    if (!tenantObj && tid) {
+        tenantObj = await db_1.centralModels.Tenant.findOne({ $or: [{ _id: tid }, { id: tid }, { tenantId: tid }] }).lean();
+    }
+    if (!tenantObj && tid) {
+        tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tid }, { tenantId: tid }] }).lean();
+    }
+    if (!tenantObj) {
+        tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenantObj) {
+        tenantObj = await db_1.centralModels.Tenant.findOne({ deletedAt: null }).lean();
+    }
+    if (!tenantObj) {
+        tenantObj = await db_1.centralModels.AllCompany.findOne({ deletedAt: null }).lean();
+    }
+    // If Razorpay credentials missing on matched tenantObj, look up central tenant/AllCompany
+    if (tenantObj) {
+        if (!tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret) {
+            const altTenant = await db_1.centralModels.Tenant.findOne({
+                razorpayKeyId: { $ne: null }
+            }).lean() || await db_1.centralModels.AllCompany.findOne({
+                razorpayKeyId: { $ne: null }
+            }).lean();
+            if (altTenant) {
+                if (!tenantObj.razorpayKeyId && altTenant.razorpayKeyId)
+                    tenantObj.razorpayKeyId = altTenant.razorpayKeyId;
+                if (!tenantObj.razorpayKeySecret && altTenant.razorpayKeySecret)
+                    tenantObj.razorpayKeySecret = altTenant.razorpayKeySecret;
+            }
+        }
+    }
+    return tenantObj;
+};
+exports.getResolvedTenant = getResolvedTenant;
+const getRelatedTenantIds = async (tenantId, userId) => {
+    const ids = new Set();
+    if (tenantId)
+        ids.add(String(tenantId));
+    if (userId) {
+        const clientDoc = await db_1.default.Client.findOne({ userId }).lean();
+        if (clientDoc?.tenantId)
+            ids.add(String(clientDoc.tenantId));
+        const userDoc = await db_1.default.User.findById(userId).lean();
+        if (userDoc?.tenantId)
+            ids.add(String(userDoc.tenantId));
+    }
+    const allTenants = await db_1.centralModels.Tenant.find({ deletedAt: null }).lean().catch(() => []);
+    const allCompanies = await db_1.centralModels.AllCompany.find({ deletedAt: null }).lean().catch(() => []);
+    allTenants.forEach((t) => {
+        if (t._id)
+            ids.add(String(t._id));
+        if (t.id)
+            ids.add(String(t.id));
+        if (t.tenantId)
+            ids.add(String(t.tenantId));
+    });
+    allCompanies.forEach((c) => {
+        if (c._id)
+            ids.add(String(c._id));
+        if (c.id)
+            ids.add(String(c.id));
+        if (c.tenantId)
+            ids.add(String(c.tenantId));
+    });
+    return Array.from(ids)
+        .filter(id => mongoose_1.default.Types.ObjectId.isValid(id))
+        .map(id => new mongoose_1.default.Types.ObjectId(id));
+};
+exports.getRelatedTenantIds = getRelatedTenantIds;
 const getPlans = async (req, res) => {
-    const tenantId = req.user.tenantId;
-    if (!tenantId)
-        return res.status(400).json({ success: false, message: 'Tenant ID required.' });
     try {
-        const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
+        const relatedTenantIds = await (0, exports.getRelatedTenantIds)(req.user?.tenantId, req.user?.id);
         // Find active categories
-        const activeCategories = await db_1.default.PlanCategory.find({ tenantId, status: 'ACTIVE' }).lean();
+        const activeCategories = await db_1.default.PlanCategory.find({
+            $or: [
+                { tenantId: { $in: relatedTenantIds } },
+                { tenantId: null }
+            ],
+            status: 'ACTIVE'
+        }).lean();
         const activeCatIds = activeCategories.map((c) => c._id || c.id);
         const plans = await db_1.default.Plan.find({
-            tenantId,
-            deletedAt: null,
-            status: 'ACTIVE',
-            $or: [
-                { categoryId: null },
-                { categoryId: { $in: activeCatIds } }
+            $and: [
+                {
+                    $or: [
+                        { tenantId: { $in: relatedTenantIds } },
+                        { tenantId: null }
+                    ]
+                },
+                { deletedAt: null },
+                { status: 'ACTIVE' },
+                {
+                    $or: [
+                        { categoryId: null },
+                        { categoryId: { $in: activeCatIds } }
+                    ]
+                }
             ]
         })
             .populate('categoryId')
+            .sort({ createdAt: -1 })
             .lean();
         const formatted = plans.map((p) => {
             const catObj = p.categoryId && typeof p.categoryId === 'object' ? p.categoryId : null;
@@ -618,7 +724,7 @@ const getPlans = async (req, res) => {
         return res.status(200).json({
             success: true,
             data: formatted,
-            gstCalculationType: tenant?.gstCalculationType || 'EXCLUSIVE'
+            gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE'
         });
     }
     catch (error) {
@@ -628,7 +734,7 @@ const getPlans = async (req, res) => {
 exports.getPlans = getPlans;
 const getClientProfile = async (req, res) => {
     try {
-        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean() || await db_1.default.Client.findById(req.user.id).lean();
         if (!client) {
             return res.status(404).json({ success: false, message: 'Client profile not found.' });
         }
@@ -643,23 +749,7 @@ const getClientProfile = async (req, res) => {
         const consents = await db_1.default.Consent.find({
             $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user.id }]
         }).lean();
-        const user = await db_1.default.User.findById(req.user.id).lean();
-        let tenantObj = null;
-        if (user && user.tenantId) {
-            const tenantId = user.tenantId;
-            if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
-                tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
-            }
-            if (!tenantObj) {
-                tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-            }
-            if (!tenantObj) {
-                tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-            }
-        }
-        if (!tenantObj) {
-            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
-        }
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
         let isPaymentGatewayConfigured = false;
         let tenantFormatted = null;
         if (tenantObj) {
@@ -682,7 +772,7 @@ const getClientProfile = async (req, res) => {
                 companyName: tenantObj.companyName,
                 sebiRegistration: tenantObj.sebiRegistration,
                 address: tenantObj.address,
-                email: tenantObj.email,
+                email: tenantObj.companyEmail || tenantObj.email,
                 mobile: tenantObj.mobile,
                 agreementContent: tenantObj.agreementContent,
                 activePaymentGateway: tenantObj.activePaymentGateway || 'RAZORPAY',
@@ -707,11 +797,12 @@ const getClientProfile = async (req, res) => {
             })),
             agreements,
             consents,
-            user: user ? {
-                ...user,
-                id: String(user._id || user.id),
+            user: {
+                id: req.user.id,
+                email: req.user.email,
+                role: req.user.role,
                 tenant: tenantFormatted
-            } : null
+            }
         };
         return res.status(200).json({ success: true, data: formatted });
     }
@@ -721,48 +812,22 @@ const getClientProfile = async (req, res) => {
 };
 exports.getClientProfile = getClientProfile;
 const updateClientProfile = async (req, res) => {
+    const { occupation, addressLine1, city, state, zipCode } = req.body;
     try {
-        const { pan, aadhaar, name, email, mobile, dob, address } = req.body;
-        const userId = req.user.id;
-        const client = await db_1.default.Client.findOne({ userId }).lean();
-        if (!client) {
+        const client = await db_1.default.Client.findOne({ userId: req.user.id });
+        if (!client)
             return res.status(404).json({ success: false, message: 'Client not found.' });
-        }
-        const clientUpdate = {};
-        if (pan !== undefined)
-            clientUpdate.pan = pan;
-        if (aadhaar !== undefined)
-            clientUpdate.aadhaar = aadhaar;
-        if (name)
-            clientUpdate.name = name;
-        if (email)
-            clientUpdate.email = email;
-        if (mobile)
-            clientUpdate.mobile = mobile;
-        if (dob)
-            clientUpdate.dob = new Date(dob);
-        if (Object.keys(clientUpdate).length > 0) {
-            await db_1.default.Client.findByIdAndUpdate(client._id || client.id, { $set: clientUpdate });
-        }
-        if (name || email || mobile) {
-            const userUpdate = {};
-            if (name) {
-                userUpdate.firstName = name.split(' ')[0];
-                userUpdate.lastName = name.split(' ').slice(1).join(' ') || 'Client';
+        const clientId = client._id || client.id;
+        const profile = await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, {
+            $set: {
+                occupation,
+                addressLine1,
+                city,
+                state,
+                zipCode
             }
-            if (email)
-                userUpdate.email = email;
-            if (mobile)
-                userUpdate.mobile = mobile;
-            await db_1.default.User.findByIdAndUpdate(userId, { $set: userUpdate });
-        }
-        if (address) {
-            await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, {
-                $set: { addressLine1: address },
-                $setOnInsert: { clientId: client._id || client.id, city: '', state: '', country: 'India' }
-            }, { upsert: true, returnDocument: 'after' });
-        }
-        return res.status(200).json({ success: true, message: 'Profile updated' });
+        }, { upsert: true, returnDocument: 'after', lean: true });
+        return res.status(200).json({ success: true, data: profile });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -771,17 +836,12 @@ const updateClientProfile = async (req, res) => {
 exports.updateClientProfile = updateClientProfile;
 const deleteClientAccount = async (req, res) => {
     try {
-        const userId = req.user.id;
-        const client = await db_1.default.Client.findOne({ userId }).lean();
+        const client = await db_1.default.Client.findOne({ userId: req.user.id });
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found.' });
-        await db_1.default.User.findByIdAndUpdate(userId, {
-            $set: { deletedAt: new Date(), deletedBy: 'SELF', status: 'INACTIVE' }
-        });
-        await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
-            $set: { status: 'INACTIVE' }
-        });
-        return res.status(200).json({ success: true, message: 'Account deleted successfully' });
+        await db_1.default.Client.findByIdAndUpdate(client._id || client.id, { $set: { status: 'DELETED' } });
+        await db_1.default.User.findByIdAndUpdate(req.user.id, { $set: { status: 'DELETED' } });
+        return res.status(200).json({ success: true, message: 'Account scheduled for deletion.' });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -789,23 +849,38 @@ const deleteClientAccount = async (req, res) => {
 };
 exports.deleteClientAccount = deleteClientAccount;
 const uploadClientDocument = async (req, res) => {
-    res.json({ success: true, message: 'Document uploaded' });
+    const { documentType } = req.body;
+    if (!req.file)
+        return res.status(400).json({ success: false, message: 'No file uploaded.' });
+    try {
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+        if (!client)
+            return res.status(404).json({ success: false, message: 'Client not found.' });
+        const doc = await db_1.default.ClientDocument.create({
+            clientId: client._id || client.id,
+            docType: documentType || 'OTHER',
+            fileUrl: `/uploads/documents/${req.file.filename}`,
+            fileName: req.file.originalname,
+            status: 'VERIFIED'
+        });
+        return res.status(201).json({ success: true, data: doc });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, errors: [error.message] });
+    }
 };
 exports.uploadClientDocument = uploadClientDocument;
 const downloadInvoice = async (req, res) => {
+    const { paymentId } = req.params;
     try {
-        const { id } = req.params;
-        const payment = await db_1.default.Payment.findById(id).lean();
-        if (!payment)
-            return res.status(404).json({ success: false, message: 'Payment not found' });
-        const user = req.user;
-        if (user && user.role === 'CLIENT') {
-            const client = await db_1.default.Client.findOne({ userId: user.id }).lean();
-            if (!client || String(client._id || client.id) !== String(payment.clientId)) {
-                return res.status(403).json({ success: false, message: 'Forbidden' });
-            }
+        const payment = await db_1.default.Payment.findById(paymentId)
+            .populate('clientId')
+            .populate('planId')
+            .lean();
+        if (!payment) {
+            return res.status(404).json({ success: false, message: 'Payment record not found' });
         }
-        const pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(id);
+        const pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(payment);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="Invoice_${payment.transactionRef}.pdf"`);
         return res.send(pdfBuffer);
@@ -819,32 +894,11 @@ exports.downloadInvoice = downloadInvoice;
 const initiateRazorpayPayment = async (req, res) => {
     const { planId, couponCode } = req.body;
     try {
-        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean() || await db_1.default.Client.findById(req.user.id).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
-        let tenantId = req.user?.tenantId;
-        if (!tenantId && req.user?.id) {
-            if (client?.tenantId)
-                tenantId = client.tenantId;
-            if (!tenantId) {
-                const userDoc = await db_1.default.User.findById(req.user.id).lean();
-                if (userDoc?.tenantId)
-                    tenantId = userDoc.tenantId;
-            }
-        }
-        let tenantObj = null;
-        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
-            tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
-        }
-        if (!tenantObj && tenantId) {
-            tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-        }
-        if (!tenantObj && tenantId) {
-            tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-        }
-        if (!tenantObj) {
-            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
-        }
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
+        const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
         if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
             return res.status(400).json({
                 success: false,
@@ -853,7 +907,7 @@ const initiateRazorpayPayment = async (req, res) => {
             });
         }
         const kycRequired = tenantObj?.kycFirst !== false;
-        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING' || client.status === 'ACTIVE');
         if (kycRequired && !isClientKycDone) {
             return res.status(403).json({
                 success: false,
@@ -864,7 +918,7 @@ const initiateRazorpayPayment = async (req, res) => {
         const plan = await db_1.default.Plan.findById(planId).lean();
         if (!plan)
             return res.status(404).json({ success: false, message: 'Plan not found' });
-        let finalPrice = plan.price;
+        let finalPrice = plan.amount || plan.price;
         let appliedCouponId = null;
         if (couponCode) {
             const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
@@ -899,7 +953,7 @@ const initiateRazorpayPayment = async (req, res) => {
                 clientId: String(client._id || client.id),
                 planId: String(plan._id || plan.id),
                 couponId: appliedCouponId ? String(appliedCouponId) : '',
-                tenantId: tenantId
+                tenantId: String(tenantId)
             }
         };
         const order = await razorpay.orders.create(orderOptions);
@@ -920,14 +974,14 @@ exports.initiateRazorpayPayment = initiateRazorpayPayment;
 const verifyRazorpayPayment = async (req, res) => {
     const { razorpay_payment_id, razorpay_order_id, razorpay_signature, planId, couponCode } = req.body;
     try {
-        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean() || await db_1.default.Client.findById(req.user.id).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
-        const tenantId = req.user.tenantId;
-        const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
         if (!tenantObj || !tenantObj.razorpayKeySecret) {
             return res.status(400).json({ success: false, message: 'Razorpay configuration error' });
         }
+        const tenantId = tenantObj._id || tenantObj.id || req.user?.tenantId;
         const body = razorpay_order_id + '|' + razorpay_payment_id;
         const expectedSignature = crypto_1.default.createHmac('sha256', tenantObj.razorpayKeySecret).update(body.toString()).digest('hex');
         if (expectedSignature !== razorpay_signature) {
@@ -945,55 +999,73 @@ const verifyRazorpayPayment = async (req, res) => {
                     discountAmount = coupon.discountValue;
                 }
                 else if (coupon.discountType === 'PERCENTAGE') {
-                    discountAmount = (plan.price * coupon.discountValue) / 100;
+                    discountAmount = ((plan.amount || plan.price) * coupon.discountValue) / 100;
                     if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
                         discountAmount = coupon.maxDiscountValue;
                     }
                 }
-                if (discountAmount > plan.price)
-                    discountAmount = plan.price;
+                if (discountAmount > (plan.amount || plan.price))
+                    discountAmount = (plan.amount || plan.price);
                 appliedCouponId = coupon._id || coupon.id;
                 await db_1.default.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
                     $inc: { usedCount: 1 }
                 });
             }
         }
-        let finalPrice = plan.price - discountAmount;
-        if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
+        let finalPrice = (plan.amount || plan.price) - discountAmount;
+        let amountBase = finalPrice;
+        let amountGst = 0;
+        const isExclusive = tenantObj.gstCalculationType === 'EXCLUSIVE';
+        if (isExclusive) {
+            amountGst = finalPrice * 0.18;
             finalPrice = finalPrice * 1.18;
         }
+        else {
+            amountBase = finalPrice / 1.18;
+            amountGst = finalPrice - amountBase;
+        }
+        const clientProfile = await db_1.default.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
         await db_1.default.Payment.create({
             tenantId,
             clientId: client._id || client.id,
-            planId,
+            planId: plan._id || plan.id,
             amount: finalPrice,
             couponId: appliedCouponId,
             discountApplied: discountAmount,
             paymentMode: 'ONLINE_RAZORPAY',
             transactionRef: razorpay_payment_id,
-            status: 'SUCCESS'
+            status: 'SUCCESS',
+            clientCity: clientProfile?.city || client.city || null,
+            clientState: clientProfile?.state || client.state || null,
+            tenantState: tenantObj?.state || null,
+            paymentDate: new Date()
         });
         const existingSub = await db_1.default.Subscription.findOne({
             clientId: client._id || client.id,
-            planId,
+            planId: plan._id || plan.id,
             status: 'ACTIVE',
             endDate: { $gt: new Date() }
         }).sort({ endDate: -1 }).lean();
         let startDate = new Date();
         if (existingSub)
             startDate = new Date(existingSub.endDate);
-        const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
-        await db_1.default.Subscription.create({
+        const duration = plan.durationMonths || plan.duration || 1;
+        const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
+        const subscription = await db_1.default.Subscription.create({
             clientId: client._id || client.id,
-            planId,
+            planId: plan._id || plan.id,
             startDate,
             endDate,
-            status: 'ACTIVE'
+            status: 'ACTIVE',
+            amountBase,
+            amountGst,
+            amountTotal: finalPrice,
+            isGstInclusive: !isExclusive
         });
         await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
             $set: { status: 'ACTIVE' }
         });
-        return res.status(200).json({ success: true, message: 'Payment verified successfully' });
+        return res.status(200).json({ success: true, message: 'Payment verified successfully', subscription });
     }
     catch (error) {
         console.error('Razorpay Verify Error:', error);
@@ -1004,32 +1076,11 @@ exports.verifyRazorpayPayment = verifyRazorpayPayment;
 const initiateCCAvenuePayment = async (req, res) => {
     const { planId, couponCode } = req.body;
     try {
-        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean() || await db_1.default.Client.findById(req.user.id).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
-        let tenantId = req.user?.tenantId;
-        if (!tenantId && req.user?.id) {
-            if (client?.tenantId)
-                tenantId = client.tenantId;
-            if (!tenantId) {
-                const userDoc = await db_1.default.User.findById(req.user.id).lean();
-                if (userDoc?.tenantId)
-                    tenantId = userDoc.tenantId;
-            }
-        }
-        let tenantObj = null;
-        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
-            tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
-        }
-        if (!tenantObj && tenantId) {
-            tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-        }
-        if (!tenantObj && tenantId) {
-            tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-        }
-        if (!tenantObj) {
-            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
-        }
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
+        const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
         if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
             return res.status(400).json({
                 success: false,
@@ -1038,7 +1089,7 @@ const initiateCCAvenuePayment = async (req, res) => {
             });
         }
         const kycRequired = tenantObj?.kycFirst !== false;
-        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+        const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING' || client.status === 'ACTIVE');
         if (kycRequired && !isClientKycDone) {
             return res.status(403).json({
                 success: false,
@@ -1049,7 +1100,7 @@ const initiateCCAvenuePayment = async (req, res) => {
         const plan = await db_1.default.Plan.findById(planId).lean();
         if (!plan)
             return res.status(404).json({ success: false, message: 'Plan not found' });
-        let finalPrice = plan.price;
+        let finalPrice = plan.amount || plan.price;
         let appliedCouponId = null;
         if (couponCode) {
             const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
@@ -1097,7 +1148,7 @@ const handleCCAvenueResponse = async (req, res) => {
     if (!encResp || !tenantId)
         return res.status(400).send('Invalid response');
     try {
-        const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        const tenantObj = await (0, exports.getResolvedTenant)(tenantId);
         if (!tenantObj || !tenantObj.ccavenueWorkingKey)
             return res.status(400).send('Tenant configuration error');
         const decryptedStr = (0, ccavenue_1.decryptCCAvenue)(encResp, tenantObj.ccavenueWorkingKey);
@@ -1111,15 +1162,20 @@ const handleCCAvenueResponse = async (req, res) => {
             const client = await db_1.default.Client.findById(clientId).lean();
             const plan = await db_1.default.Plan.findById(planId).lean();
             if (client && plan) {
+                const clientProfile = await db_1.default.ClientProfile.findOne({ clientId }).lean();
                 await db_1.default.Payment.create({
-                    tenantId,
+                    tenantId: tenantObj._id || tenantObj.id || tenantId,
                     clientId,
                     planId,
                     amount: parseFloat(parsedData.amount) || 0,
                     couponId: appliedCouponId || null,
                     paymentMode: 'ONLINE_CCAVENUE',
                     transactionRef: parsedData.tracking_id || parsedData.order_id,
-                    status: 'SUCCESS'
+                    status: 'SUCCESS',
+                    clientCity: clientProfile?.city || client.city || null,
+                    clientState: clientProfile?.state || client.state || null,
+                    tenantState: tenantObj?.state || null,
+                    paymentDate: new Date()
                 });
                 const existingSub = await db_1.default.Subscription.findOne({
                     clientId,
@@ -1130,13 +1186,15 @@ const handleCCAvenueResponse = async (req, res) => {
                 let startDate = new Date();
                 if (existingSub)
                     startDate = new Date(existingSub.endDate);
-                const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+                const duration = plan.durationMonths || plan.duration || 1;
+                const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
                 await db_1.default.Subscription.create({
                     clientId,
                     planId,
                     startDate,
                     endDate,
-                    status: 'ACTIVE'
+                    status: 'ACTIVE',
+                    amountTotal: parseFloat(parsedData.amount) || 0
                 });
                 await db_1.default.Client.findByIdAndUpdate(clientId, {
                     $set: { status: 'ACTIVE' }
@@ -1161,33 +1219,7 @@ const handleCCAvenueResponse = async (req, res) => {
 exports.handleCCAvenueResponse = handleCCAvenueResponse;
 const getPaymentGatewayStatus = async (req, res) => {
     try {
-        let tenantId = req.user?.tenantId;
-        if (!tenantId && req.user?.id) {
-            const clientDoc = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
-            if (clientDoc?.tenantId)
-                tenantId = clientDoc.tenantId;
-            if (!tenantId) {
-                const userDoc = await db_1.default.User.findById(req.user.id).lean();
-                if (userDoc?.tenantId)
-                    tenantId = userDoc.tenantId;
-            }
-        }
-        let tenantObj = null;
-        if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
-            tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
-        }
-        if (!tenantObj && tenantId) {
-            tenantObj = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-        }
-        if (!tenantObj && tenantId) {
-            tenantObj = await db_1.centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-        }
-        if (!tenantObj) {
-            tenantObj = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
-        }
-        if (!tenantObj) {
-            tenantObj = await db_1.centralModels.AllCompany.findOne({ deletedAt: null }).lean();
-        }
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
         if (!tenantObj) {
             return res.status(200).json({
                 success: true,

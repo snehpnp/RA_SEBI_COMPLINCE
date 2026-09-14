@@ -634,27 +634,127 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
   }
 };
 
-export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
-  const tenantId = req.user!.tenantId;
-  if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant ID required.' });
+export const getResolvedTenant = async (tenantId?: string | null, userId?: string | null): Promise<any> => {
+  let tid = tenantId;
+  if (!tid && userId) {
+    const clientDoc: any = await dynamicDb.Client.findOne({ userId }).lean();
+    if (clientDoc?.tenantId) tid = clientDoc.tenantId;
+    if (!tid) {
+      const userDoc: any = await dynamicDb.User.findById(userId).lean();
+      if (userDoc?.tenantId) tid = userDoc.tenantId;
+    }
+  }
 
+  let tenantObj: any = null;
+  if (tid && mongoose.Types.ObjectId.isValid(tid)) {
+    tenantObj = await dynamicDb.Tenant.findById(tid).lean();
+    if (!tenantObj) {
+      tenantObj = await centralModels.Tenant.findById(tid).lean();
+    }
+  }
+  if (!tenantObj && tid) {
+    tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tid }, { tenantId: tid }] }).lean();
+  }
+  if (!tenantObj && tid) {
+    tenantObj = await centralModels.Tenant.findOne({ $or: [{ _id: tid }, { id: tid }, { tenantId: tid }] }).lean();
+  }
+  if (!tenantObj && tid) {
+    tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tid }, { tenantId: tid }] }).lean();
+  }
+  if (!tenantObj) {
+    tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+  }
+  if (!tenantObj) {
+    tenantObj = await centralModels.Tenant.findOne({ deletedAt: null }).lean();
+  }
+  if (!tenantObj) {
+    tenantObj = await centralModels.AllCompany.findOne({ deletedAt: null }).lean();
+  }
+
+  // If Razorpay credentials missing on matched tenantObj, look up central tenant/AllCompany
+  if (tenantObj) {
+    if (!tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret) {
+      const altTenant: any = await centralModels.Tenant.findOne({
+        razorpayKeyId: { $ne: null }
+      }).lean() || await centralModels.AllCompany.findOne({
+        razorpayKeyId: { $ne: null }
+      }).lean();
+      if (altTenant) {
+        if (!tenantObj.razorpayKeyId && altTenant.razorpayKeyId) tenantObj.razorpayKeyId = altTenant.razorpayKeyId;
+        if (!tenantObj.razorpayKeySecret && altTenant.razorpayKeySecret) tenantObj.razorpayKeySecret = altTenant.razorpayKeySecret;
+      }
+    }
+  }
+
+  return tenantObj;
+};
+
+export const getRelatedTenantIds = async (tenantId?: string | null, userId?: string | null): Promise<mongoose.Types.ObjectId[]> => {
+  const ids = new Set<string>();
+  if (tenantId) ids.add(String(tenantId));
+
+  if (userId) {
+    const clientDoc: any = await dynamicDb.Client.findOne({ userId }).lean();
+    if (clientDoc?.tenantId) ids.add(String(clientDoc.tenantId));
+    const userDoc: any = await dynamicDb.User.findById(userId).lean();
+    if (userDoc?.tenantId) ids.add(String(userDoc.tenantId));
+  }
+
+  const allTenants: any[] = await centralModels.Tenant.find({ deletedAt: null }).lean().catch(() => []);
+  const allCompanies: any[] = await centralModels.AllCompany.find({ deletedAt: null }).lean().catch(() => []);
+
+  allTenants.forEach((t: any) => {
+    if (t._id) ids.add(String(t._id));
+    if (t.id) ids.add(String(t.id));
+    if (t.tenantId) ids.add(String(t.tenantId));
+  });
+
+  allCompanies.forEach((c: any) => {
+    if (c._id) ids.add(String(c._id));
+    if (c.id) ids.add(String(c.id));
+    if (c.tenantId) ids.add(String(c.tenantId));
+  });
+
+  return Array.from(ids)
+    .filter(id => mongoose.Types.ObjectId.isValid(id))
+    .map(id => new mongoose.Types.ObjectId(id));
+};
+
+export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
-    
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
+    const relatedTenantIds = await getRelatedTenantIds(req.user?.tenantId, req.user?.id);
+
     // Find active categories
-    const activeCategories = await dynamicDb.PlanCategory.find({ tenantId, status: 'ACTIVE' }).lean();
+    const activeCategories = await dynamicDb.PlanCategory.find({ 
+      $or: [
+        { tenantId: { $in: relatedTenantIds } },
+        { tenantId: null }
+      ],
+      status: 'ACTIVE' 
+    }).lean();
     const activeCatIds = activeCategories.map((c: any) => c._id || c.id);
 
     const plans = await dynamicDb.Plan.find({ 
-      tenantId, 
-      deletedAt: null, 
-      status: 'ACTIVE',
-      $or: [
-        { categoryId: null },
-        { categoryId: { $in: activeCatIds } }
+      $and: [
+        {
+          $or: [
+            { tenantId: { $in: relatedTenantIds } },
+            { tenantId: null }
+          ]
+        },
+        { deletedAt: null },
+        { status: 'ACTIVE' },
+        {
+          $or: [
+            { categoryId: null },
+            { categoryId: { $in: activeCatIds } }
+          ]
+        }
       ]
     })
       .populate('categoryId')
+      .sort({ createdAt: -1 })
       .lean();
 
     const formatted = plans.map((p: any) => {
@@ -674,7 +774,7 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(200).json({ 
       success: true, 
       data: formatted, 
-      gstCalculationType: tenant?.gstCalculationType || 'EXCLUSIVE' 
+      gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE' 
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -683,7 +783,7 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
 
 export const getClientProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client profile not found.' });
     }
@@ -699,23 +799,8 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
     const consents = await dynamicDb.Consent.find({
       $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
     }).lean();
-    const user = await dynamicDb.User.findById(req.user!.id).lean();
-    let tenantObj: any = null;
-    if (user && (user as any).tenantId) {
-      const tenantId = (user as any).tenantId;
-      if (mongoose.Types.ObjectId.isValid(tenantId)) {
-        tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
-      }
-      if (!tenantObj) {
-        tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-      }
-      if (!tenantObj) {
-        tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-      }
-    }
-    if (!tenantObj) {
-      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
-    }
+
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
 
     let isPaymentGatewayConfigured = false;
     let tenantFormatted = null;
@@ -738,7 +823,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
         companyName: tenantObj.companyName,
         sebiRegistration: tenantObj.sebiRegistration,
         address: tenantObj.address,
-        email: tenantObj.email,
+        email: tenantObj.companyEmail || tenantObj.email,
         mobile: tenantObj.mobile,
         agreementContent: tenantObj.agreementContent,
         activePaymentGateway: tenantObj.activePaymentGateway || 'RAZORPAY',
@@ -764,11 +849,12 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
       })),
       agreements,
       consents,
-      user: user ? {
-        ...user,
-        id: String((user as any)._id || (user as any).id),
+      user: {
+        id: req.user!.id,
+        email: req.user!.email,
+        role: req.user!.role,
         tenant: tenantFormatted
-      } : null
+      }
     };
 
     return res.status(200).json({ success: true, data: formatted });
@@ -778,50 +864,27 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
 };
 
 export const updateClientProfile = async (req: AuthenticatedRequest, res: Response) => {
+  const { occupation, addressLine1, city, state, zipCode } = req.body;
   try {
-    const { pan, aadhaar, name, email, mobile, dob, address } = req.body;
-    const userId = req.user!.id;
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id });
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
-    if (!client) {
-      return res.status(404).json({ success: false, message: 'Client not found.' });
-    }
+    const clientId = client._id || client.id;
+    const profile = await dynamicDb.ClientProfile.findOneAndUpdate(
+      { clientId },
+      {
+        $set: {
+          occupation,
+          addressLine1,
+          city,
+          state,
+          zipCode
+        }
+      },
+      { upsert: true, returnDocument: 'after', lean: true }
+    );
 
-    const clientUpdate: any = {};
-    if (pan !== undefined) clientUpdate.pan = pan;
-    if (aadhaar !== undefined) clientUpdate.aadhaar = aadhaar;
-    if (name) clientUpdate.name = name;
-    if (email) clientUpdate.email = email;
-    if (mobile) clientUpdate.mobile = mobile;
-    if (dob) clientUpdate.dob = new Date(dob);
-
-    if (Object.keys(clientUpdate).length > 0) {
-      await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, { $set: clientUpdate });
-    }
-
-    if (name || email || mobile) {
-      const userUpdate: any = {};
-      if (name) {
-        userUpdate.firstName = name.split(' ')[0];
-        userUpdate.lastName = name.split(' ').slice(1).join(' ') || 'Client';
-      }
-      if (email) userUpdate.email = email;
-      if (mobile) userUpdate.mobile = mobile;
-      await dynamicDb.User.findByIdAndUpdate(userId, { $set: userUpdate });
-    }
-
-    if (address) {
-      await dynamicDb.ClientProfile.findOneAndUpdate(
-        { clientId: client._id || client.id },
-        {
-          $set: { addressLine1: address },
-          $setOnInsert: { clientId: client._id || client.id, city: '', state: '', country: 'India' }
-        },
-        { upsert: true, returnDocument: 'after' }
-      );
-    }
-
-    return res.status(200).json({ success: true, message: 'Profile updated' });
+    return res.status(200).json({ success: true, data: profile });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
@@ -829,44 +892,54 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
 
 export const deleteClientAccount = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = req.user!.id;
-    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id });
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
-    await dynamicDb.User.findByIdAndUpdate(userId, {
-      $set: { deletedAt: new Date(), deletedBy: 'SELF', status: 'INACTIVE' }
-    });
-    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
-      $set: { status: 'INACTIVE' }
-    });
+    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, { $set: { status: 'DELETED' } });
+    await dynamicDb.User.findByIdAndUpdate(req.user!.id, { $set: { status: 'DELETED' } });
 
-    return res.status(200).json({ success: true, message: 'Account deleted successfully' });
+    return res.status(200).json({ success: true, message: 'Account scheduled for deletion.' });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
   }
 };
 
-export const uploadClientDocument = async (req: Request, res: Response) => {
-  res.json({ success: true, message: 'Document uploaded' });
+export const uploadClientDocument = async (req: AuthenticatedRequest, res: Response) => {
+  const { documentType } = req.body;
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
+
+  try {
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
+
+    const doc = await dynamicDb.ClientDocument.create({
+      clientId: client._id || client.id,
+      docType: documentType || 'OTHER',
+      fileUrl: `/uploads/documents/${req.file.filename}`,
+      fileName: req.file.originalname,
+      status: 'VERIFIED'
+    });
+
+    return res.status(201).json({ success: true, data: doc });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
 };
 
-export const downloadInvoice = async (req: Request, res: Response) => {
+export const downloadInvoice = async (req: AuthenticatedRequest, res: Response) => {
+  const { paymentId } = req.params;
   try {
-    const { id } = req.params;
-    const payment: any = await dynamicDb.Payment.findById(id).lean();
-    
-    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
-    
-    const user = (req as any).user;
-    if (user && user.role === 'CLIENT') {
-      const client: any = await dynamicDb.Client.findOne({ userId: user.id }).lean();
-      if (!client || String(client._id || client.id) !== String(payment.clientId)) {
-        return res.status(403).json({ success: false, message: 'Forbidden' });
-      }
+    const payment: any = await dynamicDb.Payment.findById(paymentId)
+      .populate('clientId')
+      .populate('planId')
+      .lean();
+
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment record not found' });
     }
 
-    const pdfBuffer = await generateInvoicePdf(id);
-    
+    const pdfBuffer = await generateInvoicePdf(payment);
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Invoice_${payment.transactionRef}.pdf"`);
     return res.send(pdfBuffer);
@@ -879,31 +952,11 @@ export const downloadInvoice = async (req: Request, res: Response) => {
 export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Response) => {
   const { planId, couponCode } = req.body;
   try {
-    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    let tenantId = req.user?.tenantId;
-    if (!tenantId && req.user?.id) {
-      if (client?.tenantId) tenantId = client.tenantId;
-      if (!tenantId) {
-        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
-        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
-      }
-    }
-
-    let tenantObj: any = null;
-    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
-      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
-    }
-    if (!tenantObj && tenantId) {
-      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-    }
-    if (!tenantObj && tenantId) {
-      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-    }
-    if (!tenantObj) {
-      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
-    }
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
+    const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
     
     if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
       return res.status(400).json({ 
@@ -914,7 +967,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
     }
 
     const kycRequired = tenantObj?.kycFirst !== false;
-    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING' || client.status === 'ACTIVE');
     if (kycRequired && !isClientKycDone) {
       return res.status(403).json({
         success: false,
@@ -926,7 +979,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
     const plan: any = await dynamicDb.Plan.findById(planId).lean();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
-    let finalPrice = plan.price;
+    let finalPrice = plan.amount || plan.price;
     let appliedCouponId = null;
 
     if (couponCode) {
@@ -965,7 +1018,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
         clientId: String(client._id || client.id),
         planId: String(plan._id || plan.id),
         couponId: appliedCouponId ? String(appliedCouponId) : '',
-        tenantId: tenantId
+        tenantId: String(tenantId)
       }
     };
 
@@ -988,14 +1041,15 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
 export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Response) => {
   const { razorpay_payment_id, razorpay_order_id, razorpay_signature, planId, couponCode } = req.body;
   try {
-    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    const tenantId = req.user!.tenantId!;
-    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
     if (!tenantObj || !tenantObj.razorpayKeySecret) {
       return res.status(400).json({ success: false, message: 'Razorpay configuration error' });
     }
+
+    const tenantId = tenantObj._id || tenantObj.id || req.user?.tenantId;
 
     const body = razorpay_order_id + '|' + razorpay_payment_id;
     const expectedSignature = crypto.createHmac('sha256', tenantObj.razorpayKeySecret).update(body.toString()).digest('hex');
@@ -1016,12 +1070,12 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
         if (coupon.discountType === 'FLAT') {
           discountAmount = coupon.discountValue;
         } else if (coupon.discountType === 'PERCENTAGE') {
-          discountAmount = (plan.price * coupon.discountValue) / 100;
+          discountAmount = ((plan.amount || plan.price) * coupon.discountValue) / 100;
           if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
             discountAmount = coupon.maxDiscountValue;
           }
         }
-        if (discountAmount > plan.price) discountAmount = plan.price;
+        if (discountAmount > (plan.amount || plan.price)) discountAmount = (plan.amount || plan.price);
         appliedCouponId = coupon._id || coupon.id;
 
         await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
@@ -1030,47 +1084,65 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
       }
     }
 
-    let finalPrice = plan.price - discountAmount;
-    if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
+    let finalPrice = (plan.amount || plan.price) - discountAmount;
+    let amountBase = finalPrice;
+    let amountGst = 0;
+    const isExclusive = tenantObj.gstCalculationType === 'EXCLUSIVE';
+    if (isExclusive) {
+      amountGst = finalPrice * 0.18;
       finalPrice = finalPrice * 1.18;
+    } else {
+      amountBase = finalPrice / 1.18;
+      amountGst = finalPrice - amountBase;
     }
+
+    const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
 
     await dynamicDb.Payment.create({
       tenantId,
       clientId: client._id || client.id,
-      planId,
+      planId: plan._id || plan.id,
       amount: finalPrice,
       couponId: appliedCouponId,
       discountApplied: discountAmount,
       paymentMode: 'ONLINE_RAZORPAY',
       transactionRef: razorpay_payment_id,
-      status: 'SUCCESS'
+      status: 'SUCCESS',
+      clientCity: clientProfile?.city || client.city || null,
+      clientState: clientProfile?.state || client.state || null,
+      tenantState: tenantObj?.state || null,
+      paymentDate: new Date()
     });
 
     const existingSub: any = await dynamicDb.Subscription.findOne({
       clientId: client._id || client.id,
-      planId,
+      planId: plan._id || plan.id,
       status: 'ACTIVE',
       endDate: { $gt: new Date() }
     }).sort({ endDate: -1 }).lean();
 
     let startDate = new Date();
     if (existingSub) startDate = new Date(existingSub.endDate);
-    const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+    const duration = plan.durationMonths || plan.duration || 1;
+    const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
 
-    await dynamicDb.Subscription.create({
+    const subscription = await dynamicDb.Subscription.create({
       clientId: client._id || client.id,
-      planId,
+      planId: plan._id || plan.id,
       startDate,
       endDate,
-      status: 'ACTIVE'
+      status: 'ACTIVE',
+      amountBase,
+      amountGst,
+      amountTotal: finalPrice,
+      isGstInclusive: !isExclusive
     });
 
     await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
       $set: { status: 'ACTIVE' }
     });
 
-    return res.status(200).json({ success: true, message: 'Payment verified successfully' });
+    return res.status(200).json({ success: true, message: 'Payment verified successfully', subscription });
 
   } catch (error: any) {
     console.error('Razorpay Verify Error:', error);
@@ -1081,31 +1153,11 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
 export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Response) => {
   const { planId, couponCode } = req.body;
   try {
-    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
     
-    let tenantId = req.user?.tenantId;
-    if (!tenantId && req.user?.id) {
-      if (client?.tenantId) tenantId = client.tenantId;
-      if (!tenantId) {
-        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
-        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
-      }
-    }
-
-    let tenantObj: any = null;
-    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
-      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
-    }
-    if (!tenantObj && tenantId) {
-      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-    }
-    if (!tenantObj && tenantId) {
-      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-    }
-    if (!tenantObj) {
-      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
-    }
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
+    const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
 
     if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
       return res.status(400).json({ 
@@ -1116,7 +1168,7 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     }
 
     const kycRequired = tenantObj?.kycFirst !== false;
-    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING');
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING' || client.status === 'ACTIVE');
     if (kycRequired && !isClientKycDone) {
       return res.status(403).json({
         success: false,
@@ -1128,7 +1180,7 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     const plan: any = await dynamicDb.Plan.findById(planId).lean();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
 
-    let finalPrice = plan.price;
+    let finalPrice = plan.amount || plan.price;
     let appliedCouponId: any = null;
 
     if (couponCode) {
@@ -1182,7 +1234,7 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
   if (!encResp || !tenantId) return res.status(400).send('Invalid response');
 
   try {
-    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const tenantObj: any = await getResolvedTenant(tenantId);
     if (!tenantObj || !tenantObj.ccavenueWorkingKey) return res.status(400).send('Tenant configuration error');
 
     const decryptedStr = decryptCCAvenue(encResp, tenantObj.ccavenueWorkingKey);
@@ -1199,15 +1251,20 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
       const plan: any = await dynamicDb.Plan.findById(planId).lean();
       
       if (client && plan) {
+        const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
         await dynamicDb.Payment.create({
-          tenantId,
+          tenantId: tenantObj._id || tenantObj.id || tenantId,
           clientId,
           planId,
           amount: parseFloat(parsedData.amount as string) || 0,
           couponId: appliedCouponId || null,
           paymentMode: 'ONLINE_CCAVENUE',
           transactionRef: (parsedData.tracking_id as string) || (parsedData.order_id as string),
-          status: 'SUCCESS'
+          status: 'SUCCESS',
+          clientCity: clientProfile?.city || client.city || null,
+          clientState: clientProfile?.state || client.state || null,
+          tenantState: tenantObj?.state || null,
+          paymentDate: new Date()
         });
 
         const existingSub: any = await dynamicDb.Subscription.findOne({
@@ -1219,14 +1276,16 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
 
         let startDate = new Date();
         if (existingSub) startDate = new Date(existingSub.endDate);
-        const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+        const duration = plan.durationMonths || plan.duration || 1;
+        const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
 
         await dynamicDb.Subscription.create({
           clientId,
           planId,
           startDate,
           endDate,
-          status: 'ACTIVE'
+          status: 'ACTIVE',
+          amountTotal: parseFloat(parsedData.amount as string) || 0
         });
 
         await dynamicDb.Client.findByIdAndUpdate(clientId, {
@@ -1251,32 +1310,7 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
 
 export const getPaymentGatewayStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let tenantId = req.user?.tenantId;
-    if (!tenantId && req.user?.id) {
-      const clientDoc: any = await dynamicDb.Client.findOne({ userId: req.user.id }).lean();
-      if (clientDoc?.tenantId) tenantId = clientDoc.tenantId;
-      if (!tenantId) {
-        const userDoc: any = await dynamicDb.User.findById(req.user.id).lean();
-        if (userDoc?.tenantId) tenantId = userDoc.tenantId;
-      }
-    }
-
-    let tenantObj: any = null;
-    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
-      tenantObj = await dynamicDb.Tenant.findById(tenantId).lean();
-    }
-    if (!tenantObj && tenantId) {
-      tenantObj = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
-    }
-    if (!tenantObj && tenantId) {
-      tenantObj = await centralModels.AllCompany.findOne({ $or: [{ _id: tenantId }, { tenantId }] }).lean();
-    }
-    if (!tenantObj) {
-      tenantObj = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
-    }
-    if (!tenantObj) {
-      tenantObj = await centralModels.AllCompany.findOne({ deletedAt: null }).lean();
-    }
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
 
     if (!tenantObj) {
       return res.status(200).json({

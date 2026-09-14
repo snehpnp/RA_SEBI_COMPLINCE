@@ -1890,12 +1890,52 @@ exports.restoreClient = restoreClient;
 // =====================================================
 // PLAN CATEGORY MANAGEMENT
 // =====================================================
+const getRelatedTenantIds = async (tenantId, userId) => {
+    const ids = new Set();
+    if (tenantId)
+        ids.add(String(tenantId));
+    if (userId) {
+        const clientDoc = await db_1.default.Client.findOne({ userId }).lean();
+        if (clientDoc?.tenantId)
+            ids.add(String(clientDoc.tenantId));
+        const userDoc = await db_1.default.User.findById(userId).lean();
+        if (userDoc?.tenantId)
+            ids.add(String(userDoc.tenantId));
+    }
+    const allTenants = await db_1.centralModels.Tenant.find({ deletedAt: null }).lean().catch(() => []);
+    const allCompanies = await db_1.centralModels.AllCompany.find({ deletedAt: null }).lean().catch(() => []);
+    allTenants.forEach((t) => {
+        if (t._id)
+            ids.add(String(t._id));
+        if (t.id)
+            ids.add(String(t.id));
+        if (t.tenantId)
+            ids.add(String(t.tenantId));
+    });
+    allCompanies.forEach((c) => {
+        if (c._id)
+            ids.add(String(c._id));
+        if (c.id)
+            ids.add(String(c.id));
+        if (c.tenantId)
+            ids.add(String(c.tenantId));
+    });
+    return Array.from(ids)
+        .filter(id => mongoose_1.default.Types.ObjectId.isValid(id))
+        .map(id => new mongoose_1.default.Types.ObjectId(id));
+};
 const getAdminCategories = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const rawCategories = await db_1.default.PlanCategory.find({ tenantId })
+        const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+        const rawCategories = await db_1.default.PlanCategory.find({
+            $or: [
+                { tenantId: { $in: relatedTenantIds } },
+                { tenantId: null }
+            ]
+        })
             .sort({ createdAt: -1 })
             .lean();
         const formatted = rawCategories.map(c => ({
@@ -1989,7 +2029,14 @@ const getAdminPlans = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const isFullAdmin = req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN' || req.user.role === 'RESEARCHER';
-        let filterQuery = { tenantId, deletedAt: null };
+        const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+        let filterQuery = {
+            $or: [
+                { tenantId: { $in: relatedTenantIds } },
+                { tenantId: null }
+            ],
+            deletedAt: null
+        };
         if (!isFullAdmin) {
             const userRole = await db_1.default.Role.findOne({ name: req.user.role }).lean();
             const roleId = userRole?._id || userRole?.id;
