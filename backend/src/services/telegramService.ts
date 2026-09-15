@@ -217,6 +217,8 @@ export class TelegramService {
 
   /**
    * Send arbitrary message to Telegram chat/group
+  /**
+   * Send arbitrary message to Telegram chat/group with optional Inline/Reply Keyboards
    */
   public async sendMessage(
     text: string,
@@ -226,6 +228,7 @@ export class TelegramService {
       chatId?: string;
       botToken?: string;
       tenantId?: string;
+      replyMarkup?: any;
     }
   ): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
@@ -239,12 +242,16 @@ export class TelegramService {
       }
 
       const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-      const payload = {
+      const payload: any = {
         chat_id: chatId,
         text,
         parse_mode: options?.parseMode || 'HTML',
         disable_web_page_preview: options?.disableWebPagePreview ?? true
       };
+
+      if (options?.replyMarkup) {
+        payload.reply_markup = options.replyMarkup;
+      }
 
       const response = await axios.post(url, payload, { timeout: 10000 });
       return { success: true, data: response.data };
@@ -257,6 +264,90 @@ export class TelegramService {
       console.error('[TelegramService] Failed to send Telegram message:', rawMsg);
       return { success: false, error: errMsg };
     }
+  }
+
+  /**
+   * Configure Telegram Chat Menu Button (e.g., 'Talk to Expert' or 'Dashboard' button in input bar)
+   */
+  public async setChatMenuButton(options?: {
+    chatId?: string;
+    botToken?: string;
+    tenantId?: string;
+    menuButton?: {
+      type: 'default' | 'commands' | 'web_app';
+      text?: string;
+      web_app?: { url: string };
+    };
+  }): Promise<{ success: boolean; data?: any; error?: string }> {
+    try {
+      const config = await this.getConfig(options?.tenantId);
+      const botToken = (options?.botToken || config.botToken)?.trim();
+      if (!botToken) {
+        return { success: false, error: 'Bot token not configured' };
+      }
+
+      const url = `https://api.telegram.org/bot${botToken}/setChatMenuButton`;
+      const payload: any = {};
+      if (options?.chatId) {
+        payload.chat_id = options.chatId;
+      }
+      if (options?.menuButton) {
+        payload.menu_button = options.menuButton;
+      }
+
+      const response = await axios.post(url, payload, { timeout: 10000 });
+      return { success: true, data: response.data };
+    } catch (err: any) {
+      console.warn('[TelegramService] setChatMenuButton error:', err.response?.data || err.message);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Register standard bot commands in Telegram
+   */
+  public async setBotCommands(botToken?: string): Promise<void> {
+    try {
+      const config = await this.getConfig();
+      const token = (botToken || config.botToken)?.trim();
+      if (!token) return;
+
+      const commands = [
+        { command: 'start', description: 'Start Bot & Link Account' },
+        { command: 'plans', description: 'View My Active VIP Subscriptions' },
+        { command: 'expert', description: 'Talk to Research Analyst Expert' },
+        { command: 'dashboard', description: 'Open Web Client Dashboard' },
+        { command: 'help', description: 'Help & Contact Information' }
+      ];
+
+      await axios.post(`https://api.telegram.org/bot${token}/setMyCommands`, { commands }, { timeout: 8000 });
+    } catch (err: any) {
+      console.warn('[TelegramService] Failed to set bot commands:', err.message);
+    }
+  }
+
+  /**
+   * Answer Telegram callback queries to dismiss pending UI spinners
+   */
+  public async answerCallbackQuery(
+    callbackQueryId: string,
+    options?: {
+      botToken?: string;
+      text?: string;
+      showAlert?: boolean;
+    }
+  ): Promise<void> {
+    try {
+      const config = await this.getConfig();
+      const token = (options?.botToken || config.botToken)?.trim();
+      if (!token || !callbackQueryId) return;
+
+      const payload: any = { callback_query_id: callbackQueryId };
+      if (options?.text) payload.text = options.text;
+      if (options?.showAlert) payload.show_alert = options.showAlert;
+
+      await axios.post(`https://api.telegram.org/bot${token}/answerCallbackQuery`, payload, { timeout: 5000 });
+    } catch {}
   }
 
   /**
@@ -857,6 +948,144 @@ export class TelegramService {
   }
 
   /**
+   * Helper to find a linked client by their Telegram Chat ID across central and tenant databases
+   */
+  public async findClientByChatId(chatId: string): Promise<any> {
+    if (!chatId) return null;
+    let client: any = null;
+
+    if (dynamicDb?.Client) {
+      try {
+        client = await dynamicDb.Client.findOne({ telegramChatId: chatId, deletedAt: null });
+      } catch {}
+    }
+    if (!client && centralModels?.Client) {
+      try {
+        client = await centralModels.Client.findOne({ telegramChatId: chatId, deletedAt: null });
+      } catch {}
+    }
+    if (!client && centralModels?.Tenant) {
+      try {
+        const allTenants = await centralModels.Tenant.find({ deletedAt: null }).lean();
+        for (const t of allTenants) {
+          try {
+            const tConn = await tenantConnectionManager.getTenantConnection(t._id.toString());
+            if (tConn?.models?.Client) {
+              const found = await tConn.models.Client.findOne({ telegramChatId: chatId, deletedAt: null });
+              if (found) {
+                client = found;
+                break;
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    return client;
+  }
+
+  /**
+   * Helper to retrieve a client's active subscriptions, plans, and tenant branding
+   */
+  public async getClientActivePlans(
+    clientId: any,
+    tenantId?: any
+  ): Promise<{
+    plans: any[];
+    companyName: string;
+    tenant: any;
+    dashboardUrl: string;
+  }> {
+    const now = new Date();
+    let tenant: any = null;
+    let targetModels: any = dynamicDb;
+
+    if (tenantId) {
+      try {
+        const tConn = await tenantConnectionManager.getTenantConnection(String(tenantId));
+        if (tConn?.models) targetModels = tConn.models;
+      } catch {}
+      if (dynamicDb?.Tenant) {
+        try {
+          tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+        } catch {}
+      }
+      if (!tenant && centralModels?.Tenant) {
+        try {
+          tenant = await centralModels.Tenant.findById(tenantId).lean();
+        } catch {}
+      }
+    }
+
+    if (!tenant) {
+      if (dynamicDb?.Tenant) tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+      if (!tenant && centralModels?.Tenant) tenant = await centralModels.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    const companyName = tenant?.panelName || tenant?.companyName || 'AurumX';
+    let rawDashboardUrl = tenant?.domainUrl || tenant?.website || process.env.FRONTEND_URL || 'http://localhost:3000';
+    if (!rawDashboardUrl.startsWith('http://') && !rawDashboardUrl.startsWith('https://')) {
+      rawDashboardUrl = `https://${rawDashboardUrl}`;
+    }
+    const dashboardUrl = `${rawDashboardUrl.replace(/\/+$/, '')}/client`;
+
+    let activeSubs: any[] = [];
+    if (targetModels?.Subscription) {
+      try {
+        activeSubs = await targetModels.Subscription.find({
+          clientId,
+          status: 'ACTIVE',
+          endDate: { $gte: now },
+          deletedAt: null
+        }).lean();
+      } catch {}
+    }
+    if (activeSubs.length === 0 && dynamicDb?.Subscription) {
+      try {
+        activeSubs = await dynamicDb.Subscription.find({
+          clientId,
+          status: 'ACTIVE',
+          endDate: { $gte: now },
+          deletedAt: null
+        }).lean();
+      } catch {}
+    }
+    if (activeSubs.length === 0 && centralModels?.Subscription) {
+      try {
+        activeSubs = await centralModels.Subscription.find({
+          clientId,
+          status: 'ACTIVE',
+          endDate: { $gte: now },
+          deletedAt: null
+        }).lean();
+      } catch {}
+    }
+
+    const planIds = Array.from(new Set(activeSubs.map((s: any) => s.planId?.toString()).filter(Boolean)));
+    let plans: any[] = [];
+
+    if (planIds.length > 0) {
+      if (targetModels?.Plan) {
+        try {
+          plans = await targetModels.Plan.find({ _id: { $in: planIds }, deletedAt: null }).lean();
+        } catch {}
+      }
+      if (plans.length === 0 && dynamicDb?.Plan) {
+        try {
+          plans = await dynamicDb.Plan.find({ _id: { $in: planIds }, deletedAt: null }).lean();
+        } catch {}
+      }
+      if (plans.length === 0 && centralModels?.Plan) {
+        try {
+          plans = await centralModels.Plan.find({ _id: { $in: planIds }, deletedAt: null }).lean();
+        } catch {}
+      }
+    }
+
+    return { plans, companyName, tenant, dashboardUrl };
+  }
+
+  /**
    * Process incoming Telegram webhook updates or polling updates
    */
   public async processTelegramUpdate(
@@ -864,12 +1093,36 @@ export class TelegramService {
     tenantId?: string
   ): Promise<{ handled: boolean; action?: string; details?: any }> {
     try {
+      // 1. Handle Callback Queries (when inline buttons are pressed)
+      if (update.callback_query) {
+        const cb = update.callback_query;
+        const cbData = cb.data || '';
+        const cbChatId = String(cb.message?.chat?.id || cb.from?.id);
+        const config = await this.getConfig(tenantId);
+        const botToken = config.botToken;
+
+        await this.answerCallbackQuery(cb.id, { botToken });
+
+        if (cbData === 'action_expert') {
+          await this.sendExpertHelpMessage(cbChatId, tenantId, botToken);
+          return { handled: true, action: 'CALLBACK_EXPERT' };
+        } else if (cbData === 'action_plans') {
+          await this.sendActivePlansMessage(cbChatId, tenantId, botToken);
+          return { handled: true, action: 'CALLBACK_PLANS' };
+        } else if (cbData === 'action_dashboard') {
+          await this.sendDashboardMessage(cbChatId, tenantId, botToken);
+          return { handled: true, action: 'CALLBACK_DASHBOARD' };
+        }
+        return { handled: true };
+      }
+
       const message = update.message || update.edited_message;
       if (!message || !message.text) {
         return { handled: false };
       }
 
       const text = message.text.trim();
+      const lowerText = text.toLowerCase();
       const chatId = String(message.chat.id);
       const chatType = message.chat.type; // 'private', 'group', 'supergroup', 'channel'
       const fromUser = message.from;
@@ -878,29 +1131,53 @@ export class TelegramService {
       const config = await this.getConfig(tenantId);
       const botToken = config.botToken;
 
-      // Handle /start or /connect commands
+      if (!botToken) {
+        return { handled: false };
+      }
+
+      // 2. Handle /start or /connect commands
       if (text.startsWith('/start') || text.startsWith('/connect')) {
         const parts = text.split(/\s+/);
         const token = parts[1]?.trim();
 
-        // 1. /start without token in private chat
+        // 2a. /start without token
         if (!token) {
-          if (chatType === 'private' && botToken) {
-            const welcomeMsg = [
-              `👋 <b>Welcome to Compliance Signal Bot!</b>\n`,
-              `To receive live trading signals directly in your Telegram, please link your account:`,
-              `1️⃣ Log in to your <b>Client Dashboard</b> on the website.`,
-              `2️⃣ Click <b>"Connect Telegram"</b> in the Telegram Alerts section.`,
-              `3️⃣ Click the generated button to connect your account.\n`,
-              `<i>If you need assistance, please contact your research analyst support team.</i>`
-            ].join('\n');
+          if (chatType === 'private') {
+            const linkedClient = await this.findClientByChatId(chatId);
+            if (linkedClient) {
+              // User is already linked: send their active subscription card & quick menu
+              await this.sendActivePlansMessage(chatId, tenantId || linkedClient.tenantId, botToken, linkedClient);
+            } else {
+              const { companyName, dashboardUrl } = await this.getClientActivePlans(null, tenantId);
+              const welcomeMsg = [
+                `👋 <b>Welcome to ${companyName} Compliance & Signal Bot!</b>\n`,
+                `To receive verified real-time trading signals directly in your Telegram, please link your account:`,
+                `1️⃣ Log in to your <b>Client Portal</b> on our platform.`,
+                `2️⃣ Go to <b>Telegram Alerts</b> / <b>Subscription Center</b>.`,
+                `3️⃣ Click <b>"Connect Telegram"</b> to link automatically.\n`,
+                `<i>Need assistance? Our research analyst team is always ready to support you.</i>`
+              ].join('\n');
 
-            await this.sendMessage(welcomeMsg, { chatId, botToken, parseMode: 'HTML' });
+              const inlineKeyboard = [
+                [{ text: `🌐 Open ${companyName} Portal`, url: dashboardUrl }],
+                [{ text: `💬 Talk to Expert`, callback_data: 'action_expert' }]
+              ];
+
+              await this.sendMessage(welcomeMsg, {
+                chatId,
+                botToken,
+                parseMode: 'HTML',
+                replyMarkup: { inline_keyboard: inlineKeyboard }
+              });
+
+              // Also provide the persistent quick menu
+              await this.sendNavigationKeyboard(chatId, botToken);
+            }
           }
           return { handled: true, action: 'START_WITHOUT_TOKEN' };
         }
 
-        // 2. Token provided - Verify token in Client collection
+        // 2b. Token provided - Verify token in Client collection
         const now = new Date();
         let client: any = null;
 
@@ -928,13 +1205,15 @@ export class TelegramService {
             for (const t of allTenants) {
               try {
                 const tConn = await tenantConnectionManager.getTenantConnection(t._id.toString());
-                const foundClient = await tConn.models.Client.findOne({
-                  telegramAuthToken: token,
-                  telegramAuthTokenExpiresAt: { $gte: now }
-                });
-                if (foundClient) {
-                  client = foundClient;
-                  break;
+                if (tConn?.models?.Client) {
+                  const foundClient = await tConn.models.Client.findOne({
+                    telegramAuthToken: token,
+                    telegramAuthTokenExpiresAt: { $gte: now }
+                  });
+                  if (foundClient) {
+                    client = foundClient;
+                    break;
+                  }
                 }
               } catch {}
             }
@@ -942,14 +1221,12 @@ export class TelegramService {
         }
 
         if (!client) {
-          if (botToken) {
-            const failMsg = [
-              `❌ <b>Linking Failed</b>\n`,
-              `The authorization token is invalid or has expired (tokens are valid for 15 minutes).\n`,
-              `Please return to your <b>Client Dashboard</b> and click <b>"Connect Telegram"</b> to generate a fresh link.`
-            ].join('\n');
-            await this.sendMessage(failMsg, { chatId, botToken, parseMode: 'HTML' });
-          }
+          const failMsg = [
+            `❌ <b>Linking Failed</b>\n`,
+            `The authorization token is invalid or has expired (tokens are valid for 15 minutes).\n`,
+            `Please return to your <b>Client Dashboard</b> and click <b>"Connect Telegram"</b> to generate a fresh link.`
+          ].join('\n');
+          await this.sendMessage(failMsg, { chatId, botToken, parseMode: 'HTML' });
           return { handled: true, action: 'INVALID_OR_EXPIRED_TOKEN' };
         }
 
@@ -961,17 +1238,77 @@ export class TelegramService {
         client.telegramAuthTokenExpiresAt = null;
         await client.save();
 
-        if (botToken) {
-          const successMsg = [
-            `🎉 <b>Account Linked Successfully!</b>\n`,
-            `Welcome <b>${client.name || username}</b>! Your Telegram account is now connected.\n`,
-            `✅ <b>Status:</b> Active & Verified`,
-            `📱 <b>Chat ID:</b> <code>${chatId}</code>`,
-            `⏰ <b>Linked At:</b> ${this.formatTimeIST()}\n`,
-            `You will automatically receive real-time trading signals and updates matching your active subscription plans directly here.`
-          ].join('\n');
-          await this.sendMessage(successMsg, { chatId, botToken, parseMode: 'HTML' });
+        // Fetch active subscriptions and tenant branding
+        const { plans, companyName, tenant, dashboardUrl } = await this.getClientActivePlans(
+          client._id,
+          client.tenantId || tenantId
+        );
+
+        let activePlansText = '';
+        const inlineKeyboard: any[] = [];
+
+        if (plans.length > 0) {
+          activePlansText = plans.map((p: any) => `• <b>${(p.name || 'VIP SIGNALS').toUpperCase()}</b>`).join('\n');
+          for (const p of plans) {
+            const planInvite = p.telegramInviteLink || tenant?.telegramInviteLink;
+            if (planInvite) {
+              inlineKeyboard.push([
+                {
+                  text: `🚀 JOIN ${p.name.toUpperCase()} VIP CHANNEL NOW ➔`,
+                  url: planInvite
+                }
+              ]);
+            }
+          }
+        } else {
+          activePlansText = `• <b>STANDARD ADVISORY ACCESS</b>`;
+          if (tenant?.telegramInviteLink) {
+            inlineKeyboard.push([
+              {
+                text: `🚀 JOIN ${companyName.toUpperCase()} VIP CHANNEL NOW ➔`,
+                url: tenant.telegramInviteLink
+              }
+            ]);
+          }
         }
+
+        // Add Dashboard link button
+        inlineKeyboard.push([
+          {
+            text: `🌐 Open ${companyName} Dashboard`,
+            url: dashboardUrl
+          }
+        ]);
+
+        // 1. Send the rich welcome card with inline join buttons (matching screenshot!)
+        const welcomeSuccessMsg = [
+          `🎉 <b>Congratulations, ${client.name || username}!</b>\n`,
+          `✅ Your <b>${companyName}</b> account is now <b>Successfully Connected!</b>\n`,
+          `📦 <b>Active VIP Subscriptions:</b>`,
+          activePlansText,
+          `\n👇 <b>Click below to enter your VIP Channels immediately:</b>`
+        ].join('\n');
+
+        await this.sendMessage(welcomeSuccessMsg, {
+          chatId,
+          botToken,
+          parseMode: 'HTML',
+          replyMarkup: { inline_keyboard: inlineKeyboard }
+        });
+
+        // 2. Activate persistent ReplyKeyboardMarkup with 'Talk to Expert'
+        await this.sendNavigationKeyboard(chatId, botToken);
+
+        // 3. Configure Telegram Chat Menu Button if possible
+        try {
+          await this.setChatMenuButton({
+            chatId,
+            botToken,
+            menuButton: {
+              type: 'commands'
+            }
+          });
+        } catch {}
 
         console.log(`[TelegramService] Successfully linked client ${client.name} (${client._id}) with chatId: ${chatId}`);
 
@@ -982,10 +1319,273 @@ export class TelegramService {
         };
       }
 
+      // 3. Handle 'Talk to Expert' / '/expert' / '/support'
+      if (
+        lowerText.includes('talk to expert') ||
+        lowerText.includes('expert') ||
+        lowerText.includes('support') ||
+        lowerText.includes('contact') ||
+        lowerText.startsWith('/expert') ||
+        lowerText.startsWith('/support')
+      ) {
+        await this.sendExpertHelpMessage(chatId, tenantId, botToken);
+        return { handled: true, action: 'TALK_TO_EXPERT' };
+      }
+
+      // 4. Handle 'Active Subscriptions' / 'My Subscriptions' / '/plans'
+      if (
+        lowerText.includes('subscription') ||
+        lowerText.includes('plan') ||
+        lowerText.startsWith('/plans') ||
+        lowerText.startsWith('/subscriptions')
+      ) {
+        await this.sendActivePlansMessage(chatId, tenantId, botToken);
+        return { handled: true, action: 'VIEW_PLANS' };
+      }
+
+      // 5. Handle 'Open Dashboard' / '/dashboard' / 'portal'
+      if (
+        lowerText.includes('dashboard') ||
+        lowerText.includes('portal') ||
+        lowerText.startsWith('/dashboard') ||
+        lowerText.startsWith('/portal')
+      ) {
+        await this.sendDashboardMessage(chatId, tenantId, botToken);
+        return { handled: true, action: 'OPEN_DASHBOARD' };
+      }
+
+      // 6. Handle 'Help' / '/help'
+      if (lowerText.includes('help') || lowerText.startsWith('/help')) {
+        await this.sendHelpGuideMessage(chatId, tenantId, botToken);
+        return { handled: true, action: 'HELP' };
+      }
+
       return { handled: false };
     } catch (err: any) {
       console.error('[TelegramService] Error processing Telegram update:', err.message);
       return { handled: false, details: err.message };
+    }
+  }
+
+  /**
+   * Sends the persistent bottom ReplyKeyboardMarkup for 1-tap quick actions
+   */
+  public async sendNavigationKeyboard(chatId: string, botToken?: string): Promise<void> {
+    try {
+      const keyboardMarkup = {
+        keyboard: [
+          [{ text: '💬 Talk to Expert' }, { text: '📊 My Active Subscriptions' }],
+          [{ text: '🌐 Open Dashboard' }, { text: '❓ Help & Support' }]
+        ],
+        resize_keyboard: true,
+        is_persistent: true
+      };
+
+      await this.sendMessage('⚡ <i>Quick menu enabled below. Tap anytime for instant assistance!</i>', {
+        chatId,
+        botToken,
+        parseMode: 'HTML',
+        replyMarkup: keyboardMarkup
+      });
+    } catch (err: any) {
+      console.warn('[TelegramService] Error sending navigation keyboard:', err.message);
+    }
+  }
+
+  /**
+   * Sends the 'Talk to Expert' Advisory and Support response
+   */
+  public async sendExpertHelpMessage(chatId: string, tenantId?: string, botToken?: string): Promise<void> {
+    try {
+      const linkedClient = await this.findClientByChatId(chatId);
+      const { companyName, tenant, dashboardUrl } = await this.getClientActivePlans(
+        linkedClient?._id,
+        tenantId || linkedClient?.tenantId
+      );
+
+      const supportPhone = tenant?.mobile || '+91 98765 43210';
+      const supportEmail = tenant?.email || `support@${companyName.toLowerCase().replace(/\s+/g, '')}.com`;
+      const raOwner = tenant?.ownerName || 'Compliance Officer';
+      const sebiReg = tenant?.sebiRegistration || 'INH000000000';
+
+      const expertMsg = [
+        `👨‍💼 <b>Research Analyst Expert Support</b>\n`,
+        `Have questions regarding trading recommendations, risk management, or subscriptions? Our SEBI-registered advisory team is here to assist you!\n`,
+        `🏢 <b>Advisory:</b> <b>${companyName}</b>`,
+        `👤 <b>Analyst / Principal:</b> ${raOwner}`,
+        `🛡️ <b>SEBI Registration:</b> <code>${sebiReg}</code>`,
+        `📞 <b>Helpline:</b> <code>${supportPhone}</code>`,
+        `📧 <b>Support Email:</b> <code>${supportEmail}</code>`,
+        `⏰ <b>Market Support Hours:</b> 09:00 AM - 05:00 PM IST (Mon - Fri)\n`,
+        `👇 <i>You can connect with us directly or open a ticket from your Client Portal:</i>`
+      ].join('\n');
+
+      const inlineKeyboard = [
+        [
+          { text: `🌐 Open Support Desk in Portal`, url: `${dashboardUrl}/support` },
+        ],
+        [
+          { text: `📊 View My Subscriptions`, callback_data: 'action_plans' },
+          { text: `🌐 Open Dashboard`, url: dashboardUrl }
+        ]
+      ];
+
+      await this.sendMessage(expertMsg, {
+        chatId,
+        botToken,
+        parseMode: 'HTML',
+        replyMarkup: { inline_keyboard: inlineKeyboard }
+      });
+    } catch (err: any) {
+      console.error('[TelegramService] Error sending expert help message:', err.message);
+    }
+  }
+
+  /**
+   * Sends the client's Active Subscriptions and direct channel join links
+   */
+  public async sendActivePlansMessage(
+    chatId: string,
+    tenantId?: string,
+    botToken?: string,
+    providedClient?: any
+  ): Promise<void> {
+    try {
+      const client = providedClient || (await this.findClientByChatId(chatId));
+      const { plans, companyName, tenant, dashboardUrl } = await this.getClientActivePlans(
+        client?._id,
+        tenantId || client?.tenantId
+      );
+
+      if (!client) {
+        const unlinkedMsg = [
+          `⚠️ <b>Telegram Account Not Linked</b>\n`,
+          `Please log in to your <b>${companyName}</b> client dashboard and click <b>"Connect Telegram"</b> to link your account and view active subscriptions.`
+        ].join('\n');
+
+        await this.sendMessage(unlinkedMsg, {
+          chatId,
+          botToken,
+          parseMode: 'HTML',
+          replyMarkup: {
+            inline_keyboard: [[{ text: `🌐 Open ${companyName} Portal`, url: dashboardUrl }]]
+          }
+        });
+        return;
+      }
+
+      const inlineKeyboard: any[] = [];
+      let plansText = '';
+
+      if (plans.length > 0) {
+        plansText = plans.map((p: any) => `• <b>${(p.name || 'VIP SIGNALS').toUpperCase()}</b> (Active)`).join('\n');
+        for (const p of plans) {
+          const planInvite = p.telegramInviteLink || tenant?.telegramInviteLink;
+          if (planInvite) {
+            inlineKeyboard.push([
+              {
+                text: `🚀 JOIN ${p.name.toUpperCase()} VIP CHANNEL NOW ➔`,
+                url: planInvite
+              }
+            ]);
+          }
+        }
+      } else {
+        plansText = `• <i>No active subscriptions found.</i>`;
+      }
+
+      inlineKeyboard.push([
+        { text: `🌐 Open ${companyName} Dashboard`, url: dashboardUrl },
+        { text: `💬 Talk to Expert`, callback_data: 'action_expert' }
+      ]);
+
+      const subMsg = [
+        `📦 <b>Active Subscriptions for ${client.name || 'Client'}:</b>\n`,
+        plansText,
+        `\n👇 <b>Click below to access your VIP Trading Signal Channels:</b>`
+      ].join('\n');
+
+      await this.sendMessage(subMsg, {
+        chatId,
+        botToken,
+        parseMode: 'HTML',
+        replyMarkup: { inline_keyboard: inlineKeyboard }
+      });
+    } catch (err: any) {
+      console.error('[TelegramService] Error sending active plans message:', err.message);
+    }
+  }
+
+  /**
+   * Sends the Client Portal Dashboard link
+   */
+  public async sendDashboardMessage(chatId: string, tenantId?: string, botToken?: string): Promise<void> {
+    try {
+      const linkedClient = await this.findClientByChatId(chatId);
+      const { companyName, dashboardUrl } = await this.getClientActivePlans(
+        linkedClient?._id,
+        tenantId || linkedClient?.tenantId
+      );
+
+      const msg = [
+        `🌐 <b>${companyName} Client Portal Dashboard</b>\n`,
+        `Access your live recommendations, compliance disclosures, performance analytics, and invoices directly from your portal.\n`,
+        `👇 <i>Click the button below to open your dashboard:</i>`
+      ].join('\n');
+
+      const inlineKeyboard = [
+        [{ text: `🌐 Open ${companyName} Dashboard`, url: dashboardUrl }],
+        [{ text: `💬 Talk to Expert`, callback_data: 'action_expert' }]
+      ];
+
+      await this.sendMessage(msg, {
+        chatId,
+        botToken,
+        parseMode: 'HTML',
+        replyMarkup: { inline_keyboard: inlineKeyboard }
+      });
+    } catch (err: any) {
+      console.error('[TelegramService] Error sending dashboard message:', err.message);
+    }
+  }
+
+  /**
+   * Sends general Help & Command Guide message
+   */
+  public async sendHelpGuideMessage(chatId: string, tenantId?: string, botToken?: string): Promise<void> {
+    try {
+      const linkedClient = await this.findClientByChatId(chatId);
+      const { companyName, dashboardUrl } = await this.getClientActivePlans(
+        linkedClient?._id,
+        tenantId || linkedClient?.tenantId
+      );
+
+      const helpMsg = [
+        `🤖 <b>${companyName} Signal Bot Help Center</b>\n`,
+        `Here is how you can use this bot:`,
+        `• <b>💬 Talk to Expert:</b> Connect directly with our research analyst team.`,
+        `• <b>📊 My Active Subscriptions:</b> View and join your VIP Signal Channels.`,
+        `• <b>🌐 Open Dashboard:</b> Access your personalized client web portal.`,
+        `• <b>⚡ Instant Signals:</b> You automatically receive all live BUY/SELL alerts matching your plans.\n`,
+        `👇 <i>Choose an action below:</i>`
+      ].join('\n');
+
+      const inlineKeyboard = [
+        [
+          { text: `💬 Talk to Expert`, callback_data: 'action_expert' },
+          { text: `📊 My Subscriptions`, callback_data: 'action_plans' }
+        ],
+        [{ text: `🌐 Open ${companyName} Dashboard`, url: dashboardUrl }]
+      ];
+
+      await this.sendMessage(helpMsg, {
+        chatId,
+        botToken,
+        parseMode: 'HTML',
+        replyMarkup: { inline_keyboard: inlineKeyboard }
+      });
+    } catch (err: any) {
+      console.error('[TelegramService] Error sending help guide message:', err.message);
     }
   }
 
@@ -1000,6 +1600,12 @@ export class TelegramService {
     if (this.pollerInterval) return;
 
     console.log('[TelegramService] Starting background Telegram bot poller...');
+    this.getConfig().then((cfg) => {
+      if (cfg.botToken) {
+        this.setBotCommands(cfg.botToken);
+      }
+    });
+
     this.pollerInterval = setInterval(async () => {
       if (this.isPolling) return;
       this.isPolling = true;

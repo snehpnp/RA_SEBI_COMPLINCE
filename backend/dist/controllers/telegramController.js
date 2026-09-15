@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createTelegramChannelViaAccountApi = exports.bulkMapTelegramPlansApi = exports.getTelegramPlanMatrixApi = exports.getTelegramAuthStatusApi = exports.disconnectTelegramAccountApi = exports.syncTelegramAccountGroupsApi = exports.verifyTelegramPhoneOtpApi = exports.sendTelegramPhoneOtpApi = exports.generateGroupInviteLinkApi = exports.testTelegramGroupPingApi = exports.autoDetectTelegramGroupsApi = exports.deleteTelegramGroupApi = exports.updateTelegramGroupApi = exports.createTelegramGroupApi = exports.listTelegramGroupsApi = exports.getClientTelegramGroupsApi = exports.testTelegramConnectionApi = exports.updateTelegramSettingsApi = exports.getTelegramSettingsApi = exports.getGroupInviteLinkApi = exports.sendSignalApi = void 0;
+exports.getTelegramDeliveryLogsApi = exports.getLinkedTelegramUsersApi = exports.telegramWebhookApi = exports.unlinkClientTelegramApi = exports.getClientTelegramStatusApi = exports.generateClientConnectTokenApi = exports.createTelegramChannelViaAccountApi = exports.bulkMapTelegramPlansApi = exports.getTelegramPlanMatrixApi = exports.getTelegramAuthStatusApi = exports.disconnectTelegramAccountApi = exports.syncTelegramAccountGroupsApi = exports.verifyTelegramPhoneOtpApi = exports.sendTelegramPhoneOtpApi = exports.generateGroupInviteLinkApi = exports.testTelegramGroupPingApi = exports.autoDetectTelegramGroupsApi = exports.deleteTelegramGroupApi = exports.updateTelegramGroupApi = exports.createTelegramGroupApi = exports.listTelegramGroupsApi = exports.getClientTelegramGroupsApi = exports.testTelegramConnectionApi = exports.updateTelegramSettingsApi = exports.getTelegramSettingsApi = exports.getGroupInviteLinkApi = exports.sendSignalApi = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const telegramService_1 = __importDefault(require("../services/telegramService"));
@@ -1211,3 +1211,286 @@ const createTelegramChannelViaAccountApi = async (req, res) => {
     }
 };
 exports.createTelegramChannelViaAccountApi = createTelegramChannelViaAccountApi;
+/**
+ * POST /api/v1/client/telegram/generate-token
+ * Client: Generate one-time secure token & deep-link for /start flow
+ */
+const generateClientConnectTokenApi = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const tenantId = req.user?.tenantId || req.headers['x-tenant-id'];
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+        let client = null;
+        if (db_1.default?.Client) {
+            client = await db_1.default.Client.findOne({ userId, deletedAt: null });
+            if (!client) {
+                client = await db_1.default.Client.findById(userId);
+            }
+        }
+        if (!client && db_1.centralModels?.Client) {
+            client = await db_1.centralModels.Client.findOne({ userId, deletedAt: null });
+            if (!client) {
+                client = await db_1.centralModels.Client.findById(userId);
+            }
+        }
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client profile not found.' });
+        }
+        const result = await telegramService_1.default.generateClientConnectToken(client._id.toString(), tenantId);
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || 'Failed to generate token' });
+        }
+        return res.status(200).json({
+            success: true,
+            data: {
+                token: result.token,
+                botUsername: result.botUsername,
+                deepLink: result.deepLink,
+                expiresAt: result.expiresAt
+            }
+        });
+    }
+    catch (err) {
+        console.error('[TelegramController] generateClientConnectTokenApi error:', err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.generateClientConnectTokenApi = generateClientConnectTokenApi;
+/**
+ * GET /api/v1/client/telegram/status
+ * Client: Get current Telegram connection status
+ */
+const getClientTelegramStatusApi = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+        let client = null;
+        if (db_1.default?.Client) {
+            client = await db_1.default.Client.findOne({ userId, deletedAt: null }).lean();
+            if (!client) {
+                client = await db_1.default.Client.findById(userId).lean();
+            }
+        }
+        if (!client && db_1.centralModels?.Client) {
+            client = await db_1.centralModels.Client.findOne({ userId, deletedAt: null }).lean();
+            if (!client) {
+                client = await db_1.centralModels.Client.findById(userId).lean();
+            }
+        }
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client profile not found.' });
+        }
+        return res.status(200).json({
+            success: true,
+            data: {
+                isLinked: Boolean(client.telegramChatId),
+                telegramChatId: client.telegramChatId || null,
+                telegramUsername: client.telegramUsername || null,
+                telegramLinkedAt: client.telegramLinkedAt || null
+            }
+        });
+    }
+    catch (err) {
+        console.error('[TelegramController] getClientTelegramStatusApi error:', err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.getClientTelegramStatusApi = getClientTelegramStatusApi;
+/**
+ * POST /api/v1/client/telegram/unlink
+ * Client: Unlink connected Telegram account
+ */
+const unlinkClientTelegramApi = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const tenantId = req.user?.tenantId || req.headers['x-tenant-id'];
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+        let client = null;
+        if (db_1.default?.Client) {
+            client = await db_1.default.Client.findOne({ userId, deletedAt: null });
+            if (!client) {
+                client = await db_1.default.Client.findById(userId);
+            }
+        }
+        if (!client && db_1.centralModels?.Client) {
+            client = await db_1.centralModels.Client.findOne({ userId, deletedAt: null });
+            if (!client) {
+                client = await db_1.centralModels.Client.findById(userId);
+            }
+        }
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client profile not found.' });
+        }
+        const result = await telegramService_1.default.unlinkClientTelegram(client._id.toString(), tenantId);
+        return res.status(200).json({
+            success: result.success,
+            message: result.success ? 'Telegram account unlinked successfully.' : result.error
+        });
+    }
+    catch (err) {
+        console.error('[TelegramController] unlinkClientTelegramApi error:', err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.unlinkClientTelegramApi = unlinkClientTelegramApi;
+/**
+ * POST /api/v1/telegram/webhook
+ * Webhook handler for Telegram updates
+ */
+const telegramWebhookApi = async (req, res) => {
+    try {
+        const update = req.body;
+        if (update) {
+            await telegramService_1.default.processTelegramUpdate(update);
+        }
+        return res.status(200).json({ ok: true });
+    }
+    catch (err) {
+        console.error('[TelegramController] telegramWebhookApi error:', err);
+        return res.status(200).json({ ok: true }); // Always return 200 to Telegram
+    }
+};
+exports.telegramWebhookApi = telegramWebhookApi;
+/**
+ * GET /api/v1/telegram/linked-users
+ * Admin: List all clients with linked Telegram accounts
+ */
+const getLinkedTelegramUsersApi = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId || req.headers['x-tenant-id'];
+        const query = {
+            telegramChatId: { $ne: null },
+            deletedAt: null
+        };
+        if (tenantId) {
+            query.tenantId = tenantId;
+        }
+        let clients = [];
+        if (db_1.default?.Client) {
+            clients = await db_1.default.Client.find(query)
+                .select('name email mobile telegramChatId telegramUsername telegramLinkedAt status createdAt')
+                .sort({ telegramLinkedAt: -1 })
+                .lean();
+        }
+        if (clients.length === 0 && db_1.centralModels?.Client) {
+            clients = await db_1.centralModels.Client.find(query)
+                .select('name email mobile telegramChatId telegramUsername telegramLinkedAt status createdAt')
+                .sort({ telegramLinkedAt: -1 })
+                .lean();
+        }
+        // Also fetch active plans for each client
+        const clientIds = clients.map((c) => c._id);
+        let activeSubs = [];
+        if (db_1.default?.Subscription) {
+            activeSubs = await db_1.default.Subscription.find({
+                clientId: { $in: clientIds },
+                status: 'ACTIVE',
+                endDate: { $gte: new Date() },
+                deletedAt: null
+            }).populate('planId', 'name price durationMonths').lean();
+        }
+        const subsByClient = new Map();
+        for (const sub of activeSubs) {
+            const cId = sub.clientId?.toString();
+            if (!subsByClient.has(cId)) {
+                subsByClient.set(cId, []);
+            }
+            subsByClient.get(cId).push(sub);
+        }
+        const results = clients.map((c) => {
+            const subs = subsByClient.get(c._id.toString()) || [];
+            return {
+                _id: c._id,
+                name: c.name,
+                email: c.email,
+                mobile: c.mobile,
+                telegramChatId: c.telegramChatId,
+                telegramUsername: c.telegramUsername,
+                telegramLinkedAt: c.telegramLinkedAt,
+                status: c.status,
+                activeSubscriptions: subs.map((s) => ({
+                    subscriptionId: s._id,
+                    planName: s.planId?.name || 'Standard Plan',
+                    endDate: s.endDate
+                }))
+            };
+        });
+        return res.status(200).json({
+            success: true,
+            data: results,
+            count: results.length
+        });
+    }
+    catch (err) {
+        console.error('[TelegramController] getLinkedTelegramUsersApi error:', err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.getLinkedTelegramUsersApi = getLinkedTelegramUsersApi;
+/**
+ * GET /api/v1/telegram/delivery-logs
+ * Admin: Retrieve Telegram signal delivery audit logs
+ */
+const getTelegramDeliveryLogsApi = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId || req.headers['x-tenant-id'];
+        const { planId, signalId, targetType, status, page = '1', limit = '50' } = req.query;
+        const query = {};
+        if (tenantId)
+            query.tenantId = tenantId;
+        if (planId)
+            query.planId = planId;
+        if (signalId)
+            query.signalId = signalId;
+        if (targetType)
+            query.targetType = targetType;
+        if (status)
+            query.status = status;
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+        const skip = (pageNum - 1) * limitNum;
+        let logs = [];
+        let total = 0;
+        if (db_1.default?.TelegramDeliveryLog) {
+            [logs, total] = await Promise.all([
+                db_1.default.TelegramDeliveryLog.find(query)
+                    .sort({ sentAt: -1 })
+                    .skip(skip)
+                    .limit(limitNum)
+                    .lean(),
+                db_1.default.TelegramDeliveryLog.countDocuments(query)
+            ]);
+        }
+        else if (db_1.centralModels?.TelegramDeliveryLog) {
+            [logs, total] = await Promise.all([
+                db_1.centralModels.TelegramDeliveryLog.find(query)
+                    .sort({ sentAt: -1 })
+                    .skip(skip)
+                    .limit(limitNum)
+                    .lean(),
+                db_1.centralModels.TelegramDeliveryLog.countDocuments(query)
+            ]);
+        }
+        return res.status(200).json({
+            success: true,
+            data: logs,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            }
+        });
+    }
+    catch (err) {
+        console.error('[TelegramController] getTelegramDeliveryLogsApi error:', err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.getTelegramDeliveryLogsApi = getTelegramDeliveryLogsApi;

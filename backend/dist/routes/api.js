@@ -473,4 +473,15 @@ router.post('/admin/telegram/plans/bulk-map', auth_1.authenticateJWT, (0, auth_1
 // --- Create Telegram Channel Directly On Admin Account ---
 router.post('/telegram/auth/create-channel', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.createTelegramChannelViaAccountApi);
 router.post('/admin/telegram/auth/create-channel', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.createTelegramChannelViaAccountApi);
+// --- Client Telegram Linking Routes ---
+router.post('/client/telegram/generate-token', auth_1.authenticateJWT, telegramController_1.generateClientConnectTokenApi);
+router.get('/client/telegram/status', auth_1.authenticateJWT, telegramController_1.getClientTelegramStatusApi);
+router.post('/client/telegram/unlink', auth_1.authenticateJWT, telegramController_1.unlinkClientTelegramApi);
+// --- Public Telegram Webhook ---
+router.post('/telegram/webhook', telegramController_1.telegramWebhookApi);
+// --- Admin: Linked Telegram Users & Delivery Logs ---
+router.get('/telegram/linked-users', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getLinkedTelegramUsersApi);
+router.get('/admin/telegram/linked-users', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getLinkedTelegramUsersApi);
+router.get('/telegram/delivery-logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramDeliveryLogsApi);
+router.get('/admin/telegram/delivery-logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramDeliveryLogsApi);
 exports.default = router;

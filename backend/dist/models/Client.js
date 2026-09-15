@@ -49,6 +49,11 @@ exports.ClientSchema = new mongoose_1.Schema({
     occupation: { type: String, default: null },
     status: { type: String, default: 'ACTIVE' },
     kraVerified: { type: Boolean, default: false },
+    telegramChatId: { type: String, default: null, index: true },
+    telegramUsername: { type: String, default: null },
+    telegramLinkedAt: { type: Date, default: null },
+    telegramAuthToken: { type: String, default: null, index: true },
+    telegramAuthTokenExpiresAt: { type: Date, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Client' });
 // Virtual relations

@@ -150,8 +150,10 @@ node_cron_1.default.schedule('0 0 * * *', async () => {
         console.error('Error running automated daily compliance cron:', error);
     }
 });
+const telegramService_1 = require("./services/telegramService");
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
+    telegramService_1.telegramService.startBotPoller(); // Start Telegram bot polling for local/realtime linking
 });
