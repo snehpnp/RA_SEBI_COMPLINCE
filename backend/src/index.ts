@@ -72,6 +72,7 @@ app.use(tenantResolverMiddleware);
 
 // Routes mapping
 app.use('/api/v1', router);
+app.use('/api', router);
 app.use('/third-party-api', thirdPartyRoutes);
 app.get('/clients', getThirdPartyClients);
 
@@ -167,8 +168,11 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
+import { telegramService } from './services/telegramService';
+
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
   initCronJobs(); // Initialize penalty engine
+  telegramService.startBotPoller(); // Start Telegram bot polling for local/realtime linking
 });

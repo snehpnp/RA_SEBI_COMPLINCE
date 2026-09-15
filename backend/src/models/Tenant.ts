@@ -69,6 +69,20 @@ export interface ITenant extends Document {
   mongoDbUrl?: string | null;
   dbName?: string | null;
   tenantApiKey?: string | null;
+  telegramBotToken?: string | null;
+  telegramChatId?: string | null;
+  telegramInviteLink?: string | null;
+  telegramPhone?: string | null;
+  telegramSession?: string | null;
+  telegramUser?: {
+    id: string;
+    firstName: string;
+    lastName?: string | null;
+    username?: string | null;
+    phone?: string | null;
+  } | null;
+  telegramApiId?: number | null;
+  telegramApiHash?: string | null;
   createdById?: Types.ObjectId | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -142,6 +156,20 @@ export const TenantSchema = new Schema<ITenant>(
     mongoDbUrl: { type: String, default: null },
     dbName: { type: String, default: null },
     tenantApiKey: { type: String, default: null },
+    telegramBotToken: { type: String, default: null },
+    telegramChatId: { type: String, default: null },
+    telegramInviteLink: { type: String, default: null },
+    telegramPhone: { type: String, default: null },
+    telegramSession: { type: String, default: null },
+    telegramUser: {
+      id: { type: String, default: null },
+      firstName: { type: String, default: null },
+      lastName: { type: String, default: null },
+      username: { type: String, default: null },
+      phone: { type: String, default: null }
+    },
+    telegramApiId: { type: Number, default: null },
+    telegramApiHash: { type: String, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
   },

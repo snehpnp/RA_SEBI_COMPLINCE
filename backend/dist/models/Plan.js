@@ -47,6 +47,9 @@ exports.PlanSchema = new mongoose_1.Schema({
     notificationsAllowed: { type: String, required: true },
     clientLimit: { type: Number, default: 100 },
     status: { type: String, default: 'ACTIVE' },
+    telegramChatId: { type: String, default: null },
+    telegramInviteLink: { type: String, default: null },
+    telegramGroupName: { type: String, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Plan' });

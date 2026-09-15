@@ -14,6 +14,9 @@ export interface IPlan extends Document {
   notificationsAllowed: string;
   clientLimit: number;
   status: string;
+  telegramChatId?: string | null;
+  telegramInviteLink?: string | null;
+  telegramGroupName?: string | null;
   createdById?: Types.ObjectId | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -32,6 +35,9 @@ export const PlanSchema = new Schema<IPlan>(
     notificationsAllowed: { type: String, required: true },
     clientLimit: { type: Number, default: 100 },
     status: { type: String, default: 'ACTIVE' },
+    telegramChatId: { type: String, default: null },
+    telegramInviteLink: { type: String, default: null },
+    telegramGroupName: { type: String, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
   },

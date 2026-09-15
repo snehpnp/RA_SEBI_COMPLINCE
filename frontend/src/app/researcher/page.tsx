@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Send } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -21,6 +21,7 @@ import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
 import AdminResearchReports from '../../components/admin/AdminResearchReports';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
+import TelegramGroupSelector from '../../components/admin/TelegramGroupSelector';
 import CustomPageView from '../../components/client/CustomPageView';
 import Legal from '../../components/client/Legal';
 import MobilePreview from '../../components/MobilePreview';
@@ -510,6 +511,9 @@ function AdminDashboardContent() {
   const [planSegments, setPlanSegments] = useState<string[]>(['EQUITY']);
   const [planNotifs, setPlanNotifs] = useState<string[]>(['EMAIL', 'INAPP']);
   const [planClientLimit, setPlanClientLimit] = useState('100');
+  const [planTelegramChatId, setPlanTelegramChatId] = useState('');
+  const [planTelegramInviteLink, setPlanTelegramInviteLink] = useState('');
+  const [planTelegramGroupName, setPlanTelegramGroupName] = useState('');
 
   // Add Client modal state
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -7079,7 +7083,7 @@ function AdminDashboardContent() {
                                 <Trash2 className="h-4 w-4" /> <span>{showDeletedPlans ? 'View Active Plans' : 'View Deleted Plans'}</span>
                               </button>
                               {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
+                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setPlanTelegramChatId(''); setPlanTelegramInviteLink(''); setPlanTelegramGroupName(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
                                   <Plus className="h-4 w-4" /> <span>Create New Plan</span>
                                 </button>
                               )}
@@ -7115,35 +7119,59 @@ function AdminDashboardContent() {
                             }).map(plan => {
                               const isDeleted = plan.deletedAt !== null && plan.deletedAt !== undefined;
                               return (
-                                <div key={plan.id} className={`p-6 rounded-2xl border ${isDeleted ? 'opacity-60 bg-slate-100 dark:bg-slate-950/40 border-rose-500/20' : plan.status === 'ACTIVE' ? 'bg-white dark:bg-slate-900/50 border-slate-400 dark:border-white/10' : 'bg-red-900/10 border-red-500/20'} flex flex-col`}>
-                                  <div className="flex justify-between items-start mb-2">
-                                    <div>
-                                      <span className="text-[10px] font-bold text-primary-600 dark:text-primary-400 tracking-wider mb-1 block">{plan.category?.name || 'UNCATEGORIZED'}</span>
-                                      <h3 className="text-xl font-bold tracking-tight">{plan.name}</h3>
+                                <div key={plan.id} className={`relative p-6 rounded-2xl border transition-all duration-300 hover:shadow-xl ${isDeleted ? 'opacity-70 bg-slate-50 dark:bg-slate-900/40 border-rose-200 dark:border-rose-500/20' : plan.status === 'ACTIVE' ? 'bg-white dark:bg-[#0F172A] border-slate-200 dark:border-slate-800 shadow-sm hover:border-primary-300 dark:hover:border-primary-500/50' : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700 opacity-80'} flex flex-col group overflow-hidden`}>
+                                  {plan.status === 'ACTIVE' && !isDeleted && (
+                                    <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-[#E1F13D] to-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                                  )}
+
+                                  <div className="flex justify-between items-start mb-4">
+                                    <div className="pr-4">
+                                      <span className="inline-block px-2 py-1 rounded-md bg-primary-50 dark:bg-primary-900/20 text-[10px] font-bold text-primary-700 dark:text-primary-400 tracking-wider mb-2">{plan.category?.name || 'UNCATEGORIZED'}</span>
+                                      <h3 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors">{plan.name}</h3>
                                     </div>
-                                    <div className="text-right">
-                                      <div className="text-2xl font-bold">₹{plan.price.toLocaleString()}</div>
-                                      <span className="text-[9px] text-slate-500 dark:text-slate-500 block mt-0.5">
-                                        {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exclusive)' : '18% GST (Inclusive)'}
+                                    <div className="text-right shrink-0">
+                                      <div className="text-2xl font-black text-slate-900 dark:text-white">₹{plan.price.toLocaleString()}</div>
+                                      <span className="text-[9px] text-slate-500 dark:text-slate-400 font-medium block mt-0.5">
+                                        {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exc)' : '18% GST (Inc)'}
                                       </span>
                                     </div>
                                   </div>
-                                  <div className="flex items-center space-x-2 mb-4">
-                                    <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md ${isDeleted ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/20 text-red-600 dark:text-red-400'}`}>
+
+                                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                                    <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${isDeleted ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                                       {isDeleted ? 'DELETED' : plan.status}
                                     </span>
+                                    {(plan.telegramChatId || plan.telegramInviteLink) && (
+                                      <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-[#0088cc]/15 text-[#0088cc] border border-[#0088cc]/25 flex items-center gap-1">
+                                        <Send className="w-2.5 h-2.5" /> Telegram Group
+                                      </span>
+                                    )}
                                   </div>
-                                  <div className="text-xs text-slate-600 dark:text-slate-400 mb-4 flex-grow" dangerouslySetInnerHTML={{ __html: plan.description }} />
-                                  <div className="space-y-2 text-xs text-slate-700 dark:text-slate-300 mb-6 bg-black/20 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                    <div className="flex justify-between"><span>Duration</span> <strong className="text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong></div>
-                                    <div className="flex justify-between"><span>Segments</span> <strong className="text-emerald-600 dark:text-emerald-400">{plan.researchSegments}</strong></div>
+
+                                  <div className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: plan.description }} />
+
+                                  <div className="space-y-3 mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Duration</span>
+                                      <strong className="text-sm text-slate-900 dark:text-white">{plan.durationMonths} Month(s)</strong>
+                                    </div>
+                                    <div className="h-px w-full bg-slate-200 dark:bg-slate-700/50"></div>
+                                    <div className="flex justify-between items-start">
+                                      <span className="text-xs text-slate-500 dark:text-slate-400 font-medium pt-0.5">Segments</span>
+                                      <div className="flex flex-wrap justify-end gap-1 ml-4">
+                                        {(plan.researchSegments || '').split(',').map((seg: string, idx: number) => (
+                                          <span key={idx} className="text-[10px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-1.5 py-0.5 rounded text-emerald-700 dark:text-emerald-400 font-bold">{seg.trim()}</span>
+                                        ))}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div className="flex space-x-2 mt-auto">
+
+                                  <div className="flex space-x-3 mt-auto pt-2">
                                     {!isDeleted ? (
                                       <>
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
-                                            <Edit2 className="h-3 w-3" /> <span>Edit</span>
+                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setPlanTelegramChatId(plan.telegramChatId || ''); setPlanTelegramInviteLink(plan.telegramInviteLink || ''); setPlanTelegramGroupName(plan.telegramGroupName || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-2 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 rounded-xl text-xs font-bold transition">
+                                            <Edit2 className="h-3.5 w-3.5" /> <span>Edit</span>
                                           </button>
                                         )}
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
@@ -7998,7 +8026,16 @@ function AdminDashboardContent() {
                       <form id="planForm" onSubmit={async (e) => {
                         e.preventDefault();
                         try {
-                          const payload = { categoryId: planCategoryId, name: planName, description: planDesc, price: planPrice, durationMonths: planDuration };
+                          const payload = {
+                            categoryId: planCategoryId,
+                            name: planName,
+                            description: planDesc,
+                            price: planPrice,
+                            durationMonths: planDuration,
+                            telegramChatId: planTelegramChatId,
+                            telegramInviteLink: planTelegramInviteLink,
+                            telegramGroupName: planTelegramGroupName
+                          };
                           const res = editingPlan ? await api.updatePlan(editingPlan.id, payload) : await api.createPlan(payload);
                           if (res.success) { setIsPlanModalOpen(false); loadData(); }
                           else { toast(res.message); }
@@ -8030,6 +8067,19 @@ function AdminDashboardContent() {
                             {[1, 2, 3, 6, 12].map(m => <option key={m} value={m}>{m} Month{m > 1 ? 's' : ''}</option>)}
                           </select>
                         </div>
+
+                        {/* Telegram Plan-Specific Group Configuration */}
+                        <TelegramGroupSelector
+                          chatId={planTelegramChatId}
+                          inviteLink={planTelegramInviteLink}
+                          groupName={planTelegramGroupName}
+                          onChange={({ chatId, inviteLink, groupName }) => {
+                            setPlanTelegramChatId(chatId);
+                            setPlanTelegramInviteLink(inviteLink);
+                            setPlanTelegramGroupName(groupName);
+                          }}
+                        />
+
 
                         <div>
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Description</label>

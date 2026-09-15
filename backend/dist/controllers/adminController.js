@@ -2080,7 +2080,7 @@ const createPlan = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { categoryId, name, description, price, durationMonths, researchSegments, notificationsAllowed, clientLimit } = req.body;
+    const { categoryId, name, description, price, durationMonths, researchSegments, notificationsAllowed, clientLimit, telegramChatId, telegramInviteLink, telegramGroupName } = req.body;
     if (!categoryId)
         return res.status(400).json({ success: false, message: 'Category is required.' });
     if (!name || !name.trim())
@@ -2134,6 +2134,9 @@ const createPlan = async (req, res) => {
             researchSegments: researchSegments || category.segments || 'EQUITY',
             notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
             clientLimit: parseInt(clientLimit) || 100,
+            telegramChatId: telegramChatId ? String(telegramChatId).trim() : null,
+            telegramInviteLink: telegramInviteLink ? String(telegramInviteLink).trim() : null,
+            telegramGroupName: telegramGroupName ? String(telegramGroupName).trim() : null,
             createdById: req.user.id,
             deletedAt: null
         });
@@ -2151,7 +2154,7 @@ const updatePlan = async (req, res) => {
     const { id } = req.params;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { categoryId, name, description, price, durationMonths, notificationsAllowed, clientLimit } = req.body;
+    const { categoryId, name, description, price, durationMonths, notificationsAllowed, clientLimit, telegramChatId, telegramInviteLink, telegramGroupName } = req.body;
     if (!name || !name.trim())
         return res.status(400).json({ success: false, message: 'Plan name is required.' });
     if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
@@ -2197,7 +2200,10 @@ const updatePlan = async (req, res) => {
                 durationMonths: parseInt(durationMonths) || existing.durationMonths,
                 researchSegments: newSegments,
                 notificationsAllowed: notificationsAllowed || existing.notificationsAllowed,
-                clientLimit: parseInt(clientLimit) || existing.clientLimit
+                clientLimit: parseInt(clientLimit) || existing.clientLimit,
+                telegramChatId: telegramChatId !== undefined ? (telegramChatId ? String(telegramChatId).trim() : null) : existing.telegramChatId,
+                telegramInviteLink: telegramInviteLink !== undefined ? (telegramInviteLink ? String(telegramInviteLink).trim() : null) : existing.telegramInviteLink,
+                telegramGroupName: telegramGroupName !== undefined ? (telegramGroupName ? String(telegramGroupName).trim() : null) : existing.telegramGroupName
             }
         }, { returnDocument: 'after', lean: true });
         await (0, auditService_1.logAudit)({ tenantId, userId: req.user.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
@@ -2272,7 +2278,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, address, website, mobile } = req.body;
+    const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, address, website, mobile, telegramBotToken, telegramChatId, telegramInviteLink } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2308,6 +2314,12 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.website = website;
         if (mobile !== undefined)
             dataToUpdate.mobile = mobile;
+        if (telegramBotToken !== undefined)
+            dataToUpdate.telegramBotToken = telegramBotToken ? telegramBotToken.trim() : null;
+        if (telegramChatId !== undefined)
+            dataToUpdate.telegramChatId = telegramChatId ? telegramChatId.trim() : null;
+        if (telegramInviteLink !== undefined)
+            dataToUpdate.telegramInviteLink = telegramInviteLink ? telegramInviteLink.trim() : null;
         if (smtpHost !== undefined)
             dataToUpdate.smtpHost = smtpHost ? smtpHost.trim() : null;
         if (bankAccountName !== undefined)

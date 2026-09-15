@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CreditCard, CheckCircle2, Star, Zap, Shield, ChevronRight, Loader2 } from 'lucide-react';
+import { CreditCard, CheckCircle2, Star, Zap, Shield, ChevronRight, Loader2, Send } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ContactAdminModal from './ContactAdminModal';
+import TelegramConnectCard from './TelegramConnectCard';
 
 export default function SubscriptionCenter({ 
   profile, 
@@ -378,66 +379,79 @@ export default function SubscriptionCenter({
             </div>
           ) : activeSubscriptions.length > 0 ? (
             <div className="space-y-4">
-              {activeSubscriptions.map((sub, index) => (
-                <div key={index} className="bg-premium-cards border border-premium-border p-5 md:p-6 rounded-2xl">
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-premium-warning/10 flex items-center justify-center border border-premium-warning/20">
-                        <Zap className="w-6 h-6 text-premium-warning" />
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-bold">{sub.plan?.name || 'Premium Plan'}</h2>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-premium-success/20 text-premium-success`}>
-                            {sub.status || 'ACTIVE'}
-                          </span>
-                          <span className="text-xs text-premium-text/60">
-                            Expires: {new Date(sub.endDate).toLocaleDateString()}
-                          </span>
+              <TelegramConnectCard compact={true} />
+
+              {activeSubscriptions.map((sub, index) => {
+                const tgLink = sub.plan?.telegramInviteLink || 'https://t.me/Complince_signal_bot';
+                return (
+                  <div key={index} className="bg-premium-cards border border-premium-border p-5 md:p-6 rounded-2xl">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-premium-warning/10 flex items-center justify-center border border-premium-warning/20">
+                          <Zap className="w-6 h-6 text-premium-warning" />
+                        </div>
+                        <div>
+                          <h2 className="text-lg font-bold">{sub.plan?.name || 'Premium Plan'}</h2>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-premium-success/20 text-premium-success`}>
+                              {sub.status || 'ACTIVE'}
+                            </span>
+                            <span className="text-xs text-premium-text/60">
+                              Expires: {new Date(sub.endDate).toLocaleDateString()}
+                            </span>
+                          </div>
                         </div>
                       </div>
+                      <div className="text-left md:text-right">
+                        <p className="text-xl font-bold text-premium-text">₹{(() => {
+                          if (sub.amountPaid) return sub.amountPaid;
+                          if (sub.amountTotal) return sub.amountTotal;
+                          let displayPrice = sub.plan?.amount || sub.plan?.price || 0;
+                          if (gstType === 'EXCLUSIVE') displayPrice = displayPrice * 1.18;
+                          return displayPrice.toFixed(2);
+                        })()}</p>
+                        <p className="text-xs text-premium-text/50">/{sub.billingCycle || sub.plan?.durationMonths + ' Months' || 'term'}</p>
+                      </div>
                     </div>
-                    <div className="text-left md:text-right">
-                      <p className="text-xl font-bold text-premium-text">₹{(() => {
-                        if (sub.amountPaid) return sub.amountPaid;
-                        if (sub.amountTotal) return sub.amountTotal;
-                        let displayPrice = sub.plan?.amount || sub.plan?.price || 0;
-                        if (gstType === 'EXCLUSIVE') displayPrice = displayPrice * 1.18;
-                        return displayPrice.toFixed(2);
-                      })()}</p>
-                      <p className="text-xs text-premium-text/50">/{sub.billingCycle || sub.plan?.durationMonths + ' Months' || 'term'}</p>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-premium-bg/50 border border-premium-border/50 p-4 rounded-xl mb-5">
-                    <div>
-                      <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Start Date</p>
-                      <p className="text-sm font-semibold">{new Date(sub.startDate).toLocaleDateString()}</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-premium-bg/50 border border-premium-border/50 p-4 rounded-xl mb-5">
+                      <div>
+                        <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Start Date</p>
+                        <p className="text-sm font-semibold">{new Date(sub.startDate).toLocaleDateString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">End Date</p>
+                        <p className="text-sm font-semibold">{new Date(sub.endDate).toLocaleDateString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Receipt No</p>
+                        <p className="text-sm font-semibold">{sub.receiptNo || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Auto-Renew</p>
+                        <p className="text-sm font-semibold text-premium-text/60">Disabled</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">End Date</p>
-                      <p className="text-sm font-semibold">{new Date(sub.endDate).toLocaleDateString()}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Receipt No</p>
-                      <p className="text-sm font-semibold">{sub.receiptNo || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-premium-text/50 uppercase tracking-wider mb-1">Auto-Renew</p>
-                      <p className="text-sm font-semibold text-premium-text/60">Disabled</p>
-                    </div>
-                  </div>
 
-                  <div className="flex gap-3">
-                    <button className="px-6 py-2 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-lg text-sm font-bold transition-colors">
-                      Renew Plan
-                    </button>
-                    <button className="px-6 py-2 bg-premium-bg border border-premium-border hover:border-premium-text/30 text-premium-text rounded-lg text-sm font-bold transition-colors">
-                      Upgrade
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => window.open(tgLink, '_blank', 'noopener,noreferrer')}
+                        className="px-4 py-2 bg-[#0088cc] hover:bg-[#0077b5] text-white rounded-lg text-sm font-bold transition-all flex items-center gap-1.5 shadow-md shadow-[#0088cc]/20"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>Connect Telegram Group</span>
+                      </button>
+                      <button className="px-5 py-2 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-lg text-sm font-bold transition-colors">
+                        Renew Plan
+                      </button>
+                      <button className="px-5 py-2 bg-premium-bg border border-premium-border hover:border-premium-text/30 text-premium-text rounded-lg text-sm font-bold transition-colors">
+                        Upgrade
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-center bg-premium-cards border border-premium-border rounded-3xl max-w-3xl">

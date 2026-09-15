@@ -16,6 +16,11 @@ export interface IClient extends Document {
   occupation?: string | null;
   status: string;
   kraVerified: boolean;
+  telegramChatId?: string | null;
+  telegramUsername?: string | null;
+  telegramLinkedAt?: Date | null;
+  telegramAuthToken?: string | null;
+  telegramAuthTokenExpiresAt?: Date | null;
   createdById?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
@@ -35,6 +40,11 @@ export const ClientSchema = new Schema<IClient>(
     occupation: { type: String, default: null },
     status: { type: String, default: 'ACTIVE' },
     kraVerified: { type: Boolean, default: false },
+    telegramChatId: { type: String, default: null, index: true },
+    telegramUsername: { type: String, default: null },
+    telegramLinkedAt: { type: Date, default: null },
+    telegramAuthToken: { type: String, default: null, index: true },
+    telegramAuthTokenExpiresAt: { type: Date, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null }
   },
   { ...baseSchemaOptions, collection: 'Client' }

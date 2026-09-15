@@ -1,9 +1,8 @@
-'use client';
-
 import { useState, useEffect } from 'react';
 import { Target, TrendingUp, AlertCircle, Clock, CheckCircle2, XCircle, FileText, Download, Loader2, Bell } from 'lucide-react';
 import api from '../../services/api';
 import { base_ra_url } from '../../utils/config';
+import TelegramConnectCard from './TelegramConnectCard';
 
 export default function MarketSignals() {
   const [activeTab, setActiveTab] = useState<'active' | 'closed'>('active');
@@ -46,6 +45,9 @@ export default function MarketSignals() {
           <p className="text-sm text-premium-text/60 mt-1">Exclusive trading recommendations for premium members.</p>
         </div>
       </div>
+
+      {/* TELEGRAM COMMUNITY CONNECT CARD */}
+      <TelegramConnectCard />
 
       {/* Tabs & Categories */}
       <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">

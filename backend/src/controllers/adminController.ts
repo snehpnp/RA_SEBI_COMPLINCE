@@ -2252,7 +2252,19 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
-  const { categoryId, name, description, price, durationMonths, researchSegments, notificationsAllowed, clientLimit } = req.body;
+  const {
+    categoryId,
+    name,
+    description,
+    price,
+    durationMonths,
+    researchSegments,
+    notificationsAllowed,
+    clientLimit,
+    telegramChatId,
+    telegramInviteLink,
+    telegramGroupName
+  } = req.body;
 
   if (!categoryId) return res.status(400).json({ success: false, message: 'Category is required.' });
   if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Plan name is required.' });
@@ -2310,6 +2322,9 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
       researchSegments: researchSegments || category.segments || 'EQUITY',
       notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
       clientLimit: parseInt(clientLimit) || 100,
+      telegramChatId: telegramChatId ? String(telegramChatId).trim() : null,
+      telegramInviteLink: telegramInviteLink ? String(telegramInviteLink).trim() : null,
+      telegramGroupName: telegramGroupName ? String(telegramGroupName).trim() : null,
       createdById: req.user!.id,
       deletedAt: null
     });
@@ -2327,7 +2342,18 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
-  const { categoryId, name, description, price, durationMonths, notificationsAllowed, clientLimit } = req.body;
+  const {
+    categoryId,
+    name,
+    description,
+    price,
+    durationMonths,
+    notificationsAllowed,
+    clientLimit,
+    telegramChatId,
+    telegramInviteLink,
+    telegramGroupName
+  } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Plan name is required.' });
   if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
     return res.status(400).json({ success: false, message: 'Plan price must be a positive number.' });
@@ -2380,7 +2406,10 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
           durationMonths: parseInt(durationMonths) || existing.durationMonths,
           researchSegments: newSegments,
           notificationsAllowed: notificationsAllowed || existing.notificationsAllowed,
-          clientLimit: parseInt(clientLimit) || existing.clientLimit
+          clientLimit: parseInt(clientLimit) || existing.clientLimit,
+          telegramChatId: telegramChatId !== undefined ? (telegramChatId ? String(telegramChatId).trim() : null) : existing.telegramChatId,
+          telegramInviteLink: telegramInviteLink !== undefined ? (telegramInviteLink ? String(telegramInviteLink).trim() : null) : existing.telegramInviteLink,
+          telegramGroupName: telegramGroupName !== undefined ? (telegramGroupName ? String(telegramGroupName).trim() : null) : existing.telegramGroupName
         }
       },
       { returnDocument: 'after', lean: true }
@@ -2467,7 +2496,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
     activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey,
     ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey,
-    address, website, mobile
+    address, website, mobile, telegramBotToken, telegramChatId, telegramInviteLink
   } = req.body;
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
@@ -2496,6 +2525,9 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (address !== undefined) dataToUpdate.address = address;
     if (website !== undefined) dataToUpdate.website = website;
     if (mobile !== undefined) dataToUpdate.mobile = mobile;
+    if (telegramBotToken !== undefined) dataToUpdate.telegramBotToken = telegramBotToken ? telegramBotToken.trim() : null;
+    if (telegramChatId !== undefined) dataToUpdate.telegramChatId = telegramChatId ? telegramChatId.trim() : null;
+    if (telegramInviteLink !== undefined) dataToUpdate.telegramInviteLink = telegramInviteLink ? telegramInviteLink.trim() : null;
     if (smtpHost !== undefined) dataToUpdate.smtpHost = smtpHost ? smtpHost.trim() : null;
     if (bankAccountName !== undefined) dataToUpdate.bankAccountName = bankAccountName;
     if (bankAccountNo !== undefined) dataToUpdate.bankAccountNo = bankAccountNo;

@@ -116,8 +116,13 @@ class ApiClient {
     return data;
   }
 
-  async get(endpoint: string, options: RequestInit = {}) {
-    const data = await this.request(endpoint, { ...options, method: 'GET' });
+  async get(endpoint: string, options: RequestInit & { params?: Record<string, string> } = {}) {
+    let url = endpoint;
+    if ((options as any)?.params) {
+      const q = new URLSearchParams((options as any).params).toString();
+      if (q) url += (url.includes('?') ? '&' : '?') + q;
+    }
+    const data = await this.request(url, { ...options, method: 'GET' });
     return { data };
   }
 
@@ -1069,7 +1074,208 @@ class ApiClient {
       body: JSON.stringify(data)
     });
   }
+
+  // Telegram Integration Methods
+  async getTelegramSettings() {
+    return this.request('/telegram/settings');
+  }
+
+  async updateTelegramSettings(data: { botToken?: string; chatId?: string; inviteLink?: string }) {
+    return this.request('/telegram/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async testTelegramConnection(data?: { botToken?: string; chatId?: string }) {
+    return this.request('/telegram/test-connection', {
+      method: 'POST',
+      body: JSON.stringify(data || {})
+    });
+  }
+
+  async sendTelegramSignal(payload: any) {
+    return this.request('/telegram/send-signal', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getTelegramInviteLink() {
+    return this.request('/telegram/invite-link');
+  }
+
+  async getClientTelegramGroups() {
+    return this.request('/client/telegram/groups');
+  }
+
+  // Dynamic Telegram Groups CRUD & Detection
+  async getTelegramGroups() {
+    return this.request('/telegram/groups');
+  }
+
+  async createTelegramGroup(data: {
+    name: string;
+    chatId: string;
+    inviteLink?: string;
+    type?: string;
+    isDefault?: boolean;
+    status?: string;
+  }) {
+    return this.request('/telegram/groups', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateTelegramGroup(id: string, data: Partial<{
+    name: string;
+    chatId: string;
+    inviteLink: string;
+    type: string;
+    isDefault: boolean;
+    status: string;
+  }>) {
+    return this.request(`/telegram/groups/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteTelegramGroup(id: string) {
+    return this.request(`/telegram/groups/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async autoDetectTelegramGroups(autoImport: boolean = false) {
+    return this.request('/telegram/groups/auto-detect', {
+      method: 'POST',
+      body: JSON.stringify({ autoImport })
+    });
+  }
+
+  async testTelegramGroupPing(id: string) {
+    return this.request(`/telegram/groups/${id}/test`, {
+      method: 'POST'
+    });
+  }
+
+  async generateTelegramGroupInvite(id: string) {
+    return this.request(`/telegram/groups/${id}/generate-invite`, {
+      method: 'POST'
+    });
+  }
+
+  // Telegram Phone Number MTProto 1-Click Login & Auto-Sync
+  async sendTelegramPhoneOtp(phoneNumber: string) {
+    return this.request('/telegram/auth/send-code', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber })
+    });
+  }
+
+  async verifyTelegramPhoneOtp(data: {
+    phoneNumber: string;
+    phoneCode: string;
+    phoneCodeHash?: string;
+    password?: string;
+  }) {
+    return this.request('/telegram/auth/verify-code', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async syncTelegramAccountGroups() {
+    return this.request('/telegram/auth/sync-groups', {
+      method: 'POST'
+    });
+  }
+
+  async disconnectTelegramAccount() {
+    return this.request('/telegram/auth/disconnect', {
+      method: 'POST'
+    });
+  }
+
+  async getTelegramAuthStatus() {
+    return this.request('/telegram/auth/status');
+  }
+
+  // Multi-Plan Telegram Group Matrix
+  async getTelegramPlanMatrix() {
+    return this.request('/telegram/plans/matrix');
+  }
+
+  async bulkMapTelegramPlans(mappings: Array<{
+    planId: string;
+    telegramChatId?: string | null;
+    telegramGroupName?: string | null;
+    telegramInviteLink?: string | null;
+  }>) {
+    return this.request('/telegram/plans/bulk-map', {
+      method: 'POST',
+      body: JSON.stringify({ mappings })
+    });
+  }
+
+  async createTelegramChannelViaAccount(data: {
+    title: string;
+    about?: string;
+    isBroadcast?: boolean;
+    assignedPlanId?: string;
+  }) {
+    return this.request('/telegram/auth/create-channel', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  // Client Telegram Deep Linking (/start <token>) Flow
+  async getClientTelegramStatus() {
+    return this.request('/client/telegram/status');
+  }
+
+  async generateClientTelegramToken() {
+    return this.request('/client/telegram/generate-token', {
+      method: 'POST'
+    });
+  }
+
+  async unlinkClientTelegram() {
+    return this.request('/client/telegram/unlink', {
+      method: 'POST'
+    });
+  }
+
+  // Admin Telegram Management: Linked Users & Delivery Logs
+  async getLinkedTelegramUsers() {
+    return this.request('/telegram/linked-users');
+  }
+
+  async getTelegramDeliveryLogs(params?: {
+    planId?: string;
+    signalId?: string;
+    targetType?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const query = new URLSearchParams();
+    if (params?.planId) query.set('planId', params.planId);
+    if (params?.signalId) query.set('signalId', params.signalId);
+    if (params?.targetType) query.set('targetType', params.targetType);
+    if (params?.status) query.set('status', params.status);
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.limit) query.set('limit', String(params.limit));
+
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/telegram/delivery-logs${qs}`);
+  }
 }
 
 export const api = new ApiClient();
 export default api;
+
+
