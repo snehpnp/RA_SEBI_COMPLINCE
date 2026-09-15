@@ -507,7 +507,6 @@ const submitManualPayment = async (req, res) => {
     }
 };
 exports.submitManualPayment = submitManualPayment;
-
 const verifyManualPayment = async (req, res) => {
     const { paymentId, status, remarks } = req.body;
     try {
