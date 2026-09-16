@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -48,6 +48,7 @@ const archiver = require("archiver");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
+const pdfService_1 = require("../services/pdfService");
 const axios_1 = __importDefault(require("axios"));
 const maskEmail = (email) => {
     if (!email)
@@ -1890,12 +1891,52 @@ exports.restoreClient = restoreClient;
 // =====================================================
 // PLAN CATEGORY MANAGEMENT
 // =====================================================
+const getRelatedTenantIds = async (tenantId, userId) => {
+    const ids = new Set();
+    if (tenantId)
+        ids.add(String(tenantId));
+    if (userId) {
+        const clientDoc = await db_1.default.Client.findOne({ userId }).lean();
+        if (clientDoc?.tenantId)
+            ids.add(String(clientDoc.tenantId));
+        const userDoc = await db_1.default.User.findById(userId).lean();
+        if (userDoc?.tenantId)
+            ids.add(String(userDoc.tenantId));
+    }
+    const allTenants = await db_1.centralModels.Tenant.find({ deletedAt: null }).lean().catch(() => []);
+    const allCompanies = await db_1.centralModels.AllCompany.find({ deletedAt: null }).lean().catch(() => []);
+    allTenants.forEach((t) => {
+        if (t._id)
+            ids.add(String(t._id));
+        if (t.id)
+            ids.add(String(t.id));
+        if (t.tenantId)
+            ids.add(String(t.tenantId));
+    });
+    allCompanies.forEach((c) => {
+        if (c._id)
+            ids.add(String(c._id));
+        if (c.id)
+            ids.add(String(c.id));
+        if (c.tenantId)
+            ids.add(String(c.tenantId));
+    });
+    return Array.from(ids)
+        .filter(id => mongoose_1.default.Types.ObjectId.isValid(id))
+        .map(id => new mongoose_1.default.Types.ObjectId(id));
+};
 const getAdminCategories = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const rawCategories = await db_1.default.PlanCategory.find({ tenantId })
+        const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+        const rawCategories = await db_1.default.PlanCategory.find({
+            $or: [
+                { tenantId: { $in: relatedTenantIds } },
+                { tenantId: null }
+            ]
+        })
             .sort({ createdAt: -1 })
             .lean();
         const formatted = rawCategories.map(c => ({
@@ -1989,7 +2030,14 @@ const getAdminPlans = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const isFullAdmin = req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN' || req.user.role === 'RESEARCHER';
-        let filterQuery = { tenantId, deletedAt: null };
+        const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+        let filterQuery = {
+            $or: [
+                { tenantId: { $in: relatedTenantIds } },
+                { tenantId: null }
+            ],
+            deletedAt: null
+        };
         if (!isFullAdmin) {
             const userRole = await db_1.default.Role.findOne({ name: req.user.role }).lean();
             const roleId = userRole?._id || userRole?.id;
@@ -3403,3 +3451,62 @@ const getClientCommunications = async (req, res) => {
     }
 };
 exports.getClientCommunications = getClientCommunications;
+const previewPolicyPdf = async (req, res) => {
+    try {
+        const { type } = req.params;
+        const tenantId = req.user?.tenantId || req.tenantId || req.query.tenantId;
+        let tenant = null;
+        if (tenantId) {
+            if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                tenant = await db_1.default.Tenant.findById(tenantId).lean();
+            }
+            if (!tenant) {
+                tenant = await db_1.default.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+            }
+        }
+        if (!tenant) {
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        let filePath = null;
+        let fallbackGenerator = null;
+        let defaultFilename = 'document.pdf';
+        const normalizedType = String(type || '').toLowerCase();
+        if (normalizedType === 'terms' || normalizedType === 'terms-conditions' || normalizedType === 'terms-and-conditions') {
+            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
+            filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.termsPdfUrl);
+            fallbackGenerator = pdfService_1.generateTermsAndConditionsPdf;
+        }
+        else if (normalizedType === 'privacy' || normalizedType === 'privacy-policy') {
+            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
+            filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.privacyPdfUrl);
+            fallbackGenerator = pdfService_1.generatePrivacyPolicyPdf;
+        }
+        else if (normalizedType === 'internal-policy' || normalizedType === 'policy' || normalizedType === 'internal') {
+            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
+            filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.internalPolicyUrl);
+            fallbackGenerator = pdfService_1.generateInternalPolicyPdf;
+        }
+        else {
+            return res.status(400).json({ success: false, message: 'Invalid policy type. Use terms, privacy, or internal-policy' });
+        }
+        if (filePath && fs_1.default.existsSync(filePath)) {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `inline; filename="${defaultFilename}"`);
+            return fs_1.default.createReadStream(filePath).pipe(res);
+        }
+        if (fallbackGenerator) {
+            const pdfBuffer = await fallbackGenerator(tenant);
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `inline; filename="${defaultFilename}"`);
+            return res.send(pdfBuffer);
+        }
+        return res.status(404).json({ success: false, message: 'Policy PDF not found' });
+    }
+    catch (error) {
+        console.error('[PREVIEW-POLICY-PDF] Error:', error);
+        if (!res.headersSent) {
+            return res.status(500).json({ success: false, message: error.message || 'Failed to preview policy PDF' });
+        }
+    }
+};
+exports.previewPolicyPdf = previewPolicyPdf;

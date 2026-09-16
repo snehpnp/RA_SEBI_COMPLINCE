@@ -24,13 +24,34 @@ const getSubscriptions = async (req, res) => {
             .populate('planId')
             .sort({ createdAt: -1 })
             .lean();
-        const formatted = subscriptions.map((s) => ({
-            ...s,
-            id: String(s._id || s.id),
-            plan: s.planId ? {
-                ...s.planId,
-                id: String(s.planId._id || s.planId.id)
-            } : null
+        const formatted = await Promise.all(subscriptions.map(async (s) => {
+            let planObj = s.planId;
+            if (planObj && typeof planObj === 'object' && (planObj.name || planObj.title)) {
+                return {
+                    ...s,
+                    id: String(s._id || s.id),
+                    plan: {
+                        ...planObj,
+                        id: String(planObj._id || planObj.id)
+                    }
+                };
+            }
+            else if (planObj) {
+                const foundPlan = await db_1.default.Plan.findById(planObj).lean();
+                return {
+                    ...s,
+                    id: String(s._id || s.id),
+                    plan: foundPlan ? {
+                        ...foundPlan,
+                        id: String(foundPlan._id || foundPlan.id)
+                    } : null
+                };
+            }
+            return {
+                ...s,
+                id: String(s._id || s.id),
+                plan: null
+            };
         }));
         return res.status(200).json({ success: true, data: formatted });
     }

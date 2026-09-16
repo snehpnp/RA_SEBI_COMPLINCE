@@ -336,7 +336,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
             </button>
           ) : latestAgreement?.agreementUrl ? (
             <a
-              href={latestAgreement.agreementUrl}
+              href={api.getDownloadUrl(latestAgreement.agreementUrl)}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full bg-gradient-to-r from-premium-success to-emerald-600 hover:from-emerald-500 hover:to-premium-success text-white shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.4)] py-3.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 relative z-10"

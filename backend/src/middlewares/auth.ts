@@ -46,55 +46,50 @@ export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: 
               .lean();
           }
 
-          // if (!user || user.status !== 'ACTIVE') {
-          //   return res.status(403).json({
-          //     success: false,
-          //     message: 'Your account has been deactivated. Please contact admin.',
-          //     errors: ['User inactive or suspended']
-          //   });
-          // }
-
-          // Session validation
-          const decodedTokenVersion = Number(decoded.tokenVersion || 0);
-          const userTokenVersion = Number(user.tokenVersion || 0);
-          if (decoded.tokenVersion !== undefined && decodedTokenVersion !== userTokenVersion) {
-            return res.status(401).json({
-              success: false,
-              message: 'Session revoked. Please login again.',
-              errors: ['Token version mismatch']
-            });
-          }
-
-          const allowMultiDevice = user.role?.allowMultiDeviceLogin ?? (decoded.role === 'SUPER_ADMIN');
-          if (!allowMultiDevice && decoded.sessionId && user.currentSessionId && decoded.sessionId !== user.currentSessionId) {
-            return res.status(401).json({
-              success: false,
-              message: 'Logged out because you logged in from another device.',
-              errors: ['Single device constraint violated']
-            });
-          }
-
-          if (user.tenant) {
-            const tenantStatus = user.tenant.status;
-
-            if (tenantStatus === 'DELETED') {
-              return res.status(403).json({
+          if (user) {
+            // Session validation
+            const decodedTokenVersion = Number(decoded.tokenVersion || 0);
+            const userTokenVersion = Number(user.tokenVersion || 0);
+            if (decoded.tokenVersion !== undefined && decodedTokenVersion !== userTokenVersion) {
+              return res.status(401).json({
                 success: false,
-                message: 'Your organization account has been deleted.',
-                errors: ['User inactive or suspended', 'Tenant deleted']
+                message: 'Session revoked. Please login again.',
+                errors: ['Token version mismatch']
               });
             }
 
-            if (tenantStatus === 'SUSPENDED') {
-              return res.status(403).json({
+            const allowMultiDevice = user.role?.allowMultiDeviceLogin ?? (decoded.role === 'SUPER_ADMIN');
+            if (!allowMultiDevice && decoded.sessionId && user.currentSessionId && decoded.sessionId !== user.currentSessionId) {
+              return res.status(401).json({
                 success: false,
-                message: 'Your organization account is suspended. Please contact super admin.',
-                errors: ['User inactive or suspended', 'Tenant suspended']
+                message: 'Logged out because you logged in from another device.',
+                errors: ['Single device constraint violated']
               });
+            }
+
+            if (user.tenant) {
+              const tenantStatus = user.tenant.status;
+
+              if (tenantStatus === 'DELETED') {
+                return res.status(403).json({
+                  success: false,
+                  message: 'Your organization account has been deleted.',
+                  errors: ['User inactive or suspended', 'Tenant deleted']
+                });
+              }
+
+              if (tenantStatus === 'SUSPENDED') {
+                return res.status(403).json({
+                  success: false,
+                  message: 'Your organization account is suspended. Please contact super admin.',
+                  errors: ['User inactive or suspended', 'Tenant suspended']
+                });
+              }
             }
           }
         }
       } catch (dbErr) {
+        console.error('[AUTH DB ERROR]:', dbErr);
         return res.status(500).json({ success: false, message: 'Database error' });
       }
 
@@ -218,7 +213,7 @@ export const requireAnyPermission = (permissions: string[]) => {
       });
     }
 
-    if (req.user.role === 'SUPER_ADMIN') {
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
       return next();
     }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck, User, FileText, CheckCircle2, AlertTriangle,
-  ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag, Sparkles, X
+  ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag, Sparkles, X, Lock
 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
@@ -19,6 +19,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const { appName } = useBranding();
   const [welcomeVisited, setWelcomeVisited] = useState(false);
+  const [clientProfile, setClientProfile] = useState<any>(profile);
 
   // Contact Admin Modal State
   const [showContactAdminModal, setShowContactAdminModal] = useState(false);
@@ -57,38 +58,38 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
 
   // Status checkers
   const hasActiveSubscription = Boolean(
-    (profile?.subscriptions && profile.subscriptions.some((s: any) => s.status === 'ACTIVE')) ||
-    (profile?.status === 'ACTIVE' && ((profile?.subscriptions && profile.subscriptions.length > 0) || profile?.plan))
+    (clientProfile?.subscriptions && clientProfile.subscriptions.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+    (clientProfile?.status === 'ACTIVE' && ((clientProfile?.subscriptions && clientProfile.subscriptions.length > 0) || clientProfile?.plan))
   );
 
   const isProfileDone = Boolean(
-    (formData.name || profile?.name) &&
-    (formData.email || profile?.email || profile?.user?.email) &&
-    (formData.phone || profile?.phone || profile?.mobile)
+    (formData.name || clientProfile?.name) &&
+    (formData.email || clientProfile?.email || clientProfile?.user?.email) &&
+    (formData.phone || clientProfile?.phone || clientProfile?.mobile) &&
+    (formData.address || clientProfile?.profile?.addressLine1 || clientProfile?.address)
   );
 
   const isKycDone = Boolean(
-    profile?.kraVerified === true ||
+    clientProfile?.kraVerified === true ||
     kraStatus === 'success' ||
-    profile?.kycStatus === 'VERIFIED' ||
-    profile?.kycStatus === 'APPROVED'
+    clientProfile?.kycStatus === 'VERIFIED' ||
+    clientProfile?.kycStatus === 'APPROVED'
   );
 
   const isAgreementDone = Boolean(
     agreementSigned ||
-    profile?.agreementSigned ||
-    profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
+    clientProfile?.agreementSigned ||
+    clientProfile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
   );
 
-  const kycFirst = profile?.user?.tenant?.kycFirst !== false;
+  const kycFirst = clientProfile?.user?.tenant?.kycFirst !== false;
 
-  // Standard ordered steps list (1. Welcome, 2. Profile, 3. Subscription/KYC, 4. KYC/Agreement, 5. Agreement/Subscription)
+  // Standard ordered steps list (Strict linear sequence)
   const baseStepList = useMemo(() => {
     if (hasActiveSubscription) {
       return [
         { id: 'welcome', label: 'Welcome' },
         { id: 'profile', label: 'Complete Profile' },
-        { id: 'subscription', label: 'Subscription' },
         { id: 'kyc', label: 'Identity KYC' },
         { id: 'agreement', label: 'Legal Agreement' }
       ];
@@ -111,6 +112,9 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
     ];
   }, [hasActiveSubscription, kycFirst]);
 
+  // Always start at the first step
+  const [currentStepId, setCurrentStepId] = useState<string>('welcome');
+
   // Find step completion status
   const isStepComplete = (stepId: string) => {
     const flowOrder = baseStepList.map(s => s.id);
@@ -125,46 +129,63 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       case 'subscription':
         return hasActiveSubscription;
       case 'kyc':
-        return isKycDone;
+        return isKycDone || (kraStatus === 'success' && currentIdx > stepIdx);
       case 'agreement':
-        return isAgreementDone;
+        return agreementSigned || isAgreementDone;
       default:
         return false;
     }
   };
 
-  // Initial Step: Welcome or first uncompleted step
-  const getInitialStepId = () => {
-    if (!profile) return 'welcome';
-    if (!isProfileDone) return 'welcome';
-    if (!isKycDone) return 'kyc';
-    if (!isAgreementDone) return 'agreement';
-    if (!hasActiveSubscription) return 'subscription';
-    return 'welcome';
+  // Check if a step can be accessed / clicked in sidebar
+  const isStepAccessible = (targetStepId: string) => {
+    const flowOrder = baseStepList.map(s => s.id);
+    const targetIdx = flowOrder.indexOf(targetStepId);
+    const currentIdx = flowOrder.indexOf(currentStepId);
+
+    // If already on this step, it's active
+    if (targetStepId === currentStepId) return true;
+
+    // Once legal agreement is signed, backward navigation is locked
+    if (agreementSigned || isAgreementDone) {
+      const agreementIdx = flowOrder.indexOf('agreement');
+      if (targetIdx < agreementIdx) {
+        return false;
+      }
+    }
+
+    // Must have all preceding steps completed
+    for (let i = 0; i < targetIdx; i++) {
+      if (!isStepComplete(flowOrder[i])) {
+        return false;
+      }
+    }
+
+    // Can only jump at most to the next immediate step or any previously accessible step
+    return targetIdx <= currentIdx + 1;
   };
 
-  const [currentStepId, setCurrentStepId] = useState<string>(getInitialStepId());
-
   const agreementHTML = useMemo(() => {
-    if (!profile?.user?.tenant) return "Loading agreement...";
-    let content = profile.user.tenant.agreementContent || "Standard SEBI Agreement...";
+    const tenant = clientProfile?.user?.tenant || profile?.user?.tenant;
+    if (!tenant) return "Loading agreement...";
+    let content = tenant.agreementContent || "Standard SEBI Agreement...";
     const replacements: Record<string, string> = {
-      '{{CLIENT_NAME}}': formData.name || `${profile.user?.firstName || ''} ${profile.user?.lastName || ''}`.trim() || 'Client',
-      '{{CLIENT_EMAIL}}': formData.email || profile.user?.email || '',
-      '{{CLIENT_MOBILE}}': formData.phone || profile.mobile || 'NA',
-      '{{PAN_NUMBER}}': pan || profile.pan || '',
-      '{{AADHAAR_NUMBER}}': aadhaar || profile.aadhaar || '',
-      '{{CLIENT_ADDRESS}}': formData.address || (profile.profile?.addressLine1 ? `${profile.profile.addressLine1}, ${profile.profile?.city || ''}` : 'NA'),
-      '{{COMPANY_NAME}}': profile.user?.tenant?.companyName || '',
-      '{{SEBI_REGISTRATION}}': profile.user?.tenant?.sebiRegistration || '',
-      '{{COMPANY_ADDRESS}}': profile.user?.tenant?.address || '',
+      '{{CLIENT_NAME}}': formData.name || `${clientProfile?.user?.firstName || ''} ${clientProfile?.user?.lastName || ''}`.trim() || 'Client',
+      '{{CLIENT_EMAIL}}': formData.email || clientProfile?.user?.email || '',
+      '{{CLIENT_MOBILE}}': formData.phone || clientProfile?.mobile || 'NA',
+      '{{PAN_NUMBER}}': pan || clientProfile?.pan || '',
+      '{{AADHAAR_NUMBER}}': aadhaar || clientProfile?.aadhaar || '',
+      '{{CLIENT_ADDRESS}}': formData.address || (clientProfile?.profile?.addressLine1 ? `${clientProfile.profile.addressLine1}, ${clientProfile.profile?.city || ''}` : 'NA'),
+      '{{COMPANY_NAME}}': tenant.companyName || '',
+      '{{SEBI_REGISTRATION}}': tenant.sebiRegistration || '',
+      '{{COMPANY_ADDRESS}}': tenant.address || '',
       '{{DATE}}': new Date().toLocaleDateString('en-IN')
     };
     for (const [key, value] of Object.entries(replacements)) {
       content = content.replace(new RegExp(key, 'g'), value);
     }
     return content;
-  }, [profile, formData, pan, aadhaar]);
+  }, [clientProfile, profile, formData, pan, aadhaar]);
 
   useEffect(() => {
     api.getPlans().then(res => {
@@ -173,9 +194,12 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   }, []);
 
   const handleNextStep = () => {
-    setWelcomeVisited(true);
     const flowOrder = baseStepList.map(s => s.id);
     const currentIdx = flowOrder.indexOf(currentStepId);
+
+    if (currentStepId === 'welcome') {
+      setWelcomeVisited(true);
+    }
 
     // Advance to next step in the sequence
     if (currentIdx < flowOrder.length - 1) {
@@ -186,6 +210,9 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   };
 
   const handleBack = () => {
+    // If agreement is signed, back button is completely disabled
+    if (agreementSigned || isAgreementDone) return;
+
     const flowOrder = baseStepList.map(s => s.id);
     const currentIdx = flowOrder.indexOf(currentStepId);
     if (currentIdx > 0) {
@@ -246,10 +273,25 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 toast.error("Digio KYC Failed or Cancelled");
                 setKraStatus('failed');
               } else {
-                const verifyRes = await api.verifyKRA({ pan, aadhaar });
+                try {
+                  await api.updateDigioStatus({
+                    type: 'KYC',
+                    status: 'COMPLETED',
+                    kycId: res.data.id,
+                    digioResponse: response
+                  });
+                } catch { }
+
+                const verifyRes = await api.verifyKRA({ pan, aadhaar, digioResponse: response });
                 if (verifyRes.success) {
                   setKraStatus('success');
                   toast.success('Demat Account / KYC Verified!');
+                  api.getClientProfile().then((pRes: any) => {
+                    if (pRes.success && pRes.data) {
+                      setClientProfile(pRes.data);
+                      if (pRes.data.name) setFormData(prev => ({ ...prev, name: pRes.data.name }));
+                    }
+                  }).catch(() => { });
                 } else {
                   toast.error(verifyRes.message || 'Failed to update KRA status');
                   setKraStatus('failed');
@@ -314,9 +356,10 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 toast.error("Digio eSign Failed or Cancelled");
                 setLoading(false);
               } else {
-                await api.signAgreement({ signatureText: formData.name || profile?.name || 'Digio eSign' });
+                await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Digio eSign' });
                 setAgreementSigned(true);
                 setLoading(false);
+                toast.success('Advisory Agreement signed successfully!');
               }
             },
             logo: 'https://digio.in/images/logo.png',
@@ -334,7 +377,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         console.warn('Digio agreement initiation skipped, falling back to direct eSign:', digioErr);
       }
 
-      const signRes = await api.signAgreement({ signatureText: formData.name || profile?.name || 'Aadhaar eSign' });
+      const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
       if (signRes.success) {
         setAgreementSigned(true);
         toast.success('Advisory Agreement signed successfully!');
@@ -344,7 +387,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       setLoading(false);
     } catch (err: any) {
       try {
-        const signRes = await api.signAgreement({ signatureText: formData.name || profile?.name || 'Aadhaar eSign' });
+        const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
         if (signRes.success) {
           setAgreementSigned(true);
           toast.success('Advisory Agreement signed successfully!');
@@ -365,7 +408,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       const res = await api.applyCoupon(couponCode);
       if (res.success) {
         setAppliedCoupon(res.data);
-        toast('Coupon applied!');
+        toast.success('Coupon applied!');
       }
     } catch (err: any) {
       toast.error(err.message || 'Invalid coupon');
@@ -399,7 +442,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
 
       if (gatewayStatusRes && gatewayStatusRes.isConfigured === false) {
         setContactAdminData({
-          adminContact: gatewayStatusRes.adminContact || profile?.user?.tenant,
+          adminContact: gatewayStatusRes.adminContact || clientProfile?.user?.tenant,
           plan: selectedPlan || { id: planId, name: 'Selected Plan' },
           finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
           appliedCoupon: appliedCoupon,
@@ -410,7 +453,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         return;
       }
 
-      const activeGateway = (gatewayStatusRes?.activeGateway || profile?.user?.tenant?.activePaymentGateway || 'RAZORPAY').toUpperCase();
+      const activeGateway = (gatewayStatusRes?.activeGateway || clientProfile?.user?.tenant?.activePaymentGateway || 'RAZORPAY').toUpperCase();
 
       if (activeGateway === 'RAZORPAY') {
         const res = await api.initiateRazorpayPayment({
@@ -426,7 +469,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             key: res.keyId,
             amount: res.amount,
             currency: res.currency,
-            name: profile?.user?.tenant?.companyName || 'Premium Advisory',
+            name: clientProfile?.user?.tenant?.companyName || 'Premium Advisory',
             description: 'Subscription Payment',
             order_id: res.orderId,
             handler: async function (response: any) {
@@ -450,12 +493,12 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
               }
             },
             prefill: {
-              name: profile?.name || '',
-              email: profile?.email || '',
-              contact: profile?.phone || profile?.mobile || ''
+              name: clientProfile?.name || '',
+              email: clientProfile?.email || '',
+              contact: clientProfile?.phone || clientProfile?.mobile || ''
             },
             theme: {
-              color: profile?.user?.tenant?.themeColor || '#4F46E5'
+              color: clientProfile?.user?.tenant?.themeColor || '#4F46E5'
             }
           };
 
@@ -468,7 +511,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         } else {
           if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
             setContactAdminData({
-              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              adminContact: gatewayStatusRes?.adminContact || clientProfile?.user?.tenant,
               plan: selectedPlan || { id: planId, name: 'Selected Plan' },
               finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
               appliedCoupon: appliedCoupon,
@@ -509,7 +552,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         } else {
           if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
             setContactAdminData({
-              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              adminContact: gatewayStatusRes?.adminContact || clientProfile?.user?.tenant,
               plan: selectedPlan || { id: planId, name: 'Selected Plan' },
               finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
               appliedCoupon: appliedCoupon,
@@ -526,7 +569,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       if (err.message && (err.message.toLowerCase().includes('contact the administrator') || err.message.toLowerCase().includes('not configured'))) {
         const selectedPlan = availablePlans.find(p => (p.id || p._id) === planId);
         setContactAdminData({
-          adminContact: profile?.user?.tenant,
+          adminContact: clientProfile?.user?.tenant,
           plan: selectedPlan || { id: planId, name: 'Selected Plan' },
           finalPrice: selectedPlan ? (selectedPlan.amount || selectedPlan.price) : undefined,
           appliedCoupon: appliedCoupon,
@@ -541,6 +584,9 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   };
 
   const renderStepContent = (stepId: string) => {
+    // Check if legal agreement is already signed
+    const isSigned = agreementSigned || isAgreementDone;
+
     switch (stepId) {
       case 'welcome':
         return (
@@ -556,7 +602,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
               <div className="mb-6 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3">
                 <Sparkles className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-                  Your research plan is already active and assigned. Complete KYC &amp; Agreement to access signals immediately.
+                  Your research plan is already active and assigned. Complete Profile, KYC &amp; Agreement to access signals immediately.
                 </p>
               </div>
             )}
@@ -616,7 +662,11 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             </div>
 
             <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
-              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+              {!isSigned && (
+                <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">
+                  Back
+                </button>
+              )}
               <button onClick={handleUpdateProfile} disabled={loading || !formData.name || !formData.email || !formData.phone || !formData.address} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5">
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save & Continue'}
                 {!loading && <ChevronRight className="w-4 h-4" />}
@@ -624,9 +674,113 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             </div>
           </div>
         );
+      case 'kyc':
+        return (
+          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <div className="w-9 h-9 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center border border-blue-600/20">
+                <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              </div>
+              <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
+                Identity Verification (KYC)
+              </h2>
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
+              As per SEBI guidelines, KYC identity verification is mandatory before signing the Advisory Agreement.
+            </p>
+
+            <div className="space-y-4 flex-1">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">PAN Number</label>
+                <div className="flex gap-2.5">
+                  <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none uppercase font-mono tracking-wider" maxLength={10} placeholder="ABCDE1234F" />
+                  <button onClick={handleVerifyKRA} disabled={kraStatus === 'loading' || pan.length !== 10} className="px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 rounded-xl transition-colors flex items-center justify-center min-w-[100px] disabled:opacity-50">
+                    {kraStatus === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Check KRA'}
+                  </button>
+                </div>
+                {kraStatus === 'success' && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1 font-semibold"><CheckCircle2 className="w-3.5 h-3.5" /> Demat account &amp; KRA verified</p>}
+                {kraStatus === 'failed' && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> KRA check failed (You can still proceed)</p>}
+              </div>
+
+              <div className="pt-1">
+                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Aadhaar Number (For eSign)</label>
+                <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono tracking-widest" maxLength={14} placeholder="1111 1111 1111" />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
+              {!isSigned && (
+                <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">
+                  Back
+                </button>
+              )}
+              {(kraStatus === 'success' || kraStatus === 'failed') ? (
+                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continue to Legal Agreement <ChevronRight className="w-4 h-4" /></>}
+                </button>
+              ) : (
+                <button onClick={handleVerifyKRA} disabled={loading || pan.length !== 10} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all py-2.5">
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify PAN & Continue'}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      case 'agreement':
+        const allCompleted = isProfileDone && isKycDone && (hasActiveSubscription || agreementSigned || isAgreementDone);
+        return (
+          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
+            <h2 className="text-xl md:text-2xl font-bold mb-1 text-slate-900 dark:text-white">Legal Agreement</h2>
+            <div className="flex-1 flex flex-col my-2">
+              {isSigned ? (
+                <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl p-6 flex flex-col items-center justify-center text-center h-full">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mb-3">
+                    <PenTool className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <h3 className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mb-1">Agreement Signed Successfully</h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mb-3 max-w-md">
+                    You have legally eSigned the Research Analyst Advisory Agreement. This document is officially locked and compliance-verified.
+                  </p>
+                  {hasActiveSubscription && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Active Plan Assigned &amp; Ready
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex flex-col relative overflow-hidden">
+                  <h3 className="font-bold text-sm mb-2 flex items-center gap-2 text-slate-900 dark:text-white"><FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Advisory Agreement</h3>
+                  <div className="flex-1 overflow-y-auto pr-1 text-[11px] text-slate-600 dark:text-slate-300 space-y-2 mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl max-h-[180px] custom-scrollbar">
+                    <div dangerouslySetInnerHTML={{ __html: agreementHTML }} />
+                  </div>
+                  <button onClick={handleSignAgreement} disabled={loading} className="w-full py-2.5 bg-[#1B42E0] hover:bg-[#1535B5] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-md">
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'eSign via Digio / Aadhaar'}
+                  </button>
+                </div>
+              )}
+            </div>
+            
+            {/* Action Buttons: If agreement is signed, REMOVE Back button */}
+            <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
+              {!isSigned && (
+                <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">
+                  Back
+                </button>
+              )}
+              <button
+                onClick={handleNextStep}
+                disabled={!isSigned}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-all py-2.5 shadow-lg shadow-blue-600/20"
+              >
+                {allCompleted ? 'Complete Onboarding & Access Dashboard' : 'Continue'}
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        );
       case 'subscription':
         if (hasActiveSubscription) {
-          const activeSub = profile?.subscriptions?.find((s: any) => s.status === 'ACTIVE') || profile?.subscriptions?.[0];
+          const activeSub = clientProfile?.subscriptions?.find((s: any) => s.status === 'ACTIVE' || s.status === 'active') || clientProfile?.subscriptions?.[0];
           const planName = activeSub?.plan?.name || activeSub?.planName || activeSub?.name || 'Active Advisory Plan';
           const planPrice = activeSub?.plan?.price || activeSub?.amount || 0;
 
@@ -662,7 +816,11 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
               </div>
 
               <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
-                <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+                {!isSigned && (
+                  <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">
+                    Back
+                  </button>
+                )}
                 <button onClick={handleNextStep} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-all py-2.5">
                   Continue Onboarding <ChevronRight className="w-4 h-4" />
                 </button>
@@ -718,98 +876,12 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             </div>
 
             <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
-              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
+              {!isSigned && (
+                <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">
+                  Back
+                </button>
+              )}
               <button onClick={onClose || onComplete} className="flex-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-medium text-xs">Skip for now</button>
-            </div>
-          </div>
-        );
-      case 'kyc':
-        return (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <div className="flex items-center gap-2.5 mb-1.5">
-              <div className="w-9 h-9 rounded-xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center border border-blue-600/20">
-                <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              </div>
-              <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
-                Identity Verification
-              </h2>
-            </div>
-            <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
-              As per SEBI guidelines, KYC identity verification is mandatory.
-            </p>
-
-            <div className="space-y-4 flex-1">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">PAN Number</label>
-                <div className="flex gap-2.5">
-                  <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none uppercase font-mono tracking-wider" maxLength={10} placeholder="ABCDE1234F" />
-                  <button onClick={handleVerifyKRA} disabled={kraStatus === 'loading' || pan.length !== 10} className="px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 rounded-xl transition-colors flex items-center justify-center min-w-[100px] disabled:opacity-50">
-                    {kraStatus === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Check KRA'}
-                  </button>
-                </div>
-                {kraStatus === 'success' && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1 font-semibold"><CheckCircle2 className="w-3.5 h-3.5" /> Demat account verified</p>}
-                {kraStatus === 'failed' && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> KRA check failed (You can still proceed)</p>}
-              </div>
-
-              <div className="pt-1">
-                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Aadhaar Number (For Digio eSign)</label>
-                <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono tracking-widest" maxLength={14} placeholder="1111 1111 1111" />
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
-              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
-              {(kraStatus === 'success' || kraStatus === 'failed') ? (
-                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continue to Legal Agreement <ChevronRight className="w-4 h-4" /></>}
-                </button>
-              ) : (
-                <button onClick={handleVerifyKRA} disabled={loading || pan.length !== 10} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all py-2.5">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify PAN & Continue'}
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      case 'agreement':
-        const allCompleted = isProfileDone && isKycDone && (hasActiveSubscription || agreementSigned);
-        return (
-          <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
-            <h2 className="text-xl md:text-2xl font-bold mb-1 text-slate-900 dark:text-white">Legal Agreement</h2>
-            <div className="flex-1 flex flex-col my-2">
-              {agreementSigned ? (
-                <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl p-6 flex flex-col items-center justify-center text-center h-full">
-                  <PenTool className="w-10 h-10 text-emerald-600 dark:text-emerald-400 mb-3" />
-                  <h3 className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mb-1">Agreement Signed</h3>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 mb-3">You have successfully eSigned the Research Analyst Advisory Agreement.</p>
-                  {hasActiveSubscription && (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Active Plan Assigned &amp; Ready
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex flex-col relative overflow-hidden">
-                  <h3 className="font-bold text-sm mb-2 flex items-center gap-2 text-slate-900 dark:text-white"><FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Advisory Agreement</h3>
-                  <div className="flex-1 overflow-y-auto pr-1 text-[11px] text-slate-600 dark:text-slate-300 space-y-2 mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl max-h-[160px] custom-scrollbar">
-                    <div dangerouslySetInnerHTML={{ __html: agreementHTML }} />
-                  </div>
-                  <button onClick={handleSignAgreement} disabled={loading} className="w-full py-2.5 bg-[#1B42E0] hover:bg-[#1535B5] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-colors">
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'eSign via Digio / Aadhaar'}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
-              <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
-              <button 
-                onClick={handleNextStep} 
-                disabled={!agreementSigned} 
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-all py-2.5"
-              >
-                {allCompleted ? 'Complete Onboarding & Access Dashboard' : 'Continue'}
-                <ChevronRight className="w-4 h-4" />
-              </button>
             </div>
           </div>
         );
@@ -823,14 +895,14 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-slate-950/65 backdrop-blur-md animate-in fade-in duration-300">
       {/* Backdrop overlay */}
-      <div 
-        className="fixed inset-0 bg-transparent" 
-        onClick={onClose || onComplete} 
+      <div
+        className="fixed inset-0 bg-transparent"
+        onClick={onClose || onComplete}
       />
 
       {/* Modal Container */}
       <div className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-3xl shadow-[0_25px_70px_rgba(0,0,0,0.4)] relative z-10 flex flex-col md:flex-row min-h-[560px] max-h-[92vh] overflow-hidden my-auto animate-in zoom-in-95 duration-300">
-        
+
         {/* Close Modal X Button */}
         <button
           onClick={onClose || onComplete}
@@ -866,29 +938,49 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
               {baseStepList.map((step, idx) => {
                 const isActive = step.id === currentStepId;
                 const isDone = isStepComplete(step.id);
+                const isAccessible = isStepAccessible(step.id);
 
                 return (
-                  <div 
-                    key={step.id} 
-                    onClick={() => setCurrentStepId(step.id)}
-                    className="flex items-start gap-3.5 group cursor-pointer select-none transition-all duration-300"
+                  <div
+                    key={step.id}
+                    onClick={() => {
+                      if (isAccessible) {
+                        setCurrentStepId(step.id);
+                      } else {
+                        if ((agreementSigned || isAgreementDone) && idx < baseStepList.findIndex(s => s.id === 'agreement')) {
+                          toast.error('Legal Agreement is already signed. Previous steps cannot be modified.');
+                        } else {
+                          const prevStep = baseStepList[idx - 1];
+                          toast.error(`Please complete Step ${idx}: ${prevStep ? prevStep.label : 'previous step'} first.`);
+                        }
+                      }
+                    }}
+                    className={`flex items-start gap-3.5 group select-none transition-all duration-300 ${
+                      isAccessible ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'
+                    }`}
                   >
                     <div className="relative mt-0.5">
                       {isActive && <div className="absolute inset-0 rounded-full border-2 border-blue-600 dark:border-blue-400 animate-ping opacity-75" />}
-                      <div className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 shadow-sm ${
-                        isActive
-                          ? 'bg-blue-600 text-white scale-110 shadow-md shadow-blue-500/30 ring-2 ring-blue-600/30'
-                          : isDone
-                            ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/20'
-                            : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-400 group-hover:border-blue-500/50'
-                      }`}>
-                        {isDone && !isActive ? <Check className="w-3.5 h-3.5 text-white" /> : <span className="text-xs font-bold">{idx + 1}</span>}
+                      <div className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 shadow-sm ${isActive
+                        ? 'bg-blue-600 text-white scale-110 shadow-md shadow-blue-500/30 ring-2 ring-blue-600/30'
+                        : isDone
+                          ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/20'
+                          : isAccessible
+                            ? 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-400 group-hover:border-blue-500/50'
+                            : 'bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400/50'
+                        }`}>
+                        {isDone && !isActive ? (
+                          <Check className="w-3.5 h-3.5 text-white" />
+                        ) : !isAccessible ? (
+                          <Lock className="w-3 h-3 text-slate-400" />
+                        ) : (
+                          <span className="text-xs font-bold">{idx + 1}</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex-1">
-                      <p className={`text-xs font-bold transition-colors ${
-                        isActive ? 'text-blue-600 dark:text-blue-400 text-sm' : isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200'
-                      }`}>
+                      <p className={`text-xs font-bold transition-colors ${isActive ? 'text-blue-600 dark:text-blue-400 text-sm' : isDone ? 'text-emerald-600 dark:text-emerald-400' : isAccessible ? 'text-slate-600 dark:text-slate-300' : 'text-slate-400 dark:text-slate-600'
+                        }`}>
                         {step.label}
                       </p>
                       {isActive && (
@@ -905,7 +997,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                       )}
                       {!isDone && !isActive && (
                         <div className="flex items-center gap-1 mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                          <span>Pending</span>
+                          {isAccessible ? <span>Ready</span> : <span>Locked</span>}
                         </div>
                       )}
                     </div>
@@ -930,7 +1022,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         finalPrice={contactAdminData.finalPrice}
         appliedCoupon={contactAdminData.appliedCoupon}
         adminContact={contactAdminData.adminContact}
-        userProfile={profile}
+        userProfile={clientProfile || profile}
         customMessage={contactAdminData.customMessage}
       />
     </div>

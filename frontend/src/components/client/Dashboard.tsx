@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, CreditCard, TrendingUp, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { Activity, ShieldCheck, CreditCard, TrendingUp, TrendingDown, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle } from 'lucide-react';
 import api from '../../services/api';
 
 export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }: { profile: any, setActiveTab: (tab: string) => void, onTriggerOnboarding?: () => void }) {
@@ -13,6 +13,8 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
   const [loading, setLoading] = useState(true);
   const [marketData, setMarketData] = useState<any[]>([]);
   const [marketLoading, setMarketLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -27,9 +29,40 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
         if (sigRes.success && sigRes.data) {
           setTopSignals(sigRes.data.filter((s: any) => s.status === 'OPEN' || s.status === 'open').slice(0, 3));
         }
-        if (repRes.success && repRes.data) {
-          setTopReports(repRes.data.slice(0, 3));
-        }
+
+        // Combine research from both standalone articles and signal reports
+        const signalReports = (sigRes?.success && Array.isArray(sigRes.data))
+          ? sigRes.data
+              .filter((s: any) => s.reportUrl)
+              .map((s: any) => ({
+                id: s.id || s._id,
+                title: `${s.stock?.symbol || s.symbol || s.stockName || 'Research Report'} ${s.callType ? `• ${s.callType}` : ''}`,
+                symbol: s.stock?.symbol || s.symbol || 'STOCK',
+                segment: s.segment || 'CASH',
+                callType: s.callType || 'BUY',
+                reportUrl: s.reportUrl,
+                createdAt: s.createdAt,
+                type: 'SIGNAL_REPORT'
+              }))
+          : [];
+
+        const standaloneReports = (repRes?.success && Array.isArray(repRes.data))
+          ? repRes.data.map((r: any) => ({
+              id: r.id || r._id,
+              title: r.title,
+              symbol: r.symbol || r.category || 'RESEARCH',
+              segment: r.segment || 'ADVISORY',
+              reportUrl: r.fileUrl || r.pdfUrl || r.reportUrl,
+              createdAt: r.createdAt,
+              type: 'ARTICLE'
+            }))
+          : [];
+
+        const combinedReports = [...signalReports, ...standaloneReports].sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+
+        setTopReports(combinedReports.slice(0, 3));
         if (notifRes.success && notifRes.data) {
           setTopActivity(notifRes.data.slice(0, 4));
         }
@@ -46,32 +79,33 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
     fetchDashboardData();
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
-    
-    const fetchMarketData = async () => {
-      try {
-        const res = await api.getMarketOverview();
-        if (res.success && res.data && isMounted) {
-          setMarketData(res.data);
-        }
-      } catch (err) {
-        console.error('Error fetching market data', err);
-      } finally {
-        if (isMounted) setMarketLoading(false);
+  const fetchMarketData = async (manual = false) => {
+    if (manual) setIsRefreshing(true);
+    try {
+      const res = await api.getMarketOverview();
+      if (res.success && res.data) {
+        setMarketData(res.data);
+        setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }));
       }
-    };
-    
-    // Initial fetch
+    } catch (err) {
+      console.error('Error fetching market data', err);
+    } finally {
+      setMarketLoading(false);
+      if (manual) {
+        setTimeout(() => setIsRefreshing(false), 500);
+      }
+    }
+  };
+
+  useEffect(() => {
     fetchMarketData();
     
     // Auto-refresh every 15 seconds
-    const intervalId = setInterval(fetchMarketData, 15000);
+    const intervalId = setInterval(() => {
+      fetchMarketData(false);
+    }, 15000);
     
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
+    return () => clearInterval(intervalId);
   }, []);
 
   // Derive KYC status from profile
@@ -109,7 +143,7 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div
           className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4 cursor-pointer hover:border-premium-primary/40 transition-colors"
           onClick={() => setActiveTab('kyc')}
@@ -145,21 +179,7 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
           </div>
         </div>
 
-        <div className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center">
-            <TrendingUp className="w-6 h-6 text-amber-500" />
-          </div>
-          <div className="w-full">
-            <div className="flex justify-between items-center mb-1">
-              <p className="text-sm text-premium-text/60">Service Accuracy</p>
-              <p className="text-sm font-bold text-amber-500">92%</p>
-            </div>
-            <div className="w-full h-1.5 bg-premium-bg rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full" style={{ width: '92%' }}></div>
-            </div>
-            <p className="text-xs text-premium-text/40 mt-1">Based on closed signals</p>
-          </div>
-        </div>
+        
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -211,18 +231,53 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
         </div>
 
         {/* Market Overview */}
-        <div className="bg-premium-cards border border-premium-border rounded-3xl p-6">
-          <h2 className="text-lg font-semibold mb-6">Market Overview</h2>
-          <div className="space-y-4">
-            {marketLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-premium-primary" /></div>
-            ) : marketData.length > 0 ? (
-              marketData.map((item, i) => (
-                <MarketItem key={i} name={item.name} value={item.value} change={item.change} isUp={item.isUp} />
-              ))
-            ) : (
-              <p className="text-sm text-premium-text/40">Market data unavailable.</p>
-            )}
+        <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-5">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-premium-text">Market Overview</h2>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[11px] font-semibold">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  LIVE
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {lastUpdated && (
+                  <span className="text-[11px] text-premium-text/40 hidden sm:inline">{lastUpdated}</span>
+                )}
+                <button
+                  onClick={() => fetchMarketData(true)}
+                  disabled={isRefreshing}
+                  title="Refresh market data"
+                  className="p-1.5 rounded-lg hover:bg-premium-bg text-premium-text/60 hover:text-premium-primary transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-premium-primary' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {marketLoading ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-premium-primary" />
+                  <span className="text-xs text-premium-text/40">Fetching live market data...</span>
+                </div>
+              ) : marketData.length > 0 ? (
+                marketData.map((item, i) => (
+                  <MarketItem key={i} item={item} />
+                ))
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-sm text-premium-text/40">Market data unavailable.</p>
+                  <button onClick={() => fetchMarketData(true)} className="mt-2 text-xs text-premium-primary hover:underline">
+                    Try Reconnecting
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -243,13 +298,45 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
               <p className="col-span-3 text-sm text-premium-text/40">No recent reports.</p>
             ) : (
               topReports.map((r, i) => (
-                <div key={i} onClick={() => setActiveTab('research')} className="bg-premium-bg border border-premium-border p-4 rounded-2xl hover:border-premium-primary/50 transition-colors group cursor-pointer">
-                  <FileText className="w-6 h-6 text-premium-text/50 group-hover:text-premium-primary mb-3 transition-colors" />
-                  <h3 className="font-semibold text-sm mb-1 line-clamp-1">{r.title}</h3>
-                  <p className="text-xs text-premium-text/50 mb-3">{new Date(r.createdAt || Date.now()).toLocaleDateString()}</p>
-                  <div className="flex items-center gap-1 text-xs text-premium-primary font-medium">
-                    <Download className="w-3 h-3" /> Download PDF
+                <div 
+                  key={i} 
+                  onClick={() => setActiveTab('research')} 
+                  className="bg-premium-bg border border-premium-border p-4 rounded-2xl hover:border-premium-primary/50 transition-all duration-300 group cursor-pointer flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="w-9 h-9 rounded-xl bg-premium-primary/10 flex items-center justify-center text-premium-primary group-hover:scale-105 transition-transform">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      {r.segment && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-premium-cards border border-premium-border text-premium-text/70 uppercase">
+                          {r.segment}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-semibold text-sm mb-1 text-premium-text group-hover:text-premium-primary transition-colors line-clamp-2">
+                      {r.title}
+                    </h3>
+                    <p className="text-xs text-premium-text/50 mb-3">
+                      {new Date(r.createdAt || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
                   </div>
+                  
+                  {r.reportUrl ? (
+                    <a
+                      href={api.getDownloadUrl(r.reportUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1.5 text-xs text-premium-primary hover:text-white bg-premium-primary/10 hover:bg-premium-primary px-3 py-1.5 rounded-lg font-bold transition-all w-fit mt-2"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download PDF
+                    </a>
+                  ) : (
+                    <span className="text-xs text-premium-primary font-semibold flex items-center gap-1 mt-2">
+                      View Report <ChevronRight className="w-3 h-3" />
+                    </span>
+                  )}
                 </div>
               ))
             )}
@@ -293,13 +380,46 @@ function UserIconProgress({ percentage }: { percentage: number }) {
   );
 }
 
-function MarketItem({ name, value, change, isUp }: { name: string, value: string, change: string, isUp: boolean }) {
+function MarketItem({ item }: { item: any }) {
+  const isUp = item.isUp !== false;
+  const isCurrency = item.category === 'Currency';
+
   return (
-    <div className="flex justify-between items-center">
-      <span className="text-sm text-premium-text/80 font-medium">{name}</span>
-      <div className="text-right">
-        <div className="text-sm font-semibold">{value}</div>
-        <div className={`text-xs ${isUp ? 'text-premium-success' : 'text-premium-danger'}`}>{change}</div>
+    <div className="p-3 bg-premium-bg/60 hover:bg-premium-bg border border-premium-border/80 hover:border-premium-primary/40 rounded-2xl transition-all duration-200">
+      <div className="flex justify-between items-start">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-premium-text">{item.name}</span>
+            {item.category && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-premium-cards border border-premium-border text-premium-text/50">
+                {item.category}
+              </span>
+            )}
+          </div>
+          {item.dayHigh && item.dayLow && item.dayHigh !== '---' ? (
+            <p className="text-[11px] text-premium-text/40 mt-0.5">
+              H: <span className="text-premium-text/60 font-medium">{item.dayHigh}</span> • L: <span className="text-premium-text/60 font-medium">{item.dayLow}</span>
+            </p>
+          ) : (
+            <p className="text-[11px] text-premium-text/40 mt-0.5">
+              Prev: <span className="text-premium-text/60 font-medium">{item.previousClose || item.value}</span>
+            </p>
+          )}
+        </div>
+        
+        <div className="text-right">
+          <div className="text-sm font-bold font-mono tracking-tight text-premium-text">
+            {isCurrency ? `₹${item.value}` : item.value}
+          </div>
+          <div className={`inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-md text-[11px] mt-0.5 ${
+            isUp 
+              ? 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20' 
+              : 'bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20'
+          }`}>
+            {isUp ? <TrendingUp className="w-3 h-3 stroke-[2.5]" /> : <TrendingDown className="w-3 h-3 stroke-[2.5]" />}
+            <span>{item.change} ({item.percentChange})</span>
+          </div>
+        </div>
       </div>
     </div>
   );

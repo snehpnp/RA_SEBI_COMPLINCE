@@ -24,13 +24,33 @@ export const getSubscriptions = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const formatted = subscriptions.map((s: any) => ({
-      ...s,
-      id: String(s._id || s.id),
-      plan: s.planId ? {
-        ...s.planId,
-        id: String(s.planId._id || s.planId.id)
-      } : null
+    const formatted = await Promise.all(subscriptions.map(async (s: any) => {
+      let planObj = s.planId;
+      if (planObj && typeof planObj === 'object' && (planObj.name || planObj.title)) {
+        return {
+          ...s,
+          id: String(s._id || s.id),
+          plan: {
+            ...planObj,
+            id: String(planObj._id || planObj.id)
+          }
+        };
+      } else if (planObj) {
+        const foundPlan: any = await dynamicDb.Plan.findById(planObj).lean();
+        return {
+          ...s,
+          id: String(s._id || s.id),
+          plan: foundPlan ? {
+            ...foundPlan,
+            id: String(foundPlan._id || foundPlan.id)
+          } : null
+        };
+      }
+      return {
+        ...s,
+        id: String(s._id || s.id),
+        plan: null
+      };
     }));
 
     return res.status(200).json({ success: true, data: formatted });

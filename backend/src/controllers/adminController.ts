@@ -11,6 +11,7 @@ import archiver = require('archiver');
 import fs from 'fs';
 import path from 'path';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
+import { resolveAttachmentFilePath, generateTermsAndConditionsPdf, generatePrivacyPolicyPdf, generateInternalPolicyPdf } from '../services/pdfService';
 import axios from 'axios';
 
 const maskEmail = (email: string | null | undefined) => {
@@ -2047,12 +2048,49 @@ export const restoreClient = async (req: AuthenticatedRequest, res: Response) =>
 // PLAN CATEGORY MANAGEMENT
 // =====================================================
 
+const getRelatedTenantIds = async (tenantId?: string | null, userId?: string | null): Promise<mongoose.Types.ObjectId[]> => {
+  const ids = new Set<string>();
+  if (tenantId) ids.add(String(tenantId));
+
+  if (userId) {
+    const clientDoc: any = await dynamicDb.Client.findOne({ userId }).lean();
+    if (clientDoc?.tenantId) ids.add(String(clientDoc.tenantId));
+    const userDoc: any = await dynamicDb.User.findById(userId).lean();
+    if (userDoc?.tenantId) ids.add(String(userDoc.tenantId));
+  }
+
+  const allTenants: any[] = await centralModels.Tenant.find({ deletedAt: null }).lean().catch(() => []);
+  const allCompanies: any[] = await centralModels.AllCompany.find({ deletedAt: null }).lean().catch(() => []);
+
+  allTenants.forEach((t: any) => {
+    if (t._id) ids.add(String(t._id));
+    if (t.id) ids.add(String(t.id));
+    if (t.tenantId) ids.add(String(t.tenantId));
+  });
+
+  allCompanies.forEach((c: any) => {
+    if (c._id) ids.add(String(c._id));
+    if (c.id) ids.add(String(c.id));
+    if (c.tenantId) ids.add(String(c.tenantId));
+  });
+
+  return Array.from(ids)
+    .filter(id => mongoose.Types.ObjectId.isValid(id))
+    .map(id => new mongoose.Types.ObjectId(id));
+};
+
 export const getAdminCategories = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const rawCategories = await dynamicDb.PlanCategory.find({ tenantId })
+    const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+    const rawCategories = await dynamicDb.PlanCategory.find({
+      $or: [
+        { tenantId: { $in: relatedTenantIds } },
+        { tenantId: null }
+      ]
+    })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -2158,7 +2196,14 @@ export const getAdminPlans = async (req: AuthenticatedRequest, res: Response) =>
 
   try {
     const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN' || req.user!.role === 'RESEARCHER';
-    let filterQuery: any = { tenantId, deletedAt: null };
+    const relatedTenantIds = await getRelatedTenantIds(tenantId, req.user?.id);
+    let filterQuery: any = {
+      $or: [
+        { tenantId: { $in: relatedTenantIds } },
+        { tenantId: null }
+      ],
+      deletedAt: null
+    };
 
     if (!isFullAdmin) {
       const userRole = await dynamicDb.Role.findOne({ name: req.user!.role }).lean();
@@ -3671,3 +3716,66 @@ export const getClientCommunications = async (req: AuthenticatedRequest, res: Re
     return res.status(500).json({ success: false, errors: [error.message] });
   }
 };
+
+export const previewPolicyPdf = async (req: any, res: any) => {
+  try {
+    const { type } = req.params;
+    const tenantId = req.user?.tenantId || req.tenantId || req.query.tenantId;
+
+    let tenant: any = null;
+    if (tenantId) {
+      if (mongoose.Types.ObjectId.isValid(tenantId)) {
+        tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+      }
+      if (!tenant) {
+        tenant = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+      }
+    }
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    let filePath: string | null = null;
+    let fallbackGenerator: ((t: any) => Promise<Buffer>) | null = null;
+    let defaultFilename = 'document.pdf';
+
+    const normalizedType = String(type || '').toLowerCase();
+
+    if (normalizedType === 'terms' || normalizedType === 'terms-conditions' || normalizedType === 'terms-and-conditions') {
+      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
+      filePath = resolveAttachmentFilePath(tenant?.termsPdfUrl);
+      fallbackGenerator = generateTermsAndConditionsPdf;
+    } else if (normalizedType === 'privacy' || normalizedType === 'privacy-policy') {
+      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
+      filePath = resolveAttachmentFilePath(tenant?.privacyPdfUrl);
+      fallbackGenerator = generatePrivacyPolicyPdf;
+    } else if (normalizedType === 'internal-policy' || normalizedType === 'policy' || normalizedType === 'internal') {
+      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
+      filePath = resolveAttachmentFilePath(tenant?.internalPolicyUrl);
+      fallbackGenerator = generateInternalPolicyPdf;
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid policy type. Use terms, privacy, or internal-policy' });
+    }
+
+    if (filePath && fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${defaultFilename}"`);
+      return fs.createReadStream(filePath).pipe(res);
+    }
+
+    if (fallbackGenerator) {
+      const pdfBuffer = await fallbackGenerator(tenant);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${defaultFilename}"`);
+      return res.send(pdfBuffer);
+    }
+
+    return res.status(404).json({ success: false, message: 'Policy PDF not found' });
+  } catch (error: any) {
+    console.error('[PREVIEW-POLICY-PDF] Error:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, message: error.message || 'Failed to preview policy PDF' });
+    }
+  }
+};
+

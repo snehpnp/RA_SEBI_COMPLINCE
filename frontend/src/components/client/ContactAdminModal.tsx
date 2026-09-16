@@ -116,10 +116,10 @@ export default function ContactAdminModal({
               </div>
               <div className="space-y-1 text-xs leading-relaxed">
                 <p className="font-semibold text-premium-text">
-                  Is plan ko buy karne ke liye kripya Administrator se contact karein.
+                  {customMessage || 'Please contact the Administrator to subscribe to this plan.'}
                 </p>
                 <p className="text-premium-text/70">
-                  Aapke contact karne ke baad Administrator yeh plan aapke account par directly assign aur activate kar denge.
+                  Once you get in touch, the Administrator will directly assign and activate this plan on your account.
                 </p>
               </div>
             </div>
@@ -146,7 +146,7 @@ export default function ContactAdminModal({
             onClick={onClose}
             className="w-full py-3 bg-premium-primary hover:bg-premium-primary/90 text-white rounded-xl font-bold text-sm transition-all shadow-[0_0_15px_var(--tw-colors-premium-primary)] flex items-center justify-center gap-2"
           >
-            <CheckCircle2 className="w-4 h-4" /> Theek Hai / Okay
+            <CheckCircle2 className="w-4 h-4" /> Okay
           </button>
         </div>
 
