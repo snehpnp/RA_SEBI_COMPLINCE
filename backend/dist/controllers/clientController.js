@@ -1033,23 +1033,19 @@ const uploadClientDocument = async (req, res) => {
 };
 exports.uploadClientDocument = uploadClientDocument;
 const downloadInvoice = async (req, res) => {
-    const { paymentId } = req.params;
+    const paymentId = req.params.id || req.params.paymentId;
     try {
-        const payment = await db_1.default.Payment.findById(paymentId)
-            .populate('clientId')
-            .populate('planId')
-            .lean();
-        if (!payment) {
-            return res.status(404).json({ success: false, message: 'Payment record not found' });
+        if (!paymentId) {
+            return res.status(400).json({ success: false, message: 'Payment ID is required' });
         }
-        const pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(payment);
+        const pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(paymentId);
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="Invoice_${payment.transactionRef}.pdf"`);
+        res.setHeader('Content-Disposition', `attachment; filename="Invoice_${paymentId}.pdf"`);
         return res.send(pdfBuffer);
     }
     catch (error) {
         console.error("Download Invoice Error:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(404).json({ success: false, message: error.message || 'Invoice record not found' });
     }
 };
 exports.downloadInvoice = downloadInvoice;

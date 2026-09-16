@@ -62,8 +62,18 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
   next();
 });
 
-// Serve Uploads as Static Folder
+// Serve Uploads as Static Folder (multi-root)
 app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
+app.use('/uploads', express.static(path.resolve(process.cwd(), '../uploads')));
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+app.use('/uploads', express.static('A:/RA_SEBI_COMPLINCE/uploads'));
+app.use('/uploads', express.static('A:/RA_SEBI_COMPLINCE/backend/uploads'));
+
+// Fallback for /uploads that are missing statically: forward to the robust /api/v1/download handler
+app.use('/uploads', (req: express.Request, res: express.Response) => {
+  const targetPath = `/uploads${req.path}`;
+  res.redirect(`/api/v1/download?path=${encodeURIComponent(targetPath)}`);
+});
 
 import tenantResolverMiddleware from './middlewares/tenantResolver';
 

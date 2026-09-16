@@ -11,6 +11,7 @@ import archiver = require('archiver');
 import fs from 'fs';
 import path from 'path';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
+import { resolveAttachmentFilePath, generateTermsAndConditionsPdf, generatePrivacyPolicyPdf, generateInternalPolicyPdf } from '../services/pdfService';
 import axios from 'axios';
 
 const maskEmail = (email: string | null | undefined) => {
@@ -3715,3 +3716,66 @@ export const getClientCommunications = async (req: AuthenticatedRequest, res: Re
     return res.status(500).json({ success: false, errors: [error.message] });
   }
 };
+
+export const previewPolicyPdf = async (req: any, res: any) => {
+  try {
+    const { type } = req.params;
+    const tenantId = req.user?.tenantId || req.tenantId || req.query.tenantId;
+
+    let tenant: any = null;
+    if (tenantId) {
+      if (mongoose.Types.ObjectId.isValid(tenantId)) {
+        tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+      }
+      if (!tenant) {
+        tenant = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+      }
+    }
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    let filePath: string | null = null;
+    let fallbackGenerator: ((t: any) => Promise<Buffer>) | null = null;
+    let defaultFilename = 'document.pdf';
+
+    const normalizedType = String(type || '').toLowerCase();
+
+    if (normalizedType === 'terms' || normalizedType === 'terms-conditions' || normalizedType === 'terms-and-conditions') {
+      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
+      filePath = resolveAttachmentFilePath(tenant?.termsPdfUrl);
+      fallbackGenerator = generateTermsAndConditionsPdf;
+    } else if (normalizedType === 'privacy' || normalizedType === 'privacy-policy') {
+      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
+      filePath = resolveAttachmentFilePath(tenant?.privacyPdfUrl);
+      fallbackGenerator = generatePrivacyPolicyPdf;
+    } else if (normalizedType === 'internal-policy' || normalizedType === 'policy' || normalizedType === 'internal') {
+      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
+      filePath = resolveAttachmentFilePath(tenant?.internalPolicyUrl);
+      fallbackGenerator = generateInternalPolicyPdf;
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid policy type. Use terms, privacy, or internal-policy' });
+    }
+
+    if (filePath && fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${defaultFilename}"`);
+      return fs.createReadStream(filePath).pipe(res);
+    }
+
+    if (fallbackGenerator) {
+      const pdfBuffer = await fallbackGenerator(tenant);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${defaultFilename}"`);
+      return res.send(pdfBuffer);
+    }
+
+    return res.status(404).json({ success: false, message: 'Policy PDF not found' });
+  } catch (error: any) {
+    console.error('[PREVIEW-POLICY-PDF] Error:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, message: error.message || 'Failed to preview policy PDF' });
+    }
+  }
+};
+

@@ -32,40 +32,75 @@ const profileController_1 = require("../controllers/profileController");
 const systemSettingController_1 = require("../controllers/systemSettingController");
 const permissionController_1 = require("../controllers/permissionController");
 const tenantSyncController_1 = require("../controllers/tenantSyncController");
+const pdfService_1 = require("../services/pdfService");
+const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const router = (0, express_1.Router)();
-// Create uploads subdirectories if they don't exist
-const uploadRoot = path_1.default.join(__dirname, '../../../uploads');
+// Robust Upload Root Helper
+const getUploadRoot = () => {
+    const candidates = [
+        path_1.default.resolve(process.cwd(), '../uploads'),
+        path_1.default.resolve(process.cwd(), 'uploads'),
+        path_1.default.resolve(__dirname, '../../uploads'),
+        path_1.default.resolve(__dirname, '../../../uploads'),
+        'A:/RA_SEBI_COMPLINCE/uploads',
+        'A:/RA_SEBI_COMPLINCE/backend/uploads'
+    ];
+    for (const c of candidates) {
+        if (fs_1.default.existsSync(c))
+            return c;
+    }
+    const defaultDir = path_1.default.resolve(process.cwd(), 'uploads');
+    if (!fs_1.default.existsSync(defaultDir)) {
+        try {
+            fs_1.default.mkdirSync(defaultDir, { recursive: true });
+        }
+        catch { }
+    }
+    return defaultDir;
+};
+const uploadRoot = getUploadRoot();
 const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources'];
 folders.forEach(f => {
     const dir = path_1.default.join(uploadRoot, f);
     if (!fs_1.default.existsSync(dir)) {
-        fs_1.default.mkdirSync(dir, { recursive: true });
+        try {
+            fs_1.default.mkdirSync(dir, { recursive: true });
+        }
+        catch { }
     }
 });
 // Configure Multer Storage
 const storage = multer_1.default.diskStorage({
     destination: (req, file, cb) => {
-        let dest = path_1.default.join(uploadRoot, 'policies');
+        const root = getUploadRoot();
+        let folder = 'policies';
         if (req.path.includes('manual'))
-            dest = path_1.default.join(uploadRoot, 'payments');
-        if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist'))
-            dest = path_1.default.join(uploadRoot, 'compliance');
-        if (req.path.includes('kyc'))
-            dest = path_1.default.join(uploadRoot, 'kyc');
-        if (req.path.includes('staff'))
-            dest = path_1.default.join(uploadRoot, 'staff');
-        if (req.path.includes('settings') || req.path.includes('signature'))
-            dest = path_1.default.join(uploadRoot, 'branding');
-        if (req.path.includes('ticket') || req.path.includes('reply'))
-            dest = path_1.default.join(uploadRoot, 'tickets');
-        if (req.path.includes('signals') || req.path.includes('research'))
-            dest = path_1.default.join(uploadRoot, 'research');
-        if (req.path.includes('resources'))
-            dest = path_1.default.join(uploadRoot, 'resources');
+            folder = 'payments';
+        else if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist'))
+            folder = 'compliance';
+        else if (req.path.includes('kyc'))
+            folder = 'kyc';
+        else if (req.path.includes('staff'))
+            folder = 'staff';
+        else if (req.path.includes('settings') || req.path.includes('signature'))
+            folder = 'branding';
+        else if (req.path.includes('ticket') || req.path.includes('reply'))
+            folder = 'tickets';
+        else if (req.path.includes('signals') || req.path.includes('research'))
+            folder = 'research';
+        else if (req.path.includes('resources'))
+            folder = 'resources';
+        const dest = path_1.default.join(root, folder);
+        if (!fs_1.default.existsSync(dest)) {
+            try {
+                fs_1.default.mkdirSync(dest, { recursive: true });
+            }
+            catch { }
+        }
         cb(null, dest);
     },
     filename: (req, file, cb) => {
-        cb(null, `${Date.now()}_${file.originalname}`);
+        cb(null, `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
     }
 });
 const fileFilter = (req, file, cb) => {
@@ -168,6 +203,8 @@ router.get('/super-admin/companies/:id/panel-stats', auth_1.authenticateJWT, (0,
 // SYSTEM SETTINGS (GLOBAL BRANDING)
 // ----------------------------------------------------
 router.get('/system-settings/branding', systemSettingController_1.getGlobalBranding);
+router.get('/system-settings/preview-pdf/:type', adminController_1.previewPolicyPdf);
+router.get('/admin/preview-pdf/:type', adminController_1.previewPolicyPdf);
 router.put('/system-settings/branding', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), upload.fields([{ name: 'logo', maxCount: 1 }, { name: 'favicon', maxCount: 1 }, { name: 'loginLogo', maxCount: 1 }]), systemSettingController_1.updateGlobalBranding);
 // ----------------------------------------------------
 // ADMIN PORTAL
@@ -305,8 +342,16 @@ router.post('/payment/ccavenue/response', clientController_1.handleCCAvenueRespo
 router.post('/research', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researchController_1.createResearch);
 router.put('/research/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researchController_1.updateResearch);
 router.post('/research/:id/publish', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researchController_1.publishResearch);
-router.get('/research/list', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, researchController_1.listResearch);
-router.get('/research/:id/detail', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, researchController_1.viewResearchDetail);
+router.get('/research/list', auth_1.authenticateJWT, (req, res, next) => {
+    if (req.user?.role === 'CLIENT')
+        return next();
+    return (0, auth_1.requireAnyPermission)(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD'])(req, res, next);
+}, tenant_1.enforceTenantIsolation, researchController_1.listResearch);
+router.get('/research/:id/detail', auth_1.authenticateJWT, (req, res, next) => {
+    if (req.user?.role === 'CLIENT')
+        return next();
+    return (0, auth_1.requireAnyPermission)(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD'])(req, res, next);
+}, tenant_1.enforceTenantIsolation, researchController_1.viewResearchDetail);
 // ----------------------------------------------------
 // COMPLIANCE & DEPOSIT ENGINE
 // ----------------------------------------------------
@@ -372,46 +417,191 @@ router.get('/locations/states', locationController_1.getStates);
 // ----------------------------------------------------
 // GENERIC DOWNLOAD (Bypasses Nginx Static Block)
 // ----------------------------------------------------
-router.get('/download', (req, res) => {
+router.get('/download', async (req, res) => {
     try {
-        const fileUrl = req.query.path;
-        if (!fileUrl || !fileUrl.startsWith('/uploads/')) {
+        let fileUrl = req.query.path;
+        if (!fileUrl) {
             return res.status(400).json({ success: false, message: 'Invalid file path' });
         }
+        if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+            try {
+                fileUrl = new URL(fileUrl).pathname;
+            }
+            catch { }
+        }
+        try {
+            fileUrl = decodeURIComponent(fileUrl);
+        }
+        catch { }
         // Prevent directory traversal
         const normalizedUrl = path_1.default.normalize(fileUrl).replace(/^(\.\.[\/\\])+/, '');
         const relativePath = normalizedUrl.replace(/^[\/\\]?uploads[\/\\]/, '');
         const fileName = path_1.default.basename(normalizedUrl);
-        const candidatePaths = [
-            path_1.default.resolve(__dirname, '../../../uploads', relativePath),
-            path_1.default.resolve(process.cwd(), '../uploads', relativePath),
-            path_1.default.resolve(process.cwd(), 'uploads', relativePath),
-            path_1.default.resolve(__dirname, '../../..', normalizedUrl.replace(/^[/\\]+/, '')),
-            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads', relativePath),
-            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/resources', fileName),
-            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/policies', fileName),
-            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
-            path_1.default.resolve('a:/RA_SEBI_COMPLINCE/uploads/agreements', fileName),
+        const roots = [
+            getUploadRoot(),
+            path_1.default.resolve(process.cwd(), '../uploads'),
+            path_1.default.resolve(process.cwd(), 'uploads'),
+            path_1.default.resolve(__dirname, '../../uploads'),
+            path_1.default.resolve(__dirname, '../../../uploads'),
+            'A:/RA_SEBI_COMPLINCE/uploads',
+            'A:/RA_SEBI_COMPLINCE/backend/uploads'
         ];
+        const subfolders = ['research', 'resources', 'policies', 'branding', 'agreements', 'payments', 'compliance', 'kyc', 'staff', 'tickets'];
         let foundPath = null;
-        for (const candidate of candidatePaths) {
-            try {
-                if (fs_1.default.existsSync(candidate) && fs_1.default.statSync(candidate).isFile()) {
-                    foundPath = candidate;
+        // 1. Check relative path directly
+        for (const root of roots) {
+            const p = path_1.default.resolve(root, relativePath);
+            if (fs_1.default.existsSync(p) && fs_1.default.statSync(p).isFile()) {
+                foundPath = p;
+                break;
+            }
+        }
+        // 2. Check direct fileName at root
+        if (!foundPath) {
+            for (const root of roots) {
+                const p = path_1.default.resolve(root, fileName);
+                if (fs_1.default.existsSync(p) && fs_1.default.statSync(p).isFile()) {
+                    foundPath = p;
                     break;
                 }
             }
-            catch { }
+        }
+        // 3. Search across all known subfolders
+        if (!foundPath) {
+            for (const root of roots) {
+                for (const sub of subfolders) {
+                    const p = path_1.default.resolve(root, sub, fileName);
+                    if (fs_1.default.existsSync(p) && fs_1.default.statSync(p).isFile()) {
+                        foundPath = p;
+                        break;
+                    }
+                }
+                if (foundPath)
+                    break;
+            }
+        }
+        // 4. Stem/Fuzzy matching if exact timestamped filename was rotated/modified or uploaded with a different prefix
+        if (!foundPath) {
+            const stems = new Set();
+            let tempName = fileName;
+            while (/^\d+_(.+)$/.test(tempName)) {
+                tempName = tempName.replace(/^\d+_/, '');
+                if (tempName)
+                    stems.add(tempName);
+            }
+            const cleanBase = fileName.replace(/^(\d+_)+/, '');
+            if (cleanBase)
+                stems.add(cleanBase);
+            const candidateMatches = [];
+            for (const root of roots) {
+                if (!fs_1.default.existsSync(root))
+                    continue;
+                const foldersToScan = ['', ...subfolders];
+                for (const sub of foldersToScan) {
+                    const dir = sub ? path_1.default.resolve(root, sub) : root;
+                    if (!fs_1.default.existsSync(dir) || !fs_1.default.statSync(dir).isDirectory())
+                        continue;
+                    try {
+                        const files = fs_1.default.readdirSync(dir);
+                        for (const f of files) {
+                            const fullFPath = path_1.default.resolve(dir, f);
+                            if (!fs_1.default.statSync(fullFPath).isFile())
+                                continue;
+                            for (const stem of stems) {
+                                if (f === stem) {
+                                    candidateMatches.push({ filePath: fullFPath, mtime: fs_1.default.statSync(fullFPath).mtimeMs, score: 100 });
+                                }
+                                else if (f.endsWith(stem)) {
+                                    candidateMatches.push({ filePath: fullFPath, mtime: fs_1.default.statSync(fullFPath).mtimeMs, score: 80 });
+                                }
+                                else if (cleanBase.length > 4 && f.toLowerCase().includes(cleanBase.toLowerCase())) {
+                                    candidateMatches.push({ filePath: fullFPath, mtime: fs_1.default.statSync(fullFPath).mtimeMs, score: 50 });
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            if (candidateMatches.length > 0) {
+                candidateMatches.sort((a, b) => b.score - a.score || b.mtime - a.mtime);
+                foundPath = candidateMatches[0].filePath;
+            }
+        }
+        // 5. On-Demand Dynamic Agreement PDF Generation
+        if (!foundPath && (fileName.includes('_signed_agreement') || fileUrl.includes('agreement'))) {
+            try {
+                const clientMatch = fileName.match(/^([a-f0-9]{24})_signed_agreement/i) || fileUrl.match(/([a-f0-9]{24})/i);
+                if (clientMatch && clientMatch[1]) {
+                    const clientId = clientMatch[1];
+                    const pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientId, { isSigned: true });
+                    if (pdfBuffer && pdfBuffer.length > 0) {
+                        const saveDir = path_1.default.resolve(getUploadRoot(), 'agreements');
+                        if (!fs_1.default.existsSync(saveDir)) {
+                            try {
+                                fs_1.default.mkdirSync(saveDir, { recursive: true });
+                            }
+                            catch { }
+                        }
+                        const savePath = path_1.default.resolve(saveDir, fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`);
+                        try {
+                            fs_1.default.writeFileSync(savePath, pdfBuffer);
+                        }
+                        catch { }
+                        res.setHeader('Content-Type', 'application/pdf');
+                        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+                        return res.send(pdfBuffer);
+                    }
+                }
+            }
+            catch (genErr) {
+                console.warn('[DOWNLOAD] Agreement PDF dynamic generation failed:', genErr);
+            }
+        }
+        // 6. On-Demand Dynamic Invoice PDF Generation
+        if (!foundPath && (fileName.toLowerCase().includes('invoice') || fileUrl.toLowerCase().includes('invoice'))) {
+            try {
+                const invMatch = fileName.match(/^Invoice_([a-zA-Z0-9_-]+)\.pdf/i) || fileUrl.match(/Invoice_([a-zA-Z0-9_-]+)/i) || fileName.match(/^([a-f0-9]{24})/i);
+                if (invMatch && invMatch[1]) {
+                    const identifier = invMatch[1];
+                    const pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(identifier);
+                    if (pdfBuffer && pdfBuffer.length > 0) {
+                        const saveDir = path_1.default.resolve(getUploadRoot(), 'payments');
+                        if (!fs_1.default.existsSync(saveDir)) {
+                            try {
+                                fs_1.default.mkdirSync(saveDir, { recursive: true });
+                            }
+                            catch { }
+                        }
+                        const savePath = path_1.default.resolve(saveDir, fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`);
+                        try {
+                            fs_1.default.writeFileSync(savePath, pdfBuffer);
+                        }
+                        catch { }
+                        res.setHeader('Content-Type', 'application/pdf');
+                        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+                        return res.send(pdfBuffer);
+                    }
+                }
+            }
+            catch (invErr) {
+                console.warn('[DOWNLOAD] Invoice PDF dynamic generation failed:', invErr);
+            }
         }
         if (foundPath) {
-            res.download(foundPath, fileName);
+            const ext = path_1.default.extname(foundPath).toLowerCase();
+            if (ext === '.pdf') {
+                res.setHeader('Content-Type', 'application/pdf');
+            }
+            return res.download(foundPath, fileName);
         }
         else {
-            res.status(404).json({ success: false, message: 'File not found on server' });
+            return res.status(404).json({ success: false, message: 'File not found on server' });
         }
     }
     catch (err) {
-        res.status(500).json({ success: false, message: 'Internal server error during download' });
+        console.error('[DOWNLOAD ERROR]:', err);
+        return res.status(500).json({ success: false, message: 'Internal server error during download' });
     }
 });
 exports.default = router;

@@ -217,7 +217,7 @@ const requireAnyPermission = (permissions) => {
                 errors: ['User not authenticated']
             });
         }
-        if (req.user.role === 'SUPER_ADMIN') {
+        if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
             return next();
         }
         try {

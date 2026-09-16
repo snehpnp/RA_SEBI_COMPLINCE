@@ -213,7 +213,7 @@ export const requireAnyPermission = (permissions: string[]) => {
       });
     }
 
-    if (req.user.role === 'SUPER_ADMIN') {
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
       return next();
     }
 

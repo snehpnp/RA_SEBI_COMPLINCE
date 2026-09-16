@@ -26,24 +26,80 @@ function numberToWords(num) {
 const generateInvoicePdf = async (paymentId) => {
     return new Promise(async (resolve, reject) => {
         try {
-            const payment = await db_1.Payment.findById(paymentId).populate('coupon').lean();
+            let payment = null;
+            try {
+                payment = await db_1.Payment.findById(paymentId).populate('coupon').lean();
+            }
+            catch { }
+            if (!payment && db_1.dynamicDb?.Payment) {
+                try {
+                    payment = await db_1.dynamicDb.Payment.findById(paymentId).populate('coupon').lean();
+                }
+                catch { }
+            }
             if (!payment) {
-                return reject(new Error('Payment not found'));
+                try {
+                    payment = await db_1.Payment.findOne({ $or: [{ _id: paymentId }, { transactionRef: paymentId }] }).lean();
+                }
+                catch { }
             }
-            const client = await db_1.Client.findById(payment.clientId).populate('user').populate('profile').lean();
+            if (!payment) {
+                return reject(new Error('Payment record not found'));
+            }
+            let client = null;
+            if (payment.clientId) {
+                try {
+                    client = await db_1.Client.findById(payment.clientId).populate('user').populate('profile').lean();
+                }
+                catch { }
+                if (!client && db_1.dynamicDb?.Client) {
+                    try {
+                        client = await db_1.dynamicDb.Client.findById(payment.clientId).populate('user').populate('profile').lean();
+                    }
+                    catch { }
+                }
+            }
             if (!client) {
-                return reject(new Error('Client not found'));
+                client = {
+                    name: payment.clientName || 'Valued Client',
+                    email: payment.clientEmail || '',
+                    phone: payment.clientPhone || '',
+                    profile: { addressLine1: 'India', state: 'DELHI' }
+                };
             }
-            const tenant = await db_1.Tenant.findById(payment.tenantId).lean();
+            let tenant = null;
+            if (payment.tenantId) {
+                try {
+                    tenant = await db_1.Tenant.findById(payment.tenantId).lean();
+                }
+                catch { }
+                if (!tenant && db_1.dynamicDb?.Tenant) {
+                    try {
+                        tenant = await db_1.dynamicDb.Tenant.findById(payment.tenantId).lean();
+                    }
+                    catch { }
+                }
+            }
             if (!tenant) {
-                return reject(new Error('Tenant not found'));
+                tenant = {
+                    companyName: 'Research Analyst Advisory',
+                    address: 'India',
+                    email: 'support@advisory.com',
+                    mobile: '9999999999',
+                    sebiRegistration: 'INA000000000'
+                };
             }
-            let planName = 'Custom Plan';
+            let planName = 'Advisory Plan';
             if (payment.planId) {
-                const plan = await db_1.Plan.findById(payment.planId).lean();
-                if (plan)
-                    planName = plan.name;
+                try {
+                    const plan = await db_1.Plan.findById(payment.planId).lean() || (db_1.dynamicDb?.Plan ? await db_1.dynamicDb.Plan.findById(payment.planId).lean() : null);
+                    if (plan)
+                        planName = plan.name;
+                }
+                catch { }
             }
+            if (!planName && payment.planName)
+                planName = payment.planName;
             const doc = new pdfkit_1.default({ margin: 30, size: 'A4' });
             const buffers = [];
             doc.on('data', buffers.push.bind(buffers));

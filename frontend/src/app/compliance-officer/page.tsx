@@ -57,7 +57,7 @@ import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -783,6 +783,16 @@ function AdminDashboardContent() {
   const [coNism, setCoNism] = useState('');
 
   const [policyUrl, setPolicyUrl] = useState('');
+  const [termsPdfUrl, setTermsPdfUrl] = useState('');
+  const [privacyPdfUrl, setPrivacyPdfUrl] = useState('');
+  const [pdfPreviewModal, setPdfPreviewModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    url: string;
+    badgeText: string;
+    downloadFilename?: string;
+  } | null>(null);
+  const [copiedVariable, setCopiedVariable] = useState<string | null>(null);
   const [gstCalculationType, setGstCalculationType] = useState('EXCLUSIVE');
   const [tenantState, setTenantState] = useState('');
   const [kycFirst, setKycFirst] = useState(true);
@@ -941,6 +951,77 @@ function AdminDashboardContent() {
     return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
   };
 
+  const AGREEMENT_VARIABLES = [
+    { key: '{{CLIENT_NAME}}', label: 'Client Full Name' },
+    { key: '{{CLIENT_EMAIL}}', label: 'Client Email' },
+    { key: '{{CLIENT_MOBILE}}', label: 'Mobile Number' },
+    { key: '{{PAN_NUMBER}}', label: 'PAN Number' },
+    { key: '{{AADHAAR_NUMBER}}', label: 'Aadhaar Number' },
+    { key: '{{CLIENT_ADDRESS}}', label: 'Client Address' },
+    { key: '{{COMPANY_NAME}}', label: 'Company Name' },
+    { key: '{{COMPANY_ADDRESS}}', label: 'Company Address' },
+    { key: '{{SEBI_REGISTRATION}}', label: 'SEBI Reg. No.' },
+    { key: '{{DATE}}', label: 'Agreement Date' },
+  ];
+
+  const handleCopyVariable = (variableKey: string, variableLabel?: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(variableKey);
+      setCopiedVariable(variableKey);
+      toast.success(`Copied ${variableKey} (${variableLabel || 'variable'}) to clipboard!`);
+      setTimeout(() => setCopiedVariable(null), 2000);
+    }
+  };
+
+  const openPdfPreview = (
+    docType: 'terms' | 'privacy' | 'internal',
+    title: string,
+    fileObj: any,
+    savedUrl: string
+  ) => {
+    let previewUrl = '';
+    let badge = 'Default SEBI Template';
+    let defaultFilename = `${docType}_document.pdf`;
+
+    if (fileObj) {
+      previewUrl = URL.createObjectURL(fileObj);
+      badge = 'New File (Ready to save)';
+      defaultFilename = fileObj.name || `${docType}.pdf`;
+    } else if (savedUrl) {
+      previewUrl = getFullUrl(savedUrl);
+      badge = 'Custom Uploaded Document';
+      defaultFilename = savedUrl.split('/').pop() || `${docType}.pdf`;
+    } else {
+      const typeParam = docType === 'terms' ? 'terms' : docType === 'privacy' ? 'privacy' : 'internal-policy';
+      previewUrl = `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}/api/v1/system-settings/preview-pdf/${typeParam}`;
+      badge = 'Default SEBI Template';
+      defaultFilename = `SEBI_${docType}_Policy.pdf`;
+    }
+
+    setPdfPreviewModal({
+      isOpen: true,
+      title,
+      url: previewUrl,
+      badgeText: badge,
+      downloadFilename: defaultFilename
+    });
+  };
+
+  const getPdfDirectUrl = (
+    docType: 'terms' | 'privacy' | 'internal',
+    fileObj: any,
+    savedUrl: string
+  ) => {
+    if (fileObj) {
+      return URL.createObjectURL(fileObj);
+    }
+    if (savedUrl) {
+      return getFullUrl(savedUrl);
+    }
+    const typeParam = docType === 'terms' ? 'terms' : docType === 'privacy' ? 'privacy' : 'internal-policy';
+    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}/api/v1/system-settings/preview-pdf/${typeParam}`;
+  };
+
   const handleDownloadCSV = (type: string) => {
     let dataToExport: any[] = [];
     let filename = `${type}.csv`;
@@ -1022,6 +1103,8 @@ function AdminDashboardContent() {
               if (t.mobile) setOrgMobile(t.mobile);
               if (t.gst) setOrgGst(t.gst);
               if (t.internalPolicyUrl) setPolicyUrl(t.internalPolicyUrl);
+              if (t.termsPdfUrl) setTermsPdfUrl(t.termsPdfUrl);
+              if (t.privacyPdfUrl) setPrivacyPdfUrl(t.privacyPdfUrl);
               if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
@@ -6822,7 +6905,7 @@ function AdminDashboardContent() {
                                               <div className="text-[10px] text-slate-500 dark:text-slate-500">Signed on {new Date(agr.signedAt).toLocaleDateString('en-IN')} via {agr.esignMode}</div>
                                             </div>
                                             <a
-                                              href={`${api.getBaseUrl()}${agr.agreementUrl}`}
+                                              href={api.getDownloadUrl(agr.agreementUrl)}
                                               target="_blank"
                                               rel="noreferrer"
                                               className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
@@ -7326,32 +7409,206 @@ function AdminDashboardContent() {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Terms & Conditions PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setTermsPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
+                              {/* Terms & Conditions PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Terms & Conditions PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      termsPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : termsPdfUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {termsPdf ? '● New File Selected' : termsPdfUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Sent automatically to client in the Welcome Email upon onboarding.
+                                  </p>
+
+                                  <div className="space-y-3">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setTermsPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('terms', 'Terms & Conditions PDF', termsPdf, termsPdfUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Terms PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('terms', termsPdf, termsPdfUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Privacy Policy PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setPrivacyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
+
+                              {/* Privacy Policy PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Privacy Policy PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      privacyPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : privacyPdfUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {privacyPdf ? '● New File Selected' : privacyPdfUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Sent automatically to client in the Welcome Email upon onboarding.
+                                  </p>
+
+                                  <div className="space-y-3">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setPrivacyPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('privacy', 'Privacy Policy PDF', privacyPdf, privacyPdfUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Privacy PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('privacy', privacyPdf, privacyPdfUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5 md:col-span-2">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Internal Policy PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Written internal policies & controls for SEBI compliance. Not visible to clients.</p>
+
+                              {/* Internal Policy PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all md:col-span-2">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Internal Policy PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      internalPolicyPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : policyUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {internalPolicyPdf ? '● New File Selected' : policyUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Written internal supervisory policies & controls for SEBI compliance audit trail. Not visible to clients.
+                                  </p>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('internal', 'Internal Policy PDF', internalPolicyPdf, policyUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2.5 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Internal Policy PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('internal', internalPolicyPdf, policyUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
 
-                            <div className="border-t border-slate-400 dark:border-white/10 pt-6 space-y-6">
+                            <div className="border-t border-slate-300 dark:border-white/10 pt-6 space-y-6">
                               <div>
-                                <div className="flex justify-between items-center mb-1">
-                                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Service Agreement Content</label>
-                                  <span className="text-[10px] bg-primary-100 text-primary-700 px-2 py-1 rounded">Supports Variables</span>
+                                <div className="flex justify-between items-center mb-2">
+                                  <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                    Service Agreement Content
+                                  </label>
+                                  <span className="text-[10px] bg-primary-100 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 px-2.5 py-1 rounded-full font-bold border border-primary-200 dark:border-primary-800/60">
+                                    Supports Dynamic Variables
+                                  </span>
                                 </div>
-                                <p className="text-[11px] text-slate-500 mb-2">
-                                  Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
-                                </p>
+                                <div className="bg-slate-50 dark:bg-slate-900/60 p-3.5 rounded-xl border border-slate-200 dark:border-white/5 mb-3">
+                                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                                    <span>Click any variable below to copy it with one click:</span>
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {AGREEMENT_VARIABLES.map(v => {
+                                      const isCopied = copiedVariable === v.key;
+                                      return (
+                                        <button
+                                          key={v.key}
+                                          type="button"
+                                          onClick={() => handleCopyVariable(v.key, v.label)}
+                                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all duration-150 border cursor-pointer ${
+                                            isCopied
+                                              ? 'bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-300 shadow-sm'
+                                              : 'bg-white hover:bg-primary-50 dark:bg-slate-800 dark:hover:bg-primary-950/40 border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600 text-slate-700 dark:text-slate-200 hover:text-primary-700 dark:hover:text-primary-300'
+                                          }`}
+                                          title={`Click to copy ${v.key} (${v.label})`}
+                                        >
+                                          {isCopied ? (
+                                            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                          ) : (
+                                            <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors" />
+                                          )}
+                                          <span className="font-semibold">{v.key}</span>
+                                          <span className="text-[10px] text-slate-400 font-sans group-hover:text-primary-500">
+                                            {isCopied ? 'Copied!' : `(${v.label})`}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                                 <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
                                   {ClassicEditor ? (
                                     <CKEditor
@@ -8814,6 +9071,63 @@ function AdminDashboardContent() {
                   </div>
                 )}
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* PDF Preview Modal */}
+        {pdfPreviewModal?.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-5xl h-[92vh] rounded-3xl shadow-2xl border border-slate-200 dark:border-white/10 flex flex-col overflow-hidden animate-fade-in-up">
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 rounded-xl">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {pdfPreviewModal.title}
+                      </h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/60 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-700">
+                        {pdfPreviewModal.badgeText}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Live document view with official compliance headers and formatting
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={pdfPreviewModal.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setPdfPreviewModal(null)}
+                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF View Container */}
+              <div className="flex-1 bg-slate-100 dark:bg-slate-950 p-2 sm:p-4 overflow-hidden">
+                <iframe
+                  src={pdfPreviewModal.url}
+                  className="w-full h-full rounded-2xl border border-slate-300 dark:border-slate-800 shadow-inner bg-white"
+                  title={pdfPreviewModal.title}
+                />
+              </div>
             </div>
           </div>
         )}

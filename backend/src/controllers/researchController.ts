@@ -217,26 +217,27 @@ export const listResearch = async (req: AuthenticatedRequest, res: Response) => 
 
     // Strict Client Subscription and Web-only View Rules
     if (userRole === 'CLIENT') {
-      const client = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
-      if (!client || client.status !== 'ACTIVE') {
-        return res.status(403).json({
-          success: false,
-          message: 'Access Restricted',
-          errors: ['You must have an active subscription to access research recommendations.']
-        });
+      const client: any = await dynamicDb.Client.findOne({
+        $or: [{ userId: req.user!.id }, { _id: req.user!.id }, { email: req.user!.email }]
+      }).lean();
+
+      if (!client) {
+        return res.status(200).json({ success: true, data: [] });
       }
 
+      const clientId = client._id || client.id;
       // Filter only published reports matching the segment access from the active plan
       const activeSub: any = await dynamicDb.Subscription.findOne({
-        clientId: client._id,
+        $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }],
         status: 'ACTIVE'
-      }).populate('plan').lean();
+      }).populate('plan').populate('planId').lean();
 
       if (!activeSub) {
-        return res.status(403).json({
-          success: false,
-          message: 'Access Restricted',
-          errors: ['No active subscription found.']
+        return res.status(200).json({
+          success: true,
+          data: [],
+          requiresSubscription: true,
+          message: 'You must have an active subscription to access research recommendations.'
         });
       }
 
@@ -278,9 +279,22 @@ export const viewResearchDetail = async (req: AuthenticatedRequest, res: Respons
 
     // Client verification
     if (userRole === 'CLIENT') {
-      const client = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
-      if (!client || client.status !== 'ACTIVE') {
-        return res.status(403).json({ success: false, message: 'Active subscription required.' });
+      const client: any = await dynamicDb.Client.findOne({
+        $or: [{ userId: req.user!.id }, { _id: req.user!.id }, { email: req.user!.email }]
+      }).lean();
+
+      if (!client) {
+        return res.status(403).json({ success: false, message: 'Client profile not found.' });
+      }
+
+      const clientId = client._id || client.id;
+      const activeSub: any = await dynamicDb.Subscription.findOne({
+        $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }],
+        status: 'ACTIVE'
+      }).lean();
+
+      if (!activeSub) {
+        return res.status(403).json({ success: false, message: 'Active subscription required to view full research recommendation.' });
       }
 
       // Save view analytics
