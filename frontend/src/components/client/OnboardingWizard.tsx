@@ -246,10 +246,25 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 toast.error("Digio KYC Failed or Cancelled");
                 setKraStatus('failed');
               } else {
-                const verifyRes = await api.verifyKRA({ pan, aadhaar });
+                try {
+                  await api.updateDigioStatus({
+                    type: 'KYC',
+                    status: 'COMPLETED',
+                    kycId: res.data.id,
+                    digioResponse: response
+                  });
+                } catch { }
+
+                const verifyRes = await api.verifyKRA({ pan, aadhaar, digioResponse: response });
                 if (verifyRes.success) {
                   setKraStatus('success');
                   toast.success('Demat Account / KYC Verified!');
+                  api.getClientProfile().then((pRes: any) => {
+                    if (pRes.success && pRes.data) {
+                      setProfile(pRes.data);
+                      if (pRes.data.name) setFormData(prev => ({ ...prev, name: pRes.data.name }));
+                    }
+                  }).catch(() => { });
                 } else {
                   toast.error(verifyRes.message || 'Failed to update KRA status');
                   setKraStatus('failed');
@@ -802,9 +817,9 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             </div>
             <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
               <button onClick={handleBack} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm transition-colors">Back</button>
-              <button 
-                onClick={handleNextStep} 
-                disabled={!agreementSigned} 
+              <button
+                onClick={handleNextStep}
+                disabled={!agreementSigned}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-all py-2.5"
               >
                 {allCompleted ? 'Complete Onboarding & Access Dashboard' : 'Continue'}
@@ -823,14 +838,14 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-slate-950/65 backdrop-blur-md animate-in fade-in duration-300">
       {/* Backdrop overlay */}
-      <div 
-        className="fixed inset-0 bg-transparent" 
-        onClick={onClose || onComplete} 
+      <div
+        className="fixed inset-0 bg-transparent"
+        onClick={onClose || onComplete}
       />
 
       {/* Modal Container */}
       <div className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-3xl shadow-[0_25px_70px_rgba(0,0,0,0.4)] relative z-10 flex flex-col md:flex-row min-h-[560px] max-h-[92vh] overflow-hidden my-auto animate-in zoom-in-95 duration-300">
-        
+
         {/* Close Modal X Button */}
         <button
           onClick={onClose || onComplete}
@@ -868,27 +883,25 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 const isDone = isStepComplete(step.id);
 
                 return (
-                  <div 
-                    key={step.id} 
+                  <div
+                    key={step.id}
                     onClick={() => setCurrentStepId(step.id)}
                     className="flex items-start gap-3.5 group cursor-pointer select-none transition-all duration-300"
                   >
                     <div className="relative mt-0.5">
                       {isActive && <div className="absolute inset-0 rounded-full border-2 border-blue-600 dark:border-blue-400 animate-ping opacity-75" />}
-                      <div className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 shadow-sm ${
-                        isActive
-                          ? 'bg-blue-600 text-white scale-110 shadow-md shadow-blue-500/30 ring-2 ring-blue-600/30'
-                          : isDone
-                            ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/20'
-                            : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-400 group-hover:border-blue-500/50'
-                      }`}>
+                      <div className={`relative w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 shadow-sm ${isActive
+                        ? 'bg-blue-600 text-white scale-110 shadow-md shadow-blue-500/30 ring-2 ring-blue-600/30'
+                        : isDone
+                          ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/20'
+                          : 'bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-400 group-hover:border-blue-500/50'
+                        }`}>
                         {isDone && !isActive ? <Check className="w-3.5 h-3.5 text-white" /> : <span className="text-xs font-bold">{idx + 1}</span>}
                       </div>
                     </div>
                     <div className="flex-1">
-                      <p className={`text-xs font-bold transition-colors ${
-                        isActive ? 'text-blue-600 dark:text-blue-400 text-sm' : isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200'
-                      }`}>
+                      <p className={`text-xs font-bold transition-colors ${isActive ? 'text-blue-600 dark:text-blue-400 text-sm' : isDone ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200'
+                        }`}>
                         {step.label}
                       </p>
                       {isActive && (

@@ -38,6 +38,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.getRelatedTenantIds = exports.getResolvedTenant = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
 const auditService_1 = require("../services/auditService");
@@ -260,15 +262,37 @@ const verifyKRA = async (req, res) => {
                 remarks: 'Updated during DigiLocker eKYC verification'
             });
         }
-        const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
-        const updatedClient = await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
-            $set: {
-                pan,
-                ...(aadhaar ? { aadhaar } : {}),
-                status: nextStatus,
-                kraVerified: statusInput !== 'FAIL'
+        let verifiedAadhaarName = '';
+        let verifiedMaskedAadhaar = '';
+        if (req.body.digioResponse) {
+            const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(req.body.digioResponse);
+            if (extracted?.aadhaarName) {
+                verifiedAadhaarName = extracted.aadhaarName;
             }
-        }, { returnDocument: 'after', lean: true });
+            if (extracted?.maskedAadhaar) {
+                verifiedMaskedAadhaar = extracted.maskedAadhaar;
+            }
+        }
+        const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
+        const updateSet = {
+            pan,
+            ...(aadhaar ? { aadhaar } : {}),
+            ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {}),
+            status: nextStatus,
+            kraVerified: statusInput !== 'FAIL'
+        };
+        if (verifiedAadhaarName) {
+            updateSet.name = verifiedAadhaarName;
+            updateSet.panName = verifiedAadhaarName;
+        }
+        const updatedClient = await db_1.default.Client.findByIdAndUpdate(client._id || client.id, { $set: updateSet }, { returnDocument: 'after', lean: true });
+        if (verifiedAadhaarName) {
+            const nameParts = verifiedAadhaarName.split(' ');
+            const firstName = nameParts[0] || '';
+            const lastName = nameParts.slice(1).join(' ') || '';
+            await db_1.default.User.findByIdAndUpdate(req.user.id, { $set: { firstName, lastName } });
+            await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: { panName: verifiedAadhaarName } }, { upsert: true });
+        }
         if (statusInput === 'FAIL') {
             await db_1.default.ComplianceAlert.create({
                 tenantId: tenantId,
@@ -327,20 +351,158 @@ const signAgreement = async (req, res) => {
         const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
         if (!client)
             return res.status(404).json({ success: false, message: 'Client not found' });
-        const agreementUrl = `/uploads/agreements/${client._id || client.id}_signed_agreement.pdf`;
-        const agreement = await db_1.default.Agreement.create({
-            clientId: client._id || client.id,
-            agreementUrl,
-            esignMode: 'MOCK_AADHAAR',
-            ipAddress: req.ip,
-            status: 'SIGNED'
-        });
-        await db_1.default.AgreementHistory.create({
-            agreementId: agreement._id || agreement.id,
-            action: 'SIGNED',
-            performedBy: client.name,
-            ipAddress: req.ip
-        });
+        const clientIdStr = String(client._id || client.id);
+        const fileName = `${clientIdStr}_signed_agreement.pdf`;
+        const agreementUrl = `/uploads/agreements/${fileName}`;
+        const tenantId = req.user.tenantId || client.tenantId;
+        const tenant = tenantId ? await db_1.default.Tenant.findById(tenantId).lean() : null;
+        let verifiedDigioName = '';
+        let verifiedMaskedAadhaar = '';
+        const isGeneric = (n) => {
+            if (!n || typeof n !== 'string')
+                return true;
+            const l = n.toLowerCase().trim();
+            return (l === '' ||
+                l === 'digo' ||
+                l === 'digio' ||
+                l === 'digo client' ||
+                l === 'digio client' ||
+                l === 'digio esign' ||
+                l === 'aadhaar esign' ||
+                l === 'client' ||
+                l === 'test' ||
+                l === 'test user' ||
+                l === 'user' ||
+                l.includes('@'));
+        };
+        console.log('[Digio eSign] Callback received. req.body.documentId:', req.body.documentId, 'digioResponse:', JSON.stringify(req.body.digioResponse || {}));
+        // 1. Extract directly from PKI signature details / Digio response payload
+        if (req.body.digioResponse) {
+            const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(req.body.digioResponse);
+            if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
+                verifiedDigioName = extracted.aadhaarName;
+            }
+            if (extracted?.maskedAadhaar) {
+                verifiedMaskedAadhaar = extracted.maskedAadhaar;
+            }
+        }
+        // 2. If not found in response, query Digio Document Status API for PKI signature details
+        if (!verifiedDigioName && req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
+            try {
+                const docStatus = await (0, digioService_1.getDocumentStatus)(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+                console.log('[Digio eSign] Fetched docStatus:', JSON.stringify(docStatus || {}));
+                if (docStatus) {
+                    const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(docStatus);
+                    if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
+                        verifiedDigioName = extracted.aadhaarName;
+                    }
+                    if (extracted?.maskedAadhaar) {
+                        verifiedMaskedAadhaar = extracted.maskedAadhaar;
+                    }
+                }
+            }
+            catch (docErr) {
+                console.error('[Digio eSign] Error fetching doc status:', docErr.message);
+            }
+        }
+        const passedSig = typeof req.body.signatureText === 'string' ? req.body.signatureText.trim() : '';
+        let signerName = '';
+        if (verifiedDigioName) {
+            signerName = verifiedDigioName;
+        }
+        else if (passedSig && !isGeneric(passedSig)) {
+            signerName = passedSig;
+        }
+        else if (client.panName && !isGeneric(client.panName)) {
+            signerName = client.panName.trim();
+        }
+        else if (client.name && !isGeneric(client.name)) {
+            signerName = client.name.trim();
+        }
+        if (!signerName || isGeneric(signerName)) {
+            signerName = 'Investor / Client';
+        }
+        // If verified Aadhaar PKI signature name obtained from Digio, sync across DB
+        if (verifiedDigioName) {
+            try {
+                const nameParts = verifiedDigioName.split(' ');
+                const firstName = nameParts[0] || '';
+                const lastName = nameParts.slice(1).join(' ') || '';
+                await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
+                    $set: {
+                        name: verifiedDigioName,
+                        panName: verifiedDigioName,
+                        ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {})
+                    }
+                });
+                await db_1.default.User.findByIdAndUpdate(req.user.id, {
+                    $set: { firstName, lastName }
+                });
+                await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: { panName: verifiedDigioName } }, { upsert: true });
+            }
+            catch (syncErr) {
+                console.warn('[Digio eSign] Error syncing profile in DB:', syncErr.message);
+            }
+        }
+        // 1. Generate the official signed PDF with the verified Aadhaar name (pki_signature_details.name) and signature stamp
+        let pdfBuffer = null;
+        try {
+            pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
+                ipAddress: req.ip,
+                signingDate: new Date(),
+                signerName: verifiedDigioName || signerName,
+                aadhaarSuffix: verifiedMaskedAadhaar || undefined,
+                isSigned: true
+            });
+        }
+        catch (pdfErr) {
+            console.error('[Agreement] Error generating agreement PDF:', pdfErr.message);
+        }
+        // 2. Save PDF file to disk for downloads and audit exports
+        if (pdfBuffer) {
+            const targetDirs = [
+                path_1.default.resolve(process.cwd(), 'uploads/agreements'),
+                path_1.default.resolve(__dirname, '../../../uploads/agreements'),
+                path_1.default.resolve(__dirname, '../../public/uploads/agreements')
+            ];
+            for (const dir of targetDirs) {
+                try {
+                    if (!fs_1.default.existsSync(dir)) {
+                        fs_1.default.mkdirSync(dir, { recursive: true });
+                    }
+                    fs_1.default.writeFileSync(path_1.default.join(dir, fileName), pdfBuffer);
+                }
+                catch { }
+            }
+        }
+        // 3. Create Agreement Record
+        let agreement = null;
+        try {
+            agreement = await db_1.default.Agreement.create({
+                clientId: client._id || client.id,
+                agreementUrl,
+                esignMode: 'AADHAAR_ESIGN',
+                ipAddress: req.ip,
+                status: 'SIGNED',
+                signedAt: new Date()
+            });
+        }
+        catch (agrErr) {
+            console.warn('[Digio eSign] Error creating agreement document in DB:', agrErr.message);
+        }
+        if (agreement) {
+            try {
+                await db_1.default.AgreementHistory.create({
+                    agreementId: agreement._id || agreement.id,
+                    action: 'SIGNED',
+                    performedBy: signerName,
+                    ipAddress: req.ip
+                });
+            }
+            catch (histErr) {
+                console.warn('[Digio eSign] Error creating agreement history:', histErr.message);
+            }
+        }
         // Check if client already has an active subscription assigned by admin
         const activeSub = await db_1.default.Subscription.findOne({
             clientId: client._id || client.id,
@@ -356,6 +518,7 @@ const signAgreement = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Agreement signed successfully via Aadhaar eSign.',
+            verifiedName: verifiedDigioName || signerName,
             data: agreement
         });
     }

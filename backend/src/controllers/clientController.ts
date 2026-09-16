@@ -1,13 +1,15 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
+import path from 'path';
+import fs from 'fs';
 import dynamicDb, { centralModels } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { sendWelcomeEmail } from '../services/emailService';
-import { getTenantComplianceAttachments } from '../services/pdfService';
-import { createKycRequest } from '../services/digioService';
+import { generateAgreementPdf, getTenantComplianceAttachments } from '../services/pdfService';
+import { createKycRequest, getKycStatus, getDocumentStatus, extractAadhaarDetailsFromDigio } from '../services/digioService';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
 import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
 import querystring from 'querystring';
@@ -151,7 +153,7 @@ export const registerClient = async (req: Request, res: Response) => {
     });
 
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-    
+
     try {
       const attachments = await getTenantComplianceAttachments(tenant);
 
@@ -184,7 +186,7 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
   try {
     const tenantId = req.user!.tenantId;
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
-    
+
     if (!client) {
       return res.status(404).json({ success: false, message: 'Client not found.' });
     }
@@ -274,19 +276,49 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
+    let verifiedAadhaarName = '';
+    let verifiedMaskedAadhaar = '';
+    if (req.body.digioResponse) {
+      const extracted = extractAadhaarDetailsFromDigio(req.body.digioResponse);
+      if (extracted?.aadhaarName) {
+        verifiedAadhaarName = extracted.aadhaarName;
+      }
+      if (extracted?.maskedAadhaar) {
+        verifiedMaskedAadhaar = extracted.maskedAadhaar;
+      }
+    }
+
     const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
+    const updateSet: Record<string, any> = {
+      pan,
+      ...(aadhaar ? { aadhaar } : {}),
+      ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {}),
+      status: nextStatus,
+      kraVerified: statusInput !== 'FAIL'
+    };
+
+    if (verifiedAadhaarName) {
+      updateSet.name = verifiedAadhaarName;
+      updateSet.panName = verifiedAadhaarName;
+    }
+
     const updatedClient = await dynamicDb.Client.findByIdAndUpdate(
       client._id || client.id,
-      {
-        $set: {
-          pan,
-          ...(aadhaar ? { aadhaar } : {}),
-          status: nextStatus,
-          kraVerified: statusInput !== 'FAIL'
-        }
-      },
+      { $set: updateSet },
       { returnDocument: 'after', lean: true }
     );
+
+    if (verifiedAadhaarName) {
+      const nameParts = verifiedAadhaarName.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+      await dynamicDb.User.findByIdAndUpdate(req.user!.id, { $set: { firstName, lastName } });
+      await dynamicDb.ClientProfile.findOneAndUpdate(
+        { clientId: client._id || client.id },
+        { $set: { panName: verifiedAadhaarName } },
+        { upsert: true }
+      );
+    }
 
     if (statusInput === 'FAIL') {
       await dynamicDb.ComplianceAlert.create({
@@ -349,22 +381,168 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
 
-    const agreementUrl = `/uploads/agreements/${client._id || client.id}_signed_agreement.pdf`;
+    const clientIdStr = String(client._id || client.id);
+    const fileName = `${clientIdStr}_signed_agreement.pdf`;
+    const agreementUrl = `/uploads/agreements/${fileName}`;
 
-    const agreement: any = await dynamicDb.Agreement.create({
-      clientId: client._id || client.id,
-      agreementUrl,
-      esignMode: 'MOCK_AADHAAR',
-      ipAddress: req.ip,
-      status: 'SIGNED'
-    });
+    const tenantId = req.user!.tenantId || client.tenantId;
+    const tenant: any = tenantId ? await dynamicDb.Tenant.findById(tenantId).lean() : null;
 
-    await dynamicDb.AgreementHistory.create({
-      agreementId: agreement._id || agreement.id,
-      action: 'SIGNED',
-      performedBy: client.name,
-      ipAddress: req.ip
-    });
+    let verifiedDigioName = '';
+    let verifiedMaskedAadhaar = '';
+
+    const isGeneric = (n?: string | null) => {
+      if (!n || typeof n !== 'string') return true;
+      const l = n.toLowerCase().trim();
+      return (
+        l === '' ||
+        l === 'digo' ||
+        l === 'digio' ||
+        l === 'digo client' ||
+        l === 'digio client' ||
+        l === 'digio esign' ||
+        l === 'aadhaar esign' ||
+        l === 'client' ||
+        l === 'test' ||
+        l === 'test user' ||
+        l === 'user' ||
+        l.includes('@')
+      );
+    };
+
+    console.log('[Digio eSign] Callback received. req.body.documentId:', req.body.documentId, 'digioResponse:', JSON.stringify(req.body.digioResponse || {}));
+
+    // 1. Extract directly from PKI signature details / Digio response payload
+    if (req.body.digioResponse) {
+      const extracted = extractAadhaarDetailsFromDigio(req.body.digioResponse);
+      if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
+        verifiedDigioName = extracted.aadhaarName;
+      }
+      if (extracted?.maskedAadhaar) {
+        verifiedMaskedAadhaar = extracted.maskedAadhaar;
+      }
+    }
+
+    // 2. If not found in response, query Digio Document Status API for PKI signature details
+    if (!verifiedDigioName && req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
+      try {
+        const docStatus = await getDocumentStatus(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+        console.log('[Digio eSign] Fetched docStatus:', JSON.stringify(docStatus || {}));
+        if (docStatus) {
+          const extracted = extractAadhaarDetailsFromDigio(docStatus);
+          if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
+            verifiedDigioName = extracted.aadhaarName;
+          }
+          if (extracted?.maskedAadhaar) {
+            verifiedMaskedAadhaar = extracted.maskedAadhaar;
+          }
+        }
+      } catch (docErr: any) {
+        console.error('[Digio eSign] Error fetching doc status:', docErr.message);
+      }
+    }
+
+    const passedSig = typeof req.body.signatureText === 'string' ? req.body.signatureText.trim() : '';
+    let signerName = '';
+    if (verifiedDigioName) {
+      signerName = verifiedDigioName;
+    } else if (passedSig && !isGeneric(passedSig)) {
+      signerName = passedSig;
+    } else if (client.panName && !isGeneric(client.panName)) {
+      signerName = client.panName.trim();
+    } else if (client.name && !isGeneric(client.name)) {
+      signerName = client.name.trim();
+    }
+    if (!signerName || isGeneric(signerName)) {
+      signerName = 'Investor / Client';
+    }
+
+    // If verified Aadhaar PKI signature name obtained from Digio, sync across DB
+    if (verifiedDigioName) {
+      try {
+        const nameParts = verifiedDigioName.split(' ');
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+
+        await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+          $set: {
+            name: verifiedDigioName,
+            panName: verifiedDigioName,
+            ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {})
+          }
+        });
+        await dynamicDb.User.findByIdAndUpdate(req.user!.id, {
+          $set: { firstName, lastName }
+        });
+        await dynamicDb.ClientProfile.findOneAndUpdate(
+          { clientId: client._id || client.id },
+          { $set: { panName: verifiedDigioName } },
+          { upsert: true }
+        );
+      } catch (syncErr: any) {
+        console.warn('[Digio eSign] Error syncing profile in DB:', syncErr.message);
+      }
+    }
+
+    // 1. Generate the official signed PDF with the verified Aadhaar name (pki_signature_details.name) and signature stamp
+    let pdfBuffer: Buffer | null = null;
+    try {
+      pdfBuffer = await generateAgreementPdf(clientIdStr, {
+        ipAddress: req.ip,
+        signingDate: new Date(),
+        signerName: verifiedDigioName || signerName,
+        aadhaarSuffix: verifiedMaskedAadhaar || undefined,
+        isSigned: true
+      });
+    } catch (pdfErr: any) {
+      console.error('[Agreement] Error generating agreement PDF:', pdfErr.message);
+    }
+
+    // 2. Save PDF file to disk for downloads and audit exports
+    if (pdfBuffer) {
+      const targetDirs = [
+        path.resolve(process.cwd(), 'uploads/agreements'),
+        path.resolve(__dirname, '../../../uploads/agreements'),
+        path.resolve(__dirname, '../../public/uploads/agreements')
+      ];
+
+      for (const dir of targetDirs) {
+        try {
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fs.writeFileSync(path.join(dir, fileName), pdfBuffer);
+        } catch { }
+      }
+    }
+
+    // 3. Create Agreement Record
+    let agreement: any = null;
+    try {
+      agreement = await dynamicDb.Agreement.create({
+        clientId: client._id || client.id,
+        agreementUrl,
+        esignMode: 'AADHAAR_ESIGN',
+        ipAddress: req.ip,
+        status: 'SIGNED',
+        signedAt: new Date()
+      });
+    } catch (agrErr: any) {
+      console.warn('[Digio eSign] Error creating agreement document in DB:', agrErr.message);
+    }
+
+    if (agreement) {
+      try {
+        await dynamicDb.AgreementHistory.create({
+          agreementId: agreement._id || agreement.id,
+          action: 'SIGNED',
+          performedBy: signerName,
+          ipAddress: req.ip
+        });
+      } catch (histErr: any) {
+        console.warn('[Digio eSign] Error creating agreement history:', histErr.message);
+      }
+    }
 
     // Check if client already has an active subscription assigned by admin
     const activeSub = await dynamicDb.Subscription.findOne({
@@ -375,7 +553,7 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
     const newStatus = (activeSub && client.kraVerified) ? 'ACTIVE' : (activeSub ? 'ACTIVE' : 'PAYMENT_PENDING');
 
     await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
-      $set: { 
+      $set: {
         status: newStatus,
         agreementSigned: true
       }
@@ -384,6 +562,7 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
     return res.status(200).json({
       success: true,
       message: 'Agreement signed successfully via Aadhaar eSign.',
+      verifiedName: verifiedDigioName || signerName,
       data: agreement
     });
   } catch (error: any) {
@@ -433,7 +612,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
         }
         if (discountAmount > plan.price) discountAmount = plan.price;
         appliedCouponId = coupon._id || coupon.id;
-        
+
         if (statusInput !== 'FAILED') {
           await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
             $inc: { usedCount: 1 }
@@ -474,7 +653,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
         if (existingSub) {
           startDate = new Date(existingSub.endDate);
         }
-        
+
         const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
         await dynamicDb.Subscription.create({
@@ -598,7 +777,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
         if (existingSub) {
           startDate = new Date(existingSub.endDate);
         }
-        
+
         const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
         await dynamicDb.Subscription.create({
@@ -726,16 +905,16 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
     const relatedTenantIds = await getRelatedTenantIds(req.user?.tenantId, req.user?.id);
 
     // Find active categories
-    const activeCategories = await dynamicDb.PlanCategory.find({ 
+    const activeCategories = await dynamicDb.PlanCategory.find({
       $or: [
         { tenantId: { $in: relatedTenantIds } },
         { tenantId: null }
       ],
-      status: 'ACTIVE' 
+      status: 'ACTIVE'
     }).lean();
     const activeCatIds = activeCategories.map((c: any) => c._id || c.id);
 
-    const plans = await dynamicDb.Plan.find({ 
+    const plans = await dynamicDb.Plan.find({
       $and: [
         {
           $or: [
@@ -771,10 +950,10 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
       };
     });
 
-    return res.status(200).json({ 
-      success: true, 
-      data: formatted, 
-      gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE' 
+    return res.status(200).json({
+      success: true,
+      data: formatted,
+      gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE'
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -954,15 +1133,15 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
-    
+
     const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
     const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
-    
+
     if (!tenantObj || !tenantObj.razorpayKeyId || !tenantObj.razorpayKeySecret || !tenantObj.razorpayKeyId.trim() || !tenantObj.razorpayKeySecret.trim()) {
-      return res.status(400).json({ 
-        success: false, 
+      return res.status(400).json({
+        success: false,
         isConfigured: false,
-        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
       });
     }
 
@@ -997,7 +1176,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
         appliedCouponId = coupon._id || coupon.id;
       }
     }
-    
+
     if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
       finalPrice = finalPrice * 1.18;
     }
@@ -1043,7 +1222,7 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
-    
+
     const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
     if (!tenantObj || !tenantObj.razorpayKeySecret) {
       return res.status(400).json({ success: false, message: 'Razorpay configuration error' });
@@ -1155,15 +1334,15 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
     if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
-    
+
     const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
     const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
 
     if (!tenantObj || !tenantObj.ccavenueMerchantId || !tenantObj.ccavenueAccessCode || !tenantObj.ccavenueWorkingKey || !tenantObj.ccavenueMerchantId.trim() || !tenantObj.ccavenueWorkingKey.trim()) {
-      return res.status(400).json({ 
-        success: false, 
+      return res.status(400).json({
+        success: false,
         isConfigured: false,
-        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.' 
+        message: 'Payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
       });
     }
 
@@ -1198,14 +1377,14 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
         appliedCouponId = coupon._id || coupon.id;
       }
     }
-    
+
     if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
       finalPrice = finalPrice * 1.18;
     }
 
     const orderId = 'TXN-' + Math.floor(100000 + Math.random() * 900000);
     const amount = finalPrice.toFixed(2);
-    
+
     const origin = req.headers.origin || 'http://localhost:3000';
     const redirectUrl = `${req.protocol}://${req.get('host')}/api/v1/payment/ccavenue/response?tenantId=${tenantObj._id || tenantObj.id || tenantId}`;
     const cancelUrl = `${origin}/client`;
@@ -1239,7 +1418,7 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
 
     const decryptedStr = decryptCCAvenue(encResp, tenantObj.ccavenueWorkingKey);
     const parsedData = querystring.parse(decryptedStr);
-    
+
     const status = parsedData.order_status;
     const clientId = parsedData.merchant_param1 as string;
     const planId = parsedData.merchant_param2 as string;
@@ -1249,7 +1428,7 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
     if (status === 'Success') {
       const client: any = await dynamicDb.Client.findById(clientId).lean();
       const plan: any = await dynamicDb.Plan.findById(planId).lean();
-      
+
       if (client && plan) {
         const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
         await dynamicDb.Payment.create({
@@ -1367,7 +1546,7 @@ export const getPaymentGatewayStatus = async (req: AuthenticatedRequest, res: Re
       isConfigured,
       activeGateway,
       adminContact,
-      message: isConfigured 
+      message: isConfigured
         ? `Payment gateway (${activeGateway}) is ready.`
         : `Payment gateway credentials are not configured by the administrator for ${activeGateway}. Please contact administrator to purchase this plan.`
     });

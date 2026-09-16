@@ -602,7 +602,7 @@ class ApiClient {
     });
   }
 
-  async verifyKRA(payload: { pan: string; statusInput?: string; aadhaar?: string }) {
+  async verifyKRA(payload: { pan: string; statusInput?: string; aadhaar?: string; digioResponse?: any }) {
     return this.request('/client/kyc/verify', {
       method: 'POST',
       body: JSON.stringify(payload)
@@ -1000,7 +1000,7 @@ class ApiClient {
     return this.request('/client/agreement/initiate', { method: 'POST' });
   }
 
-  async updateDigioStatus(data: { type: string, status: string }) {
+  async updateDigioStatus(data: { type: string, status: string, kycId?: string, digioResponse?: any }) {
     return this.request('/client/kyc/status', {
       method: 'POST',
       body: JSON.stringify(data),
