@@ -444,19 +444,24 @@ const signAgreement = async (req, res) => {
                 console.warn('[Digio eSign] Error syncing profile in DB:', syncErr.message);
             }
         }
-        // 1. Generate the official signed PDF with the verified Aadhaar name (pki_signature_details.name) and signature stamp
+        // 1. Download signed PDF from Digio or fallback to generating it locally
         let pdfBuffer = null;
-        try {
-            pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
-                ipAddress: req.ip,
-                signingDate: new Date(),
-                signerName: verifiedDigioName || signerName,
-                aadhaarSuffix: verifiedMaskedAadhaar || undefined,
-                isSigned: true
-            });
+        if (req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
+            pdfBuffer = await (0, digioService_1.downloadDocument)(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
         }
-        catch (pdfErr) {
-            console.error('[Agreement] Error generating agreement PDF:', pdfErr.message);
+        if (!pdfBuffer) {
+            try {
+                pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
+                    ipAddress: req.ip,
+                    signingDate: new Date(),
+                    signerName: verifiedDigioName || signerName,
+                    aadhaarSuffix: verifiedMaskedAadhaar || undefined,
+                    isSigned: true
+                });
+            }
+            catch (pdfErr) {
+                console.error('[Agreement] Error generating agreement PDF:', pdfErr.message);
+            }
         }
         // 2. Save PDF file to disk for downloads and audit exports
         if (pdfBuffer) {

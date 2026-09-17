@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDocumentForEsign = exports.extractAadhaarDetailsFromDigio = exports.getDocumentStatus = exports.getKycStatus = exports.createKycRequest = exports.isValidName = void 0;
+exports.createDocumentForEsign = exports.extractAadhaarDetailsFromDigio = exports.downloadDocument = exports.getDocumentStatus = exports.getKycStatus = exports.createKycRequest = exports.isValidName = void 0;
 const axios_1 = __importDefault(require("axios"));
 const form_data_1 = __importDefault(require("form-data"));
 // Digio API base URL - can be overridden by env for sandbox/production
@@ -94,6 +94,24 @@ const getDocumentStatus = async (clientId, clientSecret, documentId) => {
     }
 };
 exports.getDocumentStatus = getDocumentStatus;
+const downloadDocument = async (clientId, clientSecret, documentId) => {
+    if (!documentId)
+        return null;
+    try {
+        const response = await axios_1.default.get(`${DIGIO_BASE_URL}/v2/client/document/download?document_id=${documentId}`, {
+            headers: {
+                Authorization: getDigioAuthHeader(clientId, clientSecret)
+            },
+            responseType: 'arraybuffer'
+        });
+        return Buffer.from(response.data);
+    }
+    catch (err) {
+        console.error('[Digio eSign] Error downloading signed document:', err.response?.data || err.message);
+        return null;
+    }
+};
+exports.downloadDocument = downloadDocument;
 const extractAadhaarDetailsFromDigio = (data) => {
     if (!data || typeof data !== 'object')
         return null;

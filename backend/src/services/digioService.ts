@@ -96,6 +96,26 @@ export const getDocumentStatus = async (
   }
 };
 
+export const downloadDocument = async (
+  clientId: string,
+  clientSecret: string,
+  documentId: string
+): Promise<Buffer | null> => {
+  if (!documentId) return null;
+  try {
+    const response = await axios.get(`${DIGIO_BASE_URL}/v2/client/document/download?document_id=${documentId}`, {
+      headers: {
+        Authorization: getDigioAuthHeader(clientId, clientSecret)
+      },
+      responseType: 'arraybuffer'
+    });
+    return Buffer.from(response.data);
+  } catch (err: any) {
+    console.error('[Digio eSign] Error downloading signed document:', err.response?.data || err.message);
+    return null;
+  }
+};
+
 export const extractAadhaarDetailsFromDigio = (data: any) => {
   if (!data || typeof data !== 'object') return null;
 

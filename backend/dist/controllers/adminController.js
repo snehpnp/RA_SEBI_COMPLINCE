@@ -3513,21 +3513,20 @@ exports.previewPolicyPdf = previewPolicyPdf;
 const resetClientKyc = async (req, res) => {
     try {
         const { username } = req.body;
-        const db = req.db || require('mongoose');
         if (!username) {
             return res.status(400).json({ success: false, message: 'Username (email, mobile, or pan) is required' });
         }
-        let user = await db.models.User.findOne({
+        let user = await db_1.default.User.findOne({
             $or: [{ email: username }, { mobile: username }]
         });
         let client = null;
         if (user) {
-            client = await db.models.Client.findOne({ userId: user._id });
+            client = await db_1.default.Client.findOne({ userId: user._id || user.id });
         }
         else {
-            client = await db.models.Client.findOne({ pan: username });
+            client = await db_1.default.Client.findOne({ pan: username });
             if (client) {
-                user = await db.models.User.findById(client.userId);
+                user = await db_1.default.User.findById(client.userId);
             }
         }
         if (!client) {
@@ -3535,7 +3534,15 @@ const resetClientKyc = async (req, res) => {
         }
         client.kraVerified = false;
         client.status = 'ACTIVE';
-        await client.save();
+        // We should use findByIdAndUpdate or save. If it's a lean doc, we can't save. 
+        // Wait, findOne doesn't return lean by default unless we chain .lean().
+        // But since dynamicDb might return plain models, save is fine, or findByIdAndUpdate is safer.
+        await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
+            $set: { kraVerified: false, agreementSigned: false, status: 'ACTIVE' }
+        });
+        if (db_1.default.Agreement) {
+            await db_1.default.Agreement.deleteMany({ clientId: client._id || client.id });
+        }
         res.json({ success: true, message: 'KYC successfully reset for user' });
     }
     catch (error) {

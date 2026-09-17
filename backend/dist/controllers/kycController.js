@@ -207,19 +207,25 @@ const updateKycAgreementStatus = async (req, res) => {
                 await db_1.default.User.findByIdAndUpdate(userId, { $set: { firstName, lastName } });
                 await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, { $set: { panName: verifiedAadhaarName } }, { upsert: true });
             }
-            // Generate signed PDF with Aadhaar signature block displaying pki_signature_details.name
+            // Try to download the signed PDF from Digio first
             let pdfBuffer = null;
-            try {
-                pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
-                    ipAddress: req.ip,
-                    signingDate: new Date(),
-                    signerName: signerName,
-                    aadhaarSuffix: verifiedMaskedAadhaar || undefined,
-                    isSigned: true
-                });
+            if (documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
+                pdfBuffer = await (0, digioService_1.downloadDocument)(tenant.digioClientId, tenant.digioClientSecret, documentId);
             }
-            catch (pdfErr) {
-                console.error('[Agreement] Error generating signed agreement PDF:', pdfErr.message);
+            // Fallback: Generate signed PDF with Aadhaar signature block displaying pki_signature_details.name
+            if (!pdfBuffer) {
+                try {
+                    pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
+                        ipAddress: req.ip,
+                        signingDate: new Date(),
+                        signerName: signerName,
+                        aadhaarSuffix: verifiedMaskedAadhaar || undefined,
+                        isSigned: true
+                    });
+                }
+                catch (pdfErr) {
+                    console.error('[Agreement] Error generating signed agreement PDF:', pdfErr.message);
+                }
             }
             if (pdfBuffer) {
                 const targetDirs = [

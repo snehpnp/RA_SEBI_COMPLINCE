@@ -9,7 +9,7 @@ import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { sendWelcomeEmail } from '../services/emailService';
 import { generateAgreementPdf, getTenantComplianceAttachments } from '../services/pdfService';
-import { createKycRequest, getKycStatus, getDocumentStatus, extractAadhaarDetailsFromDigio } from '../services/digioService';
+import { createKycRequest, getKycStatus, getDocumentStatus, downloadDocument, extractAadhaarDetailsFromDigio } from '../services/digioService';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
 import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
 import querystring from 'querystring';
@@ -484,18 +484,24 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
       }
     }
 
-    // 1. Generate the official signed PDF with the verified Aadhaar name (pki_signature_details.name) and signature stamp
+    // 1. Download signed PDF from Digio or fallback to generating it locally
     let pdfBuffer: Buffer | null = null;
-    try {
-      pdfBuffer = await generateAgreementPdf(clientIdStr, {
-        ipAddress: req.ip,
-        signingDate: new Date(),
-        signerName: verifiedDigioName || signerName,
-        aadhaarSuffix: verifiedMaskedAadhaar || undefined,
-        isSigned: true
-      });
-    } catch (pdfErr: any) {
-      console.error('[Agreement] Error generating agreement PDF:', pdfErr.message);
+    if (req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
+      pdfBuffer = await downloadDocument(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+    }
+
+    if (!pdfBuffer) {
+      try {
+        pdfBuffer = await generateAgreementPdf(clientIdStr, {
+          ipAddress: req.ip,
+          signingDate: new Date(),
+          signerName: verifiedDigioName || signerName,
+          aadhaarSuffix: verifiedMaskedAadhaar || undefined,
+          isSigned: true
+        });
+      } catch (pdfErr: any) {
+        console.error('[Agreement] Error generating agreement PDF:', pdfErr.message);
+      }
     }
 
     // 2. Save PDF file to disk for downloads and audit exports

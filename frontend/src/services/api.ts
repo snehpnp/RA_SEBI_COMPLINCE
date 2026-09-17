@@ -622,7 +622,7 @@ class ApiClient {
     return this.request('/client/account', { method: 'DELETE' });
   }
 
-  async signAgreement(payload?: { signatureText?: string }) {
+  async signAgreement(payload?: { signatureText?: string, documentId?: string, digioResponse?: any }) {
     return this.request('/client/esign', {
       method: 'POST',
       body: JSON.stringify(payload || { signatureText: 'eSign Verified' })

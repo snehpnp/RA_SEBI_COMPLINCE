@@ -362,7 +362,11 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 toast.error("Digio eSign Failed or Cancelled");
                 setLoading(false);
               } else {
-                await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Digio eSign' });
+                await api.signAgreement({ 
+                  signatureText: formData.name || clientProfile?.name || 'Digio eSign',
+                  documentId: response.digio_doc_id,
+                  digioResponse: response
+                });
                 setAgreementSigned(true);
                 setLoading(false);
                 toast.success('Advisory Agreement signed successfully!');

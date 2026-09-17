@@ -8,6 +8,7 @@ import {
   createDocumentForEsign,
   getKycStatus,
   getDocumentStatus,
+  downloadDocument,
   extractAadhaarDetailsFromDigio
 } from '../services/digioService';
 import { generateAgreementPdf } from '../services/pdfService';
@@ -258,18 +259,25 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
         );
       }
 
-      // Generate signed PDF with Aadhaar signature block displaying pki_signature_details.name
+      // Try to download the signed PDF from Digio first
       let pdfBuffer: Buffer | null = null;
-      try {
-        pdfBuffer = await generateAgreementPdf(clientIdStr, {
-          ipAddress: req.ip,
-          signingDate: new Date(),
-          signerName: signerName,
-          aadhaarSuffix: verifiedMaskedAadhaar || undefined,
-          isSigned: true
-        });
-      } catch (pdfErr: any) {
-        console.error('[Agreement] Error generating signed agreement PDF:', pdfErr.message);
+      if (documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
+        pdfBuffer = await downloadDocument(tenant.digioClientId, tenant.digioClientSecret, documentId);
+      }
+
+      // Fallback: Generate signed PDF with Aadhaar signature block displaying pki_signature_details.name
+      if (!pdfBuffer) {
+        try {
+          pdfBuffer = await generateAgreementPdf(clientIdStr, {
+            ipAddress: req.ip,
+            signingDate: new Date(),
+            signerName: signerName,
+            aadhaarSuffix: verifiedMaskedAadhaar || undefined,
+            isSigned: true
+          });
+        } catch (pdfErr: any) {
+          console.error('[Agreement] Error generating signed agreement PDF:', pdfErr.message);
+        }
       }
 
       if (pdfBuffer) {
