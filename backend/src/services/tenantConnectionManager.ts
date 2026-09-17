@@ -5,7 +5,7 @@ import { ITenantModels, registerTenantModels } from '../models';
 const defaultDbName: string = (process.env.DB_NAME && process.env.DB_NAME.trim()) || 'sebi-compliance';
 const defaultCentralUrl: string = (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) || 'mongodb://localhost:27017/sebi-compliance';
 
-console.log("=>>>>>>>>>>>>>>>>>>", defaultDbName, defaultCentralUrl)
+
 
 // Dedicated Central DB Mongoose Connection
 export const centralConnection = mongoose.createConnection(

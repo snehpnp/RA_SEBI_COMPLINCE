@@ -57,7 +57,7 @@ export async function ensureStates(StateModel: any = State): Promise<void> {
         { upsert: true, returnDocument: 'after' }
       );
     }
-    console.log(`[StateService] Indian states collection successfully verified/seeded (${INDIAN_STATES.length} states).`);
+    
   } catch (err: any) {
     console.error('[StateService] Failed to seed states:', err.message);
   }

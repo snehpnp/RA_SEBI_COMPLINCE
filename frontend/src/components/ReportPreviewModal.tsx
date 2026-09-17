@@ -63,25 +63,25 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      
+
       let imgWidth = pdfWidth;
       let imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      
+
       if (imgHeight > pageHeight) {
         imgHeight = pageHeight;
         imgWidth = (canvas.width * pageHeight) / canvas.height;
       }
-      
+
       const x = (pdfWidth - imgWidth) / 2;
       pdf.addImage(imgData, 'PNG', x, 0, imgWidth, imgHeight);
-      
+
       const fileName = `Research_Report_${signal.stock?.symbol || 'Signal'}_${new Date().toISOString().split('T')[0]}.pdf`;
-      
+
       // Upload to server
       const pdfBlob = pdf.output('blob');
       const formData = new FormData();
       formData.append('report', pdfBlob, fileName);
-      
+
       const res = await fetch(`${base_api_url}/signals/${signal.id}/report`, {
         method: 'POST',
         headers: {
@@ -91,14 +91,14 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
         body: formData
       });
       const data = await res.json();
-      
+
       if (!data.success) {
         throw new Error(data.message || 'Upload failed');
       }
-      
+
       // Also download locally
       pdf.save(fileName);
-      
+
       toast.success('Report generated and uploaded successfully!');
       onSuccess();
       onClose();
@@ -112,19 +112,22 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
   const trend = signal.callType === 'BUY' ? 'BULLISH' : 'BEARISH';
   const recDate = new Date(signal.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase().replace(/ /g, '-');
   const actionText = signal.callType === 'BUY' ? 'Buy' : 'Sell';
-  
+
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-6xl shadow-2xl flex flex-col md:flex-row h-[90vh]">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-6xl shadow-2xl flex flex-col md:flex-row h-[90vh] relative overflow-hidden">
+
+        {/* Close Button */}
+        <button onClick={onClose} className="absolute top-4 right-4 z-[60] p-2 bg-white/90 dark:bg-slate-800/90 shadow-md text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition backdrop-blur-sm">
+          <X className="w-5 h-5" />
+        </button>
+
         {/* Editor Sidebar */}
-        <div className="w-full md:w-1/3 border-r border-slate-200 dark:border-white/10 p-6 flex flex-col overflow-y-auto">
+        <div className="w-full md:w-1/3 border-r border-slate-200 dark:border-white/10 p-6 flex flex-col overflow-y-auto bg-white dark:bg-slate-900 z-10">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Configure Report</h2>
-            <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/5 transition">
-              <X className="w-5 h-5" />
-            </button>
           </div>
-          
+
           <div className="space-y-4 flex-1">
             <div className="relative">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
@@ -140,7 +143,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                     if (e.target.value.trim()) setSectorErr('');
                     setSectorDropdownOpen(true);
                   }}
-                  className={`w-full bg-slate-50 dark:bg-slate-800/50 border ${sectorErr ? 'border-red-500' : 'border-slate-300 dark:border-white/10'} rounded-xl p-3 pr-10 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all`}
+                  className={`w-full bg-slate-50 dark:bg-slate-800/50 border ${sectorErr ? 'border-red-500' : 'border-slate-300 dark:border-white/10'} rounded-xl p-3 pr-10 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all`}
                   placeholder="Select or type custom sector..."
                 />
                 <button
@@ -184,13 +187,13 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
               )}
               {sectorErr && <p className="text-red-600 dark:text-red-500 text-xs mt-1 font-medium">{sectorErr}</p>}
             </div>
-            
+
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Technical Outlook (Optional)</label>
               <textarea
                 value={technicalOutlook}
                 onChange={(e) => setTechnicalOutlook(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
+                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
                 placeholder="Enter technical outlook..."
               />
             </div>
@@ -200,11 +203,11 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
               <textarea
                 value={rationale}
                 onChange={(e) => setRationale(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
+                className="w-full bg-slate-50 dark:bg-slate-800/50 border border-slate-300 dark:border-white/10 rounded-xl p-3 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all min-h-[100px]"
                 placeholder="Enter fundamental/technical rationale..."
               />
             </div>
-            
+
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Chart Screenshot (Optional)</label>
               <div className="relative">
@@ -216,7 +219,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
               </div>
             </div>
           </div>
-          
+
           <div className="mt-6 pt-4 border-t border-slate-200 dark:border-white/10">
             <button
               onClick={generatePDF}
@@ -231,83 +234,91 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
         </div>
 
         {/* Live Preview Pane */}
-        <div className="w-full md:w-2/3 bg-slate-100 dark:bg-[#0f1523] p-6 overflow-y-auto flex items-start justify-center">
-          <div className="w-[210mm] min-h-[297mm] bg-white text-black shadow-lg flex flex-col relative scale-[0.6] sm:scale-[0.8] xl:scale-90 origin-top" ref={reportRef} style={{ padding: '25mm' }}>
-            
-            {/* Header */}
-            <div className="flex justify-between items-start mb-4">
-              <div className="w-32 h-12 bg-black flex items-center justify-center rounded">
-                 {user?.tenant?.logoUrl ? (
+        <div className="w-full md:w-2/3 bg-slate-100 dark:bg-[#0f1523] overflow-y-auto flex items-start justify-center relative p-6">
+          {/* We use zoom (standard in Chromium) or a scaled wrapper trick to keep the A4 size responsive but strictly bounded */}
+          <div className="preview-scale-wrapper flex justify-center origin-top w-full" style={{ zoom: 0.75 }}>
+            <div className="w-[210mm] min-h-[297mm] bg-white text-black shadow-2xl flex flex-col relative tracking-normal" ref={reportRef} style={{ padding: '25mm', letterSpacing: '0px', wordSpacing: '0px' }}>
+
+              {/* Header */}
+              <div className="flex justify-between items-start mb-4">
+                <div className="w-32 h-12 bg-black flex items-center justify-center rounded">
+                  {user?.tenant?.logoUrl ? (
                     <img src={user.tenant.logoUrl.startsWith('http') ? user.tenant.logoUrl : `${base_ra_url}${user.tenant.logoUrl}`} alt="Logo" className="max-h-10 max-w-[100px] object-contain" />
-                 ) : (
+                  ) : (
                     <span className="text-white font-bold text-sm px-2 text-center">{user?.tenant?.name || 'StockBox'}</span>
-                 )}
+                  )}
+                </div>
+                <div className="text-center flex-1 pr-16">
+                  <h1 className="text-base font-bold text-slate-900">{signal.stock?.symbol || ''} ({signal.segment})</h1>
+                </div>
               </div>
-              <div className="text-center flex-1 pr-16">
-                 <h1 className="text-base font-bold text-slate-900">{signal.stock?.symbol || ''} ({signal.segment})</h1>
+
+              {/* Subtitle */}
+              <div className="text-center mb-6">
+                <p className="text-sm text-slate-800 font-semibold mb-1">
+                  (Recommended {actionText} price-{signal.entryPrice}, Target-{[signal.target1, signal.target2, signal.target3].filter(Boolean).join('/')}, Stop loss-{signal.stoploss})
+                </p>
+                <p className="text-sm text-slate-800 font-semibold">Recommended Date-{recDate}</p>
               </div>
-            </div>
-            
-            {/* Subtitle */}
-            <div className="text-center mb-6">
-              <p className="text-sm text-slate-800 font-semibold mb-1">
-                (Recommended {actionText} price-{signal.entryPrice}, Target-{[signal.target1, signal.target2, signal.target3].filter(Boolean).join('/')}, Stop loss-{signal.stoploss})
-              </p>
-              <p className="text-sm text-slate-800 font-semibold">Recommended Date-{recDate}</p>
-            </div>
 
-            {/* Table layout */}
-            <div className="grid grid-cols-2 gap-y-3 gap-x-20 w-3/4 mx-auto mb-8 text-sm">
-              <div className="font-bold text-slate-700">SECTOR</div>
-              <div className="text-slate-800">{sector || '-'}</div>
-              
-              <div className="font-bold text-slate-700">PRICE</div>
-              <div className="text-slate-800">{signal.entryPrice}</div>
-              
-              <div className="font-bold text-slate-700">OPTION & FUTURE</div>
-              <div className="text-slate-800">{signal.segment}</div>
-              
-              <div className="font-bold text-slate-700">TREND</div>
-              <div className="text-slate-800 uppercase">{trend}</div>
-              
-              <div className="font-bold text-slate-700">VIEW</div>
-              <div className="text-slate-800 uppercase">{signal.tradeDuration || 'INTRADAY'}</div>
-            </div>
+              {/* Table layout */}
+              <div className="grid grid-cols-2 gap-y-3 gap-x-20 w-3/4 mx-auto mb-8 text-sm">
+                <div className="font-bold text-slate-700">SECTOR</div>
+                <div className="text-slate-800">{sector || '-'}</div>
 
-            {/* Content */}
-            {technicalOutlook && (
-              <div className="text-center mb-4">
-                 <h4 className="text-sm font-bold text-red-600 uppercase underline underline-offset-4 decoration-red-600">TECHNICAL OUTLOOK</h4>
-                 <p className="text-sm text-slate-800 mt-3 text-left">{technicalOutlook}</p>
+                <div className="font-bold text-slate-700">PRICE</div>
+                <div className="text-slate-800">{signal.entryPrice}</div>
+
+                <div className="font-bold text-slate-700">OPTION & FUTURE</div>
+                <div className="text-slate-800">{signal.segment}</div>
+
+                <div className="font-bold text-slate-700">TREND</div>
+                <div className="text-slate-800 uppercase">{trend}</div>
+
+                <div className="font-bold text-slate-700">VIEW</div>
+                <div className="text-slate-800 uppercase">{signal.tradeDuration || 'INTRADAY'}</div>
               </div>
-            )}
-            
-            {!technicalOutlook && (
-               <div className="text-center mb-4">
-                 <h4 className="text-sm font-bold text-red-600 uppercase underline underline-offset-4 decoration-red-600">TECHNICAL OUTLOOK</h4>
-               </div>
-            )}
 
-            {chartImage && (
-              <div className="mb-6 w-full flex justify-center">
-                <img src={chartImage} alt="Chart" className="w-[80%] max-h-[250px] object-contain border border-slate-300 p-1" />
+              {/* Content */}
+              {technicalOutlook && (
+                <div className="text-center mb-4">
+                  <h4 className="text-sm font-bold text-red-600 uppercase underline underline-offset-4 decoration-red-600">TECHNICAL OUTLOOK</h4>
+                  <p className="text-sm text-slate-800 mt-3 text-left">{technicalOutlook}</p>
+                </div>
+              )}
+
+              {!technicalOutlook && (
+                <div className="text-center mb-4">
+                  <h4 className="text-sm font-bold text-red-600 uppercase underline underline-offset-4 decoration-red-600">TECHNICAL OUTLOOK</h4>
+                </div>
+              )}
+
+              {chartImage && (
+                <div className="mb-6 w-full flex justify-center">
+                  <img src={chartImage} alt="Chart" className="w-[80%] max-h-[250px] object-contain border border-slate-300 p-1" />
+                </div>
+              )}
+
+              <div className="mb-6 text-sm text-slate-900">
+                <span className="font-bold uppercase underline">RATIONALE:</span>
+                {rationale ? (
+                  <p className="mt-2 text-left">{rationale}</p>
+                ) : (
+                  <p className="mt-2">No rationale provided.</p>
+                )}
               </div>
-            )}
 
-            <div className="mb-6 text-sm text-slate-900">
-               <span className="font-bold uppercase underline">RATIONALE:</span>
-               {rationale ? (
-                 <p className="mt-2 text-justify">{rationale}</p>
-               ) : (
-                 <p className="mt-2">No rationale provided.</p>
-               )}
-            </div>
-
-            {/* Footer Details */}
-            <div className="mt-auto border-t border-slate-200 pt-4 text-[9px] text-slate-800 leading-tight">
-               <span className="font-bold underline uppercase block mb-1">DISCLOSURE:</span>
-               <p className="mb-2 text-justify whitespace-pre-wrap text-[7px] leading-snug">
-                 {user?.tenant?.reportDisclaimer || `I, ${user?.tenant?.name || 'Research Analyst'} (SEBI Registered Research Analyst. ${user?.tenant?.sebiRegistrationNo || 'INH000000000'}) Author of this report, hereby certify that everything expressed in this research report accurately reflect my views about the subject issuer(s) or securities. I have no material adverse disciplinary history as on the date of publication of this report. I also certify that no part of our compensation was, is or will be directly or indirectly related to specific recommendation(s) or view(s) in this report.
+              {/* Footer Details */}
+              <div className="mt-auto border-t border-slate-200 pt-4 text-[9px] text-slate-800 leading-tight">
+                <span className="font-bold underline uppercase block mb-1">DISCLOSURE:</span>
+                {user?.tenant?.reportDisclaimer ? (
+                  <div
+                    className="mb-2 text-left text-[7px] leading-snug prose prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: user.tenant.reportDisclaimer }}
+                  />
+                ) : (
+                  <p className="mb-2 text-left whitespace-pre-wrap text-[7px] leading-snug">
+                    {`I, ${user?.tenant?.name || 'Research Analyst'} (SEBI Registered Research Analyst. ${user?.tenant?.sebiRegistrationNo || 'INH000000000'}) Author of this report, hereby certify that everything expressed in this research report accurately reflect my views about the subject issuer(s) or securities. I have no material adverse disciplinary history as on the date of publication of this report. I also certify that no part of our compensation was, is or will be directly or indirectly related to specific recommendation(s) or view(s) in this report.
                  
 I or my relatives does not have any financial interest in the subject company. Further Research analyst and his relative doesn't have any material conflict of interest.
                  
@@ -317,22 +328,25 @@ Phone no : ${user?.tenant?.mobile || '-'}, Email :- ${user?.tenant?.email || '-'
 Address :- ${user?.tenant?.address || '-'}
                  
 Disclaimer- "Registration granted by SEBI and certification from NISM in no way guarantee performance of the intermediary or provide any assurance of returns to investors."`}
-               </p>
-               <div className="mt-4 flex justify-end">
+                  </p>
+                )}
+                <div className="mt-4 flex justify-end">
                   <div className="text-center w-40">
-                     {user?.tenant?.coSignatureUrl ? (
-                        <img crossOrigin="anonymous" src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${base_ra_url}${user.tenant.coSignatureUrl}`} alt="Signature" className="h-12 object-contain mx-auto mb-1" />
-                     ) : (
-                        <div className="h-12"></div>
-                     )}
-                     <p className="text-[9px] font-bold border-t border-slate-500 pt-1">For {user?.tenant?.name || 'Research Analyst'}</p>
+                    {user?.tenant?.coSignatureUrl ? (
+                      <img crossOrigin="anonymous" src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${base_ra_url}${user.tenant.coSignatureUrl}`} alt="Signature" className="h-12 object-contain mx-auto mb-1" />
+                    ) : (
+                      <div className="h-12"></div>
+                    )}
+                    <p className="text-[9px] font-bold border-t border-slate-500 pt-1">For {user?.tenant?.name || 'Research Analyst'}</p>
                   </div>
-               </div>
-            </div>
+                </div>
+              </div>
 
+            </div>
           </div>
         </div>
       </div>
     </div>
+
   );
 }

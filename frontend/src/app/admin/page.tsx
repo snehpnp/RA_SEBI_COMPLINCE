@@ -2311,7 +2311,7 @@ function AdminDashboardContent() {
       }
 
       const res = await api.getPeriodicReportData(startDateStr, endDateStr);
-      console.log("RECEIVED REPORT DATA:", res.data);
+      
       if (res.success) {
         generatePeriodicReport(res.data, periodName, endDateStr);
         setShowReportModal(false);

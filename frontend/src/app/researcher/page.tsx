@@ -1297,7 +1297,7 @@ function AdminDashboardContent() {
             };
             const perm = permMap[tab];
             if (!perm) return true;
-            console.log("syncedUser.permissions", syncedUser.permissions)
+           
             return syncedUser.permissions?.includes(perm) || false;
           };
 
@@ -2145,7 +2145,7 @@ function AdminDashboardContent() {
       }
 
       const res = await api.getPeriodicReportData(startDateStr, endDateStr);
-      console.log("RECEIVED REPORT DATA:", res.data);
+   
       if (res.success) {
         generatePeriodicReport(res.data, periodName, endDateStr);
         setShowReportModal(false);

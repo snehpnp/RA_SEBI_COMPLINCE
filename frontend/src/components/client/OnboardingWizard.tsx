@@ -270,9 +270,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             environment: 'production',
             callback: async function (response: any) {
 
-              console.log("Digio Response", response);
-              alert("response" + response)
-
+              
               if (response.hasOwnProperty('error_code')) {
                 toast.error("Digio KYC Failed or Cancelled");
                 setKraStatus('failed');
@@ -351,7 +349,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       let digioInitiated = false;
       try {
         const res = await api.initiateDigioAgreement();
-        console.log("Digio Response", res);
+       
 
         if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
           digioInitiated = true;
@@ -387,7 +385,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         console.warn('Digio agreement initiation skipped, falling back to direct eSign:', digioErr);
       }
 
-      console.log("formData", formData);
+    
 
       const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
       if (signRes.success) {
@@ -399,7 +397,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       setLoading(false);
     } catch (err: any) {
       try {
-        console.log("formData22", formData);
+      
 
         const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
         if (signRes.success) {
