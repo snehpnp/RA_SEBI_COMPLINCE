@@ -53,7 +53,7 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       }
       if (!client) {
         client = {
-          name: payment.clientName || 'Valued Client',
+          name: payment.clientName ,
           email: payment.clientEmail || '',
           phone: payment.clientPhone || '',
           profile: { addressLine1: 'India', state: 'DELHI' }
