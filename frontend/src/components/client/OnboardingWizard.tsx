@@ -269,6 +269,10 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
           const options = {
             environment: 'production',
             callback: async function (response: any) {
+
+              console.log("Digio Response", response);
+              alert("response" + response)
+
               if (response.hasOwnProperty('error_code')) {
                 toast.error("Digio KYC Failed or Cancelled");
                 setKraStatus('failed');
@@ -347,6 +351,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       let digioInitiated = false;
       try {
         const res = await api.initiateDigioAgreement();
+        console.log("Digio Response", res);
+
         if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
           digioInitiated = true;
           const options = {
@@ -377,6 +383,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         console.warn('Digio agreement initiation skipped, falling back to direct eSign:', digioErr);
       }
 
+      console.log("formData", formData);
+
       const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
       if (signRes.success) {
         setAgreementSigned(true);
@@ -387,6 +395,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       setLoading(false);
     } catch (err: any) {
       try {
+        console.log("formData22", formData);
+
         const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
         if (signRes.success) {
           setAgreementSigned(true);
@@ -759,7 +769,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 </div>
               )}
             </div>
-            
+
             {/* Action Buttons: If agreement is signed, REMOVE Back button */}
             <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
               {!isSigned && (
@@ -955,9 +965,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                         }
                       }
                     }}
-                    className={`flex items-start gap-3.5 group select-none transition-all duration-300 ${
-                      isAccessible ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'
-                    }`}
+                    className={`flex items-start gap-3.5 group select-none transition-all duration-300 ${isAccessible ? 'cursor-pointer' : 'cursor-not-allowed opacity-45'
+                      }`}
                   >
                     <div className="relative mt-0.5">
                       {isActive && <div className="absolute inset-0 rounded-full border-2 border-blue-600 dark:border-blue-400 animate-ping opacity-75" />}

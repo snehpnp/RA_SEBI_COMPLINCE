@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -3510,3 +3510,37 @@ const previewPolicyPdf = async (req, res) => {
     }
 };
 exports.previewPolicyPdf = previewPolicyPdf;
+const resetClientKyc = async (req, res) => {
+    try {
+        const { username } = req.body;
+        const db = req.db || require('mongoose');
+        if (!username) {
+            return res.status(400).json({ success: false, message: 'Username (email, mobile, or pan) is required' });
+        }
+        let user = await db.models.User.findOne({
+            $or: [{ email: username }, { mobile: username }]
+        });
+        let client = null;
+        if (user) {
+            client = await db.models.Client.findOne({ userId: user._id });
+        }
+        else {
+            client = await db.models.Client.findOne({ pan: username });
+            if (client) {
+                user = await db.models.User.findById(client.userId);
+            }
+        }
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client not found' });
+        }
+        client.kraVerified = false;
+        client.status = 'ACTIVE';
+        await client.save();
+        res.json({ success: true, message: 'KYC successfully reset for user' });
+    }
+    catch (error) {
+        console.error('Reset KYC error:', error);
+        res.status(500).json({ success: false, message: error.message || 'Server Error' });
+    }
+};
+exports.resetClientKyc = resetClientKyc;

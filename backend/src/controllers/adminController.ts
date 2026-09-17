@@ -3779,3 +3779,49 @@ export const previewPolicyPdf = async (req: any, res: any) => {
   }
 };
 
+export const resetClientKyc = async (req: any, res: any) => {
+  try {
+    const { username } = req.body;
+
+    if (!username) {
+      return res.status(400).json({ success: false, message: 'Username (email, mobile, or pan) is required' });
+    }
+
+    let user = await dynamicDb.User.findOne({
+      $or: [{ email: username }, { mobile: username }]
+    });
+
+    let client = null;
+    if (user) {
+      client = await dynamicDb.Client.findOne({ userId: user._id || user.id });
+    } else {
+      client = await dynamicDb.Client.findOne({ pan: username });
+      if (client) {
+        user = await dynamicDb.User.findById(client.userId);
+      }
+    }
+
+    if (!client) {
+      return res.status(404).json({ success: false, message: 'Client not found' });
+    }
+
+    client.kraVerified = false;
+    client.status = 'ACTIVE';
+    
+    // We should use findByIdAndUpdate or save. If it's a lean doc, we can't save. 
+    // Wait, findOne doesn't return lean by default unless we chain .lean().
+    // But since dynamicDb might return plain models, save is fine, or findByIdAndUpdate is safer.
+    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+      $set: { kraVerified: false, agreementSigned: false, status: 'ACTIVE' }
+    });
+
+    if (dynamicDb.Agreement) {
+      await dynamicDb.Agreement.deleteMany({ clientId: client._id || client.id });
+    }
+
+    res.json({ success: true, message: 'KYC successfully reset for user' });
+  } catch (error: any) {
+    console.error('Reset KYC error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Server Error' });
+  }
+};

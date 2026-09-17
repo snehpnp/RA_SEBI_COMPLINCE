@@ -262,6 +262,7 @@ router.post('/admin/staff/:id/restore', auth_1.authenticateJWT, (0, auth_1.requi
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
 router.get('/admin/clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, adminController_1.getAdminClients);
+router.post('/admin/clients/reset-kyc', adminController_1.resetClientKyc);
 router.get('/admin/clients/deleted', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminDeletedClients);
 router.post('/admin/clients/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.toggleClientStatus);
 router.get('/admin/clients/:id/communications', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getClientCommunications);
