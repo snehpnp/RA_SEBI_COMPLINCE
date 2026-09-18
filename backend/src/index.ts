@@ -15,6 +15,7 @@ import cron from 'node-cron';
 import router from './routes/api';
 import { centralConnection, Tenant, Client, ComplianceAlert } from './config/db';
 import { initCronJobs } from './services/cronService';
+import { checkComplianceForTenant } from './controllers/complianceController';
 import { thirdPartyRoutes, getThirdPartyClients } from './third-party-api';
 
 const app = express();
@@ -113,16 +114,22 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // Background Cron Jobs
-// Run daily compliance check (Deposit levels, SEBI/NISM expires, missing agreements)
+// Run daily automated compliance check at midnight (12:00 AM)
 cron.schedule('0 0 * * *', async () => {
+  const timestamp = new Date().toLocaleTimeString();
+  console.log(`\n⏳ [COMPLIANCE CRON - ${timestamp}] Running daily automated compliance sweep...`);
   try {
     const tenants: any[] = await Tenant.find({ status: 'ACTIVE', deletedAt: null }).lean();
+    console.log(`🔍 [COMPLIANCE CRON] Active Tenants to verify: ${tenants.length}`);
     for (const tenant of tenants) {
+      const tenantIdStr = tenant._id?.toString() || tenant.id;
       // Calculate Active Clients Count
       const activeClientsCount = await Client.countDocuments({
         tenantId: tenant._id || tenant.id,
         status: 'ACTIVE'
       });
+
+      console.log(`🏢 [COMPLIANCE CRON] Checking Tenant "${tenant.name || tenantIdStr}" — Active Clients: ${activeClientsCount}, Current Deposit: Rs. ${tenant.depositAmount || 0}`);
 
       // 1. DEPOSIT Sweep
       const requiredDeposit = activeClientsCount * 1000;
@@ -141,6 +148,7 @@ cron.schedule('0 0 * * *', async () => {
             severity: 'HIGH',
             description
           });
+          console.log(`⚠️ [COMPLIANCE CRON] Alert Created: DEPOSIT_LOW for "${tenant.name || tenantIdStr}"`);
         }
       }
 
@@ -163,6 +171,7 @@ cron.schedule('0 0 * * *', async () => {
               severity: daysLeft <= 15 ? 'HIGH' : 'MEDIUM',
               description
             });
+            console.log(`⚠️ [COMPLIANCE CRON] Alert Created: CERTIFICATE_EXPIRY for "${tenant.name || tenantIdStr}"`);
           } else {
             await ComplianceAlert.findByIdAndUpdate(exists._id, {
               severity: daysLeft <= 15 ? 'HIGH' : 'MEDIUM',
@@ -171,9 +180,20 @@ cron.schedule('0 0 * * *', async () => {
           }
         }
       }
+
+      // Run full compliance engine checks (KYC, Agreement, NISM, Policies, SEBI Fee Cap, etc.)
+      const autoAlerts = await checkComplianceForTenant(tenantIdStr).catch((e) => {
+        console.error(`❌ [COMPLIANCE CRON] Error running checkComplianceForTenant for ${tenant.name || tenantIdStr}:`, e?.message);
+        return [];
+      });
+
+      if (autoAlerts && autoAlerts.length > 0) {
+        console.log(`🚨 [COMPLIANCE CRON] Generated ${autoAlerts.length} new compliance alert(s) for "${tenant.name || tenantIdStr}"`);
+      }
     }
-  } catch (error) {
-    console.error('Error running automated daily compliance cron:', error);
+    console.log(`✅ [COMPLIANCE CRON - ${timestamp}] 1-minute compliance sweep finished.\n`);
+  } catch (error: any) {
+    console.error('❌ [COMPLIANCE CRON] Error running automated daily compliance cron:', error?.message);
   }
 });
 

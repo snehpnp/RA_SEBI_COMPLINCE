@@ -52,7 +52,6 @@ async function ensureStates(StateModel = db_1.State) {
         for (const state of exports.INDIAN_STATES) {
             await StateModel.findOneAndUpdate({ name: state.name }, { gstCode: state.gstCode, isActive: true }, { upsert: true, returnDocument: 'after' });
         }
-        console.log(`[StateService] Indian states collection successfully verified/seeded (${exports.INDIAN_STATES.length} states).`);
     }
     catch (err) {
         console.error('[StateService] Failed to seed states:', err.message);

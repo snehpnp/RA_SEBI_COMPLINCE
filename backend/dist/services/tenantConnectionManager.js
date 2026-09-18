@@ -9,7 +9,6 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const models_1 = require("../models");
 const defaultDbName = (process.env.DB_NAME && process.env.DB_NAME.trim()) || 'sebi-compliance';
 const defaultCentralUrl = (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) || 'mongodb://localhost:27017/sebi-compliance';
-console.log("=>>>>>>>>>>>>>>>>>>", defaultDbName, defaultCentralUrl);
 // Dedicated Central DB Mongoose Connection
 exports.centralConnection = mongoose_1.default.createConnection(defaultCentralUrl, {
     dbName: defaultDbName,

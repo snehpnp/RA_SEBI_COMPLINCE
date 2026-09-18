@@ -7,8 +7,10 @@ exports.initCronJobs = void 0;
 const node_cron_1 = __importDefault(require("node-cron"));
 const db_1 = require("../config/db");
 const initCronJobs = () => {
-    // Run every night at midnight
+    console.log('⏰ [CRON ENGINE] Checklist & Deadline Cron initialized (Running daily at 12:00 AM Midnight)');
+    // Run daily at midnight (12:00 AM)
     node_cron_1.default.schedule('0 0 * * *', async () => {
+        console.log(`⏱️ [CHECKLIST CRON - ${new Date().toLocaleTimeString()}] Checking pending checklist tasks & audit deadlines...`);
         try {
             const now = new Date();
             // Find all pending audits with a due date
@@ -19,6 +21,9 @@ const initCronJobs = () => {
                 .populate('requirement')
                 .populate('tenant')
                 .lean();
+            if (pendingAudits.length > 0) {
+                console.log(`📋 [CHECKLIST CRON] Evaluating ${pendingAudits.length} pending audit item(s)...`);
+            }
             for (const audit of pendingAudits) {
                 if (!audit.dueDate)
                     continue;

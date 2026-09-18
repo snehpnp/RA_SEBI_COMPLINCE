@@ -388,7 +388,6 @@ const generateAgreementPdf = async (clientId, options) => {
             };
             // Resolve true legal client full name (pki_signature_details.name / Digio verified Aadhaar name prioritized)
             let clientFullName = '';
-            console.log('options-------------------------------------', options);
             if (options?.signerName) {
                 clientFullName = options.signerName.trim();
             }

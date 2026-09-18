@@ -270,8 +270,8 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
     const client: any = clientItem;
     const clientId = client._id;
     // 4a. KYC Check
-    const isKycPending = ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-    const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (Status: ${client.status}).`;
+    const isKycPending = !client.kraVerified || ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+    const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (KRA: ${client.kraVerified ? 'VERIFIED' : 'PENDING'}).`;
     const existingKycAlert = await dynamicDb.ComplianceAlert.findOne({
       tenantId,
       alertType: 'KYC_MISSING',
@@ -342,7 +342,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
         .lean();
 
       if (client) {
-        const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+        const isKycComplete = Boolean(client.kraVerified) && !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
         const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
         const hasActiveSub = (client.subscriptions || []).some((s: any) => s.status === 'ACTIVE');
         if ((isKycComplete && isAgreementComplete) || !hasActiveSub) {
@@ -372,7 +372,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
         .lean();
 
       if (client) {
-        const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+        const isKycComplete = Boolean(client.kraVerified) && !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
         const hasActiveSub = (client.subscriptions || []).some((s: any) => s.status === 'ACTIVE');
         if (isKycComplete || !hasActiveSub) {
           await dynamicDb.ComplianceAlert.findByIdAndUpdate(alert._id, {
@@ -1017,7 +1017,7 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
       if (!client) {
         return res.status(404).json({ success: false, message: 'Client associated with this alert not found.' });
       }
-      const isKycComplete = !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+      const isKycComplete = Boolean(client.kraVerified) && !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
       const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
       const isPanComplete = !!(client.pan && client.pan.trim() !== '');
 
