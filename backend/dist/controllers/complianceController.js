@@ -8,7 +8,6 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
-const adminController_1 = require("./adminController");
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const checkComplianceForTenant = async (tenantId) => {
     try {
@@ -18,7 +17,7 @@ const checkComplianceForTenant = async (tenantId) => {
         }
         if (!tenant && tenantId) {
             tenant = await db_1.default.Tenant.findOne({
-                $or: [{ id: tenantId }, { tenantId: tenantId }]
+                $or: [{ id: tenantId }, { tenantId: tenantId }, { _id: tenantId }]
             }).lean();
         }
         if (!tenant) {
@@ -26,18 +25,24 @@ const checkComplianceForTenant = async (tenantId) => {
         }
         if (!tenant)
             return [];
-        const resolvedTenantId = String(tenant._id || tenantId || '');
-        // DO NOT run compliance checks for tenants that haven't finished onboarding
-        const completeness = await (0, adminController_1.calculateCompleteness)(resolvedTenantId);
-        if (!completeness || completeness.score < 100) {
-            return []; // Return empty alerts, skipping all checks
-        }
+        const resolvedTenantId = String(tenant._id || tenant.id || tenantId || '');
+        tenantId = resolvedTenantId;
         const alertsCreated = [];
-        const tenantUsers = await db_1.default.User.find({ tenantId, deletedAt: null }).select('_id').lean();
-        const tenantUserIds = tenantUsers.map(u => u._id);
+        const tenantUsers = await db_1.default.User.find({
+            $or: [
+                { tenantId: resolvedTenantId },
+                { tenantId: tenant._id }
+            ],
+            deletedAt: null
+        }).select('_id role roleId').populate('role').populate('roleId').lean();
+        const tenantUserIds = tenantUsers.map((u) => u._id);
         // 1. DEPOSIT RULE CHECK
         const activeClientsCount = await db_1.default.Client.countDocuments({
-            userId: { $in: tenantUserIds },
+            $or: [
+                { tenantId: resolvedTenantId },
+                { tenantId: tenant._id },
+                { userId: { $in: tenantUserIds } }
+            ],
             status: 'ACTIVE'
         });
         let requiredDeposit = 100000;
@@ -54,7 +59,7 @@ const checkComplianceForTenant = async (tenantId) => {
             requiredDeposit = 1000000;
         }
         if ((tenant.depositAmount || 0) < requiredDeposit) {
-            const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${tenant.depositAmount || 0}. Please submit deposit proof.`;
+            const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit.toLocaleString('en-IN')} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${(tenant.depositAmount || 0).toLocaleString('en-IN')}. Please submit deposit proof.`;
             const existingAlert = await db_1.default.ComplianceAlert.findOne({
                 tenantId,
                 alertType: 'DEPOSIT_LOW',
@@ -69,6 +74,9 @@ const checkComplianceForTenant = async (tenantId) => {
                 });
                 alertsCreated.push(newAlert.toObject());
             }
+        }
+        else {
+            await db_1.default.ComplianceAlert.updateMany({ tenantId, alertType: 'DEPOSIT_LOW', status: 'OPEN' }, { $set: { status: 'CLOSED', remarks: 'Auto-resolved: Deposit threshold met.', closedAt: new Date() } });
         }
         // 1B. PART-TIME RA LIMIT CHECK
         if (tenant.raType === 'PART_TIME') {
@@ -500,7 +508,10 @@ const checkComplianceForTenant = async (tenantId) => {
         }
         // 5C. MISSING PRINCIPAL OFFICER CHECK (SR.7)
         const hasPrincipalOfficer = staffMembers.some((st) => {
-            const role = st.userId?.role || {};
+            const role = st.userId?.role || st.userId?.roleId || {};
+            return role.name === 'PRINCIPAL_OFFICER';
+        }) || tenantUsers.some((u) => {
+            const role = u.role || u.roleId || {};
             return role.name === 'PRINCIPAL_OFFICER';
         });
         const existingPoAlert = await db_1.default.ComplianceAlert.findOne({
@@ -579,7 +590,10 @@ const checkComplianceForTenant = async (tenantId) => {
         }
         // 5D. MISSING COMPLIANCE OFFICER CHECK (SR.8)
         const hasComplianceOfficer = staffMembers.some((st) => {
-            const role = st.userId?.role || {};
+            const role = st.userId?.role || st.userId?.roleId || {};
+            return role.name === 'COMPLIANCE_OFFICER';
+        }) || tenantUsers.some((u) => {
+            const role = u.role || u.roleId || {};
             return role.name === 'COMPLIANCE_OFFICER';
         });
         const existingCoAlert = await db_1.default.ComplianceAlert.findOne({
@@ -834,10 +848,18 @@ const runComplianceCheck = async (req, res) => {
             if (queryTenant) {
                 const alertsCreated = await (0, exports.checkComplianceForTenant)(queryTenant);
                 (0, tenantSyncDispatcher_1.syncTenantToRemote)(queryTenant, { reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
+                const openAlertsCount = await db_1.default.ComplianceAlert.countDocuments({
+                    $or: [
+                        { tenantId: queryTenant },
+                        ...(mongoose_1.default.Types.ObjectId.isValid(queryTenant) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(queryTenant) }] : [])
+                    ],
+                    status: 'OPEN'
+                });
                 return res.status(200).json({
                     success: true,
                     message: 'Compliance verification completed successfully.',
                     alertsGenerated: alertsCreated.length,
+                    totalActiveAlerts: openAlertsCount,
                     data: alertsCreated
                 });
             }
@@ -857,14 +879,28 @@ const runComplianceCheck = async (req, res) => {
             }
         }
         if (!tenantId) {
+            const defaultTenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+            if (defaultTenant) {
+                tenantId = (defaultTenant._id || defaultTenant.id).toString();
+            }
+        }
+        if (!tenantId) {
             return res.status(400).json({ success: false, message: 'Invalid tenant context' });
         }
         const alertsCreated = await (0, exports.checkComplianceForTenant)(tenantId);
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_SWEEP' }).catch(() => { });
+        const openAlertsCount = await db_1.default.ComplianceAlert.countDocuments({
+            $or: [
+                { tenantId },
+                ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+            ],
+            status: 'OPEN'
+        });
         return res.status(200).json({
             success: true,
             message: 'Compliance verification completed successfully.',
             alertsGenerated: alertsCreated.length,
+            totalActiveAlerts: openAlertsCount,
             data: alertsCreated
         });
     }
@@ -874,11 +910,25 @@ const runComplianceCheck = async (req, res) => {
 };
 exports.runComplianceCheck = runComplianceCheck;
 const getAlerts = async (req, res) => {
-    const tenantId = req.user.tenantId;
+    let tenantId = req.user.tenantId;
+    if (!tenantId && req.user.role === 'SUPER_ADMIN') {
+        tenantId = req.query.tenantId;
+    }
+    if (!tenantId) {
+        const defaultTenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        if (defaultTenant) {
+            tenantId = (defaultTenant._id || defaultTenant.id).toString();
+        }
+    }
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const alerts = await db_1.default.ComplianceAlert.find({ tenantId })
+        const alerts = await db_1.default.ComplianceAlert.find({
+            $or: [
+                { tenantId },
+                ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
+            ]
+        })
             .sort({ createdAt: -1 })
             .lean();
         const alertsWithPenalty = await Promise.all(alerts.map(async (alert) => {

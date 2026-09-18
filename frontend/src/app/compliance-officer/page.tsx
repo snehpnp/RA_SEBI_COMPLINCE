@@ -1211,7 +1211,7 @@ function AdminDashboardContent() {
 
       if (tab === 'compliance' || tab === 'checklist') {
         api.request('/compliance/complaints').then(res => { if (Array.isArray(res)) setComplaints(res); }).catch(() => { });
-        api.getComplianceAlerts().then(res => { if (res.success && res.data.length > 0) setAlerts(res.data); }).catch(() => { });
+        api.getComplianceAlerts().then(res => { if (res.success && Array.isArray(res.data)) setAlerts(res.data); }).catch(() => { });
         api.getComplianceChecklist().then(res => { if (res.success) setChecklist(res.data); }).catch(() => { });
         api.getPenalties().then(res => { if (res.success) setPenalties(res.data); }).catch(() => { });
         api.getComplianceChecklistHistory().then(res => { if (res.success) setChecklistHistory(res.data); }).catch(() => { });
@@ -2160,7 +2160,10 @@ function AdminDashboardContent() {
           const res = await api.runComplianceCheck();
           if (res.success) {
             loadData();
-            toast(`Sweep done. ${res.alertsGenerated} alert(s) generated.`);
+            const msg = (res.alertsGenerated && res.alertsGenerated > 0)
+              ? `Sweep done. ${res.alertsGenerated} new alert(s) generated (${res.totalActiveAlerts || res.alertsGenerated} active).`
+              : `Sweep done. ${res.totalActiveAlerts || 0} active compliance alert(s) found.`;
+            toast(msg);
           }
         } catch (err: any) {
           toast.error(err.message || 'Sweep failed.');

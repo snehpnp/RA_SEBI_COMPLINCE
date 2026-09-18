@@ -15,7 +15,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
     }
     if (!tenant && tenantId) {
       tenant = await dynamicDb.Tenant.findOne({
-        $or: [{ id: tenantId }, { tenantId: tenantId }]
+        $or: [{ id: tenantId }, { tenantId: tenantId }, { _id: tenantId }]
       }).lean();
     }
     if (!tenant) {
@@ -23,54 +23,64 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
     }
     if (!tenant) return [];
 
-    const resolvedTenantId = String(tenant._id || tenantId || '');
+    const resolvedTenantId = String(tenant._id || tenant.id || tenantId || '');
+    tenantId = resolvedTenantId;
 
-    // DO NOT run compliance checks for tenants that haven't finished onboarding
-    const completeness = await calculateCompleteness(resolvedTenantId);
-    if (!completeness || completeness.score < 100) {
-      return []; // Return empty alerts, skipping all checks
+    const alertsCreated: any[] = [];
+
+    const tenantUsers = await dynamicDb.User.find({
+      $or: [
+        { tenantId: resolvedTenantId },
+        { tenantId: tenant._id }
+      ],
+      deletedAt: null
+    }).select('_id role roleId').populate('role').populate('roleId').lean();
+    const tenantUserIds = tenantUsers.map((u: any) => u._id);
+
+    // 1. DEPOSIT RULE CHECK
+    const activeClientsCount = await dynamicDb.Client.countDocuments({
+      $or: [
+        { tenantId: resolvedTenantId },
+        { tenantId: tenant._id },
+        { userId: { $in: tenantUserIds } }
+      ],
+      status: 'ACTIVE'
+    });
+    
+    let requiredDeposit = 100000;
+    if (activeClientsCount <= 150) {
+      requiredDeposit = 100000;
+    } else if (activeClientsCount <= 300) {
+      requiredDeposit = 200000;
+    } else if (activeClientsCount <= 1000) {
+      requiredDeposit = 500000;
+    } else {
+      requiredDeposit = 1000000;
     }
 
-  const alertsCreated: any[] = [];
-
-  const tenantUsers = await dynamicDb.User.find({ tenantId, deletedAt: null }).select('_id').lean();
-  const tenantUserIds = tenantUsers.map(u => u._id);
-
-  // 1. DEPOSIT RULE CHECK
-  const activeClientsCount = await dynamicDb.Client.countDocuments({
-    userId: { $in: tenantUserIds },
-    status: 'ACTIVE'
-  });
-  
-  let requiredDeposit = 100000;
-  if (activeClientsCount <= 150) {
-    requiredDeposit = 100000;
-  } else if (activeClientsCount <= 300) {
-    requiredDeposit = 200000;
-  } else if (activeClientsCount <= 1000) {
-    requiredDeposit = 500000;
-  } else {
-    requiredDeposit = 1000000;
-  }
-
-  if ((tenant.depositAmount || 0) < requiredDeposit) {
-    const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${tenant.depositAmount || 0}. Please submit deposit proof.`;
-    const existingAlert = await dynamicDb.ComplianceAlert.findOne({
-      tenantId,
-      alertType: 'DEPOSIT_LOW',
-      status: 'OPEN'
-    }).lean();
-
-    if (!existingAlert) {
-      const newAlert = await dynamicDb.ComplianceAlert.create({
+    if ((tenant.depositAmount || 0) < requiredDeposit) {
+      const description = `Compliance Alert: Deposit threshold low. Required deposit is Rs. ${requiredDeposit.toLocaleString('en-IN')} for ${activeClientsCount} active clients. Current actual deposit is Rs. ${(tenant.depositAmount || 0).toLocaleString('en-IN')}. Please submit deposit proof.`;
+      const existingAlert = await dynamicDb.ComplianceAlert.findOne({
         tenantId,
         alertType: 'DEPOSIT_LOW',
-        severity: 'HIGH',
-        description
-      });
-      alertsCreated.push(newAlert.toObject());
+        status: 'OPEN'
+      }).lean();
+
+      if (!existingAlert) {
+        const newAlert = await dynamicDb.ComplianceAlert.create({
+          tenantId,
+          alertType: 'DEPOSIT_LOW',
+          severity: 'HIGH',
+          description
+        });
+        alertsCreated.push(newAlert.toObject());
+      }
+    } else {
+      await dynamicDb.ComplianceAlert.updateMany(
+        { tenantId, alertType: 'DEPOSIT_LOW', status: 'OPEN' },
+        { $set: { status: 'CLOSED', remarks: 'Auto-resolved: Deposit threshold met.', closedAt: new Date() } }
+      );
     }
-  }
 
   // 1B. PART-TIME RA LIMIT CHECK
   if (tenant.raType === 'PART_TIME') {
@@ -548,7 +558,10 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
 
   // 5C. MISSING PRINCIPAL OFFICER CHECK (SR.7)
   const hasPrincipalOfficer = staffMembers.some((st: any) => {
-    const role = st.userId?.role || {};
+    const role = st.userId?.role || st.userId?.roleId || {};
+    return role.name === 'PRINCIPAL_OFFICER';
+  }) || tenantUsers.some((u: any) => {
+    const role = u.role || u.roleId || {};
     return role.name === 'PRINCIPAL_OFFICER';
   });
 
@@ -636,7 +649,10 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
 
   // 5D. MISSING COMPLIANCE OFFICER CHECK (SR.8)
   const hasComplianceOfficer = staffMembers.some((st: any) => {
-    const role = st.userId?.role || {};
+    const role = st.userId?.role || st.userId?.roleId || {};
+    return role.name === 'COMPLIANCE_OFFICER';
+  }) || tenantUsers.some((u: any) => {
+    const role = u.role || u.roleId || {};
     return role.name === 'COMPLIANCE_OFFICER';
   });
 
@@ -922,10 +938,18 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
       if (queryTenant) {
         const alertsCreated = await checkComplianceForTenant(queryTenant);
         syncTenantToRemote(queryTenant, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+        const openAlertsCount = await dynamicDb.ComplianceAlert.countDocuments({
+          $or: [
+            { tenantId: queryTenant },
+            ...(mongoose.Types.ObjectId.isValid(queryTenant) ? [{ tenantId: new mongoose.Types.ObjectId(queryTenant) }] : [])
+          ],
+          status: 'OPEN'
+        });
         return res.status(200).json({
           success: true,
           message: 'Compliance verification completed successfully.',
           alertsGenerated: alertsCreated.length,
+          totalActiveAlerts: openAlertsCount,
           data: alertsCreated
         });
       } else {
@@ -945,15 +969,30 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
     }
 
     if (!tenantId) {
+      const defaultTenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+      if (defaultTenant) {
+        tenantId = (defaultTenant._id || defaultTenant.id).toString();
+      }
+    }
+
+    if (!tenantId) {
       return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
 
     const alertsCreated = await checkComplianceForTenant(tenantId);
     syncTenantToRemote(tenantId, { reason: 'COMPLIANCE_SWEEP' }).catch(() => {});
+    const openAlertsCount = await dynamicDb.ComplianceAlert.countDocuments({
+      $or: [
+        { tenantId },
+        ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose.Types.ObjectId(tenantId) }] : [])
+      ],
+      status: 'OPEN'
+    });
     return res.status(200).json({
       success: true,
       message: 'Compliance verification completed successfully.',
       alertsGenerated: alertsCreated.length,
+      totalActiveAlerts: openAlertsCount,
       data: alertsCreated
     });
   } catch (error: any) {
@@ -962,10 +1001,24 @@ export const runComplianceCheck = async (req: AuthenticatedRequest, res: Respons
 };
 
 export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
-  const tenantId = req.user!.tenantId;
+  let tenantId = req.user!.tenantId;
+  if (!tenantId && req.user!.role === 'SUPER_ADMIN') {
+    tenantId = req.query.tenantId as string;
+  }
+  if (!tenantId) {
+    const defaultTenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    if (defaultTenant) {
+      tenantId = (defaultTenant._id || defaultTenant.id).toString();
+    }
+  }
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   try {
-    const alerts = await dynamicDb.ComplianceAlert.find({ tenantId })
+    const alerts = await dynamicDb.ComplianceAlert.find({
+      $or: [
+        { tenantId },
+        ...(mongoose.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose.Types.ObjectId(tenantId) }] : [])
+      ]
+    })
       .sort({ createdAt: -1 })
       .lean();
     
