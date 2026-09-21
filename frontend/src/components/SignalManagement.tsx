@@ -1117,7 +1117,7 @@ export default function SignalManagement({
                   <Bell className="w-5 h-5 text-lime-700 dark:text-[#d4f23b]" />
                   Signal Publish Consent
                 </h3>
-                <button type="button" onClick={() => setShowConfirmModal(false)} className="text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition">
+                <button type="button" onClick={() => setShowConfirmModal(false)} className="text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1139,7 +1139,7 @@ export default function SignalManagement({
                       onChange={e => setTncChecked(e.target.checked)}
                       className="mt-1 accent-[#d4f23b] h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                     />
-                    <span className="text-xs text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:text-white transition-colors">
+                    <span className="text-xs text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:hover:text-white transition-colors">
                       I accept the <a href="/terms" target="_blank" rel="noreferrer" className="text-lime-700 dark:text-[#d4f23b] hover:underline font-semibold">Terms & Conditions / Redirection Guidelines</a>.
                     </span>
                   </label>
@@ -1151,7 +1151,7 @@ export default function SignalManagement({
                       onChange={e => setConsentChecked(e.target.checked)}
                       className="mt-1 accent-[#d4f23b] h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                     />
-                    <span className="text-xs text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:text-white transition-colors">
+                    <span className="text-xs text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:hover:text-white transition-colors">
                       I provide my consent to immediately publish this trade signal to all active plan subscribers.
                     </span>
                   </label>
@@ -1190,7 +1190,7 @@ export default function SignalManagement({
                   <X className="w-5 h-5 text-red-600 dark:text-red-400" />
                   Close Signal: {closeSignalModal.stock?.symbol}
                 </h3>
-                <button type="button" onClick={() => setCloseSignalModal(null)} className="text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition">
+                <button type="button" onClick={() => setCloseSignalModal(null)} className="text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1371,7 +1371,7 @@ export default function SignalManagement({
             <div className="bg-slate-100 dark:bg-[#1A2235] border border-slate-400 dark:border-white/10 rounded-lg shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
               <div className="flex justify-between items-center p-3 bg-[#4c1d95] border-b border-[#4c1d95]">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white px-2">Description</h3>
-                <button onClick={() => setAvoidRemarkModal(null)} className="text-slate-900 dark:text-white/80 hover:text-slate-900 dark:text-white transition">
+                <button onClick={() => setAvoidRemarkModal(null)} className="text-slate-900 dark:text-white/80 hover:text-slate-900 dark:hover:text-white transition">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1391,7 +1391,7 @@ export default function SignalManagement({
                   <Eye className="w-5 h-5 text-lime-700 dark:text-[#d4f23b]" />
                   Signal Details
                 </h3>
-                <button onClick={() => setViewSignalDetails(null)} className="p-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 rounded-lg text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition-all">
+                <button onClick={() => setViewSignalDetails(null)} className="p-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 rounded-lg text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white transition-all">
                   <X className="w-5 h-5" />
                 </button>
               </div>

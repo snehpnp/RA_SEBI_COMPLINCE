@@ -261,7 +261,7 @@ export default function CouponsManager() {
                 <td className="py-4 px-6 text-right space-x-2">
                   {!isExpired && (
                     <>
-                      <button onClick={() => handleToggleStatus(c.id)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white" title="Toggle Status">
+                      <button onClick={() => handleToggleStatus(c.id)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white" title="Toggle Status">
                         {c.status === 'ACTIVE' ? <XCircle className="h-5 w-5 text-amber-500" /> : <CheckCircle className="h-5 w-5 text-emerald-500" />}
                       </button>
                       <button onClick={() => handleOpenModal(c)} className="text-slate-600 dark:text-slate-400 hover:text-indigo-400">
@@ -475,7 +475,7 @@ export default function CouponsManager() {
                 <button
                   type="button"
                   onClick={() => setConfirmDialog({ ...confirmDialog, isOpen: false })}
-                  className="px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition"
+                  className="px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition"
                 >
                   Cancel
                 </button>

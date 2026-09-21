@@ -113,7 +113,7 @@ export default function ConfirmDialog({
             </div>
             <button
               onClick={onCancel}
-              className="text-slate-500 hover:text-slate-900 dark:text-white transition flex-shrink-0 -mt-1"
+              className="text-slate-500 hover:text-slate-900 dark:hover:text-white transition flex-shrink-0 -mt-1"
             >
               <X className="h-4 w-4" />
             </button>

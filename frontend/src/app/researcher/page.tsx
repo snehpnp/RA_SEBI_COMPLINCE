@@ -3191,7 +3191,7 @@ function AdminDashboardContent() {
                                     );
                                   })}
                                   {upcomingAlerts.length > 10 && (
-                                    <button onClick={() => window.dispatchEvent(new CustomEvent('nav-to-upcoming'))} className="w-full text-center text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white py-2 mt-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-300 dark:border-white/5 rounded-lg transition">
+                                    <button onClick={() => window.dispatchEvent(new CustomEvent('nav-to-upcoming'))} className="w-full text-center text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white py-2 mt-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-300 dark:border-white/5 rounded-lg transition">
                                       View all {upcomingAlerts.length} upcoming alerts <ArrowRight className="inline h-3 w-3 ml-1" />
                                     </button>
                                   )}
@@ -3664,7 +3664,7 @@ function AdminDashboardContent() {
                                         <button
                                           onClick={() => setSelectedStaff(st)}
                                           title="View Details"
-                                          className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+                                          className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition inline-flex items-center"
                                         >
                                           <Eye className="h-3.5 w-3.5" />
                                         </button>
@@ -3730,7 +3730,7 @@ function AdminDashboardContent() {
                                 setIsStaffModalOpen(false);
                                 resetStaffForm();
                               }}
-                              className="absolute top-4 right-4 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white"
+                              className="absolute top-4 right-4 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                             >
                               <X className="h-5 w-5" />
                             </button>
@@ -3983,7 +3983,7 @@ function AdminDashboardContent() {
                                   <span className="font-mono text-sm text-emerald-700 dark:text-emerald-300 font-bold break-all">{createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}</span>
                                   <button
                                     onClick={() => navigator.clipboard.writeText(createdStaffCreds?.staff?.email || createdStaffCreds?.email || '')}
-                                    className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
+                                    className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition font-semibold"
                                   >Copy</button>
                                 </div>
                               </div>
@@ -3994,7 +3994,7 @@ function AdminDashboardContent() {
                                   <span className="font-mono text-sm text-amber-700 dark:text-amber-300 font-bold tracking-widest">{createdStaffCreds?.generatedPassword || '—'}</span>
                                   <button
                                     onClick={() => navigator.clipboard.writeText(createdStaffCreds?.generatedPassword || '')}
-                                    className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
+                                    className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition font-semibold"
                                   >Copy</button>
                                 </div>
                               </div>
@@ -4023,7 +4023,7 @@ function AdminDashboardContent() {
                           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 space-y-6 relative max-h-[90vh] overflow-y-auto">
                             <button
                               onClick={() => setSelectedStaff(null)}
-                              className="absolute top-4 right-4 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white"
+                              className="absolute top-4 right-4 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                             >
                               <X className="h-5 w-5" />
                             </button>
@@ -4402,13 +4402,13 @@ function AdminDashboardContent() {
                           <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                             <button
                               onClick={() => setChecklistSubTab('active')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 '}`}
                             >
                               Active Checklist ({activeList.length})
                             </button>
                             <button
                               onClick={() => setChecklistSubTab('history')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 '}`}
                             >
                               Checklist History ({checklistHistory.length})
                             </button>
@@ -4418,9 +4418,9 @@ function AdminDashboardContent() {
                           {checklistSubTab === 'active' && (
                             <div className="space-y-4">
                               <div className="flex gap-2">
-                                <button onClick={() => setChecklistStatusFilter('ALL')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'ALL' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>All Tasks</button>
-                                <button onClick={() => setChecklistStatusFilter('PENDING')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'PENDING' ? 'bg-amber-600 text-slate-900 dark:text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>Pending</button>
-                                <button onClick={() => setChecklistStatusFilter('OVERDUE')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'OVERDUE' ? 'bg-rose-600 text-slate-900 dark:text-white ' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-300 dark:border-white/5'}`}>Non-Compliant</button>
+                                <button onClick={() => setChecklistStatusFilter('ALL')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'ALL' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-white/5'}`}>All Tasks</button>
+                                <button onClick={() => setChecklistStatusFilter('PENDING')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'PENDING' ? 'bg-amber-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-white/5'}`}>Pending</button>
+                                <button onClick={() => setChecklistStatusFilter('OVERDUE')} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${checklistStatusFilter === 'OVERDUE' ? 'bg-rose-600 text-white ' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-white/5'}`}>Non-Compliant</button>
                               </div>
                               <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
                                 <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
@@ -4561,7 +4561,7 @@ function AdminDashboardContent() {
                                       className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
                                     />
                                     {historyFilterText && (
-                                      <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs">Clear</button>
+                                      <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-xs">Clear</button>
                                     )}
                                   </div>
                                   <select
@@ -4634,7 +4634,7 @@ function AdminDashboardContent() {
                                                 {h.proofDocumentUrl ? (
                                                   <button
                                                     onClick={() => window.open(api.getBaseUrl() + '' + h.proofDocumentUrl, '_blank')}
-                                                    className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium underline flex items-center"
+                                                    className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:hover:text-white font-medium underline flex items-center"
                                                   >
                                                     <Eye className="h-3 w-3 mr-1" /> View
                                                   </button>
@@ -4713,7 +4713,7 @@ function AdminDashboardContent() {
                               { id: 'complaints', label: `Complaints (${complaints.filter(c => c.status === 'OPEN').length} Open)` },
                               { id: 'audit_history', label: 'Audit Log' }
                             ].map(tab => (
-                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}>
+                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 '}`}>
                                 {tab.label}
                               </button>
                             ))}
@@ -4924,13 +4924,13 @@ function AdminDashboardContent() {
                                 <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                                   <button
                                     onClick={() => setAlertsSubTab('active')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'active' ? 'bg-amber-600 text-slate-900 dark:text-white shadow-lg shadow-amber-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'active' ? 'bg-amber-600 text-white shadow-lg shadow-amber-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
                                   >
                                     Active Alerts ({alerts.filter((a: any) => a.status === 'OPEN').length})
                                   </button>
                                   <button
                                     onClick={() => setAlertsSubTab('history')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 '}`}
                                   >
                                     Resolved History ({alerts.filter((a: any) => a.status === 'CLOSED').length})
                                   </button>
@@ -5040,22 +5040,22 @@ function AdminDashboardContent() {
                                         let descColor = "text-slate-700 dark:text-slate-300";
 
                                         if (a.severity === 'HIGH') {
-                                          cardColor = "bg-gradient-to-b from-rose-950/40 to-slate-50 dark:to-[#0a0f18] border-rose-500/20 border-t-rose-500/80 border-t-4 shadow-[0_5px_15px_rgba(244,63,94,0.05)] text-rose-200";
+                                          cardColor = "bg-gradient-to-b from-rose-50 dark:from-rose-950/40 to-white dark:to-[#0a0f18] border-rose-200 dark:border-rose-500/20 border-t-rose-500 border-t-4 shadow-sm text-slate-800 dark:text-rose-200";
                                           titleColor = "text-slate-900 dark:text-white";
                                           severityBadge = "bg-rose-500/20 text-rose-700 dark:text-rose-300 font-extrabold";
-                                          resolveBtnColor = "bg-rose-600 border border-rose-500 hover:bg-rose-500 text-slate-900 dark:text-white shadow-lg shadow-rose-500/20";
+                                          resolveBtnColor = "bg-rose-600 border border-rose-500 hover:bg-rose-700 text-white shadow-md shadow-rose-500/20";
                                           descColor = "text-slate-700 dark:text-slate-300";
                                         } else if (a.severity === 'MEDIUM') {
-                                          cardColor = "bg-gradient-to-b from-orange-950/40 to-slate-50 dark:to-[#0a0f18] border-orange-500/20 border-t-orange-500/80 border-t-4 shadow-[0_5px_15px_rgba(249,115,22,0.05)] text-orange-200";
+                                          cardColor = "bg-gradient-to-b from-orange-50 dark:from-orange-950/40 to-white dark:to-[#0a0f18] border-orange-200 dark:border-orange-500/20 border-t-orange-500 border-t-4 shadow-sm text-slate-800 dark:text-orange-200";
                                           titleColor = "text-slate-900 dark:text-white";
                                           severityBadge = "bg-orange-500/20 text-orange-700 dark:text-orange-300 font-extrabold";
-                                          resolveBtnColor = "bg-orange-600 border border-orange-500 hover:bg-orange-500 text-slate-900 dark:text-white shadow-lg shadow-orange-500/20";
+                                          resolveBtnColor = "bg-orange-600 border border-orange-500 hover:bg-orange-700 text-white shadow-md shadow-orange-500/20";
                                           descColor = "text-slate-700 dark:text-slate-300";
                                         } else if (a.severity === 'LOW') {
-                                          cardColor = "bg-gradient-to-b from-yellow-950/30 to-slate-50 dark:to-[#0a0f18] border-yellow-500/20 border-t-yellow-500/80 border-t-4 shadow-[0_5px_15px_rgba(234,179,8,0.05)] text-yellow-200";
+                                          cardColor = "bg-gradient-to-b from-amber-50 dark:from-yellow-950/30 to-white dark:to-[#0a0f18] border-amber-200 dark:border-yellow-500/20 border-t-amber-500 border-t-4 shadow-sm text-slate-800 dark:text-yellow-200";
                                           titleColor = "text-slate-900 dark:text-white";
                                           severityBadge = "bg-yellow-500/20 text-yellow-700 dark:text-yellow-300 font-extrabold";
-                                          resolveBtnColor = "bg-yellow-600 border border-yellow-500 hover:bg-yellow-500 text-slate-900 dark:text-white shadow-lg shadow-yellow-500/20";
+                                          resolveBtnColor = "bg-amber-600 border border-amber-500 hover:bg-amber-700 text-white shadow-md shadow-amber-500/20";
                                           descColor = "text-slate-700 dark:text-slate-300";
                                         }
 
@@ -5189,11 +5189,11 @@ function AdminDashboardContent() {
                                                     setComplaintAtrProof(null);
                                                     setComplaintAtrRemarks('');
                                                   }}
-                                                  className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
+                                                  className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:hover:text-white font-medium text-xs underline"
                                                 >Resolve</button>
                                               ) : (
                                                 c.atrProofUrl && (
-                                                  <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
+                                                  <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:hover:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
                                                 )
                                               )}
                                             </td>
@@ -5832,7 +5832,7 @@ function AdminDashboardContent() {
                                                   setClientDetailsTab('profile');
                                                 }}
                                                 title="View Details"
-                                                className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+                                                className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition inline-flex items-center"
                                               >
                                                 <Eye className="h-3.5 w-3.5" />
                                               </button>
@@ -5943,7 +5943,7 @@ function AdminDashboardContent() {
                                   <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Client: <span className="text-violet-300 font-semibold">{assignPlanClient.name}</span></p>
                                 </div>
                               </div>
-                              <button onClick={() => setIsAssignPlanModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
+                              <button onClick={() => setIsAssignPlanModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
                                 <X className="h-5 w-5" />
                               </button>
                             </div>
@@ -6263,7 +6263,7 @@ function AdminDashboardContent() {
                                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Register New Client</h3>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Client will be onboarded with KYC_PENDING status</p>
                               </div>
-                              <button onClick={() => setIsClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
+                              <button onClick={() => setIsClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
                                 <X className="h-5 w-5" />
                               </button>
                             </div>
@@ -6551,7 +6551,7 @@ function AdminDashboardContent() {
                                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Client Details</h3>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Modify information for client: {editingClient.name}</p>
                               </div>
-                              <button onClick={() => setIsEditClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
+                              <button onClick={() => setIsEditClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
                                 <X className="h-5 w-5" />
                               </button>
                             </div>
@@ -6742,7 +6742,7 @@ function AdminDashboardContent() {
                                   setIsViewClientModalOpen(false);
                                   setSelectedClient(null);
                                 }}
-                                className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition"
+                                className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition"
                               >
                                 <X className="h-5 w-5" />
                               </button>
@@ -6759,7 +6759,7 @@ function AdminDashboardContent() {
                                 <button
                                   key={tab.id}
                                   onClick={() => setClientDetailsTab(tab.id as any)}
-                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 '}`}
                                 >
                                   {tab.label}
                                 </button>
@@ -6843,7 +6843,7 @@ function AdminDashboardContent() {
                                               </div>
                                               <div className="flex items-center space-x-2">
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${doc.status === 'VERIFIED' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>{doc.status}</span>
-                                                <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white transition"><Eye className="h-3 w-3" /></a>
+                                                <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:hover:text-white transition"><Eye className="h-3 w-3" /></a>
                                               </div>
                                             </div>
                                           ))}
@@ -7289,7 +7289,7 @@ function AdminDashboardContent() {
                           <button
                             key={tab.id}
                             onClick={() => setSettingsTab(tab.id as any)}
-                            className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
+                            className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
                           >
                             <tab.icon className="h-4 w-4" />
                             <span>{tab.label}</span>
@@ -7745,7 +7745,7 @@ function AdminDashboardContent() {
                               <button
                                 key={tab.id}
                                 onClick={() => setIntegrationTab(tab.id as any)}
-                                className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
+                                className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/50 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
                               >
                                 <tab.icon className="h-4 w-4" />
                                 <span>{tab.label}</span>
@@ -8094,7 +8094,7 @@ function AdminDashboardContent() {
                                           setIsEditRoleModalOpen(true);
                                         }}
                                         disabled={selectedRole.isAssigned}
-                                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                         title={selectedRole.isAssigned ? "This role is currently assigned to users and cannot be modified." : "Edit this custom role's name and description"}
                                       >
                                         <Edit2 className="h-3 w-3 mr-1" /> Edit Role
@@ -8102,7 +8102,7 @@ function AdminDashboardContent() {
                                       <button
                                         onClick={() => handleDeleteRole(selectedRole.id)}
                                         disabled={selectedRole.isAssigned}
-                                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center bg-red-950/40 border border-red-500/30 text-red-600 dark:text-red-400 hover:text-slate-900 dark:text-white hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center bg-red-950/40 border border-red-500/30 text-red-600 dark:text-red-400 hover:text-slate-900 dark:hover:text-white hover:bg-red-900/40 disabled:opacity-50 disabled:cursor-not-allowed"
                                         title={selectedRole.isAssigned ? "This role is currently assigned to users and cannot be deleted." : "Delete this custom role"}
                                       >
                                         <Trash2 className="h-3 w-3 mr-1" /> Delete Role
@@ -8252,7 +8252,7 @@ function AdminDashboardContent() {
                   <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
                     <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
                       <h3 className="text-xl font-bold">{editingPlan ? 'Edit Plan' : 'Create New Plan'}</h3>
-                      <button onClick={() => setIsPlanModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setIsPlanModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
                     </div>
                     <div className="p-6 overflow-y-auto">
                       <form id="planForm" onSubmit={async (e) => {
@@ -8310,7 +8310,7 @@ function AdminDashboardContent() {
                       </form>
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-                      <button onClick={() => setIsPlanModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
+                      <button onClick={() => setIsPlanModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
                       <button type="submit" form="planForm" className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20">{editingPlan ? 'Update Plan' : 'Create Plan'}</button>
                     </div>
                   </div>
@@ -8323,7 +8323,7 @@ function AdminDashboardContent() {
                   <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
                     <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
                       <h3 className="text-xl font-bold">Create Category</h3>
-                      <button onClick={() => setIsCategoryModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setIsCategoryModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
                     </div>
                     <div className="p-6">
                       <form id="catForm" onSubmit={handleCreateCategory} className="space-y-5">
@@ -8348,7 +8348,7 @@ function AdminDashboardContent() {
                       </form>
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-                      <button onClick={() => setIsCategoryModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
+                      <button onClick={() => setIsCategoryModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
                       <button type="submit" form="catForm" className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20">Create Category</button>
                     </div>
                   </div>
@@ -8361,7 +8361,7 @@ function AdminDashboardContent() {
                   <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
                     <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
                       <h3 className="text-xl font-bold">Create Custom Role</h3>
-                      <button onClick={() => setIsRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setIsRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
                     </div>
                     <div className="p-6">
                       <form id="roleForm" onSubmit={handleCreateRole} className="space-y-5">
@@ -8389,7 +8389,7 @@ function AdminDashboardContent() {
                       </form>
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-                      <button onClick={() => setIsRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
+                      <button onClick={() => setIsRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
                       <button type="submit" form="roleForm" disabled={roleModalLoading} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50">
                         {roleModalLoading ? 'Creating...' : 'Create Role'}
                       </button>
@@ -8404,7 +8404,7 @@ function AdminDashboardContent() {
                   <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
                     <div className="p-6 border-b border-slate-400 dark:border-white/10 flex justify-between items-center bg-slate-100 dark:bg-slate-800/50">
                       <h3 className="text-xl font-bold">Edit Custom Role</h3>
-                      <button onClick={() => setIsEditRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setIsEditRoleModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"><X className="h-5 w-5" /></button>
                     </div>
                     <div className="p-6">
                       <form id="editRoleForm" onSubmit={handleEditRole} className="space-y-5">
@@ -8432,7 +8432,7 @@ function AdminDashboardContent() {
                       </form>
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
-                      <button onClick={() => setIsEditRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
+                      <button onClick={() => setIsEditRoleModalOpen(false)} className="px-6 py-2.5 rounded-xl font-bold text-sm text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">Cancel</button>
                       <button type="submit" form="editRoleForm" disabled={editRoleModalLoading} className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-bold text-sm transition shadow-lg shadow-emerald-500/20 disabled:opacity-50">
                         {editRoleModalLoading ? 'Saving...' : 'Save Changes'}
                       </button>
@@ -8457,7 +8457,7 @@ function AdminDashboardContent() {
                       </div>
                       <button
                         onClick={() => setIsProfileModalOpen(false)}
-                        className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"
+                        className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"
                       >
                         <X className="h-5 w-5" />
                       </button>
@@ -8569,7 +8569,7 @@ function AdminDashboardContent() {
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end">
                       <button
                         onClick={() => setIsProfileModalOpen(false)}
-                        className="px-6 py-2 bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-900 dark:text-white rounded-xl text-xs font-bold transition"
+                        className="px-6 py-2 bg-slate-100 dark:bg-white/5 border border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-white/10 hover:text-slate-900 dark:hover:text-white rounded-xl text-xs font-bold transition"
                       >
                         Close
                       </button>
@@ -8584,7 +8584,7 @@ function AdminDashboardContent() {
                   <div className="bg-white dark:bg-[#0f1523] border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
                     <div className="flex justify-between items-center p-5 border-b border-slate-300 dark:border-white/5">
                       <h3 className="font-bold text-slate-900 dark:text-white">Update Compliance Status</h3>
-                      <button onClick={() => setAuditModalReq(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setAuditModalReq(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"><X className="h-5 w-5" /></button>
                     </div>
                     <form onSubmit={handleAuditUpdate} className="p-5 space-y-4">
                       <div>
@@ -8607,7 +8607,7 @@ function AdminDashboardContent() {
                         <input type="file" accept=".pdf,.jpg,.png" onChange={e => setAuditProof(e.target.files?.[0] || null)} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white" />
                       </div>
                       <div className="flex justify-end space-x-3 pt-2">
-                        <button type="button" onClick={() => setAuditModalReq(null)} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 rounded-xl transition">Cancel</button>
+                        <button type="button" onClick={() => setAuditModalReq(null)} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-400 dark:border-white/10 rounded-xl transition">Cancel</button>
                         <button type="submit" disabled={resolveLoading} className="px-5 py-2 text-xs font-bold bg-primary-600 hover:bg-primary-500 rounded-xl transition disabled:opacity-50">
                           {resolveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Status'}
                         </button>
@@ -8623,7 +8623,7 @@ function AdminDashboardContent() {
                   <div className="bg-white dark:bg-[#0f1523] border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
                     <div className="flex justify-between items-center p-5 border-b border-slate-300 dark:border-white/5">
                       <h3 className="font-bold text-slate-900 dark:text-white">Resolve Penalty</h3>
-                      <button onClick={() => setPenaltyResolveId(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setPenaltyResolveId(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"><X className="h-5 w-5" /></button>
                     </div>
                     <form onSubmit={handlePenaltyResolve} className="p-5 space-y-4">
                       <div>
@@ -8649,7 +8649,7 @@ function AdminDashboardContent() {
                         <textarea value={penaltyRemarks} onChange={e => setPenaltyRemarks(e.target.value)} required rows={2} placeholder={penaltyResolutionType === 'Paid' ? "Enter payment details..." : "Enter compliance remarks..."} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-sm text-slate-900 dark:text-white resize-none" />
                       </div>
                       <div className="flex justify-end space-x-3 pt-2">
-                        <button type="button" onClick={() => { setPenaltyResolveId(null); setPenaltyResolutionType(''); }} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 rounded-xl transition">Cancel</button>
+                        <button type="button" onClick={() => { setPenaltyResolveId(null); setPenaltyResolutionType(''); }} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-400 dark:border-white/10 rounded-xl transition">Cancel</button>
                         <button type="submit" disabled={resolveLoading} className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 rounded-xl transition disabled:opacity-50">
                           {resolveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit Resolution'}
                         </button>
@@ -8668,7 +8668,7 @@ function AdminDashboardContent() {
                         <h3 className="font-bold text-slate-900 dark:text-white text-base">Resolve Complaint</h3>
                         <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Upload ATR (Action Taken Report) to close this complaint</p>
                       </div>
-                      <button onClick={() => setComplaintResolveId(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white"><X className="h-5 w-5" /></button>
+                      <button onClick={() => setComplaintResolveId(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"><X className="h-5 w-5" /></button>
                     </div>
                     <form onSubmit={handleComplaintResolve} className="p-5 space-y-4">
                       <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
@@ -8702,7 +8702,7 @@ function AdminDashboardContent() {
                         />
                       </div>
                       <div className="flex justify-end space-x-3 pt-2">
-                        <button type="button" onClick={() => setComplaintResolveId(null)} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 rounded-xl transition">Cancel</button>
+                        <button type="button" onClick={() => setComplaintResolveId(null)} className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-400 dark:border-white/10 rounded-xl transition">Cancel</button>
                         <button type="submit" disabled={complaintResolveLoading} className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 rounded-xl transition disabled:opacity-50 flex items-center space-x-2">
                           {complaintResolveLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                           <span>Submit ATR & Close</span>
@@ -8798,7 +8798,7 @@ function AdminDashboardContent() {
             <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center"><FileText className="h-5 w-5 mr-2 text-primary-600 dark:text-primary-400" /> Download Periodic Report</h3>
-                <button onClick={() => setShowReportModal(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
+                <button onClick={() => setShowReportModal(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition">
                   <X className="h-5 w-5" />
                 </button>
               </div>

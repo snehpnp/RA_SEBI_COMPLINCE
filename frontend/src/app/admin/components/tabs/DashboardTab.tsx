@@ -172,7 +172,7 @@ export default function DashboardTab({
                       );
                     })}
                     {upcomingAlerts.length > 10 && (
-                      <button onClick={() => window.dispatchEvent(new CustomEvent('nav-to-upcoming'))} className="w-full text-center text-[11px] font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white py-3 mt-2 bg-white/50 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-2xl transition shadow-sm">
+                      <button onClick={() => window.dispatchEvent(new CustomEvent('nav-to-upcoming'))} className="w-full text-center text-[11px] font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white py-3 mt-2 bg-white/50 dark:bg-slate-800/50 hover:bg-white dark:hover:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-2xl transition shadow-sm">
                         View all {upcomingAlerts.length} upcoming alerts <ArrowRight className="inline h-3 w-3 ml-1" />
                       </button>
                     )}

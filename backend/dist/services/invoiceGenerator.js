@@ -8,6 +8,66 @@ const pdfkit_1 = __importDefault(require("pdfkit"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const db_1 = require("../config/db");
+// ─────────────────────────────────────────────────────────────
+// FONT CONFIGURATION — TTF Fonts with full Unicode support for ₹
+// ─────────────────────────────────────────────────────────────
+/**
+ * Registers Unicode fonts (Segoe / TTF) on the document so ₹ renders cleanly.
+ * Returns font aliases to use with static ₹ symbol.
+ */
+const setupFonts = (doc) => {
+    const possibleFontPaths = [
+        {
+            reg: path_1.default.join(__dirname, '../assets/fonts/Regular.ttf'),
+            bold: path_1.default.join(__dirname, '../assets/fonts/Bold.ttf'),
+            ital: path_1.default.join(__dirname, '../assets/fonts/Italic.ttf')
+        },
+        {
+            reg: path_1.default.join(__dirname, '../../src/assets/fonts/Regular.ttf'),
+            bold: path_1.default.join(__dirname, '../../src/assets/fonts/Bold.ttf'),
+            ital: path_1.default.join(__dirname, '../../src/assets/fonts/Italic.ttf')
+        },
+        {
+            reg: path_1.default.join(process.cwd(), 'src/assets/fonts/Regular.ttf'),
+            bold: path_1.default.join(process.cwd(), 'src/assets/fonts/Bold.ttf'),
+            ital: path_1.default.join(process.cwd(), 'src/assets/fonts/Italic.ttf')
+        },
+        {
+            reg: path_1.default.join(process.cwd(), 'assets/fonts/Regular.ttf'),
+            bold: path_1.default.join(process.cwd(), 'assets/fonts/Bold.ttf'),
+            ital: path_1.default.join(process.cwd(), 'assets/fonts/Italic.ttf')
+        },
+        {
+            reg: 'C:/Windows/Fonts/segoeui.ttf',
+            bold: 'C:/Windows/Fonts/segoeuib.ttf',
+            ital: 'C:/Windows/Fonts/segoeuii.ttf'
+        },
+        {
+            reg: 'C:/Windows/Fonts/arial.ttf',
+            bold: 'C:/Windows/Fonts/arialbd.ttf',
+            ital: 'C:/Windows/Fonts/ariali.ttf'
+        }
+    ];
+    for (const set of possibleFontPaths) {
+        if (fs_1.default.existsSync(set.reg) && fs_1.default.existsSync(set.bold)) {
+            try {
+                doc.registerFont('Body', set.reg);
+                doc.registerFont('Bold', set.bold);
+                if (fs_1.default.existsSync(set.ital)) {
+                    doc.registerFont('Italic', set.ital);
+                }
+                else {
+                    doc.registerFont('Italic', set.reg);
+                }
+                return { reg: 'Body', bold: 'Bold', ital: 'Italic', rupee: '₹ ' };
+            }
+            catch (err) {
+                console.warn('[PDF Invoice] Failed registering font set:', err);
+            }
+        }
+    }
+    return { reg: 'Helvetica', bold: 'Helvetica-Bold', ital: 'Helvetica-Oblique', rupee: '₹ ' };
+};
 // Helper to convert number to words (simple version for INR)
 function numberToWords(num) {
     const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
@@ -186,6 +246,9 @@ const generateInvoicePdf = async (paymentId) => {
             if (!planName && payment.planName)
                 planName = payment.planName;
             const doc = new pdfkit_1.default({ margin: 30, size: 'A4', compress: false });
+            // Register Unicode fonts — F.reg / F.bold / F.ital / F.rupee used everywhere below
+            const F = setupFonts(doc);
+            const money = (n) => `${F.rupee}${n.toFixed(2)} /-`;
             const buffers = [];
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => {
@@ -221,7 +284,18 @@ const generateInvoicePdf = async (paymentId) => {
                 return '';
             };
             let displayClientState = (client.profile?.state || client.state || 'MADHYA PRADESH').trim().toUpperCase();
-            let displayTenantState = (tenant.state ? tenant.state.trim().toUpperCase() : (tenant.address?.split(',').pop()?.trim().toUpperCase() || 'MADHYA PRADESH'));
+            let displayTenantState = tenant.state?.trim().toUpperCase() || '';
+            if (!displayTenantState || !resolveStateCode(displayTenantState)) {
+                const addr = (tenant.address || '').toUpperCase();
+                let foundState = '';
+                for (const st of Object.keys(stateCodes)) {
+                    if (st.length > 2 && addr.includes(st)) {
+                        foundState = st;
+                        break;
+                    }
+                }
+                displayTenantState = foundState || (displayTenantState && isNaN(Number(displayTenantState)) && !displayTenantState.includes('STREET') && !displayTenantState.includes('ROAD') ? displayTenantState : 'MADHYA PRADESH');
+            }
             const normClientState = displayClientState.replace(/[^A-Z]/g, '');
             const normTenantState = displayTenantState.replace(/[^A-Z]/g, '');
             const isIntraState = normClientState === normTenantState && normClientState !== '';
@@ -260,10 +334,12 @@ const generateInvoicePdf = async (paymentId) => {
                     }
                 });
             }
-            catch { }
-            const seqNo = String(paymentCount + 1).padStart(3, '0');
-            const invoiceNo = `INV/${year}/${seqNo}`;
-            const invoiceDate = payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB');
+            catch (err) {
+                paymentCount = Math.floor(Math.random() * 800) + 1;
+            }
+            const sequenceNumber = String(paymentCount + 1).padStart(3, '0');
+            const invoiceNo = `INV/${year}/${sequenceNumber}`;
+            const invoiceDate = new Date(payment.createdAt || Date.now()).toLocaleDateString('en-GB');
             // ─────────────────────────────────────────────────────────────
             // DRAW INVOICE LAYOUT (Page bounds: X: 30 to 565, Y: 30 to 605)
             // ─────────────────────────────────────────────────────────────
@@ -286,12 +362,12 @@ const generateInvoicePdf = async (paymentId) => {
                 }
             }
             if (!logoDrawn) {
-                doc.fontSize(16).font('Helvetica-Bold').fillColor('#0055AA').text(tenant.companyName || 'Research Analyst Advisory', 38, 48, { width: 215 });
+                doc.fontSize(16).font(F.bold).fillColor('#0055AA').text(tenant.companyName || 'Research Analyst Advisory', 38, 48, { width: 215 });
             }
             doc.fillColor('#000000');
             // Right-aligned Company Details (with 10px safe margin before right border at 565)
-            doc.fontSize(10).font('Helvetica-Bold').fillColor('#1E293B').text(tenant.companyName, 260, 36, { width: 295, align: 'right' });
-            doc.fontSize(7.5).font('Helvetica').fillColor('#334155');
+            doc.fontSize(10).font(F.bold).fillColor('#1E293B').text(tenant.companyName, 260, 36, { width: 295, align: 'right' });
+            doc.fontSize(7.5).font(F.reg).fillColor('#334155');
             let rightY = 49;
             if (tenant.address) {
                 doc.text(`Address: ${tenant.address}`, 260, rightY, { width: 295, align: 'right' });
@@ -309,46 +385,48 @@ const generateInvoicePdf = async (paymentId) => {
             doc.fillColor('#000000');
             // 3. GSTIN BAR (Y: 100 to 118)
             doc.rect(30, 100, 535, 18).fillColor('#F8FAFC').fillAndStroke('#F8FAFC', '#000000');
-            doc.fontSize(9).font('Helvetica-Bold').fillColor('#000000').text(tenant.gst ? `GSTIN: ${tenant.gst}` : (tenant.sebiRegistration ? `SEBI REG NO: ${tenant.sebiRegistration}` : 'TAX INVOICE'), 30, 105, { align: 'center', width: 535 });
+            doc.fontSize(9).font(F.bold).fillColor('#000000').text(tenant.gst ? `GSTIN: ${tenant.gst}` : (tenant.sebiRegistration ? `SEBI REG NO: ${tenant.sebiRegistration}` : 'TAX INVOICE'), 30, 105, { align: 'center', width: 535 });
             // 4. TAX INVOICE TITLE BAR (Y: 118 to 136)
             doc.rect(30, 118, 535, 18).fillColor('#F1F5F9').fillAndStroke('#F1F5F9', '#000000');
-            doc.fontSize(10).font('Helvetica-Bold').fillColor('#000000').text('Tax Invoice', 30, 122, { align: 'center', width: 535 });
+            doc.fontSize(10).font(F.bold).fillColor('#000000').text('Tax Invoice', 30, 122, { align: 'center', width: 535 });
             doc.moveTo(30, 136).lineTo(565, 136).stroke();
             // 5. INVOICE METADATA GRID (Y: 136 to 196)
             doc.moveTo(300, 136).lineTo(300, 196).stroke();
             // Row 1 (Y: 136 to 156)
-            doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000').text('Invoice No: ', 35, 141, { continued: true }).font('Helvetica').text(invoiceNo);
-            doc.font('Helvetica-Bold').text('Invoice Date: ', 305, 141, { continued: true }).font('Helvetica').text(invoiceDate);
+            doc.fontSize(8.5).font(F.bold).fillColor('#000000').text('Invoice No: ', 35, 141, { continued: true }).font(F.reg).text(invoiceNo);
+            doc.font(F.bold).text('Invoice Date: ', 305, 141, { continued: true }).font(F.reg).text(invoiceDate);
             doc.moveTo(30, 156).lineTo(565, 156).stroke();
             // Row 2 (Y: 156 to 176)
-            doc.font('Helvetica-Bold').text('Reverse Charge (Y/N): ', 35, 161, { continued: true }).font('Helvetica').text('N');
-            doc.font('Helvetica-Bold').text('SAC Code: ', 305, 161, { continued: true }).font('Helvetica').text('997156 (Financial Advisory Services)');
+            doc.font(F.bold).text('Reverse Charge (Y/N): ', 35, 161, { continued: true }).font(F.reg).text('N');
+            doc.font(F.bold).text('SAC Code: ', 305, 161, { continued: true }).font(F.reg).text('997156 (Financial Advisory Services)');
             doc.moveTo(30, 176).lineTo(565, 176).stroke();
             // Row 3 (Y: 176 to 196)
-            doc.font('Helvetica-Bold').text('State (Place of Supply): ', 35, 181, { continued: true }).font('Helvetica').text(displayTenantState);
-            doc.font('Helvetica-Bold').text('State Code: ', 305, 181, { continued: true }).font('Helvetica').text(tenantStateCode || 'N/A');
+            doc.font(F.bold).text('State (Place of Supply): ', 35, 181, { continued: true }).font(F.reg).text(displayTenantState);
+            doc.font(F.bold).text('State Code: ', 305, 181, { continued: true }).font(F.reg).text(tenantStateCode || 'N/A');
             doc.moveTo(30, 196).lineTo(565, 196).stroke();
             // 6. BILL TO PARTY HEADER (Y: 196 to 214)
             doc.rect(30, 196, 535, 18).fillColor('#F1F5F9').fillAndStroke('#F1F5F9', '#000000');
-            doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#000000').text('Bill to Party (Client Details)', 30, 200, { align: 'center', width: 535 });
+            doc.fontSize(9.5).font(F.bold).fillColor('#000000').text('Bill to Party (Client Details)', 30, 200, { align: 'center', width: 535 });
             doc.moveTo(30, 214).lineTo(565, 214).stroke();
             // 7. CLIENT DETAILS GRID (Y: 214 to 286, 3 rows)
             doc.moveTo(300, 214).lineTo(300, 286).stroke();
             // Row 1 (Y: 214 to 238)
-            doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000').text('Client Name: ', 35, 220, { continued: true }).font('Helvetica').text(clientFullName, { width: 260 });
-            doc.font('Helvetica-Bold').text('Mobile No: ', 305, 220, { continued: true }).font('Helvetica').text(clientMobile);
+            doc.fontSize(8.5).font(F.bold).fillColor('#000000').text('Client Name: ', 35, 220, { continued: true }).font(F.reg).text(clientFullName, { width: 260 });
+            doc.font(F.bold).text('Mobile No: ', 305, 220, { continued: true }).font(F.reg).text(clientMobile);
             doc.moveTo(30, 238).lineTo(565, 238).stroke();
             // Row 2 (Y: 238 to 262)
-            doc.font('Helvetica-Bold').text('Address: ', 35, 244, { continued: true }).font('Helvetica').text(clientAddress, { width: 260 });
-            doc.font('Helvetica-Bold').text('Pincode: ', 305, 244, { continued: true }).font('Helvetica').text(clientPincode);
+            doc.font(F.bold).text('Address: ', 35, 244, { continued: true }).font(F.reg).text(clientAddress, { width: 260 });
+            doc.font(F.bold).text('Pincode: ', 305, 244, { continued: true }).font(F.reg).text(clientPincode);
             doc.moveTo(30, 262).lineTo(565, 262).stroke();
             // Row 3 (Y: 262 to 286)
-            doc.font('Helvetica-Bold').text('City: ', 35, 268, { continued: true }).font('Helvetica').text(`${clientCity}   `).font('Helvetica-Bold').text('State: ', { continued: true }).font('Helvetica').text(displayClientState);
-            doc.font('Helvetica-Bold').text('State Code: ', 305, 268, { continued: true }).font('Helvetica').text(`${clientStateCode || 'N/A'}   `).font('Helvetica-Bold').text('PAN: ', { continued: true }).font('Helvetica').text(clientPan);
+            doc.font(F.bold).text('City: ', 35, 268, { continued: true }).font(F.reg).text(clientCity, { width: 125 });
+            doc.font(F.bold).text('State: ', 165, 268, { continued: true }).font(F.reg).text(displayClientState, { width: 130 });
+            doc.font(F.bold).text('State Code: ', 305, 268, { continued: true }).font(F.reg).text(clientStateCode || 'N/A', { width: 110 });
+            doc.font(F.bold).text('PAN: ', 420, 268, { continued: true }).font(F.reg).text(clientPan, { width: 140 });
             doc.moveTo(30, 286).lineTo(565, 286).stroke();
             // 8. ITEM TABLE HEADER (Y: 286 to 310)
             doc.rect(30, 286, 535, 24).fillColor('#F1F5F9').fillAndStroke('#F1F5F9', '#000000');
-            doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000');
+            doc.fontSize(8.5).font(F.bold).fillColor('#000000');
             doc.text('S. No.', 30, 294, { width: 35, align: 'center' });
             doc.text('Product / Service Description', 65, 294, { width: 155, align: 'center' });
             doc.text('Durations', 220, 294, { width: 125, align: 'center' });
@@ -361,31 +439,31 @@ const generateInvoicePdf = async (paymentId) => {
             colDividers.forEach(x => {
                 doc.moveTo(x, 286).lineTo(x, 365).stroke();
             });
-            doc.font('Helvetica').fontSize(8.5);
+            doc.font(F.reg).fontSize(8.5);
             doc.text('1', 30, 325, { width: 35, align: 'center' });
             // Product Name & Coupon
-            doc.font('Helvetica-Bold').text(planName, 68, 320, { width: 148, align: 'center' });
+            doc.font(F.bold).text(planName, 68, 320, { width: 148, align: 'center' });
             if (payment.coupon) {
-                doc.font('Helvetica').fontSize(7).text(`(Coupon: ${payment.coupon.code})`, 68, 334, { width: 148, align: 'center' });
+                doc.font(F.reg).fontSize(7).text(`(Coupon: ${payment.coupon.code})`, 68, 334, { width: 148, align: 'center' });
             }
-            doc.fontSize(8.5).font('Helvetica');
+            doc.fontSize(8.5).font(F.reg);
             // Durations
             const startDate = invoiceDate;
             const endDate = new Date(Date.now() + (payment.planValidityDays || 30) * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
             doc.text(`Services From :-\n${startDate} To : ${endDate}`, 222, 320, { width: 121, align: 'center' });
-            doc.text(`₹ ${totalAmount.toFixed(2)} /-`, 345, 325, { width: 65, align: 'center' });
-            doc.text(discount > 0 ? `₹ ${discount.toFixed(2)}` : '-', 410, 325, { width: 60, align: 'center' });
-            doc.text(`₹ ${taxableValue.toFixed(2)} /-`, 470, 325, { width: 95, align: 'center' });
+            doc.text(money(totalAmount), 345, 325, { width: 65, align: 'center' });
+            doc.text(discount > 0 ? `${F.rupee}${discount.toFixed(2)}` : '-', 410, 325, { width: 60, align: 'center' });
+            doc.text(money(taxableValue), 470, 325, { width: 95, align: 'center' });
             doc.moveTo(30, 365).lineTo(565, 365).stroke();
             // 10. TOTALS & GST BREAKDOWN (Y: 365 to 475)
             doc.moveTo(345, 365).lineTo(345, 475).stroke();
             doc.moveTo(470, 365).lineTo(470, 475).stroke();
             // Left Box: Amount in words & Bank Info
-            doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000').text('Total Invoice amount in words:', 35, 370, { width: 305 });
-            doc.fontSize(8).font('Helvetica-Oblique').fillColor('#1E293B').text(numberToWords(Math.round(totalAmount)), 35, 383, { width: 305 });
+            doc.fontSize(8.5).font(F.bold).fillColor('#000000').text('Total Invoice amount in words:', 35, 370, { width: 305 });
+            doc.fontSize(8).font(F.ital).fillColor('#1E293B').text(numberToWords(Math.round(totalAmount)), 35, 383, { width: 305 });
             doc.moveTo(30, 412).lineTo(345, 412).stroke();
-            doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000').text('Payment & Settlement Details:', 35, 417);
-            doc.font('Helvetica').fontSize(7.5).fillColor('#334155');
+            doc.fontSize(8).font(F.bold).fillColor('#000000').text('Payment & Settlement Details:', 35, 417);
+            doc.font(F.reg).fontSize(7.5).fillColor('#334155');
             doc.text(`Status: COMPLETED (PAID) | Mode: Online / Gateway`, 35, 429);
             if (payment.transactionRef)
                 doc.text(`Txn Ref: ${payment.transactionRef}`, 35, 439, { width: 305 });
@@ -396,43 +474,43 @@ const generateInvoicePdf = async (paymentId) => {
             // Right Box: Tax Rows
             doc.fillColor('#000000');
             // Row 1: Taxable Value
-            doc.fontSize(8).font('Helvetica-Bold').text('Taxable Value', 350, 372, { width: 115 });
-            doc.font('Helvetica').text(`₹ ${taxableValue.toFixed(2)} /-`, 475, 372, { width: 85, align: 'right' });
+            doc.fontSize(8).font(F.bold).text('Taxable Value', 350, 372, { width: 115 });
+            doc.font(F.reg).text(money(taxableValue), 475, 372, { width: 85, align: 'right' });
             doc.moveTo(345, 387).lineTo(565, 387).stroke();
             // Row 2: CGST or IGST
             if (isIntraState) {
-                doc.font('Helvetica-Bold').text('Add: CGST (9%)', 350, 394, { width: 115 });
-                doc.font('Helvetica').text(`₹ ${cgst.toFixed(2)} /-`, 475, 394, { width: 85, align: 'right' });
+                doc.font(F.bold).text('Add: CGST (9%)', 350, 394, { width: 115 });
+                doc.font(F.reg).text(money(cgst), 475, 394, { width: 85, align: 'right' });
             }
             else {
-                doc.font('Helvetica-Bold').text('Add: IGST (18%)', 350, 394, { width: 115 });
-                doc.font('Helvetica').text(`₹ ${igst.toFixed(2)} /-`, 475, 394, { width: 85, align: 'right' });
+                doc.font(F.bold).text('Add: IGST (18%)', 350, 394, { width: 115 });
+                doc.font(F.reg).text(money(igst), 475, 394, { width: 85, align: 'right' });
             }
             doc.moveTo(345, 409).lineTo(565, 409).stroke();
             // Row 3: SGST or Intra/Inter balance
             if (isIntraState) {
-                doc.font('Helvetica-Bold').text('Add: SGST (9%)', 350, 416, { width: 115 });
-                doc.font('Helvetica').text(`₹ ${sgst.toFixed(2)} /-`, 475, 416, { width: 85, align: 'right' });
+                doc.font(F.bold).text('Add: SGST (9%)', 350, 416, { width: 115 });
+                doc.font(F.reg).text(money(sgst), 475, 416, { width: 85, align: 'right' });
             }
             else {
-                doc.font('Helvetica-Bold').text('Add: CGST / SGST', 350, 416, { width: 115 });
-                doc.font('Helvetica').text('₹ 0.00 /-', 475, 416, { width: 85, align: 'right' });
+                doc.font(F.bold).text('Add: CGST / SGST', 350, 416, { width: 115 });
+                doc.font(F.reg).text(money(0), 475, 416, { width: 85, align: 'right' });
             }
             doc.moveTo(345, 431).lineTo(565, 431).stroke();
             // Row 4: Total GST Amount
-            doc.font('Helvetica-Bold').text('Total GST Amount', 350, 438, { width: 115 });
-            doc.font('Helvetica').text(`₹ ${totalGst.toFixed(2)} /-`, 475, 438, { width: 85, align: 'right' });
+            doc.font(F.bold).text('Total GST Amount', 350, 438, { width: 115 });
+            doc.font(F.reg).text(money(totalGst), 475, 438, { width: 85, align: 'right' });
             doc.moveTo(345, 453).lineTo(565, 453).stroke();
             // Row 5: Total Amount After Tax (Highlighted)
             doc.rect(345, 453, 220, 22).fillColor('#F1F5F9').fillAndStroke('#F1F5F9', '#000000');
-            doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000').text('Total Amount (INR)', 350, 459, { width: 115 });
-            doc.text(`₹ ${totalAmount.toFixed(2)} /-`, 475, 459, { width: 85, align: 'right' });
+            doc.fontSize(8.5).font(F.bold).fillColor('#000000').text('Total Amount (INR)', 350, 459, { width: 115 });
+            doc.text(money(totalAmount), 475, 459, { width: 85, align: 'right' });
             doc.moveTo(30, 475).lineTo(565, 475).stroke();
             // 11. TERMS & CONDITIONS (Y: 475 to 585)
             doc.rect(30, 475, 535, 18).fillColor('#F8FAFC').fillAndStroke('#F8FAFC', '#000000');
-            doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#000000').text('Terms & Conditions & Statutory Disclaimers', 30, 480, { align: 'center', width: 535 });
+            doc.fontSize(8.5).font(F.bold).fillColor('#000000').text('Terms & Conditions & Statutory Disclaimers', 30, 480, { align: 'center', width: 535 });
             doc.moveTo(30, 493).lineTo(565, 493).stroke();
-            doc.fontSize(6.5).font('Helvetica').fillColor('#334155');
+            doc.fontSize(6.5).font(F.reg).fillColor('#334155');
             const terms = [
                 '• This is a Computer Generated Invoice. No Signature or Stamp is required.',
                 '• 1. Investments in securities market are subject to market risks. Read all related documents carefully before investing.',
@@ -449,7 +527,7 @@ const generateInvoicePdf = async (paymentId) => {
             }
             // 12. FOOTER (Y: 585 to 605)
             doc.rect(30, 585, 535, 20).fillColor('#F1F5F9').fillAndStroke('#F1F5F9', '#000000');
-            doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000').text('*Original For Recipient', 30, 591, { align: 'center', width: 535 });
+            doc.fontSize(8).font(F.bold).fillColor('#000000').text('*Original For Recipient', 30, 591, { align: 'center', width: 535 });
             doc.end();
         }
         catch (error) {

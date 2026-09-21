@@ -1262,7 +1262,7 @@ function SuperAdminDashboardContent() {
             <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
               <button
                 onClick={() => setIsAddCompanyModalOpen(false)}
-                className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10"
+                className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10"
               >
                 <XCircle className="h-5 w-5" />
               </button>
@@ -1902,7 +1902,7 @@ function SuperAdminDashboardContent() {
         {isViewModalOpen && viewData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
-              <button onClick={() => setIsViewModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
+              <button onClick={() => setIsViewModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
                 <XCircle className="h-5 w-5" />
               </button>
               <h2 className="text-2xl font-bold mb-6">Tenant Details</h2>
@@ -1994,7 +1994,7 @@ function SuperAdminDashboardContent() {
         {isEditRuleModalOpen && editRuleData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-lg shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
-              <button onClick={() => setIsEditRuleModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
+              <button onClick={() => setIsEditRuleModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
                 <XCircle className="h-5 w-5" />
               </button>
               <h2 className="text-xl font-bold mb-6 text-slate-900 dark:text-white">Edit Compliance Rule #{editRuleData.serialNo}</h2>
@@ -2055,7 +2055,7 @@ function SuperAdminDashboardContent() {
         {isEditModalOpen && editData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl relative text-left animate-in zoom-in-95 duration-200">
-              <button onClick={() => setIsEditModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
+              <button onClick={() => setIsEditModalOpen(false)} className="absolute top-6 right-6 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors bg-slate-100 dark:bg-white/5 p-2 rounded-full">
                 <XCircle className="h-5 w-5" />
               </button>
               <h2 className="text-2xl font-bold mb-6">Edit Tenant</h2>
