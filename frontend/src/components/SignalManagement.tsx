@@ -45,7 +45,7 @@ const tableCustomStyles = {
     },
   },
 };
-import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff } from 'lucide-react';
+import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send } from 'lucide-react';
 import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
@@ -1091,6 +1091,18 @@ export default function SignalManagement({
                 <label className="block text-sm font-bold mb-1">Description<span className="text-red-600 dark:text-red-500">*</span></label>
                 <textarea value={description} onChange={e => { setDescription(e.target.value); setErrors((prev: any) => ({ ...prev, description: '' })); }} placeholder="Enter Description" rows={4} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b] resize-none" />
                 {errors.description && <p className="text-red-600 dark:text-red-500 text-xs mt-1">{errors.description}</p>}
+              </div>
+
+              {/* TELEGRAM AUTO-BROADCAST NOTICE */}
+              <div className="mb-6 p-3.5 bg-sky-500/10 border border-sky-500/20 rounded-xl flex items-center justify-between text-xs text-sky-800 dark:text-sky-300">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 bg-[#229ED9] text-white rounded-lg inline-flex items-center justify-center">
+                    <Send className="w-3.5 h-3.5" />
+                  </span>
+                  <span>
+                    <b>Telegram Auto-Broadcast Active:</b> Publishing this signal will instantly notify all members in the common Telegram group.
+                  </span>
+                </div>
               </div>
 
               {/* Buttons */}

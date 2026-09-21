@@ -35,6 +35,7 @@
     "razorpay": "^2.9.8",
     "swagger-autogen": "^2.23.7",
     "swagger-ui-express": "^5.0.1",
+    "telegram": "^2.26.22",
     "tesseract.js": "^7.0.0",
     "yahoo-finance2": "^4.0.0",
     "yamljs": "^0.3.0"

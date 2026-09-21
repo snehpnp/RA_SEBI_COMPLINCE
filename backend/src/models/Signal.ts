@@ -27,6 +27,8 @@ export interface ISignal extends Document {
   closeRemark?: string | null;
   closedAt?: Date | null;
   closeTargets?: string | null;
+  telegramChatId?: string | null;
+  telegramMessageId?: number | null;
   status: string;
   createdById: Types.ObjectId;
   createdAt: Date;
@@ -58,6 +60,8 @@ export const SignalSchema = new Schema<ISignal>(
     closeRemark: { type: String, default: null },
     closedAt: { type: Date, default: null },
     closeTargets: { type: String, default: null },
+    telegramChatId: { type: String, default: null, index: true },
+    telegramMessageId: { type: Number, default: null },
     status: { type: String, default: 'OPEN' },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', required: true }
   },

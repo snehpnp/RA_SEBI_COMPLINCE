@@ -46,6 +46,8 @@ import { EmailTemplate, EmailTemplateSchema, IEmailTemplate } from './EmailTempl
 import { EmailVerification, EmailVerificationSchema, IEmailVerification } from './EmailVerification';
 import { SystemSetting, SystemSettingSchema, ISystemSetting } from './SystemSetting';
 import { AdminPermission, AdminPermissionSchema, IAdminPermission } from './AdminPermission';
+import { TelegramGroup, TelegramGroupSchema, ITelegramGroup } from './TelegramGroup';
+import { TelegramDeliveryLog, TelegramDeliveryLogSchema, ITelegramDeliveryLog } from './TelegramDeliveryLog';
 
 // Re-export all models and interfaces
 export {
@@ -93,7 +95,9 @@ export {
   EmailTemplate, EmailTemplateSchema, IEmailTemplate,
   EmailVerification, EmailVerificationSchema, IEmailVerification,
   SystemSetting, SystemSettingSchema, ISystemSetting,
-  AdminPermission, AdminPermissionSchema, IAdminPermission
+  AdminPermission, AdminPermissionSchema, IAdminPermission,
+  TelegramGroup, TelegramGroupSchema, ITelegramGroup,
+  TelegramDeliveryLog, TelegramDeliveryLogSchema, ITelegramDeliveryLog
 };
 
 /**
@@ -146,6 +150,8 @@ export interface ITenantModels {
   EmailVerification: Model<IEmailVerification>;
   SystemSetting: Model<ISystemSetting>;
   AdminPermission: Model<IAdminPermission>;
+  TelegramGroup: Model<ITelegramGroup>;
+  TelegramDeliveryLog: Model<ITelegramDeliveryLog>;
 
   // Lowercase / camelCase aliases
   tenant: Model<ITenant>;
@@ -193,6 +199,8 @@ export interface ITenantModels {
   emailVerification: Model<IEmailVerification>;
   systemSetting: Model<ISystemSetting>;
   adminPermission: Model<IAdminPermission>;
+  telegramGroup: Model<ITelegramGroup>;
+  telegramDeliveryLog: Model<ITelegramDeliveryLog>;
 
   [key: string]: any;
 }
@@ -246,7 +254,9 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     EmailTemplate: (connection.models.EmailTemplate || connection.model<IEmailTemplate>('EmailTemplate', EmailTemplateSchema, 'EmailTemplate')) as Model<IEmailTemplate>,
     EmailVerification: (connection.models.EmailVerification || connection.model<IEmailVerification>('EmailVerification', EmailVerificationSchema, 'EmailVerification')) as Model<IEmailVerification>,
     SystemSetting: (connection.models.SystemSetting || connection.model<ISystemSetting>('SystemSetting', SystemSettingSchema, 'SystemSetting')) as Model<ISystemSetting>,
-    AdminPermission: (connection.models.AdminPermission || connection.model<IAdminPermission>('AdminPermission', AdminPermissionSchema, 'AdminPermission')) as Model<IAdminPermission>
+    AdminPermission: (connection.models.AdminPermission || connection.model<IAdminPermission>('AdminPermission', AdminPermissionSchema, 'AdminPermission')) as Model<IAdminPermission>,
+    TelegramGroup: (connection.models.TelegramGroup || connection.model<ITelegramGroup>('TelegramGroup', TelegramGroupSchema, 'TelegramGroup')) as Model<ITelegramGroup>,
+    TelegramDeliveryLog: (connection.models.TelegramDeliveryLog || connection.model<ITelegramDeliveryLog>('TelegramDeliveryLog', TelegramDeliveryLogSchema, 'TelegramDeliveryLog')) as Model<ITelegramDeliveryLog>
   };
 
   return {
@@ -295,6 +305,8 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     emailTemplate: models.EmailTemplate,
     emailVerification: models.EmailVerification,
     systemSetting: models.SystemSetting,
-    adminPermission: models.AdminPermission
+    adminPermission: models.AdminPermission,
+    telegramGroup: models.TelegramGroup,
+    telegramDeliveryLog: models.TelegramDeliveryLog
   };
 }

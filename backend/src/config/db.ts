@@ -97,5 +97,7 @@ export const EmailTemplate = createDynamicModelProxy('EmailTemplate');
 export const EmailVerification = createDynamicModelProxy('EmailVerification');
 export const SystemSetting = createDynamicModelProxy('SystemSetting');
 export const AdminPermission = createDynamicModelProxy('AdminPermission');
+export const TelegramGroup = createDynamicModelProxy('TelegramGroup');
+export const TelegramDeliveryLog = createDynamicModelProxy('TelegramDeliveryLog');
 
 export default dynamicDb;

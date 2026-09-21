@@ -70,6 +70,7 @@ const tenantResolver_1 = __importDefault(require("./middlewares/tenantResolver")
 app.use(tenantResolver_1.default);
 // Routes mapping
 app.use('/api/v1', api_1.default);
+app.use('/api', api_1.default);
 app.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
 app.get('/clients', third_party_api_1.getThirdPartyClients);
 // Health check endpoint
@@ -175,8 +176,10 @@ node_cron_1.default.schedule('0 0 * * *', async () => {
         console.error('❌ [COMPLIANCE CRON] Error running automated daily compliance cron:', error?.message);
     }
 });
+const telegramService_1 = require("./services/telegramService");
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
+    telegramService_1.telegramService.startBotPoller(); // Start Telegram bot polling for local/realtime linking
 });

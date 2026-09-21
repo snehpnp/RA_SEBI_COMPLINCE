@@ -102,6 +102,20 @@ exports.TenantSchema = new mongoose_1.Schema({
     mongoDbUrl: { type: String, default: null },
     dbName: { type: String, default: null },
     tenantApiKey: { type: String, default: null },
+    telegramBotToken: { type: String, default: null },
+    telegramChatId: { type: String, default: null },
+    telegramInviteLink: { type: String, default: null },
+    telegramPhone: { type: String, default: null },
+    telegramSession: { type: String, default: null },
+    telegramUser: {
+        id: { type: String, default: null },
+        firstName: { type: String, default: null },
+        lastName: { type: String, default: null },
+        username: { type: String, default: null },
+        phone: { type: String, default: null }
+    },
+    telegramApiId: { type: Number, default: null },
+    telegramApiHash: { type: String, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Tenant' });

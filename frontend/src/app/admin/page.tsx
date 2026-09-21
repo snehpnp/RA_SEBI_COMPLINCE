@@ -35,6 +35,8 @@ import { generatePeriodicReport } from '@/utils/generatePeriodicReport';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, Cell, XAxis, YAxis, Tooltip } from 'recharts';
 import CouponsManager from '../../components/CouponsManager';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
+import TelegramSettingsTab from '../../components/admin/TelegramSettingsTab';
+import TelegramGroupSelector from '../../components/admin/TelegramGroupSelector';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -425,7 +427,7 @@ function AdminDashboardContent() {
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const [dashboardStats, setDashboardStats] = useState({ staffCount: 0, clientCount: 0, researchCount: 0, planCount: 0 });
   const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'reports' | 'policies' | 'billing' | 'security'>('general');
-  const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc'>('payments');
+  const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc' | 'telegram'>('payments');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
@@ -685,6 +687,9 @@ function AdminDashboardContent() {
   const [planSegments, setPlanSegments] = useState<string[]>(['EQUITY']);
   const [planNotifs, setPlanNotifs] = useState<string[]>(['EMAIL', 'INAPP']);
   const [planClientLimit, setPlanClientLimit] = useState('100');
+  const [planTelegramChatId, setPlanTelegramChatId] = useState('');
+  const [planTelegramInviteLink, setPlanTelegramInviteLink] = useState('');
+  const [planTelegramGroupName, setPlanTelegramGroupName] = useState('');
 
   // Add Client modal state
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -7495,7 +7500,7 @@ function AdminDashboardContent() {
                                 <Trash2 className="h-4 w-4" /> <span>{showDeletedPlans ? 'View Active Plans' : 'View Deleted Plans'}</span>
                               </button>
                               {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
+                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setPlanTelegramChatId(''); setPlanTelegramInviteLink(''); setPlanTelegramGroupName(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
                                   <Plus className="h-4 w-4" /> <span>Create New Plan</span>
                                 </button>
                               )}
@@ -7549,10 +7554,15 @@ function AdminDashboardContent() {
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center space-x-2 mb-4">
+                                  <div className="flex flex-wrap items-center gap-2 mb-4">
                                     <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${isDeleted ? 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400' : plan.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'}`}>
                                       {isDeleted ? 'DELETED' : plan.status}
                                     </span>
+                                    {(plan.telegramChatId || plan.telegramInviteLink) && (
+                                      <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-[#0088cc]/15 text-[#0088cc] border border-[#0088cc]/25 flex items-center gap-1">
+                                        <Send className="w-2.5 h-2.5" /> Telegram Group
+                                      </span>
+                                    )}
                                   </div>
 
                                   <div className="text-sm text-slate-600 dark:text-slate-400 mb-6 flex-grow line-clamp-3 leading-relaxed" dangerouslySetInnerHTML={{ __html: plan.description }} />
@@ -7577,10 +7587,11 @@ function AdminDashboardContent() {
                                     {!isDeleted ? (
                                       <>
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
+                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setPlanTelegramChatId(plan.telegramChatId || ''); setPlanTelegramInviteLink(plan.telegramInviteLink || ''); setPlanTelegramGroupName(plan.telegramGroupName || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
                                             <Edit2 className="h-3.5 w-3.5" /> <span>Edit</span>
                                           </button>
                                         )}
+
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
                                           <button onClick={() => handleTogglePlanStatus(plan.id)} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
                                             <span>Toggle</span>
@@ -8112,6 +8123,7 @@ function AdminDashboardContent() {
                           <div className="flex flex-wrap items-center gap-2 bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-xl w-full mb-2">
                             {[
                               { id: 'payments', label: 'Payment Gateways', icon: CreditCard },
+                              { id: 'telegram', label: 'Telegram Bot', icon: Send },
                               { id: 'email', label: 'Email & SMTP', icon: User },
                               { id: 'kyc', label: 'Digio KYC & eSign', icon: FileCheck }
                             ].map(tab => (
@@ -8317,6 +8329,11 @@ function AdminDashboardContent() {
                                 </div>
                               </div>
                             </div>
+                          )}
+
+                          {/* Telegram Bot Integration */}
+                          {integrationTab === 'telegram' && (
+                            <TelegramSettingsTab />
                           )}
                         </div>
                       )}
@@ -8685,7 +8702,16 @@ function AdminDashboardContent() {
                       <form id="planForm" onSubmit={async (e) => {
                         e.preventDefault();
                         try {
-                          const payload = { categoryId: planCategoryId, name: planName, description: planDesc, price: planPrice, durationMonths: planDuration };
+                          const payload = {
+                            categoryId: planCategoryId,
+                            name: planName,
+                            description: planDesc,
+                            price: planPrice,
+                            durationMonths: planDuration,
+                            telegramChatId: planTelegramChatId,
+                            telegramInviteLink: planTelegramInviteLink,
+                            telegramGroupName: planTelegramGroupName
+                          };
                           const res = editingPlan ? await api.updatePlan(editingPlan.id, payload) : await api.createPlan(payload);
                           if (res.success) { setIsPlanModalOpen(false); loadData(); }
                           else { toast(res.message); }
@@ -8717,6 +8743,19 @@ function AdminDashboardContent() {
                             {[1, 2, 3, 6, 12].map(m => <option key={m} value={m}>{m} Month{m > 1 ? 's' : ''}</option>)}
                           </select>
                         </div>
+
+                        {/* Telegram Plan-Specific Group Configuration */}
+                        <TelegramGroupSelector
+                          chatId={planTelegramChatId}
+                          inviteLink={planTelegramInviteLink}
+                          groupName={planTelegramGroupName}
+                          onChange={({ chatId, inviteLink, groupName }) => {
+                            setPlanTelegramChatId(chatId);
+                            setPlanTelegramInviteLink(inviteLink);
+                            setPlanTelegramGroupName(groupName);
+                          }}
+                        />
+
 
                         <div>
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Description</label>

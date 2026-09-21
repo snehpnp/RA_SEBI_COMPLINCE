@@ -60,6 +60,8 @@ exports.SignalSchema = new mongoose_1.Schema({
     closeRemark: { type: String, default: null },
     closedAt: { type: Date, default: null },
     closeTargets: { type: String, default: null },
+    telegramChatId: { type: String, default: null, index: true },
+    telegramMessageId: { type: Number, default: null },
     status: { type: String, default: 'OPEN' },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Signal' });

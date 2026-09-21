@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.addSignalMessage = exports.uploadReport = exports.closeSignal = exports.listSignals = exports.createSignal = exports.getStocks = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
+const telegramService_1 = __importDefault(require("../services/telegramService"));
 const getStocks = async (req, res) => {
     try {
         const { query } = req.query;
@@ -129,6 +130,67 @@ const createSignal = async (req, res) => {
                 id: newSignal._id.toString()
             });
         }
+        // Dispatch newly created signal to Telegram channel(s) and active plan subscribers
+        (async () => {
+            try {
+                let stockSymbol = 'UNKNOWN';
+                if (stockId) {
+                    const stockDoc = (await db_1.default.Stock.findById(stockId).lean()) ||
+                        (db_1.centralModels?.Stock ? await db_1.centralModels.Stock.findById(stockId).lean() : null);
+                    if (stockDoc && stockDoc.symbol) {
+                        stockSymbol = stockDoc.symbol;
+                    }
+                }
+                const signalPayload = {
+                    symbol: stockSymbol,
+                    action: callType || 'BUY',
+                    entry: parseFloat(entryPrice),
+                    entryType: entryType || undefined,
+                    target: parseFloat(target1),
+                    target2: target2 ? parseFloat(target2) : undefined,
+                    target3: target3 ? parseFloat(target3) : undefined,
+                    stopLoss: parseFloat(stoploss),
+                    segment,
+                    tradeDuration,
+                    expiryDate: expiryDate ? new Date(expiryDate) : undefined,
+                    strikePrice: strikePrice ? parseFloat(strikePrice) : undefined,
+                    optionType: optionType || undefined,
+                    description: description || undefined
+                };
+                for (const createdSig of createdSignals) {
+                    let planChatId;
+                    try {
+                        let p = null;
+                        if (db_1.default?.Plan) {
+                            p = await db_1.default.Plan.findById(createdSig.planId).lean();
+                        }
+                        if (!p && db_1.centralModels?.Plan) {
+                            p = await db_1.centralModels.Plan.findById(createdSig.planId).lean();
+                        }
+                        if (p?.telegramChatId) {
+                            planChatId = String(p.telegramChatId).trim();
+                        }
+                    }
+                    catch { }
+                    const dispatchResult = await telegramService_1.default.dispatchSignalToPlanAndSubscribers(signalPayload, {
+                        signalId: createdSig._id,
+                        planId: createdSig.planId,
+                        tenantId,
+                        chatId: planChatId
+                    });
+                    // Save telegramChatId & messageId to the Signal doc if delivered
+                    if (dispatchResult.channelDelivery?.chatId) {
+                        await db_1.default.Signal.findByIdAndUpdate(createdSig._id, {
+                            telegramChatId: dispatchResult.channelDelivery.chatId,
+                            telegramMessageId: dispatchResult.channelDelivery.messageId || null
+                        });
+                    }
+                }
+            }
+            catch (tgErr) {
+                console.warn('[SignalController] Telegram signal dispatch warning:', tgErr?.message || tgErr);
+            }
+        })();
         return res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
     }
     catch (err) {
@@ -327,6 +389,40 @@ const closeSignal = async (req, res) => {
             });
         }).filter(Boolean);
         await Promise.all(notificationPromises);
+        // Broadcast signal update/close to Telegram channel and active subscribers
+        (async () => {
+            try {
+                let planChatId = undefined;
+                try {
+                    let planDoc = null;
+                    if (signal.planId && db_1.default?.Plan) {
+                        planDoc = await db_1.default.Plan.findById(signal.planId).lean();
+                    }
+                    if (!planDoc && signal.planId && db_1.centralModels?.Plan) {
+                        planDoc = await db_1.centralModels.Plan.findById(signal.planId).lean();
+                    }
+                    if (planDoc?.telegramChatId && String(planDoc.telegramChatId).trim()) {
+                        planChatId = String(planDoc.telegramChatId).trim();
+                    }
+                }
+                catch { }
+                await telegramService_1.default.dispatchSignalToPlanAndSubscribers({
+                    symbol: stockSymbol,
+                    status: closeStatus || (isFinalClose ? 'CLOSED' : 'UPDATED'),
+                    exitPrice: exitPrice ? parseFloat(exitPrice) : undefined,
+                    remark: closeRemark || undefined
+                }, {
+                    signalId: signal._id,
+                    planId: signal.planId,
+                    tenantId,
+                    chatId: planChatId,
+                    isUpdate: true
+                });
+            }
+            catch (tgErr) {
+                console.warn('[SignalController] Telegram signal update warning:', tgErr?.message || tgErr);
+            }
+        })();
         return res.json({
             success: true,
             data: updatedSignal ? { ...updatedSignal, id: updatedSignal._id?.toString() || updatedSignal.id } : null,

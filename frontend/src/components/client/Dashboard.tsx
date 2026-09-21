@@ -1,8 +1,7 @@
-'use client';
-
 import { useState, useEffect } from 'react';
 import { Activity, ShieldCheck, CreditCard, TrendingUp, TrendingDown, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle } from 'lucide-react';
 import api from '../../services/api';
+import TelegramConnectCard from './TelegramConnectCard';
 
 export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }: { profile: any, setActiveTab: (tab: string) => void, onTriggerOnboarding?: () => void }) {
   const userName = profile?.name?.split(' ')[0] || 'User';
@@ -143,7 +142,10 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* TELEGRAM COMMUNITY CONNECT WIDGET */}
+      <TelegramConnectCard compact={true} />
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div
           className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4 cursor-pointer hover:border-premium-primary/40 transition-colors"
           onClick={() => setActiveTab('kyc')}

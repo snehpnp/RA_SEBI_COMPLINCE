@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuditLogSchema = exports.AuditLog = exports.ComplianceAlertSchema = exports.ComplianceAlert = exports.ResearchAnalyticsSchema = exports.ResearchAnalytics = exports.ResearchReportSchema = exports.ResearchReport = exports.PaymentSchema = exports.Payment = exports.ConsentHistorySchema = exports.ConsentHistory = exports.ConsentSchema = exports.Consent = exports.AgreementHistorySchema = exports.AgreementHistory = exports.AgreementSchema = exports.Agreement = exports.CouponSchema = exports.Coupon = exports.SubscriptionSchema = exports.Subscription = exports.PlanSchema = exports.Plan = exports.PlanCategorySchema = exports.PlanCategory = exports.ClientIdentityHistorySchema = exports.ClientIdentityHistory = exports.ClientDocumentSchema = exports.ClientDocument = exports.ClientProfileSchema = exports.ClientProfile = exports.ClientSchema = exports.Client = exports.PersonAssociatedSchema = exports.PersonAssociated = exports.StaffSchema = exports.Staff = exports.RolePermissionSchema = exports.RolePermission = exports.PermissionSchema = exports.Permission = exports.RoleSchema = exports.Role = exports.UserSchema = exports.User = exports.AllCompanySchema = exports.AllCompany = exports.TenantSchema = exports.Tenant = void 0;
-exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = void 0;
+exports.TelegramDeliveryLogSchema = exports.TelegramDeliveryLog = exports.TelegramGroupSchema = exports.TelegramGroup = exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = void 0;
 exports.registerTenantModels = registerTenantModels;
 // Import all Schemas & Models
 const Tenant_1 = require("./Tenant");
@@ -139,6 +139,12 @@ Object.defineProperty(exports, "SystemSettingSchema", { enumerable: true, get: f
 const AdminPermission_1 = require("./AdminPermission");
 Object.defineProperty(exports, "AdminPermission", { enumerable: true, get: function () { return AdminPermission_1.AdminPermission; } });
 Object.defineProperty(exports, "AdminPermissionSchema", { enumerable: true, get: function () { return AdminPermission_1.AdminPermissionSchema; } });
+const TelegramGroup_1 = require("./TelegramGroup");
+Object.defineProperty(exports, "TelegramGroup", { enumerable: true, get: function () { return TelegramGroup_1.TelegramGroup; } });
+Object.defineProperty(exports, "TelegramGroupSchema", { enumerable: true, get: function () { return TelegramGroup_1.TelegramGroupSchema; } });
+const TelegramDeliveryLog_1 = require("./TelegramDeliveryLog");
+Object.defineProperty(exports, "TelegramDeliveryLog", { enumerable: true, get: function () { return TelegramDeliveryLog_1.TelegramDeliveryLog; } });
+Object.defineProperty(exports, "TelegramDeliveryLogSchema", { enumerable: true, get: function () { return TelegramDeliveryLog_1.TelegramDeliveryLogSchema; } });
 /**
  * Helper to register all schemas onto a dynamic Mongoose connection instance
  */
@@ -188,7 +194,9 @@ function registerTenantModels(connection) {
         EmailTemplate: (connection.models.EmailTemplate || connection.model('EmailTemplate', EmailTemplate_1.EmailTemplateSchema, 'EmailTemplate')),
         EmailVerification: (connection.models.EmailVerification || connection.model('EmailVerification', EmailVerification_1.EmailVerificationSchema, 'EmailVerification')),
         SystemSetting: (connection.models.SystemSetting || connection.model('SystemSetting', SystemSetting_1.SystemSettingSchema, 'SystemSetting')),
-        AdminPermission: (connection.models.AdminPermission || connection.model('AdminPermission', AdminPermission_1.AdminPermissionSchema, 'AdminPermission'))
+        AdminPermission: (connection.models.AdminPermission || connection.model('AdminPermission', AdminPermission_1.AdminPermissionSchema, 'AdminPermission')),
+        TelegramGroup: (connection.models.TelegramGroup || connection.model('TelegramGroup', TelegramGroup_1.TelegramGroupSchema, 'TelegramGroup')),
+        TelegramDeliveryLog: (connection.models.TelegramDeliveryLog || connection.model('TelegramDeliveryLog', TelegramDeliveryLog_1.TelegramDeliveryLogSchema, 'TelegramDeliveryLog'))
     };
     return {
         ...models,
@@ -236,6 +244,8 @@ function registerTenantModels(connection) {
         emailTemplate: models.EmailTemplate,
         emailVerification: models.EmailVerification,
         systemSetting: models.SystemSetting,
-        adminPermission: models.AdminPermission
+        adminPermission: models.AdminPermission,
+        telegramGroup: models.TelegramGroup,
+        telegramDeliveryLog: models.TelegramDeliveryLog
     };
 }

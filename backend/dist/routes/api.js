@@ -34,6 +34,7 @@ const permissionController_1 = require("../controllers/permissionController");
 const tenantSyncController_1 = require("../controllers/tenantSyncController");
 const pdfService_1 = require("../services/pdfService");
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
+const telegramController_1 = require("../controllers/telegramController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -605,4 +606,73 @@ router.get('/download', async (req, res) => {
         return res.status(500).json({ success: false, message: 'Internal server error during download' });
     }
 });
+// ----------------------------------------------------
+// TELEGRAM BOT INTEGRATION & SIGNAL COMMUNITY
+// ----------------------------------------------------
+// Client Subscribed Telegram Groups (Per-plan private groups)
+router.get('/client/telegram/groups', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.getClientTelegramGroupsApi);
+router.get('/telegram/client-groups', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.getClientTelegramGroupsApi);
+// Client / User Connect Link (To join the common Telegram group)
+router.get('/telegram/invite-link', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.getGroupInviteLinkApi);
+// Public / Guest invite link
+router.get('/public/telegram/invite-link', telegramController_1.getGroupInviteLinkApi);
+// Broadcast signal directly to Telegram (Admin / Staff with ACCESS_RESEARCH)
+router.post('/telegram/send-signal', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, telegramController_1.sendSignalApi);
+// Admin: View Telegram bot and group status
+router.get('/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramSettingsApi);
+router.get('/admin/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramSettingsApi);
+// Admin: Update Telegram bot token and group settings
+router.put('/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramSettingsApi);
+router.post('/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramSettingsApi);
+router.patch('/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramSettingsApi);
+router.put('/admin/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramSettingsApi);
+router.post('/admin/telegram/settings', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramSettingsApi);
+// Admin: Test Telegram connection and send test message
+router.post('/telegram/test-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.testTelegramConnectionApi);
+router.post('/admin/telegram/test-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.testTelegramConnectionApi);
+// Dynamic Telegram Groups Management
+router.get('/telegram/groups', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.listTelegramGroupsApi);
+router.get('/admin/telegram/groups', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.listTelegramGroupsApi);
+router.post('/telegram/groups', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.createTelegramGroupApi);
+router.post('/admin/telegram/groups', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.createTelegramGroupApi);
+router.post('/telegram/groups/auto-detect', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.autoDetectTelegramGroupsApi);
+router.post('/admin/telegram/groups/auto-detect', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.autoDetectTelegramGroupsApi);
+router.put('/telegram/groups/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramGroupApi);
+router.put('/admin/telegram/groups/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.updateTelegramGroupApi);
+router.delete('/telegram/groups/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.deleteTelegramGroupApi);
+router.delete('/admin/telegram/groups/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.deleteTelegramGroupApi);
+router.post('/telegram/groups/:id/test', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.testTelegramGroupPingApi);
+router.post('/admin/telegram/groups/:id/test', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.testTelegramGroupPingApi);
+router.post('/telegram/groups/:id/generate-invite', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.generateGroupInviteLinkApi);
+router.post('/admin/telegram/groups/:id/generate-invite', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.generateGroupInviteLinkApi);
+// --- Telegram Phone MTProto Authentication & 1-Click Sync ---
+router.post('/telegram/auth/send-code', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.sendTelegramPhoneOtpApi);
+router.post('/admin/telegram/auth/send-code', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.sendTelegramPhoneOtpApi);
+router.post('/telegram/auth/verify-code', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.verifyTelegramPhoneOtpApi);
+router.post('/admin/telegram/auth/verify-code', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.verifyTelegramPhoneOtpApi);
+router.post('/telegram/auth/sync-groups', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.syncTelegramAccountGroupsApi);
+router.post('/admin/telegram/auth/sync-groups', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.syncTelegramAccountGroupsApi);
+router.post('/telegram/auth/disconnect', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.disconnectTelegramAccountApi);
+router.post('/admin/telegram/auth/disconnect', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.disconnectTelegramAccountApi);
+router.get('/telegram/auth/status', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramAuthStatusApi);
+router.get('/admin/telegram/auth/status', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramAuthStatusApi);
+// --- Telegram Multi-Plan Group Matrix ---
+router.get('/telegram/plans/matrix', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramPlanMatrixApi);
+router.get('/admin/telegram/plans/matrix', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramPlanMatrixApi);
+router.post('/telegram/plans/bulk-map', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.bulkMapTelegramPlansApi);
+router.post('/admin/telegram/plans/bulk-map', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.bulkMapTelegramPlansApi);
+// --- Create Telegram Channel Directly On Admin Account ---
+router.post('/telegram/auth/create-channel', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.createTelegramChannelViaAccountApi);
+router.post('/admin/telegram/auth/create-channel', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.createTelegramChannelViaAccountApi);
+// --- Client Telegram Linking Routes ---
+router.post('/client/telegram/generate-token', auth_1.authenticateJWT, telegramController_1.generateClientConnectTokenApi);
+router.get('/client/telegram/status', auth_1.authenticateJWT, telegramController_1.getClientTelegramStatusApi);
+router.post('/client/telegram/unlink', auth_1.authenticateJWT, telegramController_1.unlinkClientTelegramApi);
+// --- Public Telegram Webhook ---
+router.post('/telegram/webhook', telegramController_1.telegramWebhookApi);
+// --- Admin: Linked Telegram Users & Delivery Logs ---
+router.get('/telegram/linked-users', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getLinkedTelegramUsersApi);
+router.get('/admin/telegram/linked-users', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getLinkedTelegramUsersApi);
+router.get('/telegram/delivery-logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramDeliveryLogsApi);
+router.get('/admin/telegram/delivery-logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN', 'RESEARCHER', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER']), tenant_1.enforceTenantIsolation, telegramController_1.getTelegramDeliveryLogsApi);
 exports.default = router;

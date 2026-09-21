@@ -258,6 +258,7 @@ function SuperAdminDashboardContent() {
     localData?: any[];
     remoteCount?: number;
     localCount?: number;
+    endpointUsed?: string | null;
   }>({
     loading: false,
     error: null,
