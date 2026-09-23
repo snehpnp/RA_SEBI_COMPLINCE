@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, CreditCard, TrendingUp, TrendingDown, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp } from 'lucide-react';
 import api from '../../services/api';
 
 export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }: { profile: any, setActiveTab: (tab: string) => void, onTriggerOnboarding?: () => void }) {
@@ -11,8 +11,8 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
   const [topActivity, setTopActivity] = useState<any[]>([]);
   const [activeSub, setActiveSub] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [marketData, setMarketData] = useState<any[]>([]);
-  const [marketLoading, setMarketLoading] = useState(true);
+  const [newsData, setNewsData] = useState<any[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
@@ -79,18 +79,18 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
     fetchDashboardData();
   }, []);
 
-  const fetchMarketData = async (manual = false) => {
+  const fetchNewsData = async (manual = false) => {
     if (manual) setIsRefreshing(true);
     try {
-      const res = await api.getMarketOverview();
-      if (res.success && res.data) {
-        setMarketData(res.data);
+      const res = await api.getNewsFeed();
+      if (res.success && Array.isArray(res.data)) {
+        setNewsData(res.data);
         setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }));
       }
     } catch (err) {
-      console.error('Error fetching market data', err);
+      console.error('Error fetching news feed', err);
     } finally {
-      setMarketLoading(false);
+      setNewsLoading(false);
       if (manual) {
         setTimeout(() => setIsRefreshing(false), 500);
       }
@@ -98,12 +98,12 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
   };
 
   useEffect(() => {
-    fetchMarketData();
+    fetchNewsData();
     
-    // Auto-refresh every 15 seconds
+    // Auto-refresh every 5 minutes
     const intervalId = setInterval(() => {
-      fetchMarketData(false);
-    }, 15000);
+      fetchNewsData(false);
+    }, 5 * 60 * 1000);
     
     return () => clearInterval(intervalId);
   }, []);
@@ -196,7 +196,21 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
           </div>
           
           <div className="space-y-4">
-            {loading ? (
+            {activeSub && !(isKraVerified && isAgreementSigned) ? (
+              <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center space-y-2">
+                <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
+                <h3 className="font-bold text-sm text-amber-500">Live Signals Locked (SEBI Compliance)</h3>
+                <p className="text-xs text-premium-text/70 max-w-sm mx-auto">
+                  Your advisory plan is active, but SEBI mandates completing DigiLocker KYC and eSigning the Advisory Agreement before receiving live signals.
+                </p>
+                <button
+                  onClick={() => setActiveTab('kyc')}
+                  className="mt-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition-colors inline-flex items-center gap-1.5"
+                >
+                  Complete KYC &amp; Agreement <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : loading ? (
               <div className="flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-premium-primary" /></div>
             ) : topSignals.length === 0 ? (
               <p className="text-sm text-premium-text/40">No active signals.</p>
@@ -230,12 +244,13 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
           </div>
         </div>
 
-        {/* Market Overview */}
+        {/* Market News (RSS Feeds) */}
         <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-center mb-5">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-premium-text">Market Overview</h2>
+                <Newspaper className="w-5 h-5 text-premium-primary" />
+                <h2 className="text-lg font-bold text-premium-text">Market News</h2>
                 <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[11px] font-semibold">
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -249,9 +264,9 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
                   <span className="text-[11px] text-premium-text/40 hidden sm:inline">{lastUpdated}</span>
                 )}
                 <button
-                  onClick={() => fetchMarketData(true)}
+                  onClick={() => fetchNewsData(true)}
                   disabled={isRefreshing}
-                  title="Refresh market data"
+                  title="Refresh market news"
                   className="p-1.5 rounded-lg hover:bg-premium-bg text-premium-text/60 hover:text-premium-primary transition-colors disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-premium-primary' : ''}`} />
@@ -259,20 +274,45 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
               </div>
             </div>
 
-            <div className="space-y-3">
-              {marketLoading ? (
-                <div className="flex flex-col items-center justify-center py-8 gap-2">
+            <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+              {newsLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
                   <Loader2 className="w-6 h-6 animate-spin text-premium-primary" />
-                  <span className="text-xs text-premium-text/40">Fetching live market data...</span>
+                  <span className="text-xs text-premium-text/40">Fetching market news...</span>
                 </div>
-              ) : marketData.length > 0 ? (
-                marketData.map((item, i) => (
-                  <MarketItem key={i} item={item} />
+              ) : newsData.length > 0 ? (
+                newsData.slice(0, 7).map((item, i) => (
+                  <a
+                    key={i}
+                    href={item.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group block p-3 bg-premium-bg/60 hover:bg-premium-bg border border-premium-border/80 hover:border-premium-primary/40 rounded-2xl transition-all duration-200"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-xs font-medium text-premium-text group-hover:text-premium-primary line-clamp-2 leading-relaxed transition-colors">
+                        {item.title}
+                      </h3>
+                      <ExternalLink className="w-3.5 h-3.5 text-premium-text/30 group-hover:text-premium-primary flex-shrink-0 mt-0.5 transition-colors" />
+                    </div>
+                    <div className="flex items-center gap-2 mt-2 text-[11px] text-premium-text/40">
+                      <span className="px-1.5 py-0.5 rounded-md font-semibold bg-premium-cards border border-premium-border text-premium-primary text-[10px]">
+                        {item.source || 'News'}
+                      </span>
+                      {item.timeAgo && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {item.timeAgo}
+                        </span>
+                      )}
+                    </div>
+                  </a>
                 ))
               ) : (
-                <div className="text-center py-6">
-                  <p className="text-sm text-premium-text/40">Market data unavailable.</p>
-                  <button onClick={() => fetchMarketData(true)} className="mt-2 text-xs text-premium-primary hover:underline">
+                <div className="text-center py-8">
+                  <Newspaper className="w-8 h-8 text-premium-text/20 mx-auto mb-2" />
+                  <p className="text-sm text-premium-text/40">Market news unavailable.</p>
+                  <button onClick={() => fetchNewsData(true)} className="mt-2 text-xs text-premium-primary hover:underline">
                     Try Reconnecting
                   </button>
                 </div>
@@ -292,7 +332,21 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {loading ? (
+            {activeSub && !(isKraVerified && isAgreementSigned) ? (
+              <div className="col-span-3 p-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center space-y-2">
+                <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
+                <h3 className="font-bold text-sm text-amber-500">Research Reports Locked (SEBI Compliance)</h3>
+                <p className="text-xs text-premium-text/70 max-w-sm mx-auto">
+                  Complete DigiLocker KYC and Advisory Agreement to access detailed technical and fundamental research reports.
+                </p>
+                <button
+                  onClick={() => setActiveTab('kyc')}
+                  className="mt-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition-colors inline-flex items-center gap-1.5"
+                >
+                  Go to KYC Center <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : loading ? (
               <div className="col-span-3 flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-premium-primary" /></div>
             ) : topReports.length === 0 ? (
               <p className="col-span-3 text-sm text-premium-text/40">No recent reports.</p>
@@ -377,52 +431,7 @@ function UserIconProgress({ percentage }: { percentage: number }) {
        </svg>
        <span className="absolute text-[10px] font-bold text-premium-warning">{percentage}%</span>
     </div>
-  );
-}
-
-function MarketItem({ item }: { item: any }) {
-  const isUp = item.isUp !== false;
-  const isCurrency = item.category === 'Currency';
-
-  return (
-    <div className="p-3 bg-premium-bg/60 hover:bg-premium-bg border border-premium-border/80 hover:border-premium-primary/40 rounded-2xl transition-all duration-200">
-      <div className="flex justify-between items-start">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-premium-text">{item.name}</span>
-            {item.category && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-premium-cards border border-premium-border text-premium-text/50">
-                {item.category}
-              </span>
-            )}
-          </div>
-          {item.dayHigh && item.dayLow && item.dayHigh !== '---' ? (
-            <p className="text-[11px] text-premium-text/40 mt-0.5">
-              H: <span className="text-premium-text/60 font-medium">{item.dayHigh}</span> • L: <span className="text-premium-text/60 font-medium">{item.dayLow}</span>
-            </p>
-          ) : (
-            <p className="text-[11px] text-premium-text/40 mt-0.5">
-              Prev: <span className="text-premium-text/60 font-medium">{item.previousClose || item.value}</span>
-            </p>
-          )}
-        </div>
-        
-        <div className="text-right">
-          <div className="text-sm font-bold font-mono tracking-tight text-premium-text">
-            {isCurrency ? `₹${item.value}` : item.value}
-          </div>
-          <div className={`inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-md text-[11px] mt-0.5 ${
-            isUp 
-              ? 'bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20' 
-              : 'bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20'
-          }`}>
-            {isUp ? <TrendingUp className="w-3 h-3 stroke-[2.5]" /> : <TrendingDown className="w-3 h-3 stroke-[2.5]" />}
-            <span>{item.change} ({item.percentChange})</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+   );
 }
 
 function ReportCard({ title, date, icon: Icon }: { title: string, date: string, icon: any }) {

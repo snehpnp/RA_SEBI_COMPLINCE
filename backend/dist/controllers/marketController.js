@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMarketOverview = void 0;
+exports.getNewsFeed = exports.getMarketOverview = void 0;
 const yahoo_finance2_1 = __importDefault(require("yahoo-finance2"));
 // Instantiate YahooFinance instance with notice suppression
 const yf = new yahoo_finance2_1.default({ suppressNotices: ['yahooSurvey'] });
@@ -116,3 +116,135 @@ const getMarketOverview = async (req, res) => {
     }
 };
 exports.getMarketOverview = getMarketOverview;
+let newsCache = null;
+const NEWS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
+/**
+ * GET /api/v1/client/news-feed
+ * Open API RSS news feeds for Indian stock market and financial updates
+ */
+const getNewsFeed = async (req, res) => {
+    try {
+        const now = Date.now();
+        if (newsCache && (now - newsCache.timestamp < NEWS_CACHE_TTL_MS)) {
+            return res.json({
+                success: true,
+                data: newsCache.data,
+                cached: true,
+                lastUpdated: new Date(newsCache.timestamp).toISOString()
+            });
+        }
+        const rssFeeds = [
+            { name: 'Economic Times', url: 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms' },
+            { name: 'LiveMint', url: 'https://www.livemint.com/rss/markets' },
+            { name: 'Google News', url: 'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en' }
+        ];
+        let items = [];
+        for (const feed of rssFeeds) {
+            try {
+                const response = await fetch(feed.url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    },
+                    signal: AbortSignal.timeout(5000)
+                });
+                if (!response.ok)
+                    continue;
+                const xmlText = await response.text();
+                const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+                let match;
+                const feedItems = [];
+                while ((match = itemRegex.exec(xmlText)) !== null && feedItems.length < 8) {
+                    const itemContent = match[1];
+                    const titleMatch = itemContent.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+                    const linkMatch = itemContent.match(/<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i);
+                    const pubDateMatch = itemContent.match(/<pubDate>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/pubDate>/i);
+                    const sourceMatch = itemContent.match(/<source[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/source>/i);
+                    const rawTitle = titleMatch ? titleMatch[1] : '';
+                    const cleanTitle = rawTitle
+                        .replace(/<!\[CDATA\[/g, '')
+                        .replace(/\]\]>/g, '')
+                        .replace(/&amp;/g, '&')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&#39;/g, "'")
+                        .replace(/&lt;/g, '<')
+                        .replace(/&gt;/g, '>')
+                        .trim();
+                    const rawLink = linkMatch ? linkMatch[1].replace(/<!\[CDATA\[/g, '').replace(/\]\]>/g, '').trim() : '';
+                    const rawPubDate = pubDateMatch ? pubDateMatch[1].trim() : '';
+                    const sourceName = sourceMatch ? sourceMatch[1].trim() : feed.name;
+                    let timeAgo = '';
+                    if (rawPubDate) {
+                        const pubTime = new Date(rawPubDate).getTime();
+                        if (!isNaN(pubTime)) {
+                            const diffMin = Math.max(1, Math.floor((now - pubTime) / (1000 * 60)));
+                            if (diffMin < 60) {
+                                timeAgo = `${diffMin}m ago`;
+                            }
+                            else if (diffMin < 1440) {
+                                timeAgo = `${Math.floor(diffMin / 60)}h ago`;
+                            }
+                            else {
+                                timeAgo = `${Math.floor(diffMin / 1440)}d ago`;
+                            }
+                        }
+                    }
+                    if (cleanTitle && rawLink) {
+                        feedItems.push({
+                            title: cleanTitle,
+                            link: rawLink,
+                            pubDate: rawPubDate,
+                            timeAgo: timeAgo || 'Recent',
+                            source: sourceName
+                        });
+                    }
+                }
+                if (feedItems.length > 0) {
+                    items = feedItems;
+                    break; // Stop at first successful feed
+                }
+            }
+            catch (feedErr) {
+                console.warn(`[RSS] Failed to fetch ${feed.name}:`, feedErr.message);
+            }
+        }
+        if (items.length > 0) {
+            newsCache = {
+                timestamp: now,
+                data: items
+            };
+            return res.json({
+                success: true,
+                data: items,
+                cached: false,
+                lastUpdated: new Date().toISOString()
+            });
+        }
+        // If fetch failed but previous cache exists, return stale cache
+        if (newsCache) {
+            return res.json({
+                success: true,
+                data: newsCache.data,
+                cached: true,
+                lastUpdated: new Date(newsCache.timestamp).toISOString()
+            });
+        }
+        return res.json({
+            success: true,
+            data: [],
+            message: 'No news feeds available'
+        });
+    }
+    catch (error) {
+        console.error('Error fetching news feed:', error);
+        if (newsCache) {
+            return res.json({
+                success: true,
+                data: newsCache.data,
+                cached: true,
+                lastUpdated: new Date(newsCache.timestamp).toISOString()
+            });
+        }
+        return res.status(500).json({ success: false, message: 'Failed to fetch news feed' });
+    }
+};
+exports.getNewsFeed = getNewsFeed;

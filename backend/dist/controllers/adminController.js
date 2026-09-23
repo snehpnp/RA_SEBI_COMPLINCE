@@ -36,7 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -50,6 +51,8 @@ const path_1 = __importDefault(require("path"));
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const pdfService_1 = require("../services/pdfService");
 const axios_1 = __importDefault(require("axios"));
+const smsService_1 = require("../services/smsService");
+const digioService_1 = require("../services/digioService");
 const maskEmail = (email) => {
     if (!email)
         return email;
@@ -2273,7 +2276,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, address, website, mobile } = req.body;
+    const { themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2291,6 +2294,29 @@ const updateTenantSettings = async (req, res) => {
         if (!oldTenant)
             return res.status(404).json({ success: false, message: 'Tenant not found' });
         const dataToUpdate = {};
+        if (passwordPolicy !== undefined)
+            dataToUpdate.passwordPolicy = passwordPolicy === 'STRONG' ? 'STRONG' : 'NORMAL';
+        if (client2FAEnabled !== undefined)
+            dataToUpdate.client2FAEnabled = client2FAEnabled === 'true' || client2FAEnabled === true;
+        if (twoFactorChannel !== undefined)
+            dataToUpdate.twoFactorChannel = twoFactorChannel;
+        if (signupVerificationMode !== undefined) {
+            dataToUpdate.signupVerificationMode = ['EMAIL_ONLY', 'MOBILE_ONLY', 'BOTH'].includes(signupVerificationMode) ? signupVerificationMode : 'EMAIL_ONLY';
+        }
+        if (lockedTradesPreviewCount !== undefined) {
+            const parsedCount = parseInt(lockedTradesPreviewCount, 10);
+            dataToUpdate.lockedTradesPreviewCount = isNaN(parsedCount) ? 5 : Math.max(0, Math.min(parsedCount, 50));
+        }
+        if (smsGatewayEnabled !== undefined)
+            dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
+        if (smsUsername !== undefined)
+            dataToUpdate.smsUsername = smsUsername ? smsUsername.trim() : null;
+        if (smsPassword !== undefined && smsPassword.trim() !== '')
+            dataToUpdate.smsPassword = smsPassword.trim();
+        if (smsSenderId !== undefined)
+            dataToUpdate.smsSenderId = smsSenderId ? smsSenderId.trim() : null;
+        if (smsEntityId !== undefined)
+            dataToUpdate.smsEntityId = smsEntityId ? smsEntityId.trim() : null;
         if (themeColor)
             dataToUpdate.themeColor = themeColor;
         if (companyName)
@@ -2331,6 +2357,8 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.digioClientSecret = digioClientSecret;
         if (digioKycTemplateName !== undefined)
             dataToUpdate.digioKycTemplateName = digioKycTemplateName;
+        if (digioEnvironment !== undefined)
+            dataToUpdate.digioEnvironment = digioEnvironment;
         if (agreementContent !== undefined)
             dataToUpdate.agreementContent = agreementContent;
         if (kraProvider !== undefined)
@@ -2341,6 +2369,8 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.kraApiSecret = kraApiSecret;
         if (activePaymentGateway !== undefined)
             dataToUpdate.activePaymentGateway = activePaymentGateway;
+        if (paymentGatewayEnabled !== undefined)
+            dataToUpdate.paymentGatewayEnabled = paymentGatewayEnabled === 'true' || paymentGatewayEnabled === true;
         if (razorpayKeyId !== undefined)
             dataToUpdate.razorpayKeyId = razorpayKeyId;
         if (razorpayKeySecret !== undefined)
@@ -2359,6 +2389,16 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.stripePublishableKey = stripePublishableKey;
         if (stripeSecretKey !== undefined)
             dataToUpdate.stripeSecretKey = stripeSecretKey;
+        if (upiQrEnabled !== undefined)
+            dataToUpdate.upiQrEnabled = upiQrEnabled === 'true' || upiQrEnabled === true;
+        if (upiId !== undefined)
+            dataToUpdate.upiId = upiId ? upiId.trim() : null;
+        if (upiPayeeName !== undefined)
+            dataToUpdate.upiPayeeName = upiPayeeName ? upiPayeeName.trim() : null;
+        if (upiQrImageUrl !== undefined)
+            dataToUpdate.upiQrImageUrl = upiQrImageUrl ? upiQrImageUrl.trim() : null;
+        if (upiInstructions !== undefined)
+            dataToUpdate.upiInstructions = upiInstructions ? upiInstructions.trim() : null;
         if (smtpPort !== undefined)
             dataToUpdate.smtpPort = smtpPort ? (parseInt(smtpPort, 10) || 587) : null;
         if (smtpUser !== undefined)
@@ -2395,6 +2435,9 @@ const updateTenantSettings = async (req, res) => {
         }
         if (files?.internalPolicyPdf && files.internalPolicyPdf.length > 0) {
             dataToUpdate.internalPolicyUrl = `/uploads/branding/${files.internalPolicyPdf[0].filename}`;
+        }
+        if (files?.upiQrImage && files.upiQrImage.length > 0) {
+            dataToUpdate.upiQrImageUrl = `/uploads/branding/${files.upiQrImage[0].filename}`;
         }
         const targetTenantDocId = oldTenant?._id || oldTenant?.id || tenantId;
         let updated = null;
@@ -2648,12 +2691,15 @@ const getAdminPayments = async (req, res) => {
             .lean();
         const clientIds = [...new Set(payments.map((p) => p.clientId))];
         const planIds = [...new Set(payments.map((p) => p.planId).filter(Boolean))];
+        const couponIds = [...new Set(payments.map((p) => p.couponId ? (typeof p.couponId === 'object' ? p.couponId._id || p.couponId.id : p.couponId) : null).filter(Boolean))];
         const clients = await db_1.default.Client.find({ _id: { $in: clientIds } })
             .populate('userId')
             .lean();
         const profiles = await db_1.default.ClientProfile.find({ clientId: { $in: clientIds } }).lean();
         const profileMap = new Map(profiles.map((p) => [String(p.clientId), p]));
         const plans = await db_1.default.Plan.find({ _id: { $in: planIds } }).lean();
+        const coupons = await db_1.default.Coupon.find({ _id: { $in: couponIds } }).lean();
+        const couponMap = new Map(coupons.map((c) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
         const clientMap = new Map(clients.map((c) => [
             String(c._id || c.id),
             {
@@ -2686,10 +2732,13 @@ const getAdminPayments = async (req, res) => {
                     } : clientObj.profile
                 };
             }
+            const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
+            const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
             return {
                 ...p,
                 id: String(p._id || p.id),
-                coupon: p.couponId || null,
+                coupon: couponObj || null,
+                couponCode: couponObj?.code || null,
                 client: clientObj,
                 plan: p.planId ? planMap.get(String(p.planId)) : null
             };
@@ -2822,7 +2871,7 @@ const assignPlanByAdmin = async (req, res) => {
             if (coupon.minPurchaseValue && plan.price < coupon.minPurchaseValue) {
                 return res.status(400).json({ success: false, message: `Minimum purchase of ₹${coupon.minPurchaseValue} required.` });
             }
-            if (coupon.discountType === 'FLAT') {
+            if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                 discountAmount = coupon.discountValue;
             }
             else if (coupon.discountType === 'PERCENTAGE') {
@@ -2860,6 +2909,7 @@ const assignPlanByAdmin = async (req, res) => {
         const isCustomAssignment = customAmount !== undefined || customDays !== undefined;
         const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
         const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
+        // Check if there is an existing active subscription for the same plan (sequential queueing)
         const existingSub = await db_1.default.Subscription.findOne({
             $or: [{ clientId: actualClientId }, { clientId: client.userId }],
             planId: plan._id || plan.id,
@@ -2870,7 +2920,13 @@ const assignPlanByAdmin = async (req, res) => {
         if (existingSub) {
             startDate = new Date(existingSub.endDate);
         }
-        const planValidityDays = customDays !== undefined ? customDays : plan.durationMonths * 30;
+        else if (paymentDate) {
+            const parsed = new Date(paymentDate);
+            if (!isNaN(parsed.getTime())) {
+                startDate = parsed;
+            }
+        }
+        const planValidityDays = customDays !== undefined ? customDays : (plan.durationMonths * 30 || 30);
         const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
         const subscription = await db_1.default.Subscription.create({
             clientId: actualClientId,
@@ -3551,3 +3607,245 @@ const resetClientKyc = async (req, res) => {
     }
 };
 exports.resetClientKyc = resetClientKyc;
+/**
+ * GET /admin/sms-templates
+ * Fetch all SMS templates for the tenant
+ */
+const getSmsTemplates = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        await (0, smsService_1.ensureDefaultSmsTemplates)(tenantId);
+        const filter = tenantId
+            ? { tenantId }
+            : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }] };
+        const templates = await db_1.default.SmsTemplate.find(filter)
+            .sort({ createdAt: 1 })
+            .lean();
+        const formatted = templates.map((t) => ({
+            ...t,
+            id: t._id?.toString() || t.id,
+            category: t.type || t.category || 'CUSTOM',
+            type: t.type || t.category || 'CUSTOM',
+            content: t.message || t.content || '',
+            message: t.message || t.content || '',
+            isActive: t.status === 'ACTIVE' || t.isActive === true,
+            status: t.status || (t.isActive ? 'ACTIVE' : 'INACTIVE')
+        }));
+        return res.status(200).json({ success: true, data: formatted });
+    }
+    catch (error) {
+        console.error('Error fetching SMS templates:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to fetch templates' });
+    }
+};
+exports.getSmsTemplates = getSmsTemplates;
+/**
+ * POST /admin/sms-templates
+ * Create a new SMS template
+ */
+const createSmsTemplate = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const name = (req.body.name || '').trim();
+        const dltTemplateId = (req.body.dltTemplateId || '').trim();
+        const effectiveType = (req.body.type || req.body.category || 'CUSTOM').trim().toUpperCase();
+        const effectiveMessage = (req.body.message || req.body.content || '').trim();
+        const effectiveStatus = req.body.status || (req.body.isActive === false ? 'INACTIVE' : 'ACTIVE');
+        if (!name || !dltTemplateId || !effectiveMessage) {
+            return res.status(400).json({ success: false, message: 'Template name, DLT Template ID, and message are required' });
+        }
+        const template = await db_1.default.SmsTemplate.create({
+            tenantId: tenantId || null,
+            name,
+            type: effectiveType,
+            dltTemplateId,
+            message: effectiveMessage,
+            status: effectiveStatus,
+            isDefault: false,
+            createdById: req.user?.id || null
+        });
+        const tObj = template.toObject ? template.toObject() : template;
+        const formatted = {
+            ...tObj,
+            id: tObj._id?.toString() || tObj.id,
+            category: tObj.type,
+            content: tObj.message,
+            isActive: tObj.status === 'ACTIVE'
+        };
+        return res.status(201).json({ success: true, message: 'SMS template created successfully', data: formatted });
+    }
+    catch (error) {
+        console.error('Error creating SMS template:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to create template' });
+    }
+};
+exports.createSmsTemplate = createSmsTemplate;
+/**
+ * PUT /admin/sms-templates/:id
+ * Update an SMS template
+ */
+const updateSmsTemplate = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const template = await db_1.default.SmsTemplate.findById(id);
+        if (!template) {
+            return res.status(404).json({ success: false, message: 'SMS template not found' });
+        }
+        if (req.body.name)
+            template.name = req.body.name.trim();
+        if (req.body.type || req.body.category)
+            template.type = (req.body.type || req.body.category).trim().toUpperCase();
+        if (req.body.dltTemplateId)
+            template.dltTemplateId = req.body.dltTemplateId.trim();
+        if (req.body.message || req.body.content)
+            template.message = (req.body.message || req.body.content).trim();
+        if (req.body.status)
+            template.status = req.body.status;
+        if (typeof req.body.isActive === 'boolean')
+            template.status = req.body.isActive ? 'ACTIVE' : 'INACTIVE';
+        await template.save();
+        const tObj = template.toObject ? template.toObject() : template;
+        const formatted = {
+            ...tObj,
+            id: tObj._id?.toString() || tObj.id,
+            category: tObj.type,
+            content: tObj.message,
+            isActive: tObj.status === 'ACTIVE'
+        };
+        return res.status(200).json({ success: true, message: 'SMS template updated', data: formatted });
+    }
+    catch (error) {
+        console.error('Error updating SMS template:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to update template' });
+    }
+};
+exports.updateSmsTemplate = updateSmsTemplate;
+/**
+ * POST /admin/sms-templates/:id/status
+ * Toggle status between ACTIVE and INACTIVE
+ */
+const toggleSmsTemplateStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const template = await db_1.default.SmsTemplate.findById(id);
+        if (!template) {
+            return res.status(404).json({ success: false, message: 'SMS template not found' });
+        }
+        template.status = template.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+        await template.save();
+        const tObj = template.toObject ? template.toObject() : template;
+        const formatted = {
+            ...tObj,
+            id: tObj._id?.toString() || tObj.id,
+            category: tObj.type,
+            content: tObj.message,
+            isActive: template.status === 'ACTIVE',
+            status: template.status
+        };
+        return res.status(200).json({
+            success: true,
+            message: `Template status changed to ${template.status}`,
+            data: formatted
+        });
+    }
+    catch (error) {
+        console.error('Error toggling SMS template status:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to toggle status' });
+    }
+};
+exports.toggleSmsTemplateStatus = toggleSmsTemplateStatus;
+/**
+ * DELETE /admin/sms-templates/:id
+ * Delete an SMS template
+ */
+const deleteSmsTemplate = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const template = await db_1.default.SmsTemplate.findById(id);
+        if (!template) {
+            return res.status(404).json({ success: false, message: 'SMS template not found' });
+        }
+        await db_1.default.SmsTemplate.findByIdAndDelete(id);
+        return res.status(200).json({ success: true, message: 'SMS template deleted' });
+    }
+    catch (error) {
+        console.error('Error deleting SMS template:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to delete template' });
+    }
+};
+exports.deleteSmsTemplate = deleteSmsTemplate;
+/**
+ * POST /admin/sms/test
+ * Test the SMS Gateway by sending a test SMS to a mobile number
+ */
+const testSmsGateway = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const { mobile, message, dltTemplateId } = req.body;
+        if (!mobile) {
+            return res.status(400).json({ success: false, message: 'Mobile number is required for testing' });
+        }
+        const result = await (0, smsService_1.sendSms)({
+            tenantId,
+            mobile,
+            templateType: 'LOGIN_2FA',
+            variables: { otp: '123456', var: '123456' },
+            customMessage: message,
+            dltTemplateId
+        });
+        if (result.success) {
+            return res.status(200).json({ success: true, message: 'Test SMS sent successfully', details: result });
+        }
+        else {
+            return res.status(400).json({ success: false, message: result.message || 'Failed to send test SMS', reason: result.reason });
+        }
+    }
+    catch (error) {
+        console.error('Error testing SMS gateway:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to test SMS gateway' });
+    }
+};
+exports.testSmsGateway = testSmsGateway;
+/**
+ * POST /admin/test-digio
+ * Test Digio API credentials and connectivity
+ */
+const testDigioConfig = async (req, res) => {
+    try {
+        const { digioClientId, digioClientSecret, digioEnvironment } = req.body;
+        const tenantId = req.user?.tenantId;
+        let clientId = digioClientId ? String(digioClientId).trim() : '';
+        let clientSecret = digioClientSecret ? String(digioClientSecret).trim() : '';
+        let environment = digioEnvironment;
+        if (!clientId || !clientSecret) {
+            const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+            if (tenant) {
+                clientId = clientId || tenant.digioClientId;
+                clientSecret = clientSecret || tenant.digioClientSecret;
+                environment = environment || tenant.digioEnvironment;
+            }
+        }
+        if (!clientId || !clientSecret) {
+            return res.status(400).json({
+                success: false,
+                message: 'Both Digio Client ID and Client Secret are required for testing.'
+            });
+        }
+        if (clientId === clientSecret) {
+            return res.status(400).json({
+                success: false,
+                message: 'Digio Client ID and Client Secret cannot be identical. Please paste the actual Secret Key generated from your Digio dashboard.'
+            });
+        }
+        const testRes = await (0, digioService_1.testDigioConnection)(clientId, clientSecret, environment);
+        return res.json(testRes);
+    }
+    catch (err) {
+        console.error('Error testing Digio credentials:', err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || 'Error communicating with Digio API'
+        });
+    }
+};
+exports.testDigioConfig = testDigioConfig;

@@ -112,12 +112,48 @@ export const createSignal = async (req: Request, res: Response) => {
   }
 };
 
+function calculatePotential(s: any) {
+  const callType = (s.callType || 'BUY').toUpperCase();
+  const isBuy = callType === 'BUY';
+  const lastTarget = Number(s.target3 || s.target2 || s.target1 || s.entryPrice || 0);
+  const entryPrice = Number(s.entryPrice || 0);
+  const target1 = Number(s.target1 || entryPrice);
+
+  const isTarget1Done = Boolean(
+    (s.closeTargets && s.closeTargets.includes('TARGET1')) ||
+    s.closeStatus === 'PARTIALLY_CLOSED' ||
+    s.closeStatus === 'TARGET1_DONE' ||
+    s.closeStatus === 'TARGET_1_REACHED'
+  );
+
+  const basePrice = isTarget1Done ? target1 : entryPrice;
+  let remainingPct = 0;
+  if (basePrice > 0 && lastTarget > 0) {
+    if (isBuy) {
+      remainingPct = Math.max(0, ((lastTarget - basePrice) / basePrice) * 100);
+    } else {
+      remainingPct = Math.max(0, ((basePrice - lastTarget) / basePrice) * 100);
+    }
+  }
+
+  const formattedPct = remainingPct.toFixed(1);
+  const directionText = isBuy ? 'Upside' : 'Downside';
+  const potentialMessage = isTarget1Done
+    ? `🎯 Target 1 Done • +${formattedPct}% ${directionText} Remaining`
+    : `🔥 +${formattedPct}% Potential ${directionText} Remaining`;
+
+  return {
+    remainingPotentialPercent: parseFloat(formattedPct),
+    isTarget1Done,
+    potentialMessage,
+    directionText
+  };
+}
+
 export const listSignals = async (req: Request, res: Response) => {
   try {
     const tenantId = (req as any).user.tenantId;
     const userRole = (req as any).user.role;
-
-    let whereClause: any = { tenantId };
 
     if (userRole === 'CLIENT') {
       const client = await dynamicDb.Client.findOne({ userId: (req as any).user.id }).lean();
@@ -129,12 +165,36 @@ export const listSignals = async (req: Request, res: Response) => {
         });
       }
 
-      // Find all subscriptions
-      const allSubs = await dynamicDb.Subscription.find({ clientId: client._id }).lean();
+      // Check KYC and Agreement compliance
+      const isKycDone = Boolean((client as any).kraVerified === true || (client as any).kycStatus === 'VERIFIED' || (client as any).kycStatus === 'APPROVED');
+      const isAgreementDone = Boolean((client as any).agreementSigned === true);
+      const isCompliant = isKycDone && isAgreementDone;
 
-      if (allSubs.length === 0) {
-        return res.json({ success: true, data: [] });
-      } else {
+      // Find all subscriptions for this client
+      const allSubs = await dynamicDb.Subscription.find({
+        clientId: client._id,
+        status: { $in: ['ACTIVE', 'active'] }
+      }).lean();
+
+      // If client has an assigned/active plan BUT KYC or Agreement is pending:
+      // STRICT SEBI COMPLIANCE: Do not show open trades on dashboard or signals list
+      if (allSubs.length > 0 && !isCompliant) {
+        return res.json({
+          success: true,
+          data: [],
+          compliancePending: true,
+          message: 'Compliance Pending: Please complete KYC & Sign Agreement to access active trade recommendations.'
+        });
+      }
+
+      // Fetch tenant settings to get lockedTradesPreviewCount
+      const tenantDoc = await dynamicDb.Tenant.findById(tenantId).lean() || await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+      const previewLimit = tenantDoc?.lockedTradesPreviewCount !== undefined ? tenantDoc.lockedTradesPreviewCount : 5;
+
+      let unlockedSignals: any[] = [];
+      const subscribedPlanIds = allSubs.map((s: any) => s.planId.toString());
+
+      if (allSubs.length > 0) {
         const subConditions = allSubs.map((sub: any) => {
           const conditions: any = {
             planId: sub.planId,
@@ -146,29 +206,152 @@ export const listSignals = async (req: Request, res: Response) => {
           return conditions;
         });
 
-        whereClause.$or = subConditions;
+        unlockedSignals = await dynamicDb.Signal.find({
+          tenantId,
+          $or: subConditions
+        })
+          .populate({ path: 'messages', options: { sort: { createdAt: -1 } } })
+          .sort({ createdAt: -1 })
+          .lean();
       }
-    } else {
-      // Staff/Admin Permissions
-      const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
-      if (!isFullAdmin) {
-        const roleDoc = await dynamicDb.Role.findOne({ name: userRole }).lean();
-        const roleId = roleDoc?._id;
-        const addPerm = await dynamicDb.Permission.findOne({ code: 'ADD_RESEARCH' }).lean();
-        const viewPerm = await dynamicDb.Permission.findOne({ code: 'VIEW_RESEARCH' }).lean();
-        const ownPerm = await dynamicDb.Permission.findOne({ code: 'OWN_RESEARCH' }).lean();
 
-        const hasAdd = addPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: addPerm._id }).lean() : null;
-        const hasView = viewPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: viewPerm._id }).lean() : null;
-        const hasOwn = ownPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: ownPerm._id }).lean() : null;
-
-        if (!hasAdd && !hasView && !hasOwn) {
-          return res.status(403).json({ success: false, message: 'You do not have permission to view signals.' });
+      // Fetch teaser locked signals from plans the user does NOT have active subscriptions for
+      let lockedSignals: any[] = [];
+      if (previewLimit > 0) {
+        const lockedWhere: any = {
+          tenantId,
+          status: 'OPEN'
+        };
+        if (subscribedPlanIds.length > 0) {
+          lockedWhere.planId = { $nin: subscribedPlanIds };
         }
 
-        if (!hasAdd && !hasView && hasOwn) {
-          whereClause.createdById = (req as any).user.id;
-        }
+        lockedSignals = await dynamicDb.Signal.find(lockedWhere)
+          .sort({ createdAt: -1 })
+          .limit(previewLimit)
+          .lean();
+      }
+
+      // Collect plan IDs and stock IDs for mapping
+      const allSignalsToMap = [...unlockedSignals, ...lockedSignals];
+      const planIds = allSignalsToMap.map((s: any) => s.planId).filter(Boolean);
+      const plans = await dynamicDb.Plan.find({ _id: { $in: planIds } }).lean();
+      const categories = await dynamicDb.PlanCategory.find({ _id: { $in: planIds } }).lean();
+
+      const planMap = new Map<string, string>();
+      plans.forEach((p: any) => planMap.set(p._id.toString(), p.name));
+      categories.forEach((c: any) => planMap.set(c._id.toString(), c.name));
+
+      const userIds = [...new Set(allSignalsToMap.map((s: any) => s.createdById).filter(Boolean))];
+      const users = await dynamicDb.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
+      const userMap = new Map<string, string>();
+      users.forEach((u: any) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
+
+      const stockIdList = allSignalsToMap
+        .map((s: any) => s.stockId?._id || s.stockId || s.stock?._id || s.stock)
+        .filter(Boolean)
+        .map((id: any) => id.toString());
+      const uniqueStockIds = [...new Set(stockIdList)];
+      const validStockObjectIds = uniqueStockIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+
+      const stocks = await dynamicDb.Stock.find({
+        $or: [
+          ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+          { id: { $in: uniqueStockIds } }
+        ]
+      }).lean();
+
+      const stockMap = new Map<string, any>();
+      stocks.forEach((st: any) => {
+        const sId = String(st._id || st.id);
+        stockMap.set(sId, { ...st, id: sId });
+      });
+
+      // Map unlocked signals
+      const mappedUnlocked = unlockedSignals.map((s: any) => {
+        const pIdStr = s.planId?.toString();
+        const cIdStr = s.createdById?.toString();
+        const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+        const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+          (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
+          (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
+
+        const potential = calculatePotential(s);
+
+        return {
+          ...s,
+          id: s._id?.toString() || s.id,
+          isLocked: false,
+          stockId: sIdStr,
+          stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
+          symbol: matchedStock?.symbol || s.symbol || '',
+          stockName: matchedStock?.name || s.stockName || '',
+          planName: (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
+          createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
+          ...potential
+        };
+      });
+
+      // Map locked teaser signals
+      const mappedLocked = lockedSignals.map((s: any) => {
+        const pIdStr = s.planId?.toString();
+        const potential = calculatePotential(s);
+        const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+        const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+          (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null);
+
+        const rawSymbol = matchedStock?.symbol || 'STOCK';
+        const maskedSymbol = rawSymbol.length > 2 ? `${rawSymbol.slice(0, 1)}****` : 'T****';
+
+        return {
+          id: s._id?.toString() || s.id,
+          _id: s._id,
+          isLocked: true,
+          symbol: maskedSymbol,
+          stockName: 'Locked Recommendation',
+          segment: s.segment || 'CASH',
+          callType: s.callType || 'BUY',
+          tradeDuration: s.tradeDuration || 'INTRADAY',
+          planId: s.planId,
+          planName: (pIdStr && planMap.get(pIdStr)) || 'Premium Advisory Plan',
+          entryPrice: null,
+          target1: null,
+          target2: null,
+          target3: null,
+          stoploss: null,
+          status: 'OPEN',
+          createdAt: s.createdAt,
+          ...potential
+        };
+      });
+
+      return res.json({
+        success: true,
+        data: [...mappedUnlocked, ...mappedLocked],
+        hasActivePlan: allSubs.length > 0
+      });
+    }
+
+    // Staff / Admin logic
+    let whereClause: any = { tenantId };
+    const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
+    if (!isFullAdmin) {
+      const roleDoc = await dynamicDb.Role.findOne({ name: userRole }).lean();
+      const roleId = roleDoc?._id;
+      const addPerm = await dynamicDb.Permission.findOne({ code: 'ADD_RESEARCH' }).lean();
+      const viewPerm = await dynamicDb.Permission.findOne({ code: 'VIEW_RESEARCH' }).lean();
+      const ownPerm = await dynamicDb.Permission.findOne({ code: 'OWN_RESEARCH' }).lean();
+
+      const hasAdd = addPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: addPerm._id }).lean() : null;
+      const hasView = viewPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: viewPerm._id }).lean() : null;
+      const hasOwn = ownPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: ownPerm._id }).lean() : null;
+
+      if (!hasAdd && !hasView && !hasOwn) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to view signals.' });
+      }
+
+      if (!hasAdd && !hasView && hasOwn) {
+        whereClause.createdById = (req as any).user.id;
       }
     }
 
@@ -188,13 +371,11 @@ export const listSignals = async (req: Request, res: Response) => {
     plans.forEach((p: any) => map.set(p._id.toString(), p.name));
     categories.forEach((c: any) => map.set(c._id.toString(), c.name));
 
-    // Manually fetch researcher names
     const userIds = [...new Set(signals.map((s: any) => s.createdById).filter(Boolean))];
     const users = await dynamicDb.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
     const userMap = new Map<string, string>();
     users.forEach((u: any) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
 
-    // Manually fetch and resolve all Stock objects by stockId
     const stockIdList = signals
       .map((s: any) => s.stockId?._id || s.stockId || s.stock?._id || s.stock)
       .filter(Boolean)
@@ -212,54 +393,29 @@ export const listSignals = async (req: Request, res: Response) => {
     const stockMap = new Map<string, any>();
     stocks.forEach((st: any) => {
       const sId = String(st._id || st.id);
-      stockMap.set(sId, {
-        ...st,
-        id: sId
-      });
+      stockMap.set(sId, { ...st, id: sId });
     });
-
-    // Central fallback if not found in local tenant DB
-    if (stockMap.size < uniqueStockIds.length) {
-      try {
-        const centralStocks = await centralModels.Stock.find({
-          $or: [
-            ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
-            { id: { $in: uniqueStockIds } }
-          ]
-        }).lean();
-        centralStocks.forEach((st: any) => {
-          const sId = String(st._id || st.id);
-          if (!stockMap.has(sId)) {
-            stockMap.set(sId, {
-              ...st,
-              id: sId
-            });
-          }
-        });
-      } catch {}
-    }
 
     const finalData = signals.map((s: any) => {
       const pIdStr = s.planId?.toString();
       const cIdStr = s.createdById?.toString();
       const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
-      
       const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
         (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
         (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
+
+      const potential = calculatePotential(s);
 
       return {
         ...s,
         id: s._id?.toString() || s.id,
         stockId: sIdStr,
-        stock: matchedStock ? {
-          ...matchedStock,
-          id: String(matchedStock._id || matchedStock.id)
-        } : null,
+        stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
         symbol: matchedStock?.symbol || '',
         stockName: matchedStock?.name || '',
         planName: (pIdStr && map.get(pIdStr)) || pIdStr || '',
-        createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher'
+        createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
+        ...potential
       };
     });
 

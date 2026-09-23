@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
-import dynamicDb, { centralModels } from '../config/db';
+import dynamicDb, { centralModels, EmailVerification } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
@@ -30,16 +30,31 @@ export const registerClient = async (req: Request, res: Response) => {
     addressLine1,
     city,
     state,
-    zipCode
+    zipCode,
+    createdById
   } = req.body;
 
-  if (!name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
+  const authHeader = req.headers.authorization;
+  let decodedUser: any = (req as any).user;
+  if (!decodedUser && authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.split(' ')[1];
+      decodedUser = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    } catch {}
+  }
+  const isAdminAdd = Boolean(
+    createdById || 
+    (decodedUser && ['ADMIN', 'SUPER_ADMIN', 'STAFF', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCH_ANALYST', 'RESEARCHER'].includes(decodedUser.role))
+  );
+
+  if (!email || !mobile || !password) {
     return res.status(400).json({
       success: false,
-      message: 'All fields (name, email, mobile, password, PAN, Aadhaar, address, state) are required.'
+      message: 'Email, mobile number, and password are required.'
     });
   }
 
+  let createdUser: any = null;
   try {
     let tenantId = passedTenantId;
     let tenant: any = null;
@@ -56,6 +71,61 @@ export const registerClient = async (req: Request, res: Response) => {
 
     if (!tenant) {
       return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
+    }
+
+    // Dynamic Password Policy Enforcement
+    if (!password || password.length < 8 || password.length > 15) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be between 8 and 15 characters long.',
+        errors: ['Password length must be between 8 and 15 characters']
+      });
+    }
+
+    const policy = tenant?.passwordPolicy || 'NORMAL';
+    if (policy === 'STRONG') {
+      const strongRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^~_\-\(\).,?:{}|<>])[A-Za-z\d@$!%*?&#^~_\-\(\).,?:{}|<>]{8,15}$/;
+      if (!strongRegex.test(password)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be between 8 and 15 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.',
+          errors: ['Password does not meet strong policy requirements']
+        });
+      }
+    }
+
+    // Check OTP verification for self-signup based on tenant.signupVerificationMode (Bypassed for Admin manual add)
+    if (!isAdminAdd) {
+      const mode = tenant?.signupVerificationMode || 'EMAIL_ONLY';
+      const cleanEmail = email.toLowerCase().trim();
+      const cleanMobile = mobile.trim();
+
+      const verRecord: any = await EmailVerification.findOne({
+        $or: [{ email: cleanEmail }, ...(cleanMobile ? [{ mobile: cleanMobile }] : [])]
+      }).lean();
+
+      if (mode === 'EMAIL_ONLY') {
+        if (!verRecord?.emailVerified) {
+          return res.status(400).json({
+            success: false,
+            message: 'Please verify your Email OTP before completing registration.'
+          });
+        }
+      } else if (mode === 'MOBILE_ONLY') {
+        if (!verRecord?.smsVerified) {
+          return res.status(400).json({
+            success: false,
+            message: 'Please verify your Mobile OTP before completing registration.'
+          });
+        }
+      } else if (mode === 'BOTH') {
+        if (!verRecord?.emailVerified || !verRecord?.smsVerified) {
+          return res.status(400).json({
+            success: false,
+            message: 'Both Email and Mobile OTPs must be verified before completing registration.'
+          });
+        }
+      }
     }
 
     const duplicateEmail = await dynamicDb.User.findOne({ email }).lean();
@@ -78,24 +148,28 @@ export const registerClient = async (req: Request, res: Response) => {
       });
     }
 
-    const duplicatePan = await dynamicDb.Client.findOne({ pan }).lean();
-    if (duplicatePan) {
-      return res.status(400).json({
-        success: false,
-        message: 'Duplicate Account Detected',
-        duplicateField: 'pan',
-        errors: ['An account with this PAN already exists.']
-      });
+    if (pan && pan.trim()) {
+      const duplicatePan = await dynamicDb.Client.findOne({ pan: pan.trim() }).lean();
+      if (duplicatePan) {
+        return res.status(400).json({
+          success: false,
+          message: 'Duplicate Account Detected',
+          duplicateField: 'pan',
+          errors: ['An account with this PAN already exists.']
+        });
+      }
     }
 
-    const duplicateAadhaar = await dynamicDb.Client.findOne({ aadhaar }).lean();
-    if (duplicateAadhaar) {
-      return res.status(400).json({
-        success: false,
-        message: 'Duplicate Account Detected',
-        duplicateField: 'aadhaar',
-        errors: ['An account with this Aadhaar already exists.']
-      });
+    if (aadhaar && aadhaar.trim()) {
+      const duplicateAadhaar = await dynamicDb.Client.findOne({ aadhaar: aadhaar.trim() }).lean();
+      if (duplicateAadhaar) {
+        return res.status(400).json({
+          success: false,
+          message: 'Duplicate Account Detected',
+          duplicateField: 'aadhaar',
+          errors: ['An account with this Aadhaar already exists.']
+        });
+      }
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -108,40 +182,57 @@ export const registerClient = async (req: Request, res: Response) => {
 
     const creatorId = req.body.createdById || ((req as any).user ? (req as any).user.id : null);
 
+    const effectiveName = (name && name.trim()) || email.split('@')[0] || 'Client';
+    const nameParts = effectiveName.split(' ');
+    const firstName = nameParts[0] || 'Client';
+    const lastName = nameParts.slice(1).join(' ') || 'User';
+
     const user: any = await dynamicDb.User.create({
       tenantId,
       roleId: clientRole._id || clientRole.id,
-      firstName: name.split(' ')[0],
-      lastName: name.split(' ').slice(1).join(' ') || 'Client',
-      email,
-      mobile,
+      firstName,
+      lastName,
+      email: email.toLowerCase().trim(),
+      mobile: mobile.trim(),
       passwordHash,
       status: 'ACTIVE',
       tempPassword: null
     });
+    createdUser = user;
 
-    const client: any = await dynamicDb.Client.create({
+    const clientPayload: any = {
       tenantId,
       userId: user._id || user.id,
-      name,
-      email,
-      mobile,
-      pan,
-      aadhaar,
+      name: effectiveName,
+      email: email.toLowerCase().trim(),
+      mobile: mobile.trim(),
       category: category || 'INDIVIDUAL',
-      occupation,
+      occupation: occupation || null,
       status: 'ACTIVE',
       createdById: creatorId
-    });
+    };
+    if (pan && String(pan).trim()) clientPayload.pan = String(pan).trim().toUpperCase();
+    if (aadhaar && String(aadhaar).trim()) clientPayload.aadhaar = String(aadhaar).trim();
+
+    const client: any = await dynamicDb.Client.create(clientPayload);
 
     await dynamicDb.ClientProfile.create({
       clientId: client._id || client.id,
-      addressLine1,
-      city,
-      state,
+      addressLine1: addressLine1 || null,
+      city: city || null,
+      state: state || null,
       country: 'India',
-      zipCode
+      zipCode: zipCode || null
     });
+
+    // Cleanup used verification records on self-registration
+    if (!isAdminAdd) {
+      const cleanEmail = email.toLowerCase().trim();
+      const cleanMobile = mobile.trim();
+      await EmailVerification.deleteMany({
+        $or: [{ email: cleanEmail }, ...(cleanMobile ? [{ mobile: cleanMobile }] : [])]
+      }).catch(() => {});
+    }
 
     await logAudit({
       tenantId,
@@ -178,7 +269,52 @@ export const registerClient = async (req: Request, res: Response) => {
       data: client
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, errors: [error.message] });
+    if (createdUser && createdUser._id) {
+      await dynamicDb.User.findByIdAndDelete(createdUser._id).catch(() => {});
+    }
+
+    let friendlyMessage = 'Registration failed. Please check your information and try again.';
+    let duplicateField: string | null = null;
+
+    if (error.code === 11000 || error.name === 'MongoServerError' || String(error.message).includes('E11000')) {
+      const rawMsg = String(error.message || '');
+      if (error.keyPattern?.email || rawMsg.includes('email')) {
+        duplicateField = 'email';
+        friendlyMessage = 'This email address is already registered. Please login or use a different email.';
+      } else if (error.keyPattern?.mobile || rawMsg.includes('mobile')) {
+        duplicateField = 'mobile';
+        friendlyMessage = 'This mobile number is already registered. Please login or use a different number.';
+      } else if (error.keyPattern?.pan || rawMsg.includes('pan')) {
+        duplicateField = 'pan';
+        friendlyMessage = 'This PAN card number is already registered with another account.';
+      } else if (error.keyPattern?.aadhaar || rawMsg.includes('aadhaar')) {
+        duplicateField = 'aadhaar';
+        friendlyMessage = 'This Aadhaar number is already registered with another account.';
+      } else {
+        friendlyMessage = 'An account with these credentials already exists. Please verify your details or login.';
+      }
+      return res.status(400).json({
+        success: false,
+        message: friendlyMessage,
+        errors: [friendlyMessage],
+        duplicateField
+      });
+    }
+
+    if (error.name === 'ValidationError') {
+      friendlyMessage = Object.values(error.errors || {}).map((e: any) => e.message).join('. ') || 'Invalid details provided.';
+      return res.status(400).json({
+        success: false,
+        message: friendlyMessage,
+        errors: [friendlyMessage]
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: friendlyMessage,
+      errors: [friendlyMessage]
+    });
   }
 };
 
@@ -199,21 +335,24 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
     const customerIdentifier = client.email;
     const customerName = client.name || 'Client';
 
+    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
     const digioResponse = await createKycRequest(
       tenant.digioClientId,
       tenant.digioClientSecret,
       tenant.digioKycTemplateName,
       customerIdentifier,
-      customerName
+      customerName,
+      tenant.digioEnvironment
     );
 
     return res.status(200).json({
       success: true,
       message: 'Digio KYC request initiated',
-      data: digioResponse
+      data: digioResponse,
+      environment: isSandbox ? 'sandbox' : 'production'
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, errors: [error.message] });
+    return res.status(500).json({ success: false, message: error.message || 'Failed to initiate Digio KYC', errors: [error.message] });
   }
 };
 
@@ -426,7 +565,7 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
     // 2. If not found in response, query Digio Document Status API for PKI signature details
     if (!verifiedDigioName && req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
       try {
-        const docStatus = await getDocumentStatus(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+        const docStatus = await getDocumentStatus(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId, tenant.digioEnvironment);
         console.log('[Digio eSign] Fetched docStatus:', JSON.stringify(docStatus || {}));
         if (docStatus) {
           const extracted = extractAadhaarDetailsFromDigio(docStatus);
@@ -487,7 +626,7 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
     // 1. Download signed PDF from Digio or fallback to generating it locally
     let pdfBuffer: Buffer | null = null;
     if (req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
-      pdfBuffer = await downloadDocument(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+      pdfBuffer = await downloadDocument(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId, tenant.digioEnvironment);
     }
 
     if (!pdfBuffer) {
@@ -608,7 +747,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
       const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       const plan: any = await dynamicDb.Plan.findById(planId).lean();
       if (coupon && plan && coupon.status === 'ACTIVE') {
-        if (coupon.discountType === 'FLAT') {
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           discountAmount = coupon.discountValue;
         } else if (coupon.discountType === 'PERCENTAGE') {
           discountAmount = (plan.price * coupon.discountValue) / 100;
@@ -687,8 +826,17 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
 };
 
 export const submitManualPayment = async (req: AuthenticatedRequest, res: Response) => {
-  const { planId, amount, paymentMode, transactionRef, remarks } = req.body;
-  const receiptUrl = req.file ? `/uploads/payments/${req.file.filename}` : '/uploads/payments/mock_receipt.png';
+  const { planId, amount, paymentMode, transactionRef, remarks, couponCode } = req.body;
+  const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+  let receiptUrl = req.body.receiptUrl || '/uploads/payments/mock_receipt.png';
+
+  if (req.file) {
+    receiptUrl = `/uploads/payments/${req.file.filename}`;
+  } else if (files?.screenshot && files.screenshot.length > 0) {
+    receiptUrl = `/uploads/payments/${files.screenshot[0].filename}`;
+  } else if (files?.receipt && files.receipt.length > 0) {
+    receiptUrl = `/uploads/payments/${files.receipt[0].filename}`;
+  }
 
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean();
@@ -707,24 +855,84 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
       });
     }
 
+    const agreementDoc = await dynamicDb.Agreement.findOne({
+      clientId: client._id || client.id,
+      status: { $in: ['SIGNED', 'ACTIVE'] }
+    }).lean();
+    const isClientAgreementDone = Boolean(client.agreementSigned || agreementDoc);
+    if (kycRequired && !isClientAgreementDone) {
+      return res.status(403).json({
+        success: false,
+        requiresAgreement: true,
+        message: 'Advisory Agreement must be signed before purchasing a plan. Please sign your agreement first.'
+      });
+    }
+
+    let planDoc: any = null;
+    if (planId && mongoose.Types.ObjectId.isValid(planId)) {
+      planDoc = await dynamicDb.Plan.findById(planId).lean();
+    } else if (planId) {
+      planDoc = await dynamicDb.Plan.findOne({ id: planId }).lean();
+    }
+
+    const parsedAmount = parseFloat(amount) || (planDoc ? planDoc.price : 0);
+
+    let discountApplied = 0;
+    let appliedCouponId = null;
+
+    if (couponCode) {
+      const coupon: any = await dynamicDb.Coupon.findOne({
+        code: String(couponCode).trim().toUpperCase(),
+        tenantId,
+        status: 'ACTIVE'
+      }).lean();
+
+      if (coupon) {
+        appliedCouponId = coupon._id || coupon.id;
+        const basePrice = planDoc ? planDoc.price : parsedAmount;
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          discountApplied = coupon.discountValue;
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          discountApplied = (basePrice * coupon.discountValue) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountApplied > coupon.maxDiscountValue) {
+            discountApplied = coupon.maxDiscountValue;
+          }
+        }
+        if (discountApplied > basePrice) discountApplied = basePrice;
+      }
+    }
+
+    // If amount is less than standard total, infer discount difference
+    if (planDoc && planDoc.price) {
+      const isExclusive = tenantObj?.gstCalculationType === 'EXCLUSIVE';
+      const expectedTotal = isExclusive ? (planDoc.price * 1.18) : planDoc.price;
+      const diff = expectedTotal - parsedAmount;
+      if (diff > 0 && discountApplied <= 0) {
+        discountApplied = diff;
+      }
+    }
+
     const payment = await dynamicDb.Payment.create({
       tenantId,
       clientId: client._id || client.id,
-      planId,
-      amount: parseFloat(amount) || 0,
-      paymentMode: paymentMode || 'MANUAL_UPI',
-      transactionRef: transactionRef || 'MANUAL-' + Date.now(),
+      planId: planDoc ? (planDoc._id || planDoc.id) : (planId || null),
+      amount: parsedAmount,
+      paymentMode: paymentMode || 'UPI_QR',
+      transactionRef: transactionRef ? transactionRef.trim() : 'UPI-' + Date.now(),
       receiptUrl,
       status: 'PENDING',
-      remarks,
+      remarks: remarks || 'Client submitted QR / UPI payment screenshot for verification.',
       clientCity: profile?.city || null,
       clientState: profile?.state || null,
-      tenantState: tenantObj?.state || null
+      tenantState: tenantObj?.state || null,
+      planValidityDays: planDoc ? (planDoc.durationMonths * 30) : null,
+      couponId: appliedCouponId,
+      discountApplied: discountApplied > 0 ? parseFloat(discountApplied.toFixed(2)) : 0
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Payment details uploaded successfully. Awaiting compliance team approval.',
+      message: 'Payment screenshot uploaded successfully. Awaiting compliance team approval.',
       data: payment
     });
   } catch (error: any) {
@@ -772,6 +980,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
           }
         }
 
+        // Check if there is an existing active subscription for this client and plan (sequential queueing)
         const existingSub: any = await dynamicDb.Subscription.findOne({
           clientId: payment.clientId,
           planId: plan._id || plan.id,
@@ -781,22 +990,40 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
 
         let startDate = new Date();
         if (existingSub) {
+          // Starts sequentially right after the existing active plan expires
           startDate = new Date(existingSub.endDate);
+        } else if (payment.paymentDate) {
+          const parsed = new Date(payment.paymentDate);
+          if (!isNaN(parsed.getTime())) startDate = parsed;
         }
 
-        const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+        const validityDays = payment.planValidityDays || (plan.durationMonths * 30) || 30;
+        const endDate = new Date(startDate.getTime() + validityDays * 24 * 60 * 60 * 1000);
+
+        const amountTotal = Number(payment.amount || 0);
+        const amountBase = amountTotal / 1.18;
+        const amountGst = amountTotal - amountBase;
 
         await dynamicDb.Subscription.create({
           clientId: payment.clientId,
           planId: plan._id || plan.id,
           startDate,
           endDate,
-          status: 'ACTIVE'
+          status: 'ACTIVE',
+          amountTotal: parseFloat(amountTotal.toFixed(2)),
+          amountBase: parseFloat(amountBase.toFixed(2)),
+          amountGst: parseFloat(amountGst.toFixed(2))
         });
 
         await dynamicDb.Client.findByIdAndUpdate(payment.clientId, {
           $set: { status: 'ACTIVE' }
         });
+
+        if (payment.couponId) {
+          await dynamicDb.Coupon.findByIdAndUpdate(payment.couponId, {
+            $inc: { usedCount: 1 }
+          }).catch(() => {});
+        }
       }
     }
 
@@ -1016,7 +1243,10 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
         ccavenueMerchantId: tenantObj.ccavenueMerchantId || null,
         kycFirst: tenantObj.kycFirst !== false,
         gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
-        isPaymentGatewayConfigured
+        isPaymentGatewayConfigured,
+        hasDigioConfigured: Boolean(tenantObj.digioClientId && tenantObj.digioClientSecret),
+        digioEnvironment: tenantObj.digioEnvironment || (tenantObj.digioClientId?.startsWith('ACK') ? 'SANDBOX' : 'PRODUCTION'),
+        digioClientId: tenantObj.digioClientId || null
       };
     }
 
@@ -1049,7 +1279,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
 };
 
 export const updateClientProfile = async (req: AuthenticatedRequest, res: Response) => {
-  const { occupation, addressLine1, city, state, zipCode } = req.body;
+  const { addressLine1, city, state, zipCode } = req.body;
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id });
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
@@ -1059,7 +1289,6 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
       { clientId },
       {
         $set: {
-          occupation,
           addressLine1,
           city,
           state,
@@ -1165,7 +1394,7 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
     if (couponCode) {
       const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
-        if (coupon.discountType === 'FLAT') {
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           finalPrice = Math.max(0, finalPrice - coupon.discountValue);
         } else if (coupon.discountType === 'PERCENTAGE') {
           let discount = (finalPrice * coupon.discountValue) / 100;
@@ -1247,7 +1476,7 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
     if (couponCode) {
       const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
-        if (coupon.discountType === 'FLAT') {
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           discountAmount = coupon.discountValue;
         } else if (coupon.discountType === 'PERCENTAGE') {
           discountAmount = ((plan.amount || plan.price) * coupon.discountValue) / 100;
@@ -1366,7 +1595,7 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     if (couponCode) {
       const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
-        if (coupon.discountType === 'FLAT') {
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           finalPrice = Math.max(0, finalPrice - coupon.discountValue);
         } else if (coupon.discountType === 'PERCENTAGE') {
           let discount = (finalPrice * coupon.discountValue) / 100;
@@ -1542,14 +1771,34 @@ export const getPaymentGatewayStatus = async (req: AuthenticatedRequest, res: Re
       } : null
     };
 
+    const isGatewayEnabled = Boolean(tenantObj.paymentGatewayEnabled !== false && isConfigured);
+    const isUpiQrEnabled = Boolean(tenantObj.upiQrEnabled && (tenantObj.upiId || tenantObj.upiQrImageUrl));
+
+    const upiQr = {
+      enabled: isUpiQrEnabled,
+      upiId: tenantObj.upiId || null,
+      payeeName: tenantObj.upiPayeeName || tenantObj.companyName || null,
+      qrImageUrl: tenantObj.upiQrImageUrl || null,
+      instructions: tenantObj.upiInstructions || null
+    };
+
     return res.status(200).json({
       success: true,
-      isConfigured,
+      isConfigured: isGatewayEnabled,
       activeGateway,
+      paymentGatewayEnabled: tenantObj.paymentGatewayEnabled !== false,
+      gateway: {
+        enabled: isGatewayEnabled,
+        activeGateway,
+        isConfigured
+      },
+      upiQr,
       adminContact,
-      message: isConfigured
+      message: isGatewayEnabled
         ? `Payment gateway (${activeGateway}) is ready.`
-        : `Payment gateway credentials are not configured by the administrator for ${activeGateway}. Please contact administrator to purchase this plan.`
+        : (isUpiQrEnabled
+          ? 'Payment gateway is disabled. Please pay using QR / UPI.'
+          : `Payment methods are currently offline. Please contact administrator to purchase this plan.`)
     });
   } catch (error: any) {
     console.error('Payment gateway status error:', error);

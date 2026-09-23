@@ -166,7 +166,7 @@ const applyCoupon = async (req, res) => {
                 return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required` });
             }
             let discountAmount = 0;
-            if (coupon.discountType === 'FLAT') {
+            if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                 discountAmount = coupon.discountValue;
             }
             else if (coupon.discountType === 'PERCENTAGE') {

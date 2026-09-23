@@ -46,9 +46,13 @@ import { EmailTemplate, EmailTemplateSchema, IEmailTemplate } from './EmailTempl
 import { EmailVerification, EmailVerificationSchema, IEmailVerification } from './EmailVerification';
 import { SystemSetting, SystemSettingSchema, ISystemSetting } from './SystemSetting';
 import { AdminPermission, AdminPermissionSchema, IAdminPermission } from './AdminPermission';
+import { Occupation, OccupationSchema, IOccupation } from './Occupation';
+import { SmsTemplate, SmsTemplateSchema, ISmsTemplate } from './SmsTemplate';
 
 // Re-export all models and interfaces
 export {
+  Occupation, OccupationSchema, IOccupation,
+  SmsTemplate, SmsTemplateSchema, ISmsTemplate,
   Tenant, TenantSchema, ITenant,
   AllCompany, AllCompanySchema, IAllCompany,
   User, UserSchema, IUser,
@@ -193,6 +197,10 @@ export interface ITenantModels {
   emailVerification: Model<IEmailVerification>;
   systemSetting: Model<ISystemSetting>;
   adminPermission: Model<IAdminPermission>;
+  Occupation: Model<IOccupation>;
+  occupation: Model<IOccupation>;
+  SmsTemplate: Model<ISmsTemplate>;
+  smsTemplate: Model<ISmsTemplate>;
 
   [key: string]: any;
 }
@@ -246,7 +254,9 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     EmailTemplate: (connection.models.EmailTemplate || connection.model<IEmailTemplate>('EmailTemplate', EmailTemplateSchema, 'EmailTemplate')) as Model<IEmailTemplate>,
     EmailVerification: (connection.models.EmailVerification || connection.model<IEmailVerification>('EmailVerification', EmailVerificationSchema, 'EmailVerification')) as Model<IEmailVerification>,
     SystemSetting: (connection.models.SystemSetting || connection.model<ISystemSetting>('SystemSetting', SystemSettingSchema, 'SystemSetting')) as Model<ISystemSetting>,
-    AdminPermission: (connection.models.AdminPermission || connection.model<IAdminPermission>('AdminPermission', AdminPermissionSchema, 'AdminPermission')) as Model<IAdminPermission>
+    AdminPermission: (connection.models.AdminPermission || connection.model<IAdminPermission>('AdminPermission', AdminPermissionSchema, 'AdminPermission')) as Model<IAdminPermission>,
+    Occupation: (connection.models.Occupation || connection.model<IOccupation>('Occupation', OccupationSchema, 'Occupation')) as Model<IOccupation>,
+    SmsTemplate: (connection.models.SmsTemplate || connection.model<ISmsTemplate>('SmsTemplate', SmsTemplateSchema, 'SmsTemplate')) as Model<ISmsTemplate>
   };
 
   return {
@@ -295,6 +305,8 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     emailTemplate: models.EmailTemplate,
     emailVerification: models.EmailVerification,
     systemSetting: models.SystemSetting,
-    adminPermission: models.AdminPermission
+    adminPermission: models.AdminPermission,
+    occupation: models.Occupation,
+    smsTemplate: models.SmsTemplate
   };
 }

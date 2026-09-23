@@ -37,8 +37,12 @@ exports.EmailVerification = exports.EmailVerificationSchema = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const _schemaOptions_1 = require("./_schemaOptions");
 exports.EmailVerificationSchema = new mongoose_1.Schema({
-    email: { type: String, required: true, unique: true },
+    email: { type: String, default: null, sparse: true },
+    mobile: { type: String, default: null, sparse: true },
     otp: { type: String, required: true },
+    smsOtp: { type: String, default: null },
+    emailVerified: { type: Boolean, default: false },
+    smsVerified: { type: Boolean, default: false },
     expiresAt: { type: Date, required: true },
     createdAt: { type: Date, default: Date.now }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'EmailVerification' });

@@ -34,6 +34,7 @@ const permissionController_1 = require("../controllers/permissionController");
 const tenantSyncController_1 = require("../controllers/tenantSyncController");
 const pdfService_1 = require("../services/pdfService");
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
+const occupationController_1 = require("../controllers/occupationController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -130,6 +131,11 @@ const upload = (0, multer_1.default)({
 // AUTHENTICATION
 // ----------------------------------------------------
 router.post('/auth/login', authController_1.login);
+router.post('/auth/request-login-otp', authController_1.requestLoginOtp);
+router.post('/auth/login-with-otp', authController_1.loginWithOtp);
+router.post('/auth/verify-2fa', authController_1.verify2FALogin);
+router.post('/auth/resend-2fa', authController_1.resend2FAOtp);
+router.get('/auth/security-policy', authController_1.getSecurityPolicy);
 router.post('/auth/refresh', authController_1.refreshToken);
 router.post('/auth/forgot-password', authController_1.forgotPassword);
 router.post('/auth/reset-password', authController_1.resetPassword);
@@ -216,7 +222,8 @@ router.put('/admin/settings', auth_1.authenticateJWT, (0, auth_1.requirePermissi
     { name: 'termsPdf', maxCount: 1 },
     { name: 'privacyPdf', maxCount: 1 },
     { name: 'coSignature', maxCount: 1 },
-    { name: 'internalPolicyPdf', maxCount: 1 }
+    { name: 'internalPolicyPdf', maxCount: 1 },
+    { name: 'upiQrImage', maxCount: 1 }
 ]), adminController_1.updateTenantSettings);
 router.get('/admin/email-templates', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.getEmailTemplates);
 router.put('/admin/email-templates/:type', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.updateEmailTemplate);
@@ -242,6 +249,24 @@ router.get('/pages', pageController_1.getActivePages);
 router.get('/pages/:slug', pageController_1.getPageBySlug);
 router.get('/complaint-report', pageController_1.getComplaintReport);
 router.get('/complaint-report/history', pageController_1.getComplaintReportHistory);
+// Public Occupations Route (for Registration / Signup dropdowns)
+router.get('/occupations', occupationController_1.getPublicOccupations);
+// Admin Occupations Management Routes
+router.get('/admin/occupations', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, occupationController_1.getAdminOccupations);
+router.post('/admin/occupations', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, occupationController_1.createOccupation);
+router.put('/admin/occupations/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, occupationController_1.updateOccupation);
+router.post('/admin/occupations/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, occupationController_1.toggleOccupationStatus);
+router.patch('/admin/occupations/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, occupationController_1.toggleOccupationStatus);
+router.delete('/admin/occupations/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, occupationController_1.deleteOccupation);
+// Admin SMS Templates & Gateway Routes
+router.get('/admin/sms-templates', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.getSmsTemplates);
+router.post('/admin/sms-templates', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.createSmsTemplate);
+router.put('/admin/sms-templates/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.updateSmsTemplate);
+router.post('/admin/sms-templates/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.toggleSmsTemplateStatus);
+router.patch('/admin/sms-templates/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.toggleSmsTemplateStatus);
+router.delete('/admin/sms-templates/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.deleteSmsTemplate);
+router.post('/admin/sms/test', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testSmsGateway);
+router.post('/admin/test-digio', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testDigioConfig);
 // ==========================================
 router.get('/admin/profile-completeness', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, adminController_1.getProfileCompleteness);
 // Active Client History endpoints
@@ -310,11 +335,15 @@ router.put('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)([
 router.delete('/client/account', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.deleteClientAccount);
 router.post('/client/documents', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.single('file'), clientController_1.uploadClientDocument);
 router.post('/client/kyc/initiate-digio', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.initiateDigioKyc);
+router.post('/client/kyc/initiate', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), kycController_1.initiateKyc);
+router.post('/client/agreement/initiate', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), kycController_1.initiateAgreementEsign);
+router.post('/client/kyc/status', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), kycController_1.updateKycAgreementStatus);
+router.post('/client/kyc-agreement/status', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), kycController_1.updateKycAgreementStatus);
 router.post('/client/kyc/verify', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.verifyKRA);
 router.post('/client/consent', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.acceptConsent);
 router.post('/client/esign', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.signAgreement);
 router.get('/client/plans', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientController_1.getPlans);
-router.post('/client/payments/manual', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.single('receipt'), clientController_1.submitManualPayment);
+router.post('/client/payments/manual', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.fields([{ name: 'receipt', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), clientController_1.submitManualPayment);
 router.post('/admin/payments/verify', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, clientController_1.verifyManualPayment);
 router.get('/admin/payments', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminPayments);
 router.post('/client/coupons/apply', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, couponController_1.applyCoupon);
@@ -371,6 +400,7 @@ router.post('/compliance/penalties/:id/resolve', auth_1.authenticateJWT, (0, aut
 // CLIENT PORTAL & TICKETS
 // ----------------------------------------------------
 router.get('/client/market-overview', auth_1.authenticateJWT, marketController_1.getMarketOverview);
+router.get('/client/news-feed', auth_1.authenticateJWT, marketController_1.getNewsFeed);
 router.get('/client/subscriptions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.getSubscriptions);
 router.get('/client/payments', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.getPaymentHistory);
 router.put('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.updateProfile);

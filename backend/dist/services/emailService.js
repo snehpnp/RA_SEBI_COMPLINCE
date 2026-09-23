@@ -40,6 +40,7 @@ exports.sendComplaintNotificationEmail = exports.sendAccountDeactivatedEmail = e
 exports.resolveSmtpCredentials = resolveSmtpCredentials;
 exports.sendEmail = sendEmail;
 exports.sendOtpEmail = sendOtpEmail;
+exports.sendTwoFactorLoginOtpEmail = sendTwoFactorLoginOtpEmail;
 exports.sendWelcomeEmail = sendWelcomeEmail;
 exports.sendForgotPasswordEmail = sendForgotPasswordEmail;
 exports.sendTestEmail = sendTestEmail;
@@ -285,6 +286,25 @@ async function sendOtpEmail(opts) {
         <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #2563eb; font-family: monospace;">${otp}</span>
       </div>
       <p style="color: #64748b; font-size: 13px; margin-bottom: 0;">⏳ This OTP is valid for 10 minutes. If you did not request this verification, please ignore this email.</p>
+    </div>
+  `;
+    return sendEmail(tenantId, toEmail, subject, html);
+}
+/**
+ * Send Two-Factor Login Verification OTP Email
+ */
+async function sendTwoFactorLoginOtpEmail(opts) {
+    const { tenantId, toEmail, otp, companyName } = opts;
+    const brand = companyName || 'RAGCP';
+    const subject = `Your Login Verification Code for ${brand}: ${otp}`;
+    const html = `
+    <div style="font-family: Arial, sans-serif; padding: 24px; max-width: 580px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
+      <h2 style="color: #1e293b; margin-top: 0;">🔐 Two-Step Login Verification</h2>
+      <p style="color: #475569; font-size: 15px; line-height: 1.5;">You are attempting to log into your account on <strong>${brand}</strong>. Please enter the following 6-digit verification code to complete your login:</p>
+      <div style="background-color: #eff6ff; padding: 18px; text-align: center; border-radius: 8px; margin: 24px 0; border: 1px dashed #93c5fd;">
+        <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1d4ed8; font-family: monospace;">${otp}</span>
+      </div>
+      <p style="color: #64748b; font-size: 13px; margin-bottom: 0;">⏳ This verification code is valid for 10 minutes. If you did not attempt to log in, please secure your account immediately.</p>
     </div>
   `;
     return sendEmail(tenantId, toEmail, subject, html);

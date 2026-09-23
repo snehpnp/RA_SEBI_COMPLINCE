@@ -65,7 +65,7 @@ class ApiClient {
           (data.message && data.message.toLowerCase().includes('suspended'))
         ));
 
-      if (isAuthError && !endpoint.includes('/auth/login')) {
+      if (isAuthError && !endpoint.startsWith('/auth/')) {
         if (typeof window !== 'undefined') {
           if ((window as any).__isRedirecting) return new Promise(() => { });
           (window as any).__isRedirecting = true;
@@ -159,15 +159,73 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    if (res.success) {
+    if (res.success && res.data?.accessToken) {
       localStorage.setItem('accessToken', res.data.accessToken);
       localStorage.setItem('refreshToken', res.data.refreshToken);
       localStorage.setItem('user', JSON.stringify(res.data.user));
-      if (res.data.user.tenantId) {
+      if (res.data.user?.tenantId) {
         localStorage.setItem('tenantId', res.data.user.tenantId);
       }
     }
     return res;
+  }
+
+  async requestLoginOtp(identifier: string) {
+    return this.request('/auth/request-login-otp', {
+      method: 'POST',
+      body: JSON.stringify({ identifier })
+    });
+  }
+
+  async loginWithOtp(identifier: string, otp: string) {
+    const res = await this.request('/auth/login-with-otp', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, otp })
+    });
+    if (res.success && res.data?.accessToken) {
+      localStorage.setItem('accessToken', res.data.accessToken);
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      if (res.data.user?.tenantId) {
+        localStorage.setItem('tenantId', res.data.user.tenantId);
+      }
+    }
+    return res;
+  }
+
+  async verify2FA(payload: { tempToken: string; otp: string; type?: 'EMAIL' | 'SMS' }) {
+    const res = await this.request('/auth/verify-2fa', {
+      method: 'POST',
+      body: JSON.stringify({
+        twoFactorToken: payload.tempToken,
+        otp: payload.otp,
+        type: payload.type
+      })
+    });
+    if (res.success && res.data?.accessToken) {
+      localStorage.setItem('accessToken', res.data.accessToken);
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      if (res.data.user?.tenantId) {
+        localStorage.setItem('tenantId', res.data.user.tenantId);
+      }
+    }
+    return res;
+  }
+
+  async resend2FA(payload: { tempToken: string; type?: 'EMAIL' | 'SMS' }) {
+    return this.request('/auth/resend-2fa', {
+      method: 'POST',
+      body: JSON.stringify({
+        twoFactorToken: payload.tempToken,
+        type: payload.type
+      })
+    });
+  }
+
+  async getSecurityPolicy(tenantId?: string) {
+    const query = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
+    return this.request(`/auth/security-policy${query}`);
   }
 
   async logout(allDevices: boolean = false) {
@@ -824,6 +882,10 @@ class ApiClient {
     return this.request('/client/market-overview');
   }
 
+  async getNewsFeed() {
+    return this.request('/client/news-feed');
+  }
+
   async createTicket(data: any) {
     return this.request('/client/tickets', {
       method: 'POST',
@@ -1007,6 +1069,13 @@ class ApiClient {
     });
   }
 
+  async testDigioConfig(data: { digioClientId?: string, digioClientSecret?: string, digioEnvironment?: string }) {
+    return this.request('/admin/test-digio', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Coupon Methods
   async getCoupons() {
     return this.request('/admin/coupons');
@@ -1043,17 +1112,19 @@ class ApiClient {
     });
   }
 
-  async requestOtp(email: string, tenantId?: string) {
+  async requestOtp(param: string | { email?: string; mobile?: string; type?: 'EMAIL' | 'MOBILE'; tenantId?: string }, tenantId?: string) {
+    const payload = typeof param === 'string' ? { email: param, tenantId } : param;
     return this.request('/public/request-otp', {
       method: 'POST',
-      body: JSON.stringify({ email, tenantId })
+      body: JSON.stringify(payload)
     });
   }
 
-  async verifyOtp(email: string, otp: string) {
+  async verifyOtp(param: string | { email?: string; mobile?: string; otp: string; type?: 'EMAIL' | 'MOBILE' }, otp?: string) {
+    const payload = typeof param === 'string' ? { email: param, otp: otp! } : param;
     return this.request('/public/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ email, otp })
+      body: JSON.stringify(payload)
     });
   }
   async testSmtpConnection(data: any) {
@@ -1065,6 +1136,94 @@ class ApiClient {
 
   async verifyPaymentGateway(data: any) {
     return this.request('/admin/verify-payment-gateway', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  // Occupations
+  async getOccupations(tenantId?: string) {
+    const query = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
+    return this.request(`/occupations${query}`);
+  }
+
+  async getAdminOccupations() {
+    return this.request('/admin/occupations');
+  }
+
+  async createOccupation(data: { name: string }) {
+    return this.request('/admin/occupations', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateOccupation(id: string, data: { name: string }) {
+    return this.request(`/admin/occupations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async toggleOccupationStatus(id: string) {
+    return this.request(`/admin/occupations/${id}/status`, {
+      method: 'POST'
+    });
+  }
+
+  async deleteOccupation(id: string) {
+    return this.request(`/admin/occupations/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // SMS Gateway & Templates
+  async getSmsTemplates() {
+    return this.request('/admin/sms-templates');
+  }
+
+  async createSmsTemplate(data: {
+    name: string;
+    dltTemplateId: string;
+    category?: string;
+    content: string;
+    description?: string;
+    isActive?: boolean;
+  }) {
+    return this.request('/admin/sms-templates', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateSmsTemplate(id: string, data: {
+    name?: string;
+    dltTemplateId?: string;
+    category?: string;
+    content?: string;
+    description?: string;
+    isActive?: boolean;
+  }) {
+    return this.request(`/admin/sms-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async toggleSmsTemplateStatus(id: string) {
+    return this.request(`/admin/sms-templates/${id}/status`, {
+      method: 'POST'
+    });
+  }
+
+  async deleteSmsTemplate(id: string) {
+    return this.request(`/admin/sms-templates/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async testSmsGateway(data: { destMobile: string; message?: string; dltTemplateId?: string }) {
+    return this.request('/admin/sms/test', {
       method: 'POST',
       body: JSON.stringify(data)
     });

@@ -118,14 +118,20 @@ function ClientPortalContent() {
   const isFullyOnboarded = isKycDone && isAgreementDone;
 
   const handleTabChange = (newTab: string) => {
+    // Strict Compliance Guard: If plan is assigned but KYC / Agreement incomplete, block other tabs and redirect to KYC
+    if (hasAssignedPlan && !isFullyOnboarded) {
+      if (newTab !== 'kyc' && newTab !== 'support' && newTab !== 'legal') {
+        toast.error('SEBI Compliance Alert: Please complete DigiLocker KYC and Advisory Agreement first.');
+        setActiveTab('kyc');
+        setShowOnboarding(true);
+        return;
+      }
+    }
+
     setActiveTab(newTab);
     setMobileMenuOpen(false);
     if (typeof window !== 'undefined') {
       localStorage.setItem('clientActiveTab', newTab);
-    }
-    // Re-open onboarding modal on tab switch ONLY if plan is assigned and onboarding is incomplete
-    if (hasAssignedPlan && !isFullyOnboarded) {
-      setShowOnboarding(true);
     }
   };
 
@@ -158,7 +164,17 @@ function ClientPortalContent() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard profile={profile} setActiveTab={handleTabChange} onTriggerOnboarding={() => setShowOnboarding(true)} />;
-      case 'signals': return <MarketSignals />;
+      case 'signals': return (
+        <MarketSignals
+          onUnlockTrade={() => {
+            if (!isFullyOnboarded) {
+              handleTabChange('kyc');
+            } else {
+              handleTabChange('subscriptions');
+            }
+          }}
+        />
+      );
       case 'research': return <ResearchReports />;
       case 'subscriptions': return <SubscriptionCenter profile={profile} onNavigateToKyc={() => handleTabChange('kyc')} onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'payments': return <PaymentCenter profile={profile} />;

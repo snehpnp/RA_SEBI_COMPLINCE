@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck, User, FileText, CheckCircle2, AlertTriangle,
-  ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag, Sparkles, X, Lock
+  ChevronRight, ChevronLeft, CreditCard, PenTool, Check, Loader2, Tag, Sparkles, X, Lock,
+  QrCode, Copy, Upload, ArrowLeft
 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
@@ -34,6 +35,31 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   // Coupons
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
+
+  // Gateway & QR/UPI configuration from Admin
+  const [gatewayConfig, setGatewayConfig] = useState<{
+    gateway?: { enabled: boolean; activeGateway?: string; isConfigured?: boolean };
+    paymentGatewayEnabled?: boolean;
+    upiQr?: { enabled: boolean; upiId?: string; payeeName?: string; qrImageUrl?: string; instructions?: string };
+    adminContact?: any;
+    message?: string;
+  } | null>(null);
+
+  // Wizard Subscription & Payment States
+  const [wizardSelectedPlan, setWizardSelectedPlan] = useState<any>(null);
+  const [wizardPaymentMode, setWizardPaymentMode] = useState<'CHOICE' | 'UPI_QR' | null>(null);
+  const [upiUtr, setUpiUtr] = useState('');
+  const [upiProofFile, setUpiProofFile] = useState<File | null>(null);
+  const [upiProofPreview, setUpiProofPreview] = useState('');
+  const [submittingProof, setSubmittingProof] = useState(false);
+  const [proofSuccess, setProofSuccess] = useState(false);
+  const [copiedUpi, setCopiedUpi] = useState(false);
+
+  const getFullUrl = (url?: string | null) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
+  };
 
   // Step Profile State
   const [formData, setFormData] = useState({
@@ -84,12 +110,11 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
 
   const kycFirst = clientProfile?.user?.tenant?.kycFirst !== false;
 
-  // Standard ordered steps list (Strict linear sequence)
+  // Standard ordered steps list (Strict linear sequence - Zero Manual Profile Paperwork)
   const baseStepList = useMemo(() => {
     if (hasActiveSubscription) {
       return [
         { id: 'welcome', label: 'Welcome' },
-        { id: 'profile', label: 'Complete Profile' },
         { id: 'kyc', label: 'Identity KYC' },
         { id: 'agreement', label: 'Legal Agreement' }
       ];
@@ -97,7 +122,6 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
     if (kycFirst) {
       return [
         { id: 'welcome', label: 'Welcome' },
-        { id: 'profile', label: 'Complete Profile' },
         { id: 'kyc', label: 'Identity KYC' },
         { id: 'agreement', label: 'Legal Agreement' },
         { id: 'subscription', label: 'Subscription' }
@@ -105,7 +129,6 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
     }
     return [
       { id: 'welcome', label: 'Welcome' },
-      { id: 'profile', label: 'Complete Profile' },
       { id: 'subscription', label: 'Subscription' },
       { id: 'kyc', label: 'Identity KYC' },
       { id: 'agreement', label: 'Legal Agreement' }
@@ -124,12 +147,10 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
     switch (stepId) {
       case 'welcome':
         return welcomeVisited || currentIdx > stepIdx;
-      case 'profile':
-        return isProfileDone && (currentIdx > stepIdx || isKycDone || isAgreementDone);
       case 'subscription':
         return hasActiveSubscription;
       case 'kyc':
-        return isKycDone || (kraStatus === 'success' && currentIdx > stepIdx);
+        return isKycDone;
       case 'agreement':
         return agreementSigned || isAgreementDone;
       default:
@@ -191,6 +212,10 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
     api.getPlans().then(res => {
       if (res.success) setAvailablePlans(res.data || []);
     }).catch(console.error);
+
+    api.getPaymentGatewayStatus().then((res: any) => {
+      if (res) setGatewayConfig(res);
+    }).catch(console.warn);
   }, []);
 
   const handleNextStep = () => {
@@ -266,11 +291,10 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         const res = await api.initiateDigioKyc();
         if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
           digioInitiated = true;
+          const env = (res as any).environment || ((clientProfile?.user?.tenant?.digioEnvironment || '').toLowerCase() === 'sandbox' || (clientProfile?.user?.tenant?.digioClientId || '').startsWith('ACK') ? 'sandbox' : 'production');
           const options = {
-            environment: 'production',
+            environment: env,
             callback: async function (response: any) {
-
-              
               if (response.hasOwnProperty('error_code')) {
                 toast.error("Digio KYC Failed or Cancelled");
                 setKraStatus('failed');
@@ -311,8 +335,13 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
           digio.submit(res.data.id, formData.email || pan);
           return;
         }
-      } catch (digioErr) {
-        console.warn('Digio KYC initiation skipped, proceeding with direct KRA verification:', digioErr);
+      } catch (digioErr: any) {
+        console.warn('Digio KYC initiation error:', digioErr);
+        if (clientProfile?.user?.tenant?.hasDigioConfigured) {
+          toast.error(digioErr.message || 'Digio KYC initiation failed. Please check Digio credentials.');
+          setKraStatus('failed');
+          return;
+        }
       }
 
       const verifyRes = await api.verifyKRA({ pan, aadhaar });
@@ -346,15 +375,13 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   const handleSignAgreement = async () => {
     setLoading(true);
     try {
-      let digioInitiated = false;
+      const hasDigio = clientProfile?.user?.tenant?.hasDigioConfigured || clientProfile?.user?.tenant?.digioClientId;
       try {
         const res = await api.initiateDigioAgreement();
-       
-
         if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
-          digioInitiated = true;
+          const env = (res as any).environment || ((clientProfile?.user?.tenant?.digioEnvironment || '').toLowerCase() === 'sandbox' || (clientProfile?.user?.tenant?.digioClientId || '').startsWith('ACK') ? 'sandbox' : 'production');
           const options = {
-            environment: 'production',
+            environment: env,
             callback: async function (response: any) {
               if (response.hasOwnProperty('error_code')) {
                 toast.error("Digio eSign Failed or Cancelled");
@@ -380,12 +407,19 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
           digio.init();
           digio.submit(res.data.id, formData.email);
           return;
+        } else if (hasDigio) {
+          toast.error(res?.message || 'Could not initiate Digio eSign. Please verify Digio credentials in Admin Settings.');
+          setLoading(false);
+          return;
         }
-      } catch (digioErr) {
-        console.warn('Digio agreement initiation skipped, falling back to direct eSign:', digioErr);
+      } catch (digioErr: any) {
+        console.warn('Digio agreement initiation error:', digioErr);
+        if (hasDigio) {
+          toast.error(digioErr.message || 'Failed to initiate Digio agreement. Please check Digio account credentials.');
+          setLoading(false);
+          return;
+        }
       }
-
-    
 
       const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
       if (signRes.success) {
@@ -396,19 +430,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       }
       setLoading(false);
     } catch (err: any) {
-      try {
-      
-
-        const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
-        if (signRes.success) {
-          setAgreementSigned(true);
-          toast.success('Advisory Agreement signed successfully!');
-        } else {
-          toast.error(signRes.message || 'Failed to sign agreement');
-        }
-      } catch (innerErr: any) {
-        toast.error(innerErr.message || 'Failed to sign agreement');
-      }
+      toast.error(err.message || 'Failed to sign agreement');
       setLoading(false);
     }
   };
@@ -440,19 +462,23 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
     });
   };
 
-  const handleSelectPlan = async (planId: string) => {
+  const executeOnlinePayment = async (planInput: any) => {
     setLoading(true);
-    try {
-      const selectedPlan = availablePlans.find(p => (p.id || p._id) === planId);
+    const planId = typeof planInput === 'string' ? planInput : (planInput?.id || planInput?._id);
+    const selectedPlan = (typeof planInput === 'object' && planInput?.name) ? planInput : availablePlans.find(p => (p.id || p._id) === planId);
 
-      let gatewayStatusRes: any = null;
-      try {
-        gatewayStatusRes = await api.getPaymentGatewayStatus();
-      } catch (err) {
-        console.warn('Payment gateway status check encountered an error:', err);
+    try {
+      let gatewayStatusRes: any = gatewayConfig;
+      if (!gatewayStatusRes) {
+        try {
+          gatewayStatusRes = await api.getPaymentGatewayStatus();
+          if (gatewayStatusRes) setGatewayConfig(gatewayStatusRes);
+        } catch (err) {
+          console.warn('Payment gateway status check encountered an error:', err);
+        }
       }
 
-      if (gatewayStatusRes && gatewayStatusRes.isConfigured === false) {
+      if (gatewayStatusRes && (gatewayStatusRes.isConfigured === false || gatewayStatusRes.paymentGatewayEnabled === false)) {
         setContactAdminData({
           adminContact: gatewayStatusRes.adminContact || clientProfile?.user?.tenant,
           plan: selectedPlan || { id: planId, name: 'Selected Plan' },
@@ -465,7 +491,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         return;
       }
 
-      const activeGateway = (gatewayStatusRes?.activeGateway || clientProfile?.user?.tenant?.activePaymentGateway || 'RAZORPAY').toUpperCase();
+      const activeGateway = (gatewayStatusRes?.activeGateway || gatewayStatusRes?.gateway?.activeGateway || clientProfile?.user?.tenant?.activePaymentGateway || 'RAZORPAY').toUpperCase();
 
       if (activeGateway === 'RAZORPAY') {
         const res = await api.initiateRazorpayPayment({
@@ -516,7 +542,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
 
           const rzp = new (window as any).Razorpay(options);
           rzp.on('payment.failed', function (response: any) {
-            toast.error(response.error.description || 'Payment failed');
+            toast.error(response.error?.description || 'Payment failed');
           });
           rzp.open();
           setLoading(false);
@@ -579,7 +605,6 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       }
     } catch (err: any) {
       if (err.message && (err.message.toLowerCase().includes('contact the administrator') || err.message.toLowerCase().includes('not configured'))) {
-        const selectedPlan = availablePlans.find(p => (p.id || p._id) === planId);
         setContactAdminData({
           adminContact: clientProfile?.user?.tenant,
           plan: selectedPlan || { id: planId, name: 'Selected Plan' },
@@ -592,6 +617,89 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         toast.error(err.message || 'Failed to select plan');
       }
       setLoading(false);
+    }
+  };
+
+  const handleSubmitUpiProof = async () => {
+    if (!upiUtr.trim()) {
+      toast.error('Please enter the 12-digit UPI / UTR Transaction Reference number');
+      return;
+    }
+    if (!upiProofFile) {
+      toast.error('Payment hone ke baad payment ka screenshot upload karein');
+      return;
+    }
+
+    setSubmittingProof(true);
+    try {
+      let price = wizardSelectedPlan.amount || wizardSelectedPlan.price;
+      if (appliedCoupon) {
+        if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
+        else price = Math.max(0, price - appliedCoupon.discountValue);
+      }
+      const formattedPrice = price.toFixed(2);
+
+      const formData = new FormData();
+      formData.append('planId', wizardSelectedPlan.id || wizardSelectedPlan._id);
+      formData.append('amount', formattedPrice);
+      formData.append('paymentMode', 'UPI_QR');
+      formData.append('transactionRef', upiUtr.trim());
+      formData.append('screenshot', upiProofFile);
+      if (appliedCoupon?.code) {
+        formData.append('couponCode', appliedCoupon.code);
+      }
+
+      const res: any = await api.submitManualPayment(formData);
+      if (res.success) {
+        setProofSuccess(true);
+        toast.success('Payment screenshot & UTR submitted successfully! Pending admin verification.');
+      } else {
+        toast.error(res.message || 'Failed to submit payment proof');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to submit payment proof');
+    } finally {
+      setSubmittingProof(false);
+    }
+  };
+
+  const handleChoosePlan = (plan: any) => {
+    const isSigned = agreementSigned || isAgreementDone;
+    if (kycFirst && !isKycDone) {
+      toast.error('KYC Verification is required before purchasing a plan.');
+      setCurrentStepId('kyc');
+      return;
+    }
+    if (!isSigned) {
+      toast.error('Legal Agreement must be signed before proceeding to payment.');
+      setCurrentStepId('agreement');
+      return;
+    }
+
+    setWizardSelectedPlan(plan);
+    setProofSuccess(false);
+    setUpiUtr('');
+    setUpiProofFile(null);
+    setUpiProofPreview('');
+
+    const isGwEnabled = gatewayConfig?.paymentGatewayEnabled !== false && gatewayConfig?.gateway?.isConfigured !== false && gatewayConfig?.isConfigured !== false;
+    const isUpiEnabled = Boolean(gatewayConfig?.upiQr?.enabled);
+
+    if (isGwEnabled && isUpiEnabled) {
+      setWizardPaymentMode('CHOICE');
+    } else if (isUpiEnabled) {
+      setWizardPaymentMode('UPI_QR');
+    } else if (isGwEnabled) {
+      executeOnlinePayment(plan);
+    } else {
+      setContactAdminData({
+        adminContact: gatewayConfig?.adminContact || clientProfile?.user?.tenant,
+        plan,
+        finalPrice: plan.amount || plan.price,
+        appliedCoupon: appliedCoupon,
+        customMessage: gatewayConfig?.message || 'Payment gateway and QR/UPI payments are currently not enabled. Please contact administrator.'
+      });
+      setShowContactAdminModal(true);
     }
   };
 
@@ -694,30 +802,70 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               </div>
               <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">
-                Identity Verification (KYC)
+                Step 1: Fetch KYC (DigiLocker)
               </h2>
             </div>
-            <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
-              As per SEBI guidelines, KYC identity verification is mandatory before signing the Advisory Agreement.
+            <p className="text-slate-500 dark:text-slate-400 text-xs mb-4">
+              SEBI requires automated DigiLocker identity verification. Zero manual paperwork or uploading required.
             </p>
 
             <div className="space-y-4 flex-1">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">PAN Number</label>
-                <div className="flex gap-2.5">
-                  <input type="text" value={pan} onChange={handlePanChange} autoComplete="off" className="flex-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none uppercase font-mono tracking-wider" maxLength={10} placeholder="ABCDE1234F" />
-                  <button onClick={handleVerifyKRA} disabled={kraStatus === 'loading' || pan.length !== 10} className="px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 rounded-xl transition-colors flex items-center justify-center min-w-[100px] disabled:opacity-50">
-                    {kraStatus === 'loading' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Check KRA'}
+              {!isKycDone ? (
+                <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 flex items-center justify-center mx-auto text-blue-600 dark:text-blue-400">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Automated DigiLocker Verification</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+                      Click below to authenticate with DigiLocker. Your official Name, DOB, PAN, Aadhaar, and Address will be fetched securely.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleVerifyKRA}
+                    disabled={kraStatus === 'loading'}
+                    className="w-full max-w-xs mx-auto py-3 px-6 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 transition-all"
+                  >
+                    {kraStatus === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                    <span>{kraStatus === 'loading' ? 'Connecting to DigiLocker...' : 'Fetch KYC via DigiLocker'}</span>
                   </button>
                 </div>
-                {kraStatus === 'success' && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1.5 flex items-center gap-1 font-semibold"><CheckCircle2 className="w-3.5 h-3.5" /> Demat account &amp; KRA verified</p>}
-                {kraStatus === 'failed' && <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> KRA check failed (You can still proceed)</p>}
-              </div>
-
-              <div className="pt-1">
-                <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Aadhaar Number (For eSign)</label>
-                <input type="text" value={aadhaar} onChange={handleAadhaarChange} autoComplete="off" className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono tracking-widest" maxLength={14} placeholder="1111 1111 1111" />
-              </div>
+              ) : (
+                <div className="bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-300 dark:border-emerald-800/50 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-emerald-200 dark:border-emerald-800/40">
+                    <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" /> KYC Verified via DigiLocker
+                    </span>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded-full font-bold">
+                      Locked &amp; Immutable
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">Legal Name:</span>
+                      <p className="font-semibold text-slate-800 dark:text-white">{clientProfile?.name || formData.name || 'Verified Investor'}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">PAN Number:</span>
+                      <p className="font-mono font-bold text-slate-800 dark:text-white">{clientProfile?.pan || pan || '••••••••••'}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">Aadhaar (Masked):</span>
+                      <p className="font-mono font-bold text-slate-800 dark:text-white">{clientProfile?.aadhaar || aadhaar || '•••• •••• ••••'}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">DOB:</span>
+                      <p className="font-semibold text-slate-800 dark:text-white">{clientProfile?.dob || clientProfile?.profile?.dob || 'Verified'}</p>
+                    </div>
+                    <div className="col-span-2 pt-1">
+                      <span className="text-slate-400 text-[10px] uppercase font-bold">Government Verified Address:</span>
+                      <p className="text-[11px] text-slate-700 dark:text-slate-300">
+                        {clientProfile?.profile?.addressLine1 || clientProfile?.addressLine1 || formData.address || 'Verified Address on Record'}, {clientProfile?.profile?.city || clientProfile?.city || ''} {clientProfile?.profile?.state || clientProfile?.state || ''}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 mt-6 pt-4 border-t border-slate-200 dark:border-slate-800">
@@ -726,15 +874,13 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                   Back
                 </button>
               )}
-              {(kraStatus === 'success' || kraStatus === 'failed') ? (
-                <button onClick={handleKycNext} disabled={loading || !pan || !aadhaar || aadhaar.replace(/\s/g, '').length < 12} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Continue to Legal Agreement <ChevronRight className="w-4 h-4" /></>}
-                </button>
-              ) : (
-                <button onClick={handleVerifyKRA} disabled={loading || pan.length !== 10} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all py-2.5">
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify PAN & Continue'}
-                </button>
-              )}
+              <button
+                onClick={handleNextStep}
+                disabled={!isKycDone}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 transition-all py-2.5"
+              >
+                Continue to Legal Agreement <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
         );
@@ -841,6 +987,302 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
           );
         }
 
+        if (proofSuccess) {
+          return (
+            <div className="flex-1 flex flex-col items-center justify-center text-center animate-in fade-in slide-in-from-bottom-4 duration-500 p-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center mb-4 border border-emerald-500/20">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                Payment Proof Submitted!
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mb-4 leading-relaxed">
+                Your payment screenshot and transaction reference (UTR: <strong className="text-slate-700 dark:text-slate-200">{upiUtr}</strong>) for <strong>{wizardSelectedPlan?.name}</strong> have been submitted. Our compliance team will verify and activate your subscription shortly.
+              </p>
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 rounded-xl p-3 mb-6 max-w-md text-left">
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+                  Verification usually completes within 15-30 minutes during market hours. You can continue exploring your dashboard.
+                </p>
+              </div>
+              <button
+                onClick={onClose || onComplete}
+                className="w-full max-w-sm bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm py-2.5 shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+              >
+                Complete Onboarding &amp; Access Dashboard <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          );
+        }
+
+        const isGwEnabled = gatewayConfig?.paymentGatewayEnabled !== false && gatewayConfig?.gateway?.isConfigured !== false && gatewayConfig?.isConfigured !== false;
+        const isUpiEnabled = Boolean(gatewayConfig?.upiQr?.enabled);
+
+        if (wizardPaymentMode === 'UPI_QR' && wizardSelectedPlan) {
+          let price = wizardSelectedPlan.amount || wizardSelectedPlan.price;
+          if (appliedCoupon) {
+            if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
+            else price = Math.max(0, price - appliedCoupon.discountValue);
+          }
+          const formattedPrice = price.toFixed(2);
+
+          return (
+            <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300 overflow-y-auto custom-scrollbar pr-1 max-h-[440px]">
+              <div className="flex items-center justify-between mb-2">
+                <button
+                  type="button"
+                  onClick={() => setWizardPaymentMode(isGwEnabled ? 'CHOICE' : null)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" /> Back
+                </button>
+                <span className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
+                  ₹{formattedPrice}
+                </span>
+              </div>
+
+              <h2 className="text-base md:text-lg font-bold text-slate-900 dark:text-white mb-0.5">Pay with QR / UPI</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-xs mb-3">
+                Scan QR or pay to the UPI ID. Upload payment screenshot to activate {wizardSelectedPlan.name}.
+              </p>
+
+              {/* QR Code and UPI ID */}
+              <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 mb-3 flex flex-col items-center text-center">
+                {gatewayConfig?.upiQr?.qrImageUrl ? (
+                  <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-200 mb-2">
+                    <img
+                      src={getFullUrl(gatewayConfig.upiQr.qrImageUrl)}
+                      alt="Payment QR Code"
+                      className="w-32 h-32 object-contain rounded-lg"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-24 h-24 rounded-xl bg-slate-200 dark:bg-slate-700 flex items-center justify-center mb-2">
+                    <QrCode className="w-8 h-8 text-slate-400" />
+                  </div>
+                )}
+
+                {gatewayConfig?.upiQr?.payeeName && (
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-0.5">
+                    Payee: {gatewayConfig.upiQr.payeeName}
+                  </p>
+                )}
+
+                {gatewayConfig?.upiQr?.upiId && (
+                  <div className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 mt-1">
+                    <span className="font-mono font-bold text-xs text-blue-600 dark:text-blue-400 select-all">
+                      {gatewayConfig.upiQr.upiId}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (gatewayConfig?.upiQr?.upiId) {
+                          navigator.clipboard.writeText(gatewayConfig.upiQr.upiId);
+                          setCopiedUpi(true);
+                          toast.success('UPI ID copied to clipboard!');
+                          setTimeout(() => setCopiedUpi(false), 2000);
+                        }
+                      }}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                      title="Copy UPI ID"
+                    >
+                      {copiedUpi ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Hindi Notice Prompt */}
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 rounded-xl p-2.5 mb-3 flex items-start gap-2 text-left">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-800 dark:text-amber-200 font-medium">
+                  <strong>Notice:</strong> Payment hone ke baad payment ka screenshot upload karein aur 12-digit UTR number enter karein.
+                </p>
+              </div>
+
+              {gatewayConfig?.upiQr?.instructions && (
+                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-500/30 rounded-xl p-2.5 mb-3">
+                  <p className="text-[11px] text-blue-800 dark:text-blue-200 leading-relaxed">
+                    {gatewayConfig.upiQr.instructions}
+                  </p>
+                </div>
+              )}
+
+              {/* UTR and File Upload */}
+              <div className="space-y-2.5 mb-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                    12-Digit UTR / Transaction Reference Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 408219283746"
+                    value={upiUtr}
+                    onChange={(e) => setUpiUtr(e.target.value.trim())}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                    Payment Screenshot / Receipt <span className="text-red-500">*</span>
+                  </label>
+                  {upiProofPreview ? (
+                    <div className="relative rounded-xl border border-slate-200 dark:border-slate-700 p-2 bg-slate-50 dark:bg-slate-800 flex items-center gap-3">
+                      <img src={upiProofPreview} alt="Screenshot Preview" className="w-12 h-12 object-cover rounded-lg border" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                          {upiProofFile?.name}
+                        </p>
+                        <p className="text-[10px] text-slate-400">
+                          {upiProofFile ? `${(upiProofFile.size / 1024).toFixed(1)} KB` : ''}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUpiProofFile(null);
+                          setUpiProofPreview('');
+                        }}
+                        className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-500"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-500 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition-colors bg-slate-50/50 dark:bg-slate-800/40">
+                      <Upload className="w-4 h-4 text-slate-400 mb-0.5" />
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Click to upload screenshot</span>
+                      <span className="text-[10px] text-slate-400">PNG, JPG, JPEG up to 10MB</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setUpiProofFile(file);
+                            setUpiProofPreview(URL.createObjectURL(file));
+                          }
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 mt-auto pt-3 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setWizardPaymentMode(isGwEnabled ? 'CHOICE' : null)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs transition-colors"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitUpiProof}
+                  disabled={submittingProof || !upiUtr || !upiProofFile}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all py-2"
+                >
+                  {submittingProof ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  Submit Payment Proof
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        if (wizardPaymentMode === 'CHOICE' && wizardSelectedPlan) {
+          let price = wizardSelectedPlan.amount || wizardSelectedPlan.price;
+          if (appliedCoupon) {
+            if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
+            else price = Math.max(0, price - appliedCoupon.discountValue);
+          }
+          const formattedPrice = price.toFixed(2);
+
+          return (
+            <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  type="button"
+                  onClick={() => setWizardPaymentMode(null)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" /> Back to Plans
+                </button>
+                <span className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-full">
+                  ₹{formattedPrice}
+                </span>
+              </div>
+
+              <h2 className="text-base md:text-lg font-bold text-slate-900 dark:text-white mb-1">Select Payment Method</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-xs mb-4">
+                Choose how you would like to complete payment for <strong>{wizardSelectedPlan.name}</strong>.
+              </p>
+
+              <div className="space-y-3 mb-6">
+                {/* Option 1: Online Gateway */}
+                <div
+                  onClick={() => executeOnlinePayment(wizardSelectedPlan)}
+                  className="group relative flex items-center justify-between p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-700/80 hover:border-blue-500 dark:hover:border-blue-500 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-blue-50/30 dark:hover:bg-blue-950/20 cursor-pointer transition-all shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400 border border-blue-500/20 group-hover:scale-105 transition-transform">
+                      <CreditCard className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-slate-900 dark:text-white">Pay Online</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300">
+                          Instant Activation
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Credit/Debit Card, Netbanking, UPI Gateway
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all" />
+                </div>
+
+                {/* Option 2: Pay with QR / UPI */}
+                <div
+                  onClick={() => setWizardPaymentMode('UPI_QR')}
+                  className="group relative flex items-center justify-between p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-700/80 hover:border-emerald-500 dark:hover:border-emerald-500 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 cursor-pointer transition-all shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+                      <QrCode className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-slate-900 dark:text-white">Pay with QR / UPI</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+                          Direct Transfer
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Scan QR code or send to UPI ID &amp; upload screenshot
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-500 group-hover:translate-x-0.5 transition-all" />
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-auto pt-4 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setWizardPaymentMode(null)}
+                  className="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs transition-colors"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-right-4 duration-500">
             <h2 className="text-xl md:text-2xl font-bold mb-1 text-slate-900 dark:text-white">Choose Your Plan</h2>
@@ -879,8 +1321,16 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                         {appliedCoupon && <span className="line-through text-xs text-slate-400 ml-2">₹{plan.amount || plan.price}</span>}
                       </div>
                     </div>
-                    <button onClick={() => handleSelectPlan(plan.id || plan._id)} disabled={loading} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center shadow-md">
-                      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Pay Now'}
+                    <button
+                      onClick={() => handleChoosePlan(plan)}
+                      disabled={loading}
+                      className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center shadow-md transition-all"
+                    >
+                      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (
+                        isGwEnabled && isUpiEnabled ? 'Select & Pay' :
+                        isUpiEnabled ? 'Pay with QR / UPI' :
+                        isGwEnabled ? 'Pay Online' : 'Contact Admin'
+                      )}
                     </button>
                   </div>
                 );

@@ -42,6 +42,7 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
+const jwt = __importStar(require("jsonwebtoken"));
 const auditService_1 = require("../services/auditService");
 const emailService_1 = require("../services/emailService");
 const pdfService_1 = require("../services/pdfService");
@@ -52,13 +53,25 @@ const querystring_1 = __importDefault(require("querystring"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
 const registerClient = async (req, res) => {
-    const { tenantId: passedTenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode } = req.body;
-    if (!name || !email || !mobile || !password || !pan || !aadhaar || !addressLine1 || !state) {
+    const { tenantId: passedTenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode, createdById } = req.body;
+    const authHeader = req.headers.authorization;
+    let decodedUser = req.user;
+    if (!decodedUser && authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+            const token = authHeader.split(' ')[1];
+            decodedUser = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+        }
+        catch { }
+    }
+    const isAdminAdd = Boolean(createdById ||
+        (decodedUser && ['ADMIN', 'SUPER_ADMIN', 'STAFF', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCH_ANALYST', 'RESEARCHER'].includes(decodedUser.role)));
+    if (!email || !mobile || !password) {
         return res.status(400).json({
             success: false,
-            message: 'All fields (name, email, mobile, password, PAN, Aadhaar, address, state) are required.'
+            message: 'Email, mobile number, and password are required.'
         });
     }
+    let createdUser = null;
     try {
         let tenantId = passedTenantId;
         let tenant = null;
@@ -73,6 +86,58 @@ const registerClient = async (req, res) => {
         }
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
+        }
+        // Dynamic Password Policy Enforcement
+        if (!password || password.length < 8 || password.length > 15) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be between 8 and 15 characters long.',
+                errors: ['Password length must be between 8 and 15 characters']
+            });
+        }
+        const policy = tenant?.passwordPolicy || 'NORMAL';
+        if (policy === 'STRONG') {
+            const strongRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^~_\-\(\).,?:{}|<>])[A-Za-z\d@$!%*?&#^~_\-\(\).,?:{}|<>]{8,15}$/;
+            if (!strongRegex.test(password)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Password must be between 8 and 15 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.',
+                    errors: ['Password does not meet strong policy requirements']
+                });
+            }
+        }
+        // Check OTP verification for self-signup based on tenant.signupVerificationMode (Bypassed for Admin manual add)
+        if (!isAdminAdd) {
+            const mode = tenant?.signupVerificationMode || 'EMAIL_ONLY';
+            const cleanEmail = email.toLowerCase().trim();
+            const cleanMobile = mobile.trim();
+            const verRecord = await db_1.EmailVerification.findOne({
+                $or: [{ email: cleanEmail }, ...(cleanMobile ? [{ mobile: cleanMobile }] : [])]
+            }).lean();
+            if (mode === 'EMAIL_ONLY') {
+                if (!verRecord?.emailVerified) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Please verify your Email OTP before completing registration.'
+                    });
+                }
+            }
+            else if (mode === 'MOBILE_ONLY') {
+                if (!verRecord?.smsVerified) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Please verify your Mobile OTP before completing registration.'
+                    });
+                }
+            }
+            else if (mode === 'BOTH') {
+                if (!verRecord?.emailVerified || !verRecord?.smsVerified) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Both Email and Mobile OTPs must be verified before completing registration.'
+                    });
+                }
+            }
         }
         const duplicateEmail = await db_1.default.User.findOne({ email }).lean();
         if (duplicateEmail) {
@@ -92,23 +157,27 @@ const registerClient = async (req, res) => {
                 errors: ['An account with this Mobile number already exists.']
             });
         }
-        const duplicatePan = await db_1.default.Client.findOne({ pan }).lean();
-        if (duplicatePan) {
-            return res.status(400).json({
-                success: false,
-                message: 'Duplicate Account Detected',
-                duplicateField: 'pan',
-                errors: ['An account with this PAN already exists.']
-            });
+        if (pan && pan.trim()) {
+            const duplicatePan = await db_1.default.Client.findOne({ pan: pan.trim() }).lean();
+            if (duplicatePan) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Duplicate Account Detected',
+                    duplicateField: 'pan',
+                    errors: ['An account with this PAN already exists.']
+                });
+            }
         }
-        const duplicateAadhaar = await db_1.default.Client.findOne({ aadhaar }).lean();
-        if (duplicateAadhaar) {
-            return res.status(400).json({
-                success: false,
-                message: 'Duplicate Account Detected',
-                duplicateField: 'aadhaar',
-                errors: ['An account with this Aadhaar already exists.']
-            });
+        if (aadhaar && aadhaar.trim()) {
+            const duplicateAadhaar = await db_1.default.Client.findOne({ aadhaar: aadhaar.trim() }).lean();
+            if (duplicateAadhaar) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Duplicate Account Detected',
+                    duplicateField: 'aadhaar',
+                    errors: ['An account with this Aadhaar already exists.']
+                });
+            }
         }
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(password, salt);
@@ -117,38 +186,54 @@ const registerClient = async (req, res) => {
             return res.status(500).json({ success: false, message: 'Client role not seeded.' });
         }
         const creatorId = req.body.createdById || (req.user ? req.user.id : null);
+        const effectiveName = (name && name.trim()) || email.split('@')[0] || 'Client';
+        const nameParts = effectiveName.split(' ');
+        const firstName = nameParts[0] || 'Client';
+        const lastName = nameParts.slice(1).join(' ') || 'User';
         const user = await db_1.default.User.create({
             tenantId,
             roleId: clientRole._id || clientRole.id,
-            firstName: name.split(' ')[0],
-            lastName: name.split(' ').slice(1).join(' ') || 'Client',
-            email,
-            mobile,
+            firstName,
+            lastName,
+            email: email.toLowerCase().trim(),
+            mobile: mobile.trim(),
             passwordHash,
             status: 'ACTIVE',
             tempPassword: null
         });
-        const client = await db_1.default.Client.create({
+        createdUser = user;
+        const clientPayload = {
             tenantId,
             userId: user._id || user.id,
-            name,
-            email,
-            mobile,
-            pan,
-            aadhaar,
+            name: effectiveName,
+            email: email.toLowerCase().trim(),
+            mobile: mobile.trim(),
             category: category || 'INDIVIDUAL',
-            occupation,
+            occupation: occupation || null,
             status: 'ACTIVE',
             createdById: creatorId
-        });
+        };
+        if (pan && String(pan).trim())
+            clientPayload.pan = String(pan).trim().toUpperCase();
+        if (aadhaar && String(aadhaar).trim())
+            clientPayload.aadhaar = String(aadhaar).trim();
+        const client = await db_1.default.Client.create(clientPayload);
         await db_1.default.ClientProfile.create({
             clientId: client._id || client.id,
-            addressLine1,
-            city,
-            state,
+            addressLine1: addressLine1 || null,
+            city: city || null,
+            state: state || null,
             country: 'India',
-            zipCode
+            zipCode: zipCode || null
         });
+        // Cleanup used verification records on self-registration
+        if (!isAdminAdd) {
+            const cleanEmail = email.toLowerCase().trim();
+            const cleanMobile = mobile.trim();
+            await db_1.EmailVerification.deleteMany({
+                $or: [{ email: cleanEmail }, ...(cleanMobile ? [{ mobile: cleanMobile }] : [])]
+            }).catch(() => { });
+        }
         await (0, auditService_1.logAudit)({
             tenantId,
             userId: user._id || user.id,
@@ -182,7 +267,52 @@ const registerClient = async (req, res) => {
         });
     }
     catch (error) {
-        return res.status(500).json({ success: false, errors: [error.message] });
+        if (createdUser && createdUser._id) {
+            await db_1.default.User.findByIdAndDelete(createdUser._id).catch(() => { });
+        }
+        let friendlyMessage = 'Registration failed. Please check your information and try again.';
+        let duplicateField = null;
+        if (error.code === 11000 || error.name === 'MongoServerError' || String(error.message).includes('E11000')) {
+            const rawMsg = String(error.message || '');
+            if (error.keyPattern?.email || rawMsg.includes('email')) {
+                duplicateField = 'email';
+                friendlyMessage = 'This email address is already registered. Please login or use a different email.';
+            }
+            else if (error.keyPattern?.mobile || rawMsg.includes('mobile')) {
+                duplicateField = 'mobile';
+                friendlyMessage = 'This mobile number is already registered. Please login or use a different number.';
+            }
+            else if (error.keyPattern?.pan || rawMsg.includes('pan')) {
+                duplicateField = 'pan';
+                friendlyMessage = 'This PAN card number is already registered with another account.';
+            }
+            else if (error.keyPattern?.aadhaar || rawMsg.includes('aadhaar')) {
+                duplicateField = 'aadhaar';
+                friendlyMessage = 'This Aadhaar number is already registered with another account.';
+            }
+            else {
+                friendlyMessage = 'An account with these credentials already exists. Please verify your details or login.';
+            }
+            return res.status(400).json({
+                success: false,
+                message: friendlyMessage,
+                errors: [friendlyMessage],
+                duplicateField
+            });
+        }
+        if (error.name === 'ValidationError') {
+            friendlyMessage = Object.values(error.errors || {}).map((e) => e.message).join('. ') || 'Invalid details provided.';
+            return res.status(400).json({
+                success: false,
+                message: friendlyMessage,
+                errors: [friendlyMessage]
+            });
+        }
+        return res.status(500).json({
+            success: false,
+            message: friendlyMessage,
+            errors: [friendlyMessage]
+        });
     }
 };
 exports.registerClient = registerClient;
@@ -199,15 +329,17 @@ const initiateDigioKyc = async (req, res) => {
         }
         const customerIdentifier = client.email;
         const customerName = client.name || 'Client';
-        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName, customerIdentifier, customerName);
+        const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName, customerIdentifier, customerName, tenant.digioEnvironment);
         return res.status(200).json({
             success: true,
             message: 'Digio KYC request initiated',
-            data: digioResponse
+            data: digioResponse,
+            environment: isSandbox ? 'sandbox' : 'production'
         });
     }
     catch (error) {
-        return res.status(500).json({ success: false, errors: [error.message] });
+        return res.status(500).json({ success: false, message: error.message || 'Failed to initiate Digio KYC', errors: [error.message] });
     }
 };
 exports.initiateDigioKyc = initiateDigioKyc;
@@ -389,7 +521,7 @@ const signAgreement = async (req, res) => {
         // 2. If not found in response, query Digio Document Status API for PKI signature details
         if (!verifiedDigioName && req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
             try {
-                const docStatus = await (0, digioService_1.getDocumentStatus)(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+                const docStatus = await (0, digioService_1.getDocumentStatus)(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId, tenant.digioEnvironment);
                 console.log('[Digio eSign] Fetched docStatus:', JSON.stringify(docStatus || {}));
                 if (docStatus) {
                     const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(docStatus);
@@ -447,7 +579,7 @@ const signAgreement = async (req, res) => {
         // 1. Download signed PDF from Digio or fallback to generating it locally
         let pdfBuffer = null;
         if (req.body.documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
-            pdfBuffer = await (0, digioService_1.downloadDocument)(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId);
+            pdfBuffer = await (0, digioService_1.downloadDocument)(tenant.digioClientId, tenant.digioClientSecret, req.body.documentId, tenant.digioEnvironment);
         }
         if (!pdfBuffer) {
             try {
@@ -559,7 +691,7 @@ const handleRazorpayWebhook = async (req, res) => {
             const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
             const plan = await db_1.default.Plan.findById(planId).lean();
             if (coupon && plan && coupon.status === 'ACTIVE') {
-                if (coupon.discountType === 'FLAT') {
+                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     discountAmount = coupon.discountValue;
                 }
                 else if (coupon.discountType === 'PERCENTAGE') {
@@ -632,8 +764,18 @@ const handleRazorpayWebhook = async (req, res) => {
 };
 exports.handleRazorpayWebhook = handleRazorpayWebhook;
 const submitManualPayment = async (req, res) => {
-    const { planId, amount, paymentMode, transactionRef, remarks } = req.body;
-    const receiptUrl = req.file ? `/uploads/payments/${req.file.filename}` : '/uploads/payments/mock_receipt.png';
+    const { planId, amount, paymentMode, transactionRef, remarks, couponCode } = req.body;
+    const files = req.files;
+    let receiptUrl = req.body.receiptUrl || '/uploads/payments/mock_receipt.png';
+    if (req.file) {
+        receiptUrl = `/uploads/payments/${req.file.filename}`;
+    }
+    else if (files?.screenshot && files.screenshot.length > 0) {
+        receiptUrl = `/uploads/payments/${files.screenshot[0].filename}`;
+    }
+    else if (files?.receipt && files.receipt.length > 0) {
+        receiptUrl = `/uploads/payments/${files.receipt[0].filename}`;
+    }
     try {
         const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
         if (!client)
@@ -650,23 +792,79 @@ const submitManualPayment = async (req, res) => {
                 message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
             });
         }
+        const agreementDoc = await db_1.default.Agreement.findOne({
+            clientId: client._id || client.id,
+            status: { $in: ['SIGNED', 'ACTIVE'] }
+        }).lean();
+        const isClientAgreementDone = Boolean(client.agreementSigned || agreementDoc);
+        if (kycRequired && !isClientAgreementDone) {
+            return res.status(403).json({
+                success: false,
+                requiresAgreement: true,
+                message: 'Advisory Agreement must be signed before purchasing a plan. Please sign your agreement first.'
+            });
+        }
+        let planDoc = null;
+        if (planId && mongoose_1.default.Types.ObjectId.isValid(planId)) {
+            planDoc = await db_1.default.Plan.findById(planId).lean();
+        }
+        else if (planId) {
+            planDoc = await db_1.default.Plan.findOne({ id: planId }).lean();
+        }
+        const parsedAmount = parseFloat(amount) || (planDoc ? planDoc.price : 0);
+        let discountApplied = 0;
+        let appliedCouponId = null;
+        if (couponCode) {
+            const coupon = await db_1.default.Coupon.findOne({
+                code: String(couponCode).trim().toUpperCase(),
+                tenantId,
+                status: 'ACTIVE'
+            }).lean();
+            if (coupon) {
+                appliedCouponId = coupon._id || coupon.id;
+                const basePrice = planDoc ? planDoc.price : parsedAmount;
+                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+                    discountApplied = coupon.discountValue;
+                }
+                else if (coupon.discountType === 'PERCENTAGE') {
+                    discountApplied = (basePrice * coupon.discountValue) / 100;
+                    if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountApplied > coupon.maxDiscountValue) {
+                        discountApplied = coupon.maxDiscountValue;
+                    }
+                }
+                if (discountApplied > basePrice)
+                    discountApplied = basePrice;
+            }
+        }
+        // If amount is less than standard total, infer discount difference
+        if (planDoc && planDoc.price) {
+            const isExclusive = tenantObj?.gstCalculationType === 'EXCLUSIVE';
+            const expectedTotal = isExclusive ? (planDoc.price * 1.18) : planDoc.price;
+            const diff = expectedTotal - parsedAmount;
+            if (diff > 0 && discountApplied <= 0) {
+                discountApplied = diff;
+            }
+        }
         const payment = await db_1.default.Payment.create({
             tenantId,
             clientId: client._id || client.id,
-            planId,
-            amount: parseFloat(amount) || 0,
-            paymentMode: paymentMode || 'MANUAL_UPI',
-            transactionRef: transactionRef || 'MANUAL-' + Date.now(),
+            planId: planDoc ? (planDoc._id || planDoc.id) : (planId || null),
+            amount: parsedAmount,
+            paymentMode: paymentMode || 'UPI_QR',
+            transactionRef: transactionRef ? transactionRef.trim() : 'UPI-' + Date.now(),
             receiptUrl,
             status: 'PENDING',
-            remarks,
+            remarks: remarks || 'Client submitted QR / UPI payment screenshot for verification.',
             clientCity: profile?.city || null,
             clientState: profile?.state || null,
-            tenantState: tenantObj?.state || null
+            tenantState: tenantObj?.state || null,
+            planValidityDays: planDoc ? (planDoc.durationMonths * 30) : null,
+            couponId: appliedCouponId,
+            discountApplied: discountApplied > 0 ? parseFloat(discountApplied.toFixed(2)) : 0
         });
         return res.status(201).json({
             success: true,
-            message: 'Payment details uploaded successfully. Awaiting compliance team approval.',
+            message: 'Payment screenshot uploaded successfully. Awaiting compliance team approval.',
             data: payment
         });
     }
@@ -708,6 +906,7 @@ const verifyManualPayment = async (req, res) => {
                         });
                     }
                 }
+                // Check if there is an existing active subscription for this client and plan (sequential queueing)
                 const existingSub = await db_1.default.Subscription.findOne({
                     clientId: payment.clientId,
                     planId: plan._id || plan.id,
@@ -716,19 +915,37 @@ const verifyManualPayment = async (req, res) => {
                 }).sort({ endDate: -1 }).lean();
                 let startDate = new Date();
                 if (existingSub) {
+                    // Starts sequentially right after the existing active plan expires
                     startDate = new Date(existingSub.endDate);
                 }
-                const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+                else if (payment.paymentDate) {
+                    const parsed = new Date(payment.paymentDate);
+                    if (!isNaN(parsed.getTime()))
+                        startDate = parsed;
+                }
+                const validityDays = payment.planValidityDays || (plan.durationMonths * 30) || 30;
+                const endDate = new Date(startDate.getTime() + validityDays * 24 * 60 * 60 * 1000);
+                const amountTotal = Number(payment.amount || 0);
+                const amountBase = amountTotal / 1.18;
+                const amountGst = amountTotal - amountBase;
                 await db_1.default.Subscription.create({
                     clientId: payment.clientId,
                     planId: plan._id || plan.id,
                     startDate,
                     endDate,
-                    status: 'ACTIVE'
+                    status: 'ACTIVE',
+                    amountTotal: parseFloat(amountTotal.toFixed(2)),
+                    amountBase: parseFloat(amountBase.toFixed(2)),
+                    amountGst: parseFloat(amountGst.toFixed(2))
                 });
                 await db_1.default.Client.findByIdAndUpdate(payment.clientId, {
                     $set: { status: 'ACTIVE' }
                 });
+                if (payment.couponId) {
+                    await db_1.default.Coupon.findByIdAndUpdate(payment.couponId, {
+                        $inc: { usedCount: 1 }
+                    }).catch(() => { });
+                }
             }
         }
         await (0, auditService_1.logAudit)({
@@ -947,7 +1164,10 @@ const getClientProfile = async (req, res) => {
                 ccavenueMerchantId: tenantObj.ccavenueMerchantId || null,
                 kycFirst: tenantObj.kycFirst !== false,
                 gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
-                isPaymentGatewayConfigured
+                isPaymentGatewayConfigured,
+                hasDigioConfigured: Boolean(tenantObj.digioClientId && tenantObj.digioClientSecret),
+                digioEnvironment: tenantObj.digioEnvironment || (tenantObj.digioClientId?.startsWith('ACK') ? 'SANDBOX' : 'PRODUCTION'),
+                digioClientId: tenantObj.digioClientId || null
             };
         }
         const formatted = {
@@ -979,7 +1199,7 @@ const getClientProfile = async (req, res) => {
 };
 exports.getClientProfile = getClientProfile;
 const updateClientProfile = async (req, res) => {
-    const { occupation, addressLine1, city, state, zipCode } = req.body;
+    const { addressLine1, city, state, zipCode } = req.body;
     try {
         const client = await db_1.default.Client.findOne({ userId: req.user.id });
         if (!client)
@@ -987,7 +1207,6 @@ const updateClientProfile = async (req, res) => {
         const clientId = client._id || client.id;
         const profile = await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, {
             $set: {
-                occupation,
                 addressLine1,
                 city,
                 state,
@@ -1086,7 +1305,7 @@ const initiateRazorpayPayment = async (req, res) => {
         if (couponCode) {
             const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
             if (coupon && coupon.status === 'ACTIVE') {
-                if (coupon.discountType === 'FLAT') {
+                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     finalPrice = Math.max(0, finalPrice - coupon.discountValue);
                 }
                 else if (coupon.discountType === 'PERCENTAGE') {
@@ -1158,7 +1377,7 @@ const verifyRazorpayPayment = async (req, res) => {
         if (couponCode) {
             const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
             if (coupon && coupon.status === 'ACTIVE') {
-                if (coupon.discountType === 'FLAT') {
+                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     discountAmount = coupon.discountValue;
                 }
                 else if (coupon.discountType === 'PERCENTAGE') {
@@ -1268,7 +1487,7 @@ const initiateCCAvenuePayment = async (req, res) => {
         if (couponCode) {
             const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
             if (coupon && coupon.status === 'ACTIVE') {
-                if (coupon.discountType === 'FLAT') {
+                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     finalPrice = Math.max(0, finalPrice - coupon.discountValue);
                 }
                 else if (coupon.discountType === 'PERCENTAGE') {
@@ -1433,14 +1652,32 @@ const getPaymentGatewayStatus = async (req, res) => {
                 bankBranch: tenantObj.bankBranch
             } : null
         };
+        const isGatewayEnabled = Boolean(tenantObj.paymentGatewayEnabled !== false && isConfigured);
+        const isUpiQrEnabled = Boolean(tenantObj.upiQrEnabled && (tenantObj.upiId || tenantObj.upiQrImageUrl));
+        const upiQr = {
+            enabled: isUpiQrEnabled,
+            upiId: tenantObj.upiId || null,
+            payeeName: tenantObj.upiPayeeName || tenantObj.companyName || null,
+            qrImageUrl: tenantObj.upiQrImageUrl || null,
+            instructions: tenantObj.upiInstructions || null
+        };
         return res.status(200).json({
             success: true,
-            isConfigured,
+            isConfigured: isGatewayEnabled,
             activeGateway,
+            paymentGatewayEnabled: tenantObj.paymentGatewayEnabled !== false,
+            gateway: {
+                enabled: isGatewayEnabled,
+                activeGateway,
+                isConfigured
+            },
+            upiQr,
             adminContact,
-            message: isConfigured
+            message: isGatewayEnabled
                 ? `Payment gateway (${activeGateway}) is ready.`
-                : `Payment gateway credentials are not configured by the administrator for ${activeGateway}. Please contact administrator to purchase this plan.`
+                : (isUpiQrEnabled
+                    ? 'Payment gateway is disabled. Please pay using QR / UPI.'
+                    : `Payment methods are currently offline. Please contact administrator to purchase this plan.`)
         });
     }
     catch (error) {

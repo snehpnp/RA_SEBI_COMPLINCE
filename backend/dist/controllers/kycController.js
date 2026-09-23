@@ -23,10 +23,12 @@ const initiateKyc = async (req, res) => {
         const identifier = client.email || req.user.email;
         const userObj = client.userId || {};
         const customerName = client.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || 'Client';
-        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName || 'DIGILOCKER_KYC', identifier, customerName);
+        const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName || 'DIGILOCKER_KYC', identifier, customerName, tenant.digioEnvironment);
         res.json({
             success: true,
-            data: digioResponse
+            data: digioResponse,
+            environment: isSandbox ? 'sandbox' : 'production'
         });
     }
     catch (error) {
@@ -97,11 +99,13 @@ const initiateAgreementEsign = async (req, res) => {
         // 2. Upload to Digio for eSign
         const identifier = req.user.email || client.email;
         const fileName = `Agreement_${clientIdStr}.pdf`;
-        const digioResponse = await (0, digioService_1.createDocumentForEsign)(tenant.digioClientId, tenant.digioClientSecret, pdfBuffer, fileName, identifier, signerName);
+        const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+        const digioResponse = await (0, digioService_1.createDocumentForEsign)(tenant.digioClientId, tenant.digioClientSecret, pdfBuffer, fileName, identifier, signerName, tenant.digioEnvironment);
         res.json({
             success: true,
             data: digioResponse,
-            signerName: signerName
+            signerName: signerName,
+            environment: isSandbox ? 'sandbox' : 'production'
         });
     }
     catch (error) {
@@ -140,27 +144,55 @@ const updateKycAgreementStatus = async (req, res) => {
         };
         let verifiedAadhaarName = '';
         let verifiedMaskedAadhaar = '';
+        let verifiedPanNumber = '';
+        let verifiedDob = '';
+        let verifiedAddress = '';
+        let verifiedCity = '';
+        let verifiedState = '';
+        let verifiedZipCode = '';
         // Extract verified Aadhaar details / pki_signature_details from Digio response payload
         if (digioResponse) {
             const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(digioResponse);
             if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
                 verifiedAadhaarName = extracted.aadhaarName;
             }
-            if (extracted?.maskedAadhaar) {
+            if (extracted?.maskedAadhaar)
                 verifiedMaskedAadhaar = extracted.maskedAadhaar;
-            }
+            if (extracted?.panNumber)
+                verifiedPanNumber = extracted.panNumber;
+            if (extracted?.dob)
+                verifiedDob = extracted.dob;
+            if (extracted?.address)
+                verifiedAddress = extracted.address;
+            if (extracted?.city)
+                verifiedCity = extracted.city;
+            if (extracted?.state)
+                verifiedState = extracted.state;
+            if (extracted?.zipCode)
+                verifiedZipCode = extracted.zipCode;
         }
         if (!verifiedAadhaarName && documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
             try {
-                const docStatus = await (0, digioService_1.getDocumentStatus)(tenant.digioClientId, tenant.digioClientSecret, documentId);
+                const docStatus = await (0, digioService_1.getDocumentStatus)(tenant.digioClientId, tenant.digioClientSecret, documentId, tenant.digioEnvironment);
                 if (docStatus) {
                     const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(docStatus);
                     if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
                         verifiedAadhaarName = extracted.aadhaarName;
                     }
-                    if (extracted?.maskedAadhaar) {
+                    if (extracted?.maskedAadhaar)
                         verifiedMaskedAadhaar = extracted.maskedAadhaar;
-                    }
+                    if (extracted?.panNumber)
+                        verifiedPanNumber = extracted.panNumber;
+                    if (extracted?.dob)
+                        verifiedDob = extracted.dob;
+                    if (extracted?.address)
+                        verifiedAddress = extracted.address;
+                    if (extracted?.city)
+                        verifiedCity = extracted.city;
+                    if (extracted?.state)
+                        verifiedState = extracted.state;
+                    if (extracted?.zipCode)
+                        verifiedZipCode = extracted.zipCode;
                 }
             }
             catch (dErr) {
@@ -170,22 +202,42 @@ const updateKycAgreementStatus = async (req, res) => {
         if (type === 'KYC' && (status === 'COMPLETED' || status === 'SUCCESS')) {
             const updateFields = {
                 status: 'AGREEMENT_PENDING',
-                kraVerified: true
+                kraVerified: true,
+                kycStatus: 'VERIFIED'
             };
             if (verifiedAadhaarName) {
                 updateFields.name = verifiedAadhaarName;
                 updateFields.panName = verifiedAadhaarName;
             }
-            if (verifiedMaskedAadhaar) {
+            if (verifiedMaskedAadhaar)
                 updateFields.aadhaar = verifiedMaskedAadhaar;
-            }
+            if (verifiedPanNumber)
+                updateFields.pan = verifiedPanNumber;
+            if (verifiedDob)
+                updateFields.dob = verifiedDob;
             await db_1.default.Client.findByIdAndUpdate(clientId, { $set: updateFields });
+            const profileUpdate = {
+                kraVerified: true,
+                isDigiLockerLocked: true
+            };
+            if (verifiedAadhaarName)
+                profileUpdate.panName = verifiedAadhaarName;
+            if (verifiedDob)
+                profileUpdate.dob = verifiedDob;
+            if (verifiedAddress)
+                profileUpdate.addressLine1 = verifiedAddress;
+            if (verifiedCity)
+                profileUpdate.city = verifiedCity;
+            if (verifiedState)
+                profileUpdate.state = verifiedState;
+            if (verifiedZipCode)
+                profileUpdate.zipCode = verifiedZipCode;
+            await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, { $set: profileUpdate }, { upsert: true });
             if (verifiedAadhaarName) {
                 const nameParts = verifiedAadhaarName.split(' ');
                 const firstName = nameParts[0] || '';
                 const lastName = nameParts.slice(1).join(' ') || '';
                 await db_1.default.User.findByIdAndUpdate(userId, { $set: { firstName, lastName } });
-                await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, { $set: { panName: verifiedAadhaarName } }, { upsert: true });
             }
         }
         else if (type === 'AGREEMENT' && (status === 'COMPLETED' || status === 'SIGNED' || status === 'SUCCESS')) {
@@ -210,7 +262,7 @@ const updateKycAgreementStatus = async (req, res) => {
             // Try to download the signed PDF from Digio first
             let pdfBuffer = null;
             if (documentId && tenant?.digioClientId && tenant?.digioClientSecret) {
-                pdfBuffer = await (0, digioService_1.downloadDocument)(tenant.digioClientId, tenant.digioClientSecret, documentId);
+                pdfBuffer = await (0, digioService_1.downloadDocument)(tenant.digioClientId, tenant.digioClientSecret, documentId, tenant.digioEnvironment);
             }
             // Fallback: Generate signed PDF with Aadhaar signature block displaying pki_signature_details.name
             if (!pdfBuffer) {

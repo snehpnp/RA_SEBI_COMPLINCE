@@ -1,8 +1,17 @@
 import axios from 'axios';
 import FormData from 'form-data';
 
-// Digio API base URL - can be overridden by env for sandbox/production
-const DIGIO_BASE_URL = process.env.DIGIO_API_URL || 'https://api.digio.in';
+// Digio API base URL - resolves dynamically based on environment or clientId prefix (ACK/AIK => sandbox)
+export const getDigioBaseUrl = (clientId?: string, environment?: string) => {
+  if (process.env.DIGIO_API_URL) return process.env.DIGIO_API_URL;
+  const envUpper = (environment || '').toUpperCase();
+  const isSandbox =
+    envUpper === 'SANDBOX' ||
+    envUpper === 'UAT' ||
+    (clientId || '').startsWith('ACK') ||
+    (clientId || '').startsWith('AIK');
+  return isSandbox ? 'https://ext.digio.in:444' : 'https://api.digio.in';
+};
 
 const getDigioAuthHeader = (clientId: string, clientSecret: string) => {
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
@@ -20,13 +29,47 @@ export const isValidName = (n?: string | null) => {
   return true;
 };
 
+export const testDigioConnection = async (
+  clientId: string,
+  clientSecret: string,
+  environment?: string
+) => {
+  const baseUrl = getDigioBaseUrl(clientId, environment);
+  const auth = getDigioAuthHeader(clientId, clientSecret);
+  try {
+    const res = await axios.get(`${baseUrl}/v2/client/document/templates`, {
+      headers: { Authorization: auth },
+      timeout: 10000
+    });
+    return { success: true, message: 'Digio connection verified successfully!' };
+  } catch (err: any) {
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      return {
+        success: false,
+        status: err.response.status,
+        message: err.response.data?.message || 'Invalid Digio Client ID or Secret. Please recheck your credentials.'
+      };
+    }
+    if (err.response) {
+      return {
+        success: false,
+        status: err.response.status,
+        message: err.response.data?.message || `Digio returned HTTP ${err.response.status}`
+      };
+    }
+    return { success: false, message: err.message || 'Could not connect to Digio service.' };
+  }
+};
+
 export const createKycRequest = async (
   clientId: string,
   clientSecret: string,
   kycTemplateName: string,
   customerIdentifier: string,
-  customerName: string
+  customerName: string,
+  environment?: string
 ) => {
+  const baseUrl = getDigioBaseUrl(clientId, environment);
   try {
     const payload = {
       customer_identifier: customerIdentifier,
@@ -34,8 +77,8 @@ export const createKycRequest = async (
       template_name: kycTemplateName,
       notify_customer: false
     };
-    console.log('[Digio KYC] Creating KYC Request payload:', payload);
-    const response = await axios.post(`${DIGIO_BASE_URL}/client/kyc/v2/request/with_template`, payload, {
+    console.log('[Digio KYC] Creating KYC Request payload:', payload, 'to URL:', baseUrl);
+    const response = await axios.post(`${baseUrl}/client/kyc/v2/request/with_template`, payload, {
       headers: {
         'Authorization': getDigioAuthHeader(clientId, clientSecret),
         'Content-Type': 'application/json'
@@ -52,11 +95,13 @@ export const createKycRequest = async (
 export const getKycStatus = async (
   clientId: string,
   clientSecret: string,
-  kycRequestId: string
+  kycRequestId: string,
+  environment?: string
 ) => {
   if (!kycRequestId) return null;
+  const baseUrl = getDigioBaseUrl(clientId, environment);
   try {
-    const response = await axios.get(`${DIGIO_BASE_URL}/client/kyc/v2/${kycRequestId}/response`, {
+    const response = await axios.get(`${baseUrl}/client/kyc/v2/${kycRequestId}/response`, {
       headers: {
         Authorization: getDigioAuthHeader(clientId, clientSecret)
       }
@@ -64,7 +109,7 @@ export const getKycStatus = async (
     return response.data;
   } catch (err: any) {
     try {
-      const altResponse = await axios.get(`${DIGIO_BASE_URL}/v2/client/kyc/${kycRequestId}`, {
+      const altResponse = await axios.get(`${baseUrl}/v2/client/kyc/${kycRequestId}`, {
         headers: {
           Authorization: getDigioAuthHeader(clientId, clientSecret)
         }
@@ -80,11 +125,13 @@ export const getKycStatus = async (
 export const getDocumentStatus = async (
   clientId: string,
   clientSecret: string,
-  documentId: string
+  documentId: string,
+  environment?: string
 ) => {
   if (!documentId) return null;
+  const baseUrl = getDigioBaseUrl(clientId, environment);
   try {
-    const response = await axios.get(`${DIGIO_BASE_URL}/v2/client/document/${documentId}`, {
+    const response = await axios.get(`${baseUrl}/v2/client/document/${documentId}`, {
       headers: {
         Authorization: getDigioAuthHeader(clientId, clientSecret)
       }
@@ -99,11 +146,13 @@ export const getDocumentStatus = async (
 export const downloadDocument = async (
   clientId: string,
   clientSecret: string,
-  documentId: string
+  documentId: string,
+  environment?: string
 ): Promise<Buffer | null> => {
   if (!documentId) return null;
+  const baseUrl = getDigioBaseUrl(clientId, environment);
   try {
-    const response = await axios.get(`${DIGIO_BASE_URL}/v2/client/document/download?document_id=${documentId}`, {
+    const response = await axios.get(`${baseUrl}/v2/client/document/download?document_id=${documentId}`, {
       headers: {
         Authorization: getDigioAuthHeader(clientId, clientSecret)
       },
@@ -208,7 +257,16 @@ export const extractAadhaarDetailsFromDigio = (data: any) => {
         }
       }
 
+      let city: string | null = null;
+      let state: string | null = null;
+      let zipCode: string | null = null;
+
       if (aadhar.dob) dob = String(aadhar.dob);
+      if (aadhar.split_address && typeof aadhar.split_address === 'object') {
+        state = aadhar.split_address.state || null;
+        city = aadhar.split_address.dist || aadhar.split_address.vtc || aadhar.split_address.subdist || null;
+        zipCode = aadhar.split_address.pincode || null;
+      }
       if (aadhar.address) {
         address = typeof aadhar.address === 'string' ? aadhar.address : Object.values(aadhar.split_address || {}).filter(Boolean).join(', ');
       }
@@ -224,7 +282,10 @@ export const extractAadhaarDetailsFromDigio = (data: any) => {
     panNumber: panNumber || null,
     maskedAadhaar: maskedAadhaar || null,
     dob: dob || null,
-    address: address || null
+    address: address || null,
+    city: (data?.actions?.[0]?.details?.aadhar?.split_address?.dist || data?.actions?.[0]?.details?.aadhar?.split_address?.vtc) || null,
+    state: data?.actions?.[0]?.details?.aadhar?.split_address?.state || null,
+    zipCode: data?.actions?.[0]?.details?.aadhar?.split_address?.pincode || null
   };
 };
 
@@ -234,8 +295,10 @@ export const createDocumentForEsign = async (
   pdfBuffer: Buffer,
   fileName: string,
   signerIdentifier: string,
-  signerName?: string
+  signerName?: string,
+  environment?: string
 ) => {
+  const baseUrl = getDigioBaseUrl(clientId, environment);
   try {
     const formData = new FormData();
     formData.append('file', pdfBuffer, { filename: fileName, contentType: 'application/pdf' });
@@ -258,7 +321,8 @@ export const createDocumentForEsign = async (
       contentType: 'application/json'
     });
 
-    const response = await axios.post(`${DIGIO_BASE_URL}/v2/client/document/upload`, formData, {
+    console.log('[Digio eSign] Uploading document to URL:', baseUrl);
+    const response = await axios.post(`${baseUrl}/v2/client/document/upload`, formData, {
       headers: {
         'Authorization': getDigioAuthHeader(clientId, clientSecret),
         ...formData.getHeaders()

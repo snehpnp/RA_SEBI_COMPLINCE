@@ -76,14 +76,25 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
       tenantId
     })
       .populate('couponId')
+      .populate('planId')
       .sort({ createdAt: -1 })
       .lean();
 
-    const formatted = payments.map((p: any) => ({
-      ...p,
-      id: String(p._id || p.id),
-      coupon: p.couponId || null
-    }));
+    const couponIds = [...new Set(payments.map((p: any) => p.couponId ? (typeof p.couponId === 'object' ? p.couponId._id || p.couponId.id : p.couponId) : null).filter(Boolean))];
+    const coupons = await dynamicDb.Coupon.find({ _id: { $in: couponIds } }).lean();
+    const couponMap = new Map(coupons.map((c: any) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
+
+    const formatted = payments.map((p: any) => {
+      const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
+      const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
+      return {
+        ...p,
+        id: String(p._id || p.id),
+        coupon: couponObj || null,
+        couponCode: couponObj?.code || null,
+        plan: p.planId || null
+      };
+    });
 
     return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {

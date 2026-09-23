@@ -153,7 +153,7 @@ export async function seedInitial() {
   console.log('Seeding default Super Admin...');
   const salt = await bcrypt.genSalt(10);
   const superAdminPasswordHash = await bcrypt.hash('Admin@987', salt);
-  const adminPasswordHash = await bcrypt.hash('Admin@12345', salt);
+  const adminPasswordHash = await bcrypt.hash('12345678', salt);
 
   await centralModels.User.findOneAndUpdate(
     { email: 'superadmin@gmail.com' },
@@ -174,13 +174,13 @@ export async function seedInitial() {
   // Create Tenant (RA Company)
   console.log('Seeding default Tenant (RA Company)...');
   const tenant = await centralModels.Tenant.findOneAndUpdate(
-    { email: 'admin@alpharesearch.com' },
+    { email: 'admin@gmail.com' },
     {
       $setOnInsert: {
         companyName: 'Alpha Research Partners',
         sebiRegistration: 'INH000001234',
         bseEnrollment: 'BSE998877',
-        email: 'admin@alpharesearch.com',
+        email: 'admin@gmail.com',
         mobile: '9876543210',
         address: '101, Finance Towers, BKC, Mumbai, Maharashtra 400051',
         pan: 'ABCDE1234F',
@@ -197,7 +197,7 @@ export async function seedInitial() {
 
   // Also sync to AllCompany
   await centralModels.AllCompany.findOneAndUpdate(
-    { email: 'admin@alpharesearch.com' },
+    { email: 'admin@gmail.com' },
     {
       $set: {
         companyId: tenant._id.toString(),
@@ -220,11 +220,11 @@ export async function seedInitial() {
 
   // Create RA Admin User
   await centralModels.User.findOneAndUpdate(
-    { email: 'admin@alpharesearch.com' },
+    { email: 'admin@gmail.com' },
     {
       $setOnInsert: {
         tenantId: tenant._id,
-        email: 'admin@alpharesearch.com',
+        email: 'admin@gmail.com',
         firstName: 'Alpha',
         lastName: 'Admin',
         mobile: '9876543210',
@@ -308,9 +308,15 @@ export async function seedInitial() {
 
   // Seed plans for Alpha Research Partners
   console.log('Seeding plans...');
+  const existingCategories = await centralModels.PlanCategory.find({ tenantId: tenant._id }).lean();
+  const equityCat = existingCategories.find((c: any) => c.name.toLowerCase().includes('equity')) || existingCategories[0];
+  const fnoCat = existingCategories.find((c: any) => c.name.toLowerCase().includes('derivatives') || c.name.toLowerCase().includes('f&o')) || existingCategories[1] || existingCategories[0];
+  const wealthCat = existingCategories.find((c: any) => c.name.toLowerCase().includes('wealth') || c.name.toLowerCase().includes('comprehensive')) || existingCategories[2] || existingCategories[0];
+
   const plans = [
     {
       tenantId: tenant._id,
+      categoryId: equityCat?._id,
       name: 'BASIC',
       description: 'Equity research segments only.',
       price: 1500,
@@ -321,6 +327,7 @@ export async function seedInitial() {
     },
     {
       tenantId: tenant._id,
+      categoryId: fnoCat?._id,
       name: 'PREMIUM',
       description: 'Equity & Derivative calls plus model portfolios.',
       price: 4500,
@@ -331,6 +338,7 @@ export async function seedInitial() {
     },
     {
       tenantId: tenant._id,
+      categoryId: wealthCat?._id,
       name: 'VIP',
       description: 'Full segment access, high frequency calls, direct alerts.',
       price: 15000,

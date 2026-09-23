@@ -10,11 +10,13 @@ export interface IClient extends Document {
   email: string;
   mobile: string;
   dob?: Date | null;
-  pan: string;
-  aadhaar: string;
+  pan?: string | null;
+  aadhaar?: string | null;
   category: string;
   occupation?: string | null;
   status: string;
+  kycStatus?: string | null;
+  agreementSigned?: boolean;
   kraVerified: boolean;
   createdById?: Types.ObjectId | null;
   createdAt: Date;
@@ -29,15 +31,26 @@ export const ClientSchema = new Schema<IClient>(
     email: { type: String, required: true },
     mobile: { type: String, required: true },
     dob: { type: Date, default: null },
-    pan: { type: String, required: true, unique: true },
-    aadhaar: { type: String, required: true, unique: true },
+    pan: { type: String, default: undefined },
+    aadhaar: { type: String, default: undefined },
     category: { type: String, default: 'INDIVIDUAL' },
     occupation: { type: String, default: null },
     status: { type: String, default: 'ACTIVE' },
+    kycStatus: { type: String, default: 'PENDING' },
+    agreementSigned: { type: Boolean, default: false },
     kraVerified: { type: Boolean, default: false },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null }
   },
-  { ...baseSchemaOptions, collection: 'Client' }
+  { ...baseSchemaOptions, collection: 'Client', autoIndex: false }
+);
+
+ClientSchema.index(
+  { pan: 1 },
+  { unique: true, partialFilterExpression: { pan: { $type: 'string' } } }
+);
+ClientSchema.index(
+  { aadhaar: 1 },
+  { unique: true, partialFilterExpression: { aadhaar: { $type: 'string' } } }
 );
 
 // Virtual relations

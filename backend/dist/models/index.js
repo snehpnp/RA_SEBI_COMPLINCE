@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AuditLogSchema = exports.AuditLog = exports.ComplianceAlertSchema = exports.ComplianceAlert = exports.ResearchAnalyticsSchema = exports.ResearchAnalytics = exports.ResearchReportSchema = exports.ResearchReport = exports.PaymentSchema = exports.Payment = exports.ConsentHistorySchema = exports.ConsentHistory = exports.ConsentSchema = exports.Consent = exports.AgreementHistorySchema = exports.AgreementHistory = exports.AgreementSchema = exports.Agreement = exports.CouponSchema = exports.Coupon = exports.SubscriptionSchema = exports.Subscription = exports.PlanSchema = exports.Plan = exports.PlanCategorySchema = exports.PlanCategory = exports.ClientIdentityHistorySchema = exports.ClientIdentityHistory = exports.ClientDocumentSchema = exports.ClientDocument = exports.ClientProfileSchema = exports.ClientProfile = exports.ClientSchema = exports.Client = exports.PersonAssociatedSchema = exports.PersonAssociated = exports.StaffSchema = exports.Staff = exports.RolePermissionSchema = exports.RolePermission = exports.PermissionSchema = exports.Permission = exports.RoleSchema = exports.Role = exports.UserSchema = exports.User = exports.AllCompanySchema = exports.AllCompany = exports.TenantSchema = exports.Tenant = void 0;
-exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = void 0;
+exports.ResearchAnalyticsSchema = exports.ResearchAnalytics = exports.ResearchReportSchema = exports.ResearchReport = exports.PaymentSchema = exports.Payment = exports.ConsentHistorySchema = exports.ConsentHistory = exports.ConsentSchema = exports.Consent = exports.AgreementHistorySchema = exports.AgreementHistory = exports.AgreementSchema = exports.Agreement = exports.CouponSchema = exports.Coupon = exports.SubscriptionSchema = exports.Subscription = exports.PlanSchema = exports.Plan = exports.PlanCategorySchema = exports.PlanCategory = exports.ClientIdentityHistorySchema = exports.ClientIdentityHistory = exports.ClientDocumentSchema = exports.ClientDocument = exports.ClientProfileSchema = exports.ClientProfile = exports.ClientSchema = exports.Client = exports.PersonAssociatedSchema = exports.PersonAssociated = exports.StaffSchema = exports.Staff = exports.RolePermissionSchema = exports.RolePermission = exports.PermissionSchema = exports.Permission = exports.RoleSchema = exports.Role = exports.UserSchema = exports.User = exports.AllCompanySchema = exports.AllCompany = exports.TenantSchema = exports.Tenant = exports.SmsTemplateSchema = exports.SmsTemplate = exports.OccupationSchema = exports.Occupation = void 0;
+exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = exports.AuditLogSchema = exports.AuditLog = exports.ComplianceAlertSchema = exports.ComplianceAlert = void 0;
 exports.registerTenantModels = registerTenantModels;
 // Import all Schemas & Models
 const Tenant_1 = require("./Tenant");
@@ -139,6 +139,12 @@ Object.defineProperty(exports, "SystemSettingSchema", { enumerable: true, get: f
 const AdminPermission_1 = require("./AdminPermission");
 Object.defineProperty(exports, "AdminPermission", { enumerable: true, get: function () { return AdminPermission_1.AdminPermission; } });
 Object.defineProperty(exports, "AdminPermissionSchema", { enumerable: true, get: function () { return AdminPermission_1.AdminPermissionSchema; } });
+const Occupation_1 = require("./Occupation");
+Object.defineProperty(exports, "Occupation", { enumerable: true, get: function () { return Occupation_1.Occupation; } });
+Object.defineProperty(exports, "OccupationSchema", { enumerable: true, get: function () { return Occupation_1.OccupationSchema; } });
+const SmsTemplate_1 = require("./SmsTemplate");
+Object.defineProperty(exports, "SmsTemplate", { enumerable: true, get: function () { return SmsTemplate_1.SmsTemplate; } });
+Object.defineProperty(exports, "SmsTemplateSchema", { enumerable: true, get: function () { return SmsTemplate_1.SmsTemplateSchema; } });
 /**
  * Helper to register all schemas onto a dynamic Mongoose connection instance
  */
@@ -188,7 +194,9 @@ function registerTenantModels(connection) {
         EmailTemplate: (connection.models.EmailTemplate || connection.model('EmailTemplate', EmailTemplate_1.EmailTemplateSchema, 'EmailTemplate')),
         EmailVerification: (connection.models.EmailVerification || connection.model('EmailVerification', EmailVerification_1.EmailVerificationSchema, 'EmailVerification')),
         SystemSetting: (connection.models.SystemSetting || connection.model('SystemSetting', SystemSetting_1.SystemSettingSchema, 'SystemSetting')),
-        AdminPermission: (connection.models.AdminPermission || connection.model('AdminPermission', AdminPermission_1.AdminPermissionSchema, 'AdminPermission'))
+        AdminPermission: (connection.models.AdminPermission || connection.model('AdminPermission', AdminPermission_1.AdminPermissionSchema, 'AdminPermission')),
+        Occupation: (connection.models.Occupation || connection.model('Occupation', Occupation_1.OccupationSchema, 'Occupation')),
+        SmsTemplate: (connection.models.SmsTemplate || connection.model('SmsTemplate', SmsTemplate_1.SmsTemplateSchema, 'SmsTemplate'))
     };
     return {
         ...models,
@@ -236,6 +244,8 @@ function registerTenantModels(connection) {
         emailTemplate: models.EmailTemplate,
         emailVerification: models.EmailVerification,
         systemSetting: models.SystemSetting,
-        adminPermission: models.AdminPermission
+        adminPermission: models.AdminPermission,
+        occupation: models.Occupation,
+        smsTemplate: models.SmsTemplate
     };
 }

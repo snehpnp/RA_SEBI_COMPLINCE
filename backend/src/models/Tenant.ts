@@ -44,12 +44,14 @@ export interface ITenant extends Document {
   digioClientId?: string | null;
   digioClientSecret?: string | null;
   digioKycTemplateName?: string | null;
+  digioEnvironment?: string | null;
   agreementContent?: string | null;
   kraProvider?: string | null;
   kraApiKey?: string | null;
   kraApiSecret?: string | null;
   coSignatureUrl?: string | null;
   activePaymentGateway?: string | null;
+  paymentGatewayEnabled?: boolean;
   razorpayKeyId?: string | null;
   razorpayKeySecret?: string | null;
   cashfreeAppId?: string | null;
@@ -59,6 +61,11 @@ export interface ITenant extends Document {
   ccavenueWorkingKey?: string | null;
   stripePublishableKey?: string | null;
   stripeSecretKey?: string | null;
+  upiQrEnabled?: boolean;
+  upiId?: string | null;
+  upiPayeeName?: string | null;
+  upiQrImageUrl?: string | null;
+  upiInstructions?: string | null;
   kycFirst: boolean;
   welcomeEmailText?: string | null;
   termsPdfUrl?: string | null;
@@ -69,6 +76,16 @@ export interface ITenant extends Document {
   mongoDbUrl?: string | null;
   dbName?: string | null;
   tenantApiKey?: string | null;
+  passwordPolicy?: 'NORMAL' | 'STRONG';
+  client2FAEnabled?: boolean;
+  twoFactorChannel?: 'EMAIL' | 'SMS' | 'BOTH';
+  signupVerificationMode?: 'EMAIL_ONLY' | 'MOBILE_ONLY' | 'BOTH';
+  lockedTradesPreviewCount?: number;
+  smsGatewayEnabled?: boolean;
+  smsUsername?: string | null;
+  smsPassword?: string | null;
+  smsSenderId?: string | null;
+  smsEntityId?: string | null;
   createdById?: Types.ObjectId | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -117,12 +134,14 @@ export const TenantSchema = new Schema<ITenant>(
     digioClientId: { type: String, default: null },
     digioClientSecret: { type: String, default: null },
     digioKycTemplateName: { type: String, default: null },
+    digioEnvironment: { type: String, default: 'SANDBOX' },
     agreementContent: { type: String, default: null },
     kraProvider: { type: String, default: null },
     kraApiKey: { type: String, default: null },
     kraApiSecret: { type: String, default: null },
     coSignatureUrl: { type: String, default: null },
     activePaymentGateway: { type: String, default: 'RAZORPAY' },
+    paymentGatewayEnabled: { type: Boolean, default: true },
     razorpayKeyId: { type: String, default: null },
     razorpayKeySecret: { type: String, default: null },
     cashfreeAppId: { type: String, default: null },
@@ -132,6 +151,11 @@ export const TenantSchema = new Schema<ITenant>(
     ccavenueWorkingKey: { type: String, default: null },
     stripePublishableKey: { type: String, default: null },
     stripeSecretKey: { type: String, default: null },
+    upiQrEnabled: { type: Boolean, default: false },
+    upiId: { type: String, default: null },
+    upiPayeeName: { type: String, default: null },
+    upiQrImageUrl: { type: String, default: null },
+    upiInstructions: { type: String, default: null },
     kycFirst: { type: Boolean, default: true },
     welcomeEmailText: { type: String, default: null },
     termsPdfUrl: { type: String, default: null },
@@ -142,6 +166,16 @@ export const TenantSchema = new Schema<ITenant>(
     mongoDbUrl: { type: String, default: null },
     dbName: { type: String, default: null },
     tenantApiKey: { type: String, default: null },
+    passwordPolicy: { type: String, enum: ['NORMAL', 'STRONG'], default: 'NORMAL' },
+    client2FAEnabled: { type: Boolean, default: false },
+    twoFactorChannel: { type: String, enum: ['EMAIL', 'SMS', 'BOTH'], default: 'EMAIL' },
+    signupVerificationMode: { type: String, enum: ['EMAIL_ONLY', 'MOBILE_ONLY', 'BOTH'], default: 'EMAIL_ONLY' },
+    lockedTradesPreviewCount: { type: Number, default: 5 },
+    smsGatewayEnabled: { type: Boolean, default: false },
+    smsUsername: { type: String, default: null },
+    smsPassword: { type: String, default: null },
+    smsSenderId: { type: String, default: null },
+    smsEntityId: { type: String, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
   },

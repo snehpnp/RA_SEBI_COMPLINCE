@@ -13,6 +13,8 @@ import path from 'path';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
 import { resolveAttachmentFilePath, generateTermsAndConditionsPdf, generatePrivacyPolicyPdf, generateInternalPolicyPdf } from '../services/pdfService';
 import axios from 'axios';
+import { sendSms, ensureDefaultSmsTemplates } from '../services/smsService';
+import { testDigioConnection } from '../services/digioService';
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return email;
@@ -2464,11 +2466,15 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
   const {
     themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort,
     smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
-    bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName,
+    bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment,
     agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
-    activePaymentGateway, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey,
+    activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey,
     ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey,
-    address, website, mobile
+    upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions,
+    address, website, mobile,
+    passwordPolicy, client2FAEnabled, twoFactorChannel,
+    signupVerificationMode, lockedTradesPreviewCount,
+    smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId
   } = req.body;
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
@@ -2488,6 +2494,21 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (!oldTenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
 
     const dataToUpdate: any = {};
+    if (passwordPolicy !== undefined) dataToUpdate.passwordPolicy = passwordPolicy === 'STRONG' ? 'STRONG' : 'NORMAL';
+    if (client2FAEnabled !== undefined) dataToUpdate.client2FAEnabled = client2FAEnabled === 'true' || client2FAEnabled === true;
+    if (twoFactorChannel !== undefined) dataToUpdate.twoFactorChannel = twoFactorChannel;
+    if (signupVerificationMode !== undefined) {
+      dataToUpdate.signupVerificationMode = ['EMAIL_ONLY', 'MOBILE_ONLY', 'BOTH'].includes(signupVerificationMode) ? signupVerificationMode : 'EMAIL_ONLY';
+    }
+    if (lockedTradesPreviewCount !== undefined) {
+      const parsedCount = parseInt(lockedTradesPreviewCount, 10);
+      dataToUpdate.lockedTradesPreviewCount = isNaN(parsedCount) ? 5 : Math.max(0, Math.min(parsedCount, 50));
+    }
+    if (smsGatewayEnabled !== undefined) dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
+    if (smsUsername !== undefined) dataToUpdate.smsUsername = smsUsername ? smsUsername.trim() : null;
+    if (smsPassword !== undefined && smsPassword.trim() !== '') dataToUpdate.smsPassword = smsPassword.trim();
+    if (smsSenderId !== undefined) dataToUpdate.smsSenderId = smsSenderId ? smsSenderId.trim() : null;
+    if (smsEntityId !== undefined) dataToUpdate.smsEntityId = smsEntityId ? smsEntityId.trim() : null;
     if (themeColor) dataToUpdate.themeColor = themeColor;
     if (companyName) dataToUpdate.companyName = companyName;
     if (companyEmail) dataToUpdate.email = companyEmail;
@@ -2508,11 +2529,13 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (digioClientId !== undefined) dataToUpdate.digioClientId = digioClientId;
     if (digioClientSecret !== undefined) dataToUpdate.digioClientSecret = digioClientSecret;
     if (digioKycTemplateName !== undefined) dataToUpdate.digioKycTemplateName = digioKycTemplateName;
+    if (digioEnvironment !== undefined) dataToUpdate.digioEnvironment = digioEnvironment;
     if (agreementContent !== undefined) dataToUpdate.agreementContent = agreementContent;
     if (kraProvider !== undefined) dataToUpdate.kraProvider = kraProvider;
     if (kraApiKey !== undefined) dataToUpdate.kraApiKey = kraApiKey;
     if (kraApiSecret !== undefined) dataToUpdate.kraApiSecret = kraApiSecret;
     if (activePaymentGateway !== undefined) dataToUpdate.activePaymentGateway = activePaymentGateway;
+    if (paymentGatewayEnabled !== undefined) dataToUpdate.paymentGatewayEnabled = paymentGatewayEnabled === 'true' || paymentGatewayEnabled === true;
     if (razorpayKeyId !== undefined) dataToUpdate.razorpayKeyId = razorpayKeyId;
     if (razorpayKeySecret !== undefined) dataToUpdate.razorpayKeySecret = razorpayKeySecret;
     if (cashfreeAppId !== undefined) dataToUpdate.cashfreeAppId = cashfreeAppId;
@@ -2522,6 +2545,11 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (ccavenueWorkingKey !== undefined) dataToUpdate.ccavenueWorkingKey = ccavenueWorkingKey;
     if (stripePublishableKey !== undefined) dataToUpdate.stripePublishableKey = stripePublishableKey;
     if (stripeSecretKey !== undefined) dataToUpdate.stripeSecretKey = stripeSecretKey;
+    if (upiQrEnabled !== undefined) dataToUpdate.upiQrEnabled = upiQrEnabled === 'true' || upiQrEnabled === true;
+    if (upiId !== undefined) dataToUpdate.upiId = upiId ? upiId.trim() : null;
+    if (upiPayeeName !== undefined) dataToUpdate.upiPayeeName = upiPayeeName ? upiPayeeName.trim() : null;
+    if (upiQrImageUrl !== undefined) dataToUpdate.upiQrImageUrl = upiQrImageUrl ? upiQrImageUrl.trim() : null;
+    if (upiInstructions !== undefined) dataToUpdate.upiInstructions = upiInstructions ? upiInstructions.trim() : null;
     if (smtpPort !== undefined) dataToUpdate.smtpPort = smtpPort ? (parseInt(smtpPort, 10) || 587) : null;
     if (smtpUser !== undefined) dataToUpdate.smtpUser = smtpUser ? smtpUser.trim() : null;
     if (smtpPassword !== undefined && smtpPassword.trim() !== '') {
@@ -2552,6 +2580,9 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     }
     if (files?.internalPolicyPdf && files.internalPolicyPdf.length > 0) {
       dataToUpdate.internalPolicyUrl = `/uploads/branding/${files.internalPolicyPdf[0].filename}`;
+    }
+    if (files?.upiQrImage && files.upiQrImage.length > 0) {
+      dataToUpdate.upiQrImageUrl = `/uploads/branding/${files.upiQrImage[0].filename}`;
     }
 
     const targetTenantDocId = oldTenant?._id || oldTenant?.id || tenantId;
@@ -2842,6 +2873,7 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
 
     const clientIds = [...new Set(payments.map((p: any) => p.clientId))];
     const planIds = [...new Set(payments.map((p: any) => p.planId).filter(Boolean))];
+    const couponIds = [...new Set(payments.map((p: any) => p.couponId ? (typeof p.couponId === 'object' ? p.couponId._id || p.couponId.id : p.couponId) : null).filter(Boolean))];
 
     const clients = await dynamicDb.Client.find({ _id: { $in: clientIds } })
       .populate('userId')
@@ -2850,6 +2882,8 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
     const profileMap = new Map(profiles.map((p: any) => [String(p.clientId), p]));
 
     const plans = await dynamicDb.Plan.find({ _id: { $in: planIds } }).lean();
+    const coupons = await dynamicDb.Coupon.find({ _id: { $in: couponIds } }).lean();
+    const couponMap = new Map(coupons.map((c: any) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
 
     const clientMap = new Map(clients.map((c: any) => [
       String(c._id || c.id),
@@ -2886,10 +2920,14 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
         } as any;
       }
 
+      const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
+      const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
+
       return {
         ...p,
         id: String(p._id || p.id),
-        coupon: p.couponId || null,
+        coupon: couponObj || null,
+        couponCode: couponObj?.code || null,
         client: clientObj,
         plan: p.planId ? planMap.get(String(p.planId)) : null
       };
@@ -3035,7 +3073,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         return res.status(400).json({ success: false, message: `Minimum purchase of ₹${coupon.minPurchaseValue} required.` });
       }
 
-      if (coupon.discountType === 'FLAT') {
+      if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
         discountAmount = coupon.discountValue;
       } else if (coupon.discountType === 'PERCENTAGE') {
         discountAmount = (plan.price * coupon.discountValue) / 100;
@@ -3078,6 +3116,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
     const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
 
+    // Check if there is an existing active subscription for the same plan (sequential queueing)
     const existingSub: any = await dynamicDb.Subscription.findOne({
       $or: [{ clientId: actualClientId }, { clientId: client.userId }],
       planId: plan._id || plan.id,
@@ -3088,9 +3127,14 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     let startDate = new Date();
     if (existingSub) {
       startDate = new Date(existingSub.endDate);
+    } else if (paymentDate) {
+      const parsed = new Date(paymentDate);
+      if (!isNaN(parsed.getTime())) {
+        startDate = parsed;
+      }
     }
 
-    const planValidityDays = customDays !== undefined ? customDays : plan.durationMonths * 30;
+    const planValidityDays = customDays !== undefined ? customDays : (plan.durationMonths * 30 || 30);
     const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
 
     const subscription = await dynamicDb.Subscription.create({
@@ -3825,3 +3869,256 @@ export const resetClientKyc = async (req: any, res: any) => {
     res.status(500).json({ success: false, message: error.message || 'Server Error' });
   }
 };
+
+/**
+ * GET /admin/sms-templates
+ * Fetch all SMS templates for the tenant
+ */
+export const getSmsTemplates = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    await ensureDefaultSmsTemplates(tenantId);
+
+    const filter: any = tenantId
+      ? { tenantId }
+      : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }] };
+
+    const templates = await dynamicDb.SmsTemplate.find(filter)
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const formatted = templates.map((t: any) => ({
+      ...t,
+      id: t._id?.toString() || t.id,
+      category: t.type || t.category || 'CUSTOM',
+      type: t.type || t.category || 'CUSTOM',
+      content: t.message || t.content || '',
+      message: t.message || t.content || '',
+      isActive: t.status === 'ACTIVE' || t.isActive === true,
+      status: t.status || (t.isActive ? 'ACTIVE' : 'INACTIVE')
+    }));
+
+    return res.status(200).json({ success: true, data: formatted });
+  } catch (error: any) {
+    console.error('Error fetching SMS templates:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to fetch templates' });
+  }
+};
+
+/**
+ * POST /admin/sms-templates
+ * Create a new SMS template
+ */
+export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const name = (req.body.name || '').trim();
+    const dltTemplateId = (req.body.dltTemplateId || '').trim();
+    const effectiveType = (req.body.type || req.body.category || 'CUSTOM').trim().toUpperCase();
+    const effectiveMessage = (req.body.message || req.body.content || '').trim();
+    const effectiveStatus = req.body.status || (req.body.isActive === false ? 'INACTIVE' : 'ACTIVE');
+
+    if (!name || !dltTemplateId || !effectiveMessage) {
+      return res.status(400).json({ success: false, message: 'Template name, DLT Template ID, and message are required' });
+    }
+
+    const template = await dynamicDb.SmsTemplate.create({
+      tenantId: tenantId || null,
+      name,
+      type: effectiveType,
+      dltTemplateId,
+      message: effectiveMessage,
+      status: effectiveStatus,
+      isDefault: false,
+      createdById: req.user?.id || null
+    });
+
+    const tObj = template.toObject ? template.toObject() : template;
+    const formatted = {
+      ...tObj,
+      id: tObj._id?.toString() || tObj.id,
+      category: tObj.type,
+      content: tObj.message,
+      isActive: tObj.status === 'ACTIVE'
+    };
+
+    return res.status(201).json({ success: true, message: 'SMS template created successfully', data: formatted });
+  } catch (error: any) {
+    console.error('Error creating SMS template:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to create template' });
+  }
+};
+
+/**
+ * PUT /admin/sms-templates/:id
+ * Update an SMS template
+ */
+export const updateSmsTemplate = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const template = await dynamicDb.SmsTemplate.findById(id);
+    if (!template) {
+      return res.status(404).json({ success: false, message: 'SMS template not found' });
+    }
+
+    if (req.body.name) template.name = req.body.name.trim();
+    if (req.body.type || req.body.category) template.type = (req.body.type || req.body.category).trim().toUpperCase();
+    if (req.body.dltTemplateId) template.dltTemplateId = req.body.dltTemplateId.trim();
+    if (req.body.message || req.body.content) template.message = (req.body.message || req.body.content).trim();
+    if (req.body.status) template.status = req.body.status;
+    if (typeof req.body.isActive === 'boolean') template.status = req.body.isActive ? 'ACTIVE' : 'INACTIVE';
+
+    await template.save();
+
+    const tObj = template.toObject ? template.toObject() : template;
+    const formatted = {
+      ...tObj,
+      id: tObj._id?.toString() || tObj.id,
+      category: tObj.type,
+      content: tObj.message,
+      isActive: tObj.status === 'ACTIVE'
+    };
+
+    return res.status(200).json({ success: true, message: 'SMS template updated', data: formatted });
+  } catch (error: any) {
+    console.error('Error updating SMS template:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to update template' });
+  }
+};
+
+/**
+ * POST /admin/sms-templates/:id/status
+ * Toggle status between ACTIVE and INACTIVE
+ */
+export const toggleSmsTemplateStatus = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const template = await dynamicDb.SmsTemplate.findById(id);
+    if (!template) {
+      return res.status(404).json({ success: false, message: 'SMS template not found' });
+    }
+
+    template.status = template.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    await template.save();
+
+    const tObj = template.toObject ? template.toObject() : template;
+    const formatted = {
+      ...tObj,
+      id: tObj._id?.toString() || tObj.id,
+      category: tObj.type,
+      content: tObj.message,
+      isActive: template.status === 'ACTIVE',
+      status: template.status
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: `Template status changed to ${template.status}`,
+      data: formatted
+    });
+  } catch (error: any) {
+    console.error('Error toggling SMS template status:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to toggle status' });
+  }
+};
+
+/**
+ * DELETE /admin/sms-templates/:id
+ * Delete an SMS template
+ */
+export const deleteSmsTemplate = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const template = await dynamicDb.SmsTemplate.findById(id);
+    if (!template) {
+      return res.status(404).json({ success: false, message: 'SMS template not found' });
+    }
+
+    await dynamicDb.SmsTemplate.findByIdAndDelete(id);
+
+    return res.status(200).json({ success: true, message: 'SMS template deleted' });
+  } catch (error: any) {
+    console.error('Error deleting SMS template:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to delete template' });
+  }
+};
+
+/**
+ * POST /admin/sms/test
+ * Test the SMS Gateway by sending a test SMS to a mobile number
+ */
+export const testSmsGateway = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const { mobile, message, dltTemplateId } = req.body;
+
+    if (!mobile) {
+      return res.status(400).json({ success: false, message: 'Mobile number is required for testing' });
+    }
+
+    const result = await sendSms({
+      tenantId,
+      mobile,
+      templateType: 'LOGIN_2FA',
+      variables: { otp: '123456', var: '123456' },
+      customMessage: message,
+      dltTemplateId
+    });
+
+    if (result.success) {
+      return res.status(200).json({ success: true, message: 'Test SMS sent successfully', details: result });
+    } else {
+      return res.status(400).json({ success: false, message: result.message || 'Failed to send test SMS', reason: result.reason });
+    }
+  } catch (error: any) {
+    console.error('Error testing SMS gateway:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to test SMS gateway' });
+  }
+};
+
+/**
+ * POST /admin/test-digio
+ * Test Digio API credentials and connectivity
+ */
+export const testDigioConfig = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { digioClientId, digioClientSecret, digioEnvironment } = req.body;
+    const tenantId = req.user?.tenantId;
+    let clientId = digioClientId ? String(digioClientId).trim() : '';
+    let clientSecret = digioClientSecret ? String(digioClientSecret).trim() : '';
+    let environment = digioEnvironment;
+
+    if (!clientId || !clientSecret) {
+      const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
+      if (tenant) {
+        clientId = clientId || tenant.digioClientId;
+        clientSecret = clientSecret || tenant.digioClientSecret;
+        environment = environment || tenant.digioEnvironment;
+      }
+    }
+
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'Both Digio Client ID and Client Secret are required for testing.'
+      });
+    }
+
+    if (clientId === clientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'Digio Client ID and Client Secret cannot be identical. Please paste the actual Secret Key generated from your Digio dashboard.'
+      });
+    }
+
+    const testRes = await testDigioConnection(clientId, clientSecret, environment);
+    return res.json(testRes);
+  } catch (err: any) {
+    console.error('Error testing Digio credentials:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Error communicating with Digio API'
+    });
+  }
+};
+

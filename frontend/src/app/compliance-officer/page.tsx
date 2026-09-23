@@ -823,6 +823,7 @@ function AdminDashboardContent() {
   const [digioClientId, setDigioClientId] = useState('');
   const [digioClientSecret, setDigioClientSecret] = useState('');
   const [digioKycTemplateName, setDigioKycTemplateName] = useState('');
+  const [digioEnvironment, setDigioEnvironment] = useState('SANDBOX');
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -1124,6 +1125,7 @@ function AdminDashboardContent() {
               if (t.digioClientId) setDigioClientId(t.digioClientId);
               if (t.digioClientSecret) setDigioClientSecret(t.digioClientSecret);
               if (t.digioKycTemplateName) setDigioKycTemplateName(t.digioKycTemplateName);
+              if (t.digioEnvironment) setDigioEnvironment(t.digioEnvironment);
               if (t.activePaymentGateway) setActivePaymentGateway(t.activePaymentGateway);
               if (t.razorpayKeyId) setRazorpayKeyId(t.razorpayKeyId);
               if (t.razorpayKeySecret) setRazorpayKeySecret(t.razorpayKeySecret);
@@ -1624,6 +1626,7 @@ function AdminDashboardContent() {
       if (digioClientId) formData.append('digioClientId', digioClientId);
       if (digioClientSecret) formData.append('digioClientSecret', digioClientSecret);
       if (digioKycTemplateName) formData.append('digioKycTemplateName', digioKycTemplateName);
+      if (digioEnvironment) formData.append('digioEnvironment', digioEnvironment);
       if (activePaymentGateway) formData.append('activePaymentGateway', activePaymentGateway);
       if (razorpayKeyId) formData.append('razorpayKeyId', razorpayKeyId);
       if (razorpayKeySecret) formData.append('razorpayKeySecret', razorpayKeySecret);
@@ -1719,6 +1722,10 @@ function AdminDashboardContent() {
     e.preventDefault();
     if (profileNewPassword !== profileConfirmPassword) {
       toast('New passwords do not match!');
+      return;
+    }
+    if (!profileNewPassword || profileNewPassword.length < 8 || profileNewPassword.length > 15) {
+      toast('Password must be between 8 and 15 characters.');
       return;
     }
     setIsChangingPassword(true);
@@ -6293,244 +6300,189 @@ function AdminDashboardContent() {
                       )}
 
                       {/* Add Client Modal */}
+                      {/* Add Client Modal */}
                       {isClientModalOpen && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                          <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+                          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[90vh] overflow-y-auto">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between px-8 py-6 border-b border-slate-400 dark:border-white/10">
+                            <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200 dark:border-white/10">
                               <div>
                                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Register New Client</h3>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Client will be onboarded with KYC_PENDING status</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Quick Direct Onboarding • Zero Manual KYC Paperwork</p>
                               </div>
-                              <button onClick={() => setIsClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
-                                <X className="h-5 w-5" />
-                              </button>
-                            </div>
-
-                            <div className="px-8 py-6 space-y-5">
-                              {/* Personal Info */}
-                              <div>
-                                <p className="text-[10px] text-primary-600 dark:text-primary-400 font-bold uppercase tracking-widest mb-3">Personal Information</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Full Name *</label>
-                                    <input
-                                      value={clientName}
-                                      onChange={e => setClientName(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Rahul Sharma"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Email *</label>
-                                    <input
-                                      type="email"
-                                      value={clientEmail}
-                                      onChange={e => {
-                                        setClientEmail(e.target.value);
-                                        if (clientDuplicateField === 'email') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="rahul@example.com"
-                                    />
-                                    {clientDuplicateField === 'email' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Mobile *</label>
-                                    <input
-                                      type="tel"
-                                      value={clientMobile}
-                                      onChange={e => {
-                                        setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
-                                        if (clientDuplicateField === 'mobile') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="10-digit mobile number"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'mobile' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Password *</label>
-                                    <input
-                                      type="password" value={clientPassword}
-                                      onChange={e => setClientPassword(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="Min 8 characters"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Occupation</label>
-                                    <input
-                                      value={clientOccupation}
-                                      onChange={e => setClientOccupation(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Engineer, Business"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* KYC Info */}
-                              <div>
-                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest mb-3">KYC Documents</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">PAN Number *</label>
-                                    <input
-                                      value={clientPan}
-                                      onChange={e => {
-                                        setClientPan(formatPan(e.target.value));
-                                        if (clientDuplicateField === 'pan') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'pan' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="ABCDE1234F"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'pan' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Aadhaar Number *</label>
-                                    <input
-                                      value={clientAadhaar}
-                                      onChange={e => {
-                                        setClientAadhaar(formatAadhaar(e.target.value));
-                                        if (clientDuplicateField === 'aadhaar') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'aadhaar' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="12-digit Aadhaar"
-                                      maxLength={12}
-                                    />
-                                    {clientDuplicateField === 'aadhaar' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Category</label>
-                                    <select
-                                      value={clientCategory}
-                                      onChange={e => setClientCategory(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none transition"
-                                    >
-                                      <option value="INDIVIDUAL">INDIVIDUAL</option>
-                                      <option value="NON_INDIVIDUAL">NON-INDIVIDUAL</option>
-                                    </select>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Address */}
-                              <div>
-                                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest mb-3">Address</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Address Line 1</label>
-                                    <input
-                                      value={clientAddress}
-                                      onChange={e => setClientAddress(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Street address, Area"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">State</label>
-                                    <select
-                                      value={clientState}
-                                      onChange={e => {
-                                        setClientState(e.target.value);
-                                        setClientCity(''); // Reset city when state changes
-                                      }}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition appearance-none"
-                                    >
-                                      <option value="">Select State</option>
-                                      {states.map((s: any) => (
-                                        <option key={s.id} value={s.name}>{s.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">City</label>
-                                    <input
-                                      value={clientCity}
-                                      onChange={e => setClientCity(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Select or type city"
-                                      list="client-city-options"
-                                      disabled={!clientState}
-                                    />
-                                    <datalist id="client-city-options">
-                                      {clientCities.map((c: any, i: number) => (
-                                        <option key={i} value={c.name} />
-                                      ))}
-                                    </datalist>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">ZIP Code</label>
-                                    <input
-                                      value={clientZip}
-                                      onChange={e => setClientZip(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="400001"
-                                      maxLength={6}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 flex space-x-3">
                               <button
                                 onClick={() => {
                                   setIsClientModalOpen(false);
                                   setClientDuplicateField(null);
                                   setClientDuplicateError(null);
                                 }}
-                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
+                                className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            <div className="px-8 py-6 space-y-5">
+                              {/* SEBI DigiLocker Notice */}
+                              <div className="p-3.5 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl flex items-start space-x-3">
+                                <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                                <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                  <span className="font-bold">DigiLocker KYC Compliance:</span> Full Legal Name, PAN, Aadhaar, DOB, and Address will be automatically fetched directly from DigiLocker when the client logs in. Direct registration requires no manual KYC paperwork or OTP verification.
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Email */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Email Address *
+                                  </label>
+                                  <input
+                                    type="email"
+                                    value={clientEmail}
+                                    onChange={e => {
+                                      setClientEmail(e.target.value);
+                                      if (clientDuplicateField === 'email') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="client@example.com"
+                                  />
+                                  {clientDuplicateField === 'email' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Mobile */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Mobile Number *
+                                  </label>
+                                  <input
+                                    type="tel"
+                                    value={clientMobile}
+                                    onChange={e => {
+                                      setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
+                                      if (clientDuplicateField === 'mobile') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="10-digit mobile number"
+                                    maxLength={10}
+                                  />
+                                  {clientDuplicateField === 'mobile' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Password */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Password *
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+                                        let pwd = 'Pass@';
+                                        for (let i = 0; i < 5; i++) {
+                                          pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+                                        }
+                                        setClientPassword(pwd);
+                                        toast.success(`Generated password: ${pwd}`);
+                                      }}
+                                      className="text-[10px] font-semibold text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
+                                    >
+                                      <span>🎲 Generate Password</span>
+                                    </button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={clientPassword}
+                                    onChange={e => setClientPassword(e.target.value)}
+                                    maxLength={15}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition font-mono"
+                                    placeholder="8 - 15 characters (e.g. Pass@12345)"
+                                  />
+                                </div>
+
+                                {/* Full Name (Optional) */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Full Name <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                                    </label>
+                                    <span className="text-[10px] text-slate-400">Synced from DigiLocker on KYC</span>
+                                  </div>
+                                  <input
+                                    value={clientName}
+                                    onChange={e => setClientName(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Rahul Sharma"
+                                  />
+                                </div>
+
+                                {/* Category */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Category
+                                  </label>
+                                  <select
+                                    value={clientCategory}
+                                    onChange={e => setClientCategory(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-primary-500 focus:outline-none transition cursor-pointer"
+                                  >
+                                    <option value="INDIVIDUAL">INDIVIDUAL</option>
+                                    <option value="HUF">HUF</option>
+                                    <option value="COMPANY">COMPANY</option>
+                                    <option value="PARTNERSHIP">PARTNERSHIP / LLP</option>
+                                  </select>
+                                </div>
+
+                                {/* Occupation */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Occupation
+                                  </label>
+                                  <input
+                                    value={clientOccupation}
+                                    onChange={e => setClientOccupation(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Salaried, Business"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-8 py-5 border-t border-slate-200 dark:border-white/10 flex space-x-3">
+                              <button
+                                onClick={() => {
+                                  setIsClientModalOpen(false);
+                                  setClientDuplicateField(null);
+                                  setClientDuplicateError(null);
+                                }}
+                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
                               >
                                 Cancel
                               </button>
                               <button
                                 disabled={clientModalLoading}
                                 onClick={async () => {
-                                  // Validate required fields
-                                  if (!clientName.trim() || clientName.trim().length < 2) {
-                                    toast('Full name must be at least 2 characters.'); return;
-                                  }
                                   const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                                  if (!emailRx.test(clientEmail)) {
-                                    setWizardErrors({ coEmail: 'Please enter a valid email address.' }); return;
+                                  if (!emailRx.test(clientEmail.trim())) {
+                                    toast.error('Please enter a valid email address.'); return;
                                   }
-                                  if (!/^\d{10}$/.test(clientMobile)) {
-                                    toast('Mobile number must be exactly 10 digits.'); return;
+                                  if (!/^\d{10}$/.test(clientMobile.trim())) {
+                                    toast.error('Mobile number must be exactly 10 digits.'); return;
                                   }
-                                  if (!clientPassword || clientPassword.length < 8) {
-                                    toast('Password must be at least 8 characters.'); return;
-                                  }
-                                  const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-                                  if (!panRx.test(clientPan)) {
-                                    toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
-                                  }
-                                  if (!/^\d{12}$/.test(clientAadhaar)) {
-                                    toast('Aadhaar number must be exactly 12 digits.'); return;
+                                  if (!clientPassword || clientPassword.length < 8 || clientPassword.length > 15) {
+                                    toast.error('Password must be between 8 and 15 characters.'); return;
                                   }
 
                                   setClientModalLoading(true);
@@ -6539,38 +6491,42 @@ function AdminDashboardContent() {
                                   try {
                                     const payload = {
                                       tenantId: user.tenantId,
-                                      name: clientName.trim(),
-                                      email: clientEmail.trim(),
+                                      name: clientName.trim() || clientEmail.split('@')[0],
+                                      email: clientEmail.trim().toLowerCase(),
                                       mobile: clientMobile.trim(),
                                       password: clientPassword,
-                                      pan: clientPan.toUpperCase(),
-                                      aadhaar: clientAadhaar,
-                                      category: clientCategory,
+                                      category: clientCategory || 'INDIVIDUAL',
                                       occupation: clientOccupation || undefined,
-                                      addressLine1: clientAddress || undefined,
-                                      city: clientCity || undefined,
-                                      state: clientState || undefined,
-                                      zipCode: clientZip || undefined,
                                       createdById: user.id
                                     };
                                     const r = await api.registerClient(payload);
                                     if (r.success) {
                                       setIsClientModalOpen(false);
+                                      setClientName('');
+                                      setClientEmail('');
+                                      setClientMobile('');
+                                      setClientPassword('');
+                                      setClientOccupation('');
+                                      setClientCategory('INDIVIDUAL');
                                       loadData();
-                                      toast.success(`Client "${clientName}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete KYC.`);
+                                      toast.success(`Client "${payload.name}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete DigiLocker KYC.`);
                                     }
                                   } catch (e: any) {
                                     if (e.duplicateField) {
                                       setClientDuplicateField(e.duplicateField);
-                                      setClientDuplicateError(e.message || 'Duplicate value detected.');
+                                      const msg = e.duplicateField === 'email'
+                                        ? 'This email address is already registered.'
+                                        : 'This mobile number is already registered.';
+                                      setClientDuplicateError(msg);
+                                      toast.error(msg);
                                     } else {
-                                      toast.error(e.message || 'Failed to register client.');
+                                      toast.error(e.message || (e.errors && e.errors[0]) || 'Failed to register client.');
                                     }
                                   } finally {
                                     setClientModalLoading(false);
                                   }
                                 }}
-                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition"
+                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-600/20"
                               >
                                 {clientModalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                                 <span>{clientModalLoading ? 'Registering...' : 'Register Client'}</span>
@@ -7948,7 +7904,18 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret</label>
                                   <input type="password" value={digioClientSecret} onChange={e => setDigioClientSecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Leave blank to keep unchanged" />
                                 </div>
-                                <div className="md:col-span-2">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Environment</label>
+                                  <select
+                                    value={digioEnvironment}
+                                    onChange={e => setDigioEnvironment(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs"
+                                  >
+                                    <option value="SANDBOX">Sandbox / UAT (ext.digio.in:444) — For Testing (ACK/AIK keys)</option>
+                                    <option value="PRODUCTION">Production (api.digio.in) — Live Accounts</option>
+                                  </select>
+                                </div>
+                                <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio KYC Template Name</label>
                                   <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_TEMPLATE_1" />
                                 </div>
@@ -7980,6 +7947,8 @@ function AdminDashboardContent() {
                                 <input
                                   type="password" required
                                   minLength={8}
+                                  maxLength={15}
+                                  placeholder="8 - 15 characters"
                                   value={profileNewPassword}
                                   onChange={e => setProfileNewPassword(e.target.value)}
                                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
@@ -7990,6 +7959,8 @@ function AdminDashboardContent() {
                                 <input
                                   type="password" required
                                   minLength={8}
+                                  maxLength={15}
+                                  placeholder="8 - 15 characters"
                                   value={profileConfirmPassword}
                                   onChange={e => setProfileConfirmPassword(e.target.value)}
                                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"

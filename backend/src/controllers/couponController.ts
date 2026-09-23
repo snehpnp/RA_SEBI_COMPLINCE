@@ -175,7 +175,7 @@ export const applyCoupon = async (req: AuthenticatedRequest, res: Response) => {
        }
 
        let discountAmount = 0;
-       if (coupon.discountType === 'FLAT') {
+       if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
          discountAmount = coupon.discountValue;
        } else if (coupon.discountType === 'PERCENTAGE') {
          discountAmount = (purchaseAmount * coupon.discountValue) / 100;

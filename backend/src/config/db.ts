@@ -97,5 +97,7 @@ export const EmailTemplate = createDynamicModelProxy('EmailTemplate');
 export const EmailVerification = createDynamicModelProxy('EmailVerification');
 export const SystemSetting = createDynamicModelProxy('SystemSetting');
 export const AdminPermission = createDynamicModelProxy('AdminPermission');
+export const Occupation = createDynamicModelProxy('Occupation');
+export const SmsTemplate = createDynamicModelProxy('SmsTemplate');
 
 export default dynamicDb;

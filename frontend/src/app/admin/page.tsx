@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -35,6 +35,8 @@ import { generatePeriodicReport } from '@/utils/generatePeriodicReport';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, Cell, XAxis, YAxis, Tooltip } from 'recharts';
 import CouponsManager from '../../components/CouponsManager';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
+import OccupationsManager from '../../components/admin/OccupationsManager';
+import SecuritySettingsTab from '../../components/admin/SecuritySettingsTab';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -424,7 +426,9 @@ function AdminDashboardContent() {
   const activeTabRef = useRef<string>('dashboard');
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const [dashboardStats, setDashboardStats] = useState({ staffCount: 0, clientCount: 0, researchCount: 0, planCount: 0 });
-  const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'reports' | 'policies' | 'billing' | 'security'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'reports' | 'policies' | 'billing' | 'security' | 'occupations'>('general');
+  const [tenantDetails, setTenantDetails] = useState<any>(null);
+  const [availableOccupations, setAvailableOccupations] = useState<any[]>([]);
   const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc'>('payments');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
@@ -710,6 +714,16 @@ function AdminDashboardContent() {
   const [isEditClientModalOpen, setIsEditClientModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<any>(null);
 
+  useEffect(() => {
+    if (isClientModalOpen || isEditClientModalOpen || activeTab === 'clients') {
+      api.getOccupations().then(res => {
+        if (res && res.success && Array.isArray(res.data)) {
+          setAvailableOccupations(res.data);
+        }
+      }).catch(() => {});
+    }
+  }, [isClientModalOpen, isEditClientModalOpen, activeTab]);
+
   // Assign Plan by Admin modal state
   const [isAssignPlanModalOpen, setIsAssignPlanModalOpen] = useState(false);
   const [assignPlanClient, setAssignPlanClient] = useState<any>(null);
@@ -955,6 +969,9 @@ function AdminDashboardContent() {
   const [digioClientId, setDigioClientId] = useState('');
   const [digioClientSecret, setDigioClientSecret] = useState('');
   const [digioKycTemplateName, setDigioKycTemplateName] = useState('');
+  const [digioEnvironment, setDigioEnvironment] = useState('SANDBOX');
+  const [testingDigio, setTestingDigio] = useState(false);
+  const [digioTestResult, setDigioTestResult] = useState<{ success: boolean; message: string } | null>(null);
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -968,6 +985,18 @@ function AdminDashboardContent() {
   const [stripeSecretKey, setStripeSecretKey] = useState('');
   const [verifyingGateway, setVerifyingGateway] = useState(false);
   const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
+
+  // Payment Gateway & QR/UPI Configuration States
+  const [paymentGatewayEnabled, setPaymentGatewayEnabled] = useState(true);
+  const [upiQrEnabled, setUpiQrEnabled] = useState(false);
+  const [upiId, setUpiId] = useState('');
+  const [upiPayeeName, setUpiPayeeName] = useState('');
+  const [upiQrImageUrl, setUpiQrImageUrl] = useState('');
+  const [upiQrImageFile, setUpiQrImageFile] = useState<File | null>(null);
+  const [upiQrImagePreview, setUpiQrImagePreview] = useState('');
+  const [upiInstructions, setUpiInstructions] = useState('');
+  const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications'>('all');
+  const [selectedScreenshotModal, setSelectedScreenshotModal] = useState<{ url: string; clientName: string; planName: string; utr: string; amount: number } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
@@ -1230,6 +1259,7 @@ function AdminDashboardContent() {
 
             const t = comp.data.data;
             if (t) {
+              setTenantDetails(t);
               if (t.logoUrl) setTenantLogoUrl(t.logoUrl);
               if (t.address) setOrgAddress(t.address);
               if (t.website) setOrgWebsite(t.website);
@@ -1257,6 +1287,7 @@ function AdminDashboardContent() {
               if (t.digioClientId) setDigioClientId(t.digioClientId);
               if (t.digioClientSecret) setDigioClientSecret(t.digioClientSecret);
               if (t.digioKycTemplateName) setDigioKycTemplateName(t.digioKycTemplateName);
+              if (t.digioEnvironment) setDigioEnvironment(t.digioEnvironment);
               if (t.activePaymentGateway) setActivePaymentGateway(t.activePaymentGateway);
               if (t.razorpayKeyId) setRazorpayKeyId(t.razorpayKeyId);
               if (t.razorpayKeySecret) setRazorpayKeySecret(t.razorpayKeySecret);
@@ -1267,6 +1298,12 @@ function AdminDashboardContent() {
               if (t.ccavenueWorkingKey) setCcavenueWorkingKey(t.ccavenueWorkingKey);
               if (t.stripePublishableKey) setStripePublishableKey(t.stripePublishableKey);
               if (t.stripeSecretKey) setStripeSecretKey(t.stripeSecretKey);
+              if (t.paymentGatewayEnabled !== undefined) setPaymentGatewayEnabled(Boolean(t.paymentGatewayEnabled));
+              if (t.upiQrEnabled !== undefined) setUpiQrEnabled(Boolean(t.upiQrEnabled));
+              if (t.upiId) setUpiId(t.upiId);
+              if (t.upiPayeeName) setUpiPayeeName(t.upiPayeeName);
+              if (t.upiQrImageUrl) setUpiQrImageUrl(t.upiQrImageUrl);
+              if (t.upiInstructions) setUpiInstructions(t.upiInstructions);
 
               if (t.agreementContent) setAgreementContent(t.agreementContent);
               if (t.welcomeEmailText) setWelcomeEmailText(t.welcomeEmailText);
@@ -1752,6 +1789,7 @@ function AdminDashboardContent() {
       if (digioClientId) formData.append('digioClientId', digioClientId);
       if (digioClientSecret) formData.append('digioClientSecret', digioClientSecret);
       if (digioKycTemplateName) formData.append('digioKycTemplateName', digioKycTemplateName);
+      if (digioEnvironment) formData.append('digioEnvironment', digioEnvironment);
       if (activePaymentGateway) formData.append('activePaymentGateway', activePaymentGateway);
       if (razorpayKeyId) formData.append('razorpayKeyId', razorpayKeyId);
       if (razorpayKeySecret) formData.append('razorpayKeySecret', razorpayKeySecret);
@@ -1762,6 +1800,14 @@ function AdminDashboardContent() {
       if (ccavenueWorkingKey) formData.append('ccavenueWorkingKey', ccavenueWorkingKey);
       if (stripePublishableKey) formData.append('stripePublishableKey', stripePublishableKey);
       if (stripeSecretKey) formData.append('stripeSecretKey', stripeSecretKey);
+      formData.append('paymentGatewayEnabled', String(paymentGatewayEnabled));
+      formData.append('upiQrEnabled', String(upiQrEnabled));
+      formData.append('upiId', (upiId || '').trim());
+      formData.append('upiPayeeName', (upiPayeeName || '').trim());
+      formData.append('upiInstructions', (upiInstructions || '').trim());
+      if (upiQrImageFile) {
+        formData.append('upiQrImage', upiQrImageFile);
+      }
 
       if (agreementContent) formData.append('agreementContent', agreementContent);
 
@@ -1771,6 +1817,11 @@ function AdminDashboardContent() {
         if (data.data) {
           if (data.data.logoUrl) {
             setTenantLogoUrl(data.data.logoUrl);
+          }
+          if (data.data.upiQrImageUrl) {
+            setUpiQrImageUrl(data.data.upiQrImageUrl);
+            setUpiQrImageFile(null);
+            setUpiQrImagePreview('');
           }
           if (data.data.smtpHost) setSmtpHost(data.data.smtpHost);
           if (data.data.smtpPort) setSmtpPort(data.data.smtpPort.toString());
@@ -1840,6 +1891,10 @@ function AdminDashboardContent() {
     e.preventDefault();
     if (profileNewPassword !== profileConfirmPassword) {
       toast('New passwords do not match!');
+      return;
+    }
+    if (!profileNewPassword || profileNewPassword.length < 8 || profileNewPassword.length > 15) {
+      toast('Password must be between 8 and 15 characters.');
       return;
     }
     setIsChangingPassword(true);
@@ -3032,7 +3087,7 @@ function AdminDashboardContent() {
     },
     {
       name: 'Plan',
-      width: '140px',
+      width: '130px',
       selector: (row: any) => row.plan?.name,
       cell: (row: any) => (
         <div className="flex flex-col gap-1 items-start">
@@ -3044,12 +3099,46 @@ function AdminDashboardContent() {
       ),
     },
     {
+      name: 'Coupon',
+      width: '130px',
+      selector: (row: any) => row.coupon?.code || row.couponId?.code || row.couponCode,
+      cell: (row: any) => {
+        const couponCode = row.coupon?.code || row.couponId?.code || row.couponCode;
+        const discount = row.discountApplied || row.discount || row.coupon?.discountValue || row.couponId?.discountValue || 0;
+        if (!couponCode && (!discount || discount === 0)) {
+          return <span className="text-slate-400 text-xs font-mono">-</span>;
+        }
+        return (
+          <div className="space-y-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-mono">
+              🎟️ {couponCode || 'APPLIED'}
+            </span>
+            {discount > 0 && (
+              <span className="block text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                Save ₹{discount}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
       name: 'Amount',
-      width: '120px',
+      width: '130px',
       selector: (row: any) => row.amount,
-      cell: (row: any) => (
-        <span className="font-semibold">INR {row.amount}</span>
-      ),
+      cell: (row: any) => {
+        const discount = row.discountApplied || row.discount || 0;
+        return (
+          <div className="space-y-0.5">
+            <span className="font-bold text-sm text-slate-900 dark:text-white">₹{row.amount}</span>
+            {discount > 0 && (
+              <span className="block text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                (₹{discount} off applied)
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       name: 'Payment Info',
@@ -3067,19 +3156,39 @@ function AdminDashboardContent() {
       width: '140px',
       cell: (row: any) => (
         <div className="text-slate-600 dark:text-slate-400 space-y-1">
-          <div>
-            <button
-              onClick={() => {
-                import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id, `Invoice_${row.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
-              }}
-              className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
-            >
-              Download Invoice
-            </button>
-          </div>
+          {row.status === 'SUCCESS' ? (
+            <div>
+              <button
+                onClick={() => {
+                  import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id, `Invoice_${row.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
+                }}
+                className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
+              >
+                Download Invoice
+              </button>
+            </div>
+          ) : row.status === 'PENDING' ? (
+            <span className="text-[10px] text-amber-500 font-medium italic">Pending Verification</span>
+          ) : (
+            <span className="text-[10px] text-rose-500 font-medium italic">Payment Rejected</span>
+          )}
           {row.receiptUrl && (
-            <div className="text-[10px] pt-1">
-              <span className="text-slate-500">Receipt:</span> <a href={row.receiptUrl} target="_blank" rel="noreferrer" className="underline text-primary-600 font-bold hover:text-primary-700">View</a>
+            <div className="text-[10px] pt-1 flex items-center gap-1">
+              <span className="text-slate-500">Receipt:</span>
+              <button
+                type="button"
+                onClick={() => setSelectedScreenshotModal({
+                  url: row.receiptUrl,
+                  clientName: row.client?.name || row.client?.user?.name || row.clientName || 'Client',
+                  planName: row.plan?.name || row.planName || 'Plan',
+                  utr: row.transactionRef || '',
+                  amount: row.amount
+                })}
+                className="underline text-primary-600 font-bold hover:text-primary-700 flex items-center gap-0.5 cursor-pointer bg-transparent border-0 p-0"
+                title="Click to view payment proof receipt"
+              >
+                <Eye className="w-3 h-3 inline" /> View
+              </button>
             </div>
           )}
         </div>
@@ -3087,13 +3196,220 @@ function AdminDashboardContent() {
     },
     {
       name: 'Status',
-      width: '100px',
+      width: '110px',
       right: true,
-      selector: (row: any) => 'SUCCESS',
-      cell: (row: any) => (
-        <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg text-[10px] font-bold uppercase">Success</span>
-      ),
+      selector: (row: any) => row.status || 'PENDING',
+      cell: (row: any) => {
+        const s = (row.status || 'PENDING').toUpperCase();
+        if (s === 'SUCCESS') {
+          return <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg text-[10px] font-bold uppercase">Success</span>;
+        }
+        if (s === 'PENDING') {
+          return <span className="px-2.5 py-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg text-[10px] font-bold uppercase">Pending</span>;
+        }
+        return <span className="px-2.5 py-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg text-[10px] font-bold uppercase">{s}</span>;
+      },
     }
+  ], []);
+
+  const qrVerificationColumns = useMemo(() => [
+    {
+      name: 'Date',
+      width: '120px',
+      selector: (row: any) => row.createdAt,
+      cell: (row: any) => (
+        <div className="text-slate-700 dark:text-slate-300 font-mono text-xs">
+          {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : 'N/A'}
+          <span className="block text-[10px] text-slate-400">
+            {row.createdAt ? new Date(row.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+          </span>
+        </div>
+      ),
+    },
+    {
+      name: 'Client Details',
+      minWidth: '220px',
+      selector: (row: any) => row.client?.user?.email,
+      cell: (row: any) => (
+        <div className="text-[11px] space-y-0.5 text-slate-600 dark:text-slate-400">
+          <div className="font-bold text-slate-800 dark:text-slate-200">
+            {row.client?.name || row.client?.user?.name || `${row.client?.user?.firstName || ''} ${row.client?.user?.lastName || ''}`.trim() || 'Client'}
+          </div>
+          <div className="flex items-center gap-1"><span className="text-slate-400">Email:</span> {row.client?.user?.email || row.client?.email || 'N/A'}</div>
+          <div className="flex items-center gap-1"><span className="text-slate-400">Mob:</span> {row.client?.user?.mobile || row.client?.mobile || 'N/A'}</div>
+          {row.client?.pan && <div className="flex items-center gap-1"><span className="text-slate-400">PAN:</span> <span className="font-mono uppercase">{row.client.pan}</span></div>}
+        </div>
+      ),
+    },
+    {
+      name: 'Plan & Amount',
+      width: '170px',
+      selector: (row: any) => row.plan?.name,
+      cell: (row: any) => {
+        const couponCode = row.coupon?.code || row.couponId?.code || row.couponCode;
+        const discount = row.discountApplied || row.discount || row.coupon?.discountValue || 0;
+        return (
+          <div className="space-y-0.5">
+            <span className="font-bold text-primary-600 dark:text-primary-400 text-xs block">{row.plan?.name || 'Subscription Plan'}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-900 dark:text-white">₹{row.amount}</span>
+              {discount > 0 && (
+                <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400">
+                  (-₹{discount})
+                </span>
+              )}
+            </div>
+            {couponCode && (
+              <div className="pt-0.5">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-mono">
+                  🎟️ {couponCode}
+                </span>
+              </div>
+            )}
+            {row.plan?.durationMonths && (
+              <span className="block text-[10px] text-slate-400">{row.plan.durationMonths} Months</span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      name: 'UTR / Payment Ref',
+      width: '170px',
+      selector: (row: any) => row.transactionRef,
+      cell: (row: any) => (
+        <div className="space-y-1">
+          <span className="inline-block px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+            {row.paymentMode || 'UPI_QR'}
+          </span>
+          <div className="flex items-center gap-1">
+            <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200 select-all">
+              {row.transactionRef || 'N/A'}
+            </span>
+            {row.transactionRef && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(row.transactionRef);
+                  toast.success('UTR copied!');
+                }}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5"
+                title="Copy UTR"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      name: 'Payment Screenshot Proof',
+      width: '180px',
+      cell: (row: any) => {
+        const proofUrl = row.screenshotUrl || row.receiptUrl;
+        if (!proofUrl) {
+          return <span className="text-[11px] text-slate-400 italic">No screenshot</span>;
+        }
+        const fullUrl = getFullUrl(proofUrl);
+        const clientName = row.client?.name || row.client?.user?.name || 'Client';
+        const planName = row.plan?.name || 'Plan';
+        return (
+          <div className="flex items-center gap-2 py-1">
+            <div
+              onClick={() => setSelectedScreenshotModal({ url: proofUrl, clientName, planName, utr: row.transactionRef || '', amount: row.amount })}
+              className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 cursor-pointer group shrink-0 shadow-sm hover:ring-2 hover:ring-primary-500 transition-all"
+              title="Click to zoom screenshot"
+            >
+              <img src={fullUrl} alt="Payment Proof" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                <Eye className="w-4 h-4 text-white" />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => setSelectedScreenshotModal({ url: proofUrl, clientName, planName, utr: row.transactionRef || '', amount: row.amount })}
+                className="text-[11px] font-bold text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
+              >
+                <Eye className="w-3 h-3" /> View Zoom
+              </button>
+              <a
+                href={fullUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-0.5"
+              >
+                <ExternalLink className="w-2.5 h-2.5" /> Full Tab
+              </a>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      name: 'Status',
+      width: '120px',
+      selector: (row: any) => row.status,
+      cell: (row: any) => {
+        const s = (row.status || 'PENDING').toUpperCase();
+        if (s === 'SUCCESS') {
+          return (
+            <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Verified
+            </span>
+          );
+        }
+        if (s === 'FAILED') {
+          return (
+            <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
+              <X className="w-3 h-3" /> Rejected
+            </span>
+          );
+        }
+        return (
+          <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1 animate-pulse">
+            <Clock className="w-3 h-3" /> Pending
+          </span>
+        );
+      },
+    },
+    {
+      name: 'Action',
+      width: '190px',
+      right: true,
+      cell: (row: any) => {
+        const s = (row.status || 'PENDING').toUpperCase();
+        if (s === 'PENDING') {
+          return (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleVerifyPayment(row.id, 'SUCCESS')}
+                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1"
+                title="Verify payment and assign plan"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Verify &amp; Assign</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleVerifyPayment(row.id, 'FAILED')}
+                className="px-2 py-1.5 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/40 rounded-lg text-xs font-bold transition"
+                title="Reject payment proof"
+              >
+                Reject
+              </button>
+            </div>
+          );
+        }
+        return (
+          <span className="text-[11px] text-slate-400 font-medium">
+            {s === 'SUCCESS' ? 'Plan Assigned' : (row.remarks || 'Closed')}
+          </span>
+        );
+      },
+    },
   ], []);
 
   const activeChecklistColumns = useMemo(() => {
@@ -5011,52 +5327,209 @@ function AdminDashboardContent() {
                     </div>
                   )}
 
-                  {/* PAYMENTS TAB (RESTORED) */}
-                  {activeTab === 'payments' && (
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-end border-b border-slate-300 dark:border-white/5 pb-4">
-                        <div>
-                          <h2 className="text-2xl font-bold tracking-tight">Payment History Desk</h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl">View all successful client payments and subscriptions.</p>
+                  {/* PAYMENTS TAB (RESTORED WITH QR VERIFICATIONS SUB-TAB) */}
+                  {activeTab === 'payments' && (() => {
+                    const qrVerificationsList = allPayments.filter((p: any) => p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI');
+                    const pendingQrCount = qrVerificationsList.filter((p: any) => (p.status || 'PENDING').toUpperCase() === 'PENDING').length;
+
+                    return (
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-300 dark:border-white/5 pb-4">
+                          <div>
+                            <h2 className="text-2xl font-bold tracking-tight">Payment Desk &amp; Verifications</h2>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-xl">
+                              Track payment transactions, gateway receipts, and verify QR/UPI screenshot payment proofs.
+                            </p>
+                          </div>
+                          {(!isStaff || hasPermission('EXPORT_DATA')) && (
+                            <button
+                              onClick={() => {
+                                const exportData = allPayments.map(p => ({
+                                  Payment_ID: p.id,
+                                  Client: p.client?.name || 'Unknown',
+                                  Date: new Date(p.createdAt).toLocaleDateString(),
+                                  Amount: p.amount,
+                                  Plan: p.plan?.name || 'Unknown',
+                                  Transaction_Ref: p.transactionRef,
+                                  Mode: p.paymentMode,
+                                  Status: p.status || 'SUCCESS'
+                                }));
+                                import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Admin_Payments'));
+                              }}
+                              className="flex items-center gap-2 px-4 py-2 bg-slate-800 dark:bg-slate-700 text-white rounded-xl text-xs font-bold hover:bg-slate-700 dark:hover:bg-slate-600 transition shadow-sm"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Export CSV
+                            </button>
+                          )}
                         </div>
-                        {(!isStaff || hasPermission('EXPORT_DATA')) && (
+
+                        {/* Sub-tab Switcher */}
+                        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
                           <button
-                            onClick={() => {
-                              const exportData = allPayments.map(p => ({
-                                Payment_ID: p.id,
-                                Client: p.client?.name || 'Unknown',
-                                Date: new Date(p.createdAt).toLocaleDateString(),
-                                Amount: p.amount,
-                                Plan: p.plan?.name || 'Unknown',
-                                Transaction_Ref: p.transactionRef,
-                                Status: 'SUCCESS'
-                              }));
-                              import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Admin_Payments'));
-                            }}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-800 dark:bg-slate-700 text-white rounded-xl text-xs font-bold hover:bg-slate-700 dark:hover:bg-slate-600 transition"
+                            type="button"
+                            onClick={() => setPaymentSubTab('all')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                              paymentSubTab === 'all'
+                                ? 'bg-primary-600 text-white shadow-md shadow-primary-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
                           >
-                            Export CSV
+                            <CreditCard className="w-4 h-4" />
+                            <span>All Transactions</span>
+                            <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
+                              {allPayments.length}
+                            </span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setPaymentSubTab('qr_verifications')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                              paymentSubTab === 'qr_verifications'
+                                ? 'bg-primary-600 text-white shadow-md shadow-primary-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <QrCode className="w-4 h-4" />
+                            <span>QR &amp; Screenshot Verifications</span>
+                            {pendingQrCount > 0 ? (
+                              <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black animate-pulse">
+                                {pendingQrCount} PENDING
+                              </span>
+                            ) : (
+                              <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
+                                {qrVerificationsList.length}
+                              </span>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* View: All Transactions */}
+                        {paymentSubTab === 'all' && (
+                          <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
+                            <div className="overflow-x-auto">
+                              <DataTable
+                                columns={paymentColumns}
+                                data={allPayments}
+                                pagination
+                                paginationPerPage={10}
+                                highlightOnHover
+                                responsive
+                                customStyles={tableCustomStyles}
+                                theme={isDarkMode ? 'dark' : 'default'}
+                                noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No payment history available.</div>}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* View: QR & Screenshot Verifications */}
+                        {paymentSubTab === 'qr_verifications' && (
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between bg-primary-50 dark:bg-primary-950/30 border border-primary-200 dark:border-primary-500/20 p-4 rounded-2xl text-xs">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-primary-500/20 flex items-center justify-center text-primary-600 dark:text-primary-400 shrink-0">
+                                  <QrCode className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-primary-900 dark:text-primary-200">Pay with QR / UPI Screenshot Queue</h4>
+                                  <p className="text-primary-700/80 dark:text-primary-300/80 mt-0.5">
+                                    Clients who paid via QR/UPI upload their payment screenshot and 12-digit UTR here. Click &quot;Verify &amp; Assign&quot; to activate their subscription immediately.
+                                  </p>
+                                </div>
+                              </div>
+                              {pendingQrCount > 0 && (
+                                <span className="px-3 py-1 rounded-xl bg-amber-500 text-black font-extrabold text-xs shrink-0 shadow-sm animate-pulse">
+                                  {pendingQrCount} Pending Action
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
+                              <div className="overflow-x-auto">
+                                <DataTable
+                                  columns={qrVerificationColumns}
+                                  data={qrVerificationsList}
+                                  pagination
+                                  paginationPerPage={10}
+                                  highlightOnHover
+                                  responsive
+                                  customStyles={tableCustomStyles}
+                                  theme={isDarkMode ? 'dark' : 'default'}
+                                  noDataComponent={
+                                    <div className="p-12 text-center text-slate-500 font-medium space-y-2">
+                                      <QrCode className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                                      <p className="font-bold text-sm text-slate-700 dark:text-slate-300">No QR/UPI Screenshot submissions yet</p>
+                                      <p className="text-xs text-slate-400">When clients upload payment screenshots, they will appear here for verification.</p>
+                                    </div>
+                                  }
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* High-Resolution Screenshot Zoom Modal */}
+                        {selectedScreenshotModal && (
+                          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+                              <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                                <div>
+                                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <QrCode className="w-4 h-4 text-primary-600" />
+                                    Payment Screenshot Proof
+                                  </h3>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                    Client: <span className="font-bold text-slate-800 dark:text-slate-200">{selectedScreenshotModal.clientName}</span> | Plan: <span className="font-bold text-primary-600">{selectedScreenshotModal.planName}</span> | Amount: <span className="font-bold text-emerald-600">₹{selectedScreenshotModal.amount}</span>
+                                  </p>
+                                  {selectedScreenshotModal.utr && (
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                      UTR / Ref: <span className="font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded border border-blue-500/20">{selectedScreenshotModal.utr}</span>
+                                    </p>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedScreenshotModal(null)}
+                                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                                >
+                                  <X className="w-5 h-5" />
+                                </button>
+                              </div>
+
+                              <div className="max-h-[65vh] overflow-auto flex items-center justify-center bg-slate-950 rounded-2xl p-3 border border-slate-800">
+                                <img
+                                  src={getFullUrl(selectedScreenshotModal.url)}
+                                  alt="Payment Proof Full"
+                                  className="max-h-[60vh] w-auto max-w-full object-contain rounded-xl shadow-lg"
+                                />
+                              </div>
+
+                              <div className="flex justify-between items-center pt-2">
+                                <a
+                                  href={getFullUrl(selectedScreenshotModal.url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs font-bold text-primary-600 hover:text-primary-700 flex items-center gap-1.5 hover:underline"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  Open Original in New Tab
+                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedScreenshotModal(null)}
+                                  className="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition"
+                                >
+                                  Close Viewer
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         )}
                       </div>
-
-                      <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
-                        <div className="overflow-x-auto">
-                          <DataTable
-                            columns={paymentColumns}
-                            data={allPayments}
-                            pagination
-                            paginationPerPage={10}
-                            highlightOnHover
-                            responsive
-                            customStyles={tableCustomStyles}
-                            theme={isDarkMode ? 'dark' : 'default'}
-                            noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No payment history available.</div>}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* SEBI CHECKLIST TAB */}
                   {activeTab === 'checklist' && (() => {
@@ -6572,242 +7045,192 @@ function AdminDashboardContent() {
                       {/* Add Client Modal */}
                       {isClientModalOpen && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                          <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+                          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[90vh] overflow-y-auto">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between px-8 py-6 border-b border-slate-400 dark:border-white/10">
+                            <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200 dark:border-white/10">
                               <div>
                                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Register New Client</h3>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Client will be onboarded with KYC_PENDING status</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Quick Direct Onboarding • Zero Manual KYC Paperwork</p>
                               </div>
-                              <button onClick={() => setIsClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
-                                <X className="h-5 w-5" />
-                              </button>
-                            </div>
-
-                            <div className="px-8 py-6 space-y-5">
-                              {/* Personal Info */}
-                              <div>
-                                <p className="text-[10px] text-primary-600 dark:text-primary-400 font-bold uppercase tracking-widest mb-3">Personal Information</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Full Name *</label>
-                                    <input
-                                      value={clientName}
-                                      onChange={e => setClientName(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Rahul Sharma"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Email *</label>
-                                    <input
-                                      type="email"
-                                      value={clientEmail}
-                                      onChange={e => {
-                                        setClientEmail(e.target.value);
-                                        if (clientDuplicateField === 'email') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="rahul@example.com"
-                                    />
-                                    {clientDuplicateField === 'email' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Mobile *</label>
-                                    <input
-                                      type="tel"
-                                      value={clientMobile}
-                                      onChange={e => {
-                                        setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
-                                        if (clientDuplicateField === 'mobile') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="10-digit mobile number"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'mobile' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Password *</label>
-                                    <input
-                                      type="password" value={clientPassword}
-                                      onChange={e => setClientPassword(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="Min 8 characters"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Occupation</label>
-                                    <input
-                                      value={clientOccupation}
-                                      onChange={e => setClientOccupation(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Engineer, Business"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* KYC Info */}
-                              <div>
-                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest mb-3">KYC Documents</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">PAN Number *</label>
-                                    <input
-                                      value={clientPan}
-                                      onChange={e => {
-                                        setClientPan(formatPan(e.target.value));
-                                        if (clientDuplicateField === 'pan') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'pan' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="ABCDE1234F"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'pan' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Aadhaar Number *</label>
-                                    <input
-                                      value={clientAadhaar}
-                                      onChange={e => {
-                                        setClientAadhaar(formatAadhaar(e.target.value));
-                                        if (clientDuplicateField === 'aadhaar') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'aadhaar' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="12-digit Aadhaar"
-                                      maxLength={12}
-                                    />
-                                    {clientDuplicateField === 'aadhaar' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Category</label>
-                                    <select
-                                      value={clientCategory}
-                                      onChange={e => setClientCategory(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none transition"
-                                    >
-                                      <option value="INDIVIDUAL">INDIVIDUAL</option>
-                                      <option value="NON_INDIVIDUAL">NON-INDIVIDUAL</option>
-                                    </select>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Address */}
-                              <div>
-                                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest mb-3">Address</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Address Line 1</label>
-                                    <input
-                                      value={clientAddress}
-                                      onChange={e => setClientAddress(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Street address, Area"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">State</label>
-                                    <select
-                                      value={clientState}
-                                      onChange={e => {
-                                        setClientState(e.target.value);
-                                        setClientCity(''); // Reset city when state changes
-                                      }}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition appearance-none"
-                                    >
-                                      <option value="">Select State</option>
-                                      {states.map((s: any) => (
-                                        <option key={s.id} value={s.name}>{s.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">City</label>
-                                    <input
-                                      value={clientCity}
-                                      onChange={e => setClientCity(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Select or type city"
-                                      list="client-city-options"
-                                      disabled={!clientState}
-                                    />
-                                    <datalist id="client-city-options">
-                                      {clientCities.map((c: any, i: number) => (
-                                        <option key={i} value={c.name} />
-                                      ))}
-                                    </datalist>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">ZIP Code</label>
-                                    <input
-                                      value={clientZip}
-                                      onChange={e => setClientZip(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="400001"
-                                      maxLength={6}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 flex space-x-3">
                               <button
                                 onClick={() => {
                                   setIsClientModalOpen(false);
                                   setClientDuplicateField(null);
                                   setClientDuplicateError(null);
                                 }}
-                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
+                                className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            <div className="px-8 py-6 space-y-5">
+                              {/* SEBI DigiLocker Notice */}
+                              <div className="p-3.5 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl flex items-start space-x-3">
+                                <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                                <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                  <span className="font-bold">DigiLocker KYC Compliance:</span> Full Legal Name, PAN, Aadhaar, DOB, and Address will be automatically fetched directly from DigiLocker when the client logs in. Admin direct registration requires no manual KYC paperwork or OTP verification.
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Email */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Email Address *
+                                  </label>
+                                  <input
+                                    type="email"
+                                    value={clientEmail}
+                                    onChange={e => {
+                                      setClientEmail(e.target.value);
+                                      if (clientDuplicateField === 'email') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="client@example.com"
+                                  />
+                                  {clientDuplicateField === 'email' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Mobile */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Mobile Number *
+                                  </label>
+                                  <input
+                                    type="tel"
+                                    value={clientMobile}
+                                    onChange={e => {
+                                      setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
+                                      if (clientDuplicateField === 'mobile') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="10-digit mobile number"
+                                    maxLength={10}
+                                  />
+                                  {clientDuplicateField === 'mobile' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Password */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Password *
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+                                        let pwd = 'Pass@';
+                                        for (let i = 0; i < 5; i++) {
+                                          pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+                                        }
+                                        setClientPassword(pwd);
+                                        toast.success(`Generated password: ${pwd}`);
+                                      }}
+                                      className="text-[10px] font-semibold text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
+                                    >
+                                      <span>🎲 Generate Password</span>
+                                    </button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={clientPassword}
+                                    onChange={e => setClientPassword(e.target.value)}
+                                    maxLength={15}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition font-mono"
+                                    placeholder="8 - 15 characters (e.g. Pass@12345)"
+                                  />
+                                </div>
+
+                                {/* Full Name (Optional) */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Full Name <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                                    </label>
+                                    <span className="text-[10px] text-slate-400">Synced from DigiLocker on KYC</span>
+                                  </div>
+                                  <input
+                                    value={clientName}
+                                    onChange={e => setClientName(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Rahul Sharma"
+                                  />
+                                </div>
+
+                                {/* Category */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Category
+                                  </label>
+                                  <select
+                                    value={clientCategory}
+                                    onChange={e => setClientCategory(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-primary-500 focus:outline-none transition cursor-pointer"
+                                  >
+                                    <option value="INDIVIDUAL">INDIVIDUAL</option>
+                                    <option value="HUF">HUF</option>
+                                    <option value="COMPANY">COMPANY</option>
+                                    <option value="PARTNERSHIP">PARTNERSHIP / LLP</option>
+                                  </select>
+                                </div>
+
+                                {/* Occupation */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Occupation
+                                  </label>
+                                  <select
+                                    value={clientOccupation}
+                                    onChange={e => setClientOccupation(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-primary-500 focus:outline-none transition cursor-pointer"
+                                  >
+                                    <option value="">Select Occupation</option>
+                                    {availableOccupations.map((o: any) => (
+                                      <option key={o.id || o._id} value={o.name}>
+                                        {o.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-8 py-5 border-t border-slate-200 dark:border-white/10 flex space-x-3">
+                              <button
+                                onClick={() => {
+                                  setIsClientModalOpen(false);
+                                  setClientDuplicateField(null);
+                                  setClientDuplicateError(null);
+                                }}
+                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
                               >
                                 Cancel
                               </button>
                               <button
                                 disabled={clientModalLoading}
                                 onClick={async () => {
-                                  // Validate required fields
-                                  if (!clientName.trim() || clientName.trim().length < 2) {
-                                    toast('Full name must be at least 2 characters.'); return;
-                                  }
                                   const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                                  if (!emailRx.test(clientEmail)) {
-                                    setWizardErrors({ coEmail: 'Please enter a valid email address.' }); return;
+                                  if (!emailRx.test(clientEmail.trim())) {
+                                    toast.error('Please enter a valid email address.'); return;
                                   }
-                                  if (!/^\d{10}$/.test(clientMobile)) {
-                                    toast('Mobile number must be exactly 10 digits.'); return;
+                                  if (!/^\d{10}$/.test(clientMobile.trim())) {
+                                    toast.error('Mobile number must be exactly 10 digits.'); return;
                                   }
-                                  if (!clientPassword || clientPassword.length < 8) {
-                                    toast('Password must be at least 8 characters.'); return;
-                                  }
-                                  const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-                                  if (!panRx.test(clientPan)) {
-                                    toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
-                                  }
-                                  if (!/^\d{12}$/.test(clientAadhaar)) {
-                                    toast('Aadhaar number must be exactly 12 digits.'); return;
+                                  if (!clientPassword || clientPassword.length < 8 || clientPassword.length > 15) {
+                                    toast.error('Password must be between 8 and 15 characters.'); return;
                                   }
 
                                   setClientModalLoading(true);
@@ -6816,38 +7239,42 @@ function AdminDashboardContent() {
                                   try {
                                     const payload = {
                                       tenantId: user.tenantId,
-                                      name: clientName.trim(),
-                                      email: clientEmail.trim(),
+                                      name: clientName.trim() || clientEmail.split('@')[0],
+                                      email: clientEmail.trim().toLowerCase(),
                                       mobile: clientMobile.trim(),
                                       password: clientPassword,
-                                      pan: clientPan.toUpperCase(),
-                                      aadhaar: clientAadhaar,
-                                      category: clientCategory,
+                                      category: clientCategory || 'INDIVIDUAL',
                                       occupation: clientOccupation || undefined,
-                                      addressLine1: clientAddress || undefined,
-                                      city: clientCity || undefined,
-                                      state: clientState || undefined,
-                                      zipCode: clientZip || undefined,
                                       createdById: user.id
                                     };
                                     const r = await api.registerClient(payload);
                                     if (r.success) {
                                       setIsClientModalOpen(false);
+                                      setClientName('');
+                                      setClientEmail('');
+                                      setClientMobile('');
+                                      setClientPassword('');
+                                      setClientOccupation('');
+                                      setClientCategory('INDIVIDUAL');
                                       loadData();
-                                      toast.success(`Client "${clientName}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete KYC.`);
+                                      toast.success(`Client "${payload.name}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete DigiLocker KYC.`);
                                     }
                                   } catch (e: any) {
                                     if (e.duplicateField) {
                                       setClientDuplicateField(e.duplicateField);
-                                      setClientDuplicateError(e.message || 'Duplicate value detected.');
+                                      const msg = e.duplicateField === 'email'
+                                        ? 'This email address is already registered.'
+                                        : 'This mobile number is already registered.';
+                                      setClientDuplicateError(msg);
+                                      toast.error(msg);
                                     } else {
-                                      toast.error(e.message || 'Failed to register client.');
+                                      toast.error(e.message || (e.errors && e.errors[0]) || 'Failed to register client.');
                                     }
                                   } finally {
                                     setClientModalLoading(false);
                                   }
                                 }}
-                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition"
+                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-600/20"
                               >
                                 {clientModalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                                 <span>{clientModalLoading ? 'Registering...' : 'Register Client'}</span>
@@ -6910,11 +7337,21 @@ function AdminDashboardContent() {
                                     </div>
                                     <div>
                                       <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Occupation</label>
-                                      <input
+                                      <select
                                         value={editClientOccupation}
                                         onChange={e => setEditClientOccupation(e.target.value)}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      />
+                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-primary-500 focus:outline-none transition cursor-pointer"
+                                      >
+                                        <option value="">Select Occupation</option>
+                                        {editClientOccupation && !availableOccupations.some((o: any) => o.name === editClientOccupation) && (
+                                          <option value={editClientOccupation}>{editClientOccupation} (Saved)</option>
+                                        )}
+                                        {availableOccupations.map((o: any) => (
+                                          <option key={o.id || o._id} value={o.name}>
+                                            {o.name}
+                                          </option>
+                                        ))}
+                                      </select>
                                     </div>
                                   </div>
                                 </div>
@@ -7629,7 +8066,9 @@ function AdminDashboardContent() {
                           { id: 'general', label: 'General Info', icon: Settings },
                           { id: 'policies', label: 'Documents & Policies', icon: FileText },
                           { id: 'billing', label: 'Banking & Invoicing', icon: Landmark },
-                          { id: 'integrations', label: 'Integrations', icon: LayoutGrid }
+                          { id: 'integrations', label: 'Integrations', icon: LayoutGrid },
+                          { id: 'security', label: 'Security & SMS', icon: ShieldCheck },
+                          { id: 'occupations', label: 'Manage Occupations', icon: Briefcase }
                         ].map(tab => (
                           <button
                             key={tab.id}
@@ -8126,117 +8565,312 @@ function AdminDashboardContent() {
                             ))}
                           </div>
 
-                          {/* Payment Gateways */}
+                          {/* Payment Gateways & QR / UPI Settings */}
                           {integrationTab === 'payments' && (
-                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
-                              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">💳 Payment Gateways</h3>
-                              <p className="text-xs text-slate-500 mb-4">Configure your payment gateway integration here.</p>
-                              <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Active Payment Gateway</label>
-                                <select value={activePaymentGateway} onChange={e => setActivePaymentGateway(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition">
-                                  <option value="RAZORPAY">Razorpay</option>
-                                  <option value="CASHFREE">Cashfree</option>
-                                  <option value="CCAVENUE">CCAvenue</option>
-                                  <option value="STRIPE">Stripe</option>
-                                </select>
-                              </div>
+                            <div className="space-y-6 animate-fade-in">
+                              {/* 1. ONLINE PAYMENT GATEWAY CARD */}
+                              <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
+                                  <div>
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="p-2 rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                                        <CreditCard className="w-5 h-5" />
+                                      </div>
+                                      <h3 className="text-lg font-bold text-slate-800 dark:text-white">Online Payment Gateway</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                      Enable or disable online payment gateway redirect (Razorpay, CCAvenue, Cashfree, Stripe) for clients.
+                                    </p>
+                                  </div>
 
-                              {activePaymentGateway === 'RAZORPAY' && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Razorpay Key ID</label>
-                                    <input type="text" value={razorpayKeyId} onChange={e => setRazorpayKeyId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Razorpay Key Secret</label>
-                                    <input type="password" value={razorpayKeySecret} onChange={e => setRazorpayKeySecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
+                                  <label className="inline-flex items-center cursor-pointer select-none">
+                                    <span className="mr-3 text-xs font-bold text-slate-700 dark:text-slate-300">
+                                      {paymentGatewayEnabled ? 'Enabled' : 'Disabled'}
+                                    </span>
+                                    <div className="relative">
+                                      <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={paymentGatewayEnabled}
+                                        onChange={e => setPaymentGatewayEnabled(e.target.checked)}
+                                      />
+                                      <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+                                    </div>
+                                  </label>
                                 </div>
-                              )}
 
-                              {activePaymentGateway === 'CASHFREE' && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Cashfree App ID</label>
-                                    <input type="text" value={cashfreeAppId} onChange={e => setCashfreeAppId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Cashfree Secret Key</label>
-                                    <input type="password" value={cashfreeSecretKey} onChange={e => setCashfreeSecretKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                </div>
-                              )}
+                                {paymentGatewayEnabled ? (
+                                  <div className="space-y-4">
+                                    <div>
+                                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Active Payment Gateway</label>
+                                      <select value={activePaymentGateway} onChange={e => setActivePaymentGateway(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition">
+                                        <option value="RAZORPAY">Razorpay</option>
+                                        <option value="CASHFREE">Cashfree</option>
+                                        <option value="CCAVENUE">CCAvenue</option>
+                                        <option value="STRIPE">Stripe</option>
+                                      </select>
+                                    </div>
 
-                              {activePaymentGateway === 'CCAVENUE' && (
-                                <div className="grid grid-cols-1 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">CCAvenue Merchant ID</label>
-                                    <input type="text" value={ccavenueMerchantId} onChange={e => setCcavenueMerchantId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">CCAvenue Access Code</label>
-                                    <input type="text" value={ccavenueAccessCode} onChange={e => setCcavenueAccessCode(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">CCAvenue Working Key</label>
-                                    <input type="password" value={ccavenueWorkingKey} onChange={e => setCcavenueWorkingKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                </div>
-                              )}
+                                    {activePaymentGateway === 'RAZORPAY' && (
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Razorpay Key ID</label>
+                                          <input type="text" value={razorpayKeyId} onChange={e => setRazorpayKeyId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Razorpay Key Secret</label>
+                                          <input type="password" value={razorpayKeySecret} onChange={e => setRazorpayKeySecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                      </div>
+                                    )}
 
-                              {activePaymentGateway === 'STRIPE' && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Stripe Publishable Key</label>
-                                    <input type="text" value={stripePublishableKey} onChange={e => setStripePublishableKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Stripe Secret Key</label>
-                                    <input type="password" value={stripeSecretKey} onChange={e => setStripeSecretKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
-                                  </div>
-                                </div>
-                              )}
+                                    {activePaymentGateway === 'CASHFREE' && (
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Cashfree App ID</label>
+                                          <input type="text" value={cashfreeAppId} onChange={e => setCashfreeAppId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Cashfree Secret Key</label>
+                                          <input type="password" value={cashfreeSecretKey} onChange={e => setCashfreeSecretKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                      </div>
+                                    )}
 
-                              {/* Gateway Live Verification Section */}
-                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
-                                <div className="flex-1">
-                                  {gatewayVerifyResult ? (
-                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
-                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
-                                      <div className="flex-1 min-w-0">
-                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
-                                        {gatewayVerifyResult.mode && (
-                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
-                                            Status: {gatewayVerifyResult.mode} MODE
-                                          </span>
+                                    {activePaymentGateway === 'CCAVENUE' && (
+                                      <div className="grid grid-cols-1 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">CCAvenue Merchant ID</label>
+                                          <input type="text" value={ccavenueMerchantId} onChange={e => setCcavenueMerchantId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">CCAvenue Access Code</label>
+                                          <input type="text" value={ccavenueAccessCode} onChange={e => setCcavenueAccessCode(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">CCAvenue Working Key</label>
+                                          <input type="password" value={ccavenueWorkingKey} onChange={e => setCcavenueWorkingKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {activePaymentGateway === 'STRIPE' && (
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 dark:border-white/10 pt-4 mt-4">
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Stripe Publishable Key</label>
+                                          <input type="text" value={stripePublishableKey} onChange={e => setStripePublishableKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                        <div>
+                                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Stripe Secret Key</label>
+                                          <input type="password" value={stripeSecretKey} onChange={e => setStripeSecretKey(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" />
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Gateway Live Verification Section */}
+                                    <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                      <div className="flex-1">
+                                        {gatewayVerifyResult ? (
+                                          <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                            <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                            <div className="flex-1 min-w-0">
+                                              <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                              {gatewayVerifyResult.mode && (
+                                                <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                                  Status: {gatewayVerifyResult.mode} MODE
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                          </p>
                                         )}
                                       </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={handleVerifyPaymentGateway}
+                                        disabled={verifyingGateway}
+                                        className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                      >
+                                        {verifyingGateway ? (
+                                          <>
+                                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            <span>Verifying Credentials...</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <ShieldCheck className="h-4 w-4" />
+                                            <span>Verify Gateway Connection</span>
+                                          </>
+                                        )}
+                                      </button>
                                     </div>
-                                  ) : (
-                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                  </div>
+                                ) : (
+                                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs flex items-center gap-3">
+                                    <AlertCircle className="w-4 h-4 shrink-0" />
+                                    <span>
+                                      Online Payment Gateway is currently <strong>disabled</strong>. Clients will not see the &quot;Pay Online&quot; button at checkout.
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 2. PAY WITH QR / UPI CONFIGURATION CARD */}
+                              <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
+                                  <div>
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                                        <QrCode className="w-5 h-5" />
+                                      </div>
+                                      <h3 className="text-lg font-bold text-slate-800 dark:text-white">Pay with QR / UPI Settings</h3>
+                                    </div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                      Allow clients to pay directly to your UPI ID or QR code and upload payment screenshot for manual verification and plan assignment.
                                     </p>
-                                  )}
+                                  </div>
+
+                                  <label className="inline-flex items-center cursor-pointer select-none">
+                                    <span className="mr-3 text-xs font-bold text-slate-700 dark:text-slate-300">
+                                      {upiQrEnabled ? 'Enabled' : 'Disabled'}
+                                    </span>
+                                    <div className="relative">
+                                      <input
+                                        type="checkbox"
+                                        className="sr-only peer"
+                                        checked={upiQrEnabled}
+                                        onChange={e => setUpiQrEnabled(e.target.checked)}
+                                      />
+                                      <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                                    </div>
+                                  </label>
                                 </div>
 
-                                <button
-                                  type="button"
-                                  onClick={handleVerifyPaymentGateway}
-                                  disabled={verifyingGateway}
-                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
-                                >
-                                  {verifyingGateway ? (
-                                    <>
-                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                      <span>Verifying Credentials...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <ShieldCheck className="h-4 w-4" />
-                                      <span>Verify Gateway Connection</span>
-                                    </>
-                                  )}
-                                </button>
+                                {upiQrEnabled ? (
+                                  <div className="space-y-5">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                          UPI ID (VPA) <span className="text-rose-500">*</span>
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={upiId}
+                                          onChange={e => setUpiId(e.target.value)}
+                                          placeholder="e.g. yourname@okaxis or company@icici"
+                                          className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3.5 text-xs focus:border-primary-500 outline-none transition font-mono"
+                                        />
+                                        <p className="text-[10px] text-slate-400 mt-1">This UPI ID will be displayed to clients with a 1-click copy button.</p>
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                          Payee / Business Name
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={upiPayeeName}
+                                          onChange={e => setUpiPayeeName(e.target.value)}
+                                          placeholder="e.g. ABC Research Advisory Services"
+                                          className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3.5 text-xs focus:border-primary-500 outline-none transition"
+                                        />
+                                        <p className="text-[10px] text-slate-400 mt-1">Name displayed under the QR code during payment.</p>
+                                      </div>
+                                    </div>
+
+                                    {/* QR Code Upload & Preview */}
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">
+                                        UPI QR Code Image
+                                      </label>
+                                      <div className="flex flex-col sm:flex-row items-start gap-4 p-4 border border-dashed border-slate-300 dark:border-slate-700 rounded-2xl bg-slate-50/50 dark:bg-slate-900/40">
+                                        {(upiQrImagePreview || upiQrImageUrl) ? (
+                                          <div className="relative w-36 h-36 bg-white rounded-2xl p-2 border border-slate-200 shadow-sm shrink-0 flex items-center justify-center">
+                                            <img
+                                              src={upiQrImagePreview || getFullUrl(upiQrImageUrl)}
+                                              alt="UPI QR Code"
+                                              className="w-full h-full object-contain rounded-xl"
+                                            />
+                                          </div>
+                                        ) : (
+                                          <div className="w-36 h-36 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 shrink-0 bg-white/50 dark:bg-slate-800/50">
+                                            <QrCode className="w-10 h-10 mb-1 text-slate-300 dark:text-slate-600" />
+                                            <span className="text-[10px] font-bold">No QR Uploaded</span>
+                                          </div>
+                                        )}
+
+                                        <div className="flex-1 space-y-2.5">
+                                          <p className="text-xs text-slate-600 dark:text-slate-300">
+                                            Upload your official business UPI QR code image (PNG, JPG, or WEBP). Clients will scan this image from any UPI payment app.
+                                          </p>
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            id="upiQrFileInput"
+                                            onChange={e => {
+                                              const file = e.target.files?.[0];
+                                              if (file) {
+                                                setUpiQrImageFile(file);
+                                                setUpiQrImagePreview(URL.createObjectURL(file));
+                                              }
+                                            }}
+                                            className="hidden"
+                                          />
+                                          <div className="flex items-center gap-2">
+                                            <label
+                                              htmlFor="upiQrFileInput"
+                                              className="cursor-pointer inline-flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                                            >
+                                              <Upload className="w-3.5 h-3.5" />
+                                              <span>{(upiQrImagePreview || upiQrImageUrl) ? 'Change QR Image' : 'Upload QR Image'}</span>
+                                            </label>
+
+                                            {(upiQrImagePreview || upiQrImageUrl) && (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setUpiQrImageFile(null);
+                                                  setUpiQrImagePreview('');
+                                                  setUpiQrImageUrl('');
+                                                }}
+                                                className="px-3 py-2 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition"
+                                              >
+                                                Remove
+                                              </button>
+                                            )}
+                                          </div>
+                                          <p className="text-[10px] text-slate-400">Recommended: Square format image (at least 400x400 px).</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Custom Instructions */}
+                                    <div>
+                                      <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                        Custom Instructions for Clients
+                                      </label>
+                                      <textarea
+                                        value={upiInstructions}
+                                        onChange={e => setUpiInstructions(e.target.value)}
+                                        rows={2}
+                                        placeholder="Scan using Google Pay, PhonePe, Paytm or BHIM. After payment, enter the 12-digit UTR and upload the payment screenshot."
+                                        className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs focus:border-primary-500 outline-none transition"
+                                      />
+                                      <p className="text-[10px] text-slate-400 mt-1">This text will be highlighted in yellow above the screenshot upload area.</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs flex items-center gap-3">
+                                    <AlertCircle className="w-4 h-4 shrink-0" />
+                                    <span>
+                                      Pay with QR / UPI is currently <strong>disabled</strong>. Enable it to show the QR/UPI payment button to clients.
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -8299,39 +8933,139 @@ function AdminDashboardContent() {
                           {/* Digio KYC */}
                           {integrationTab === 'kyc' && (
                             <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
-                              <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300 mb-2">Digio KYC & eSign Configuration</h3>
-                              <p className="text-xs text-slate-500 mb-4">Configure your Digio credentials to enable Aadhaar KYC and Agreement eSigning for your clients.</p>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/60">
+                                <div>
+                                  <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Digio KYC &amp; eSign Configuration</h3>
+                                  <p className="text-xs text-slate-500 mt-0.5">Configure your Digio credentials to enable Aadhaar DigiLocker KYC and Advisory Agreement eSigning for clients.</p>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider self-start sm:self-auto ${
+                                  (digioEnvironment || '').toUpperCase() === 'PRODUCTION'
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800'
+                                    : 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-800'
+                                }`}>
+                                  {digioEnvironment || 'SANDBOX'} MODE
+                                </span>
+                              </div>
+
+                              {/* Warning if Client ID and Secret are identical */}
+                              {digioClientId && digioClientSecret && digioClientId.trim() === digioClientSecret.trim() && (
+                                <div className="p-3.5 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 rounded-xl text-xs text-red-600 dark:text-red-400 flex items-start gap-2.5">
+                                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                  <div>
+                                    <p className="font-bold">Credential Warning: Client ID &amp; Secret are identical!</p>
+                                    <p className="mt-0.5 text-[11px] leading-relaxed">
+                                      You have entered the same key in both fields. Digio requires a separate Secret Key generated alongside the Client ID in your Digio Dashboard &gt; Settings &gt; API Keys. Pasting the Client ID into the Secret field causes authentication failures (403 Invalid API Credentials).
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
 
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client ID</label>
-                                  <input type="text" value={digioClientId} onChange={e => setDigioClientId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. DID123XYZ..." />
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Environment</label>
+                                  <select
+                                    value={digioEnvironment}
+                                    onChange={e => setDigioEnvironment(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs"
+                                  >
+                                    <option value="SANDBOX">Sandbox / UAT (ext.digio.in:444) — For Testing (ACK/AIK keys)</option>
+                                    <option value="PRODUCTION">Production (api.digio.in) — Live Accounts</option>
+                                  </select>
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret</label>
-                                  <input type="password" value={digioClientSecret} onChange={e => setDigioClientSecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Leave blank to keep unchanged" />
-                                </div>
-                                <div className="md:col-span-2">
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio KYC Template Name</label>
-                                  <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_TEMPLATE_1" />
+                                  <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_AGREEMENT" />
                                 </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client ID (Access Key)</label>
+                                  <input type="text" value={digioClientId} onChange={e => setDigioClientId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono" placeholder="e.g. ACK2609091655497739..." />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret (Secret Key)</label>
+                                  <input type="password" value={digioClientSecret} onChange={e => setDigioClientSecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono" placeholder="Leave blank to keep unchanged" />
+                                </div>
+                              </div>
+
+                              {/* Test Connection Button and Feedback */}
+                              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                <button
+                                  type="button"
+                                  disabled={testingDigio || !digioClientId}
+                                  onClick={async () => {
+                                    setTestingDigio(true);
+                                    setDigioTestResult(null);
+                                    try {
+                                      const res: any = await api.testDigioConfig({
+                                        digioClientId,
+                                        digioClientSecret,
+                                        digioEnvironment
+                                      });
+                                      setDigioTestResult({
+                                        success: res.success,
+                                        message: res.message || (res.success ? 'Digio connection successful!' : 'Connection test failed')
+                                      });
+                                      if (res.success) {
+                                        toast.success('Digio API connection verified!');
+                                      } else {
+                                        toast.error(res.message || 'Digio connection test failed');
+                                      }
+                                    } catch (err: any) {
+                                      setDigioTestResult({
+                                        success: false,
+                                        message: err.message || 'Failed to communicate with Digio'
+                                      });
+                                      toast.error(err.message || 'Failed to test Digio connection');
+                                    } finally {
+                                      setTestingDigio(false);
+                                    }
+                                  }}
+                                  className="bg-primary-50 dark:bg-primary-950/30 hover:bg-primary-100 dark:hover:bg-primary-900/40 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 font-bold py-2 px-4 rounded-xl text-xs flex items-center gap-2 transition-all disabled:opacity-50"
+                                >
+                                  {testingDigio ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                                  <span>{testingDigio ? 'Testing Digio API...' : '⚡ Test Digio Connection'}</span>
+                                </button>
+
+                                {digioTestResult && (
+                                  <div className={`text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 ${
+                                    digioTestResult.success
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                                      : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
+                                  }`}>
+                                    {digioTestResult.success ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                                    <span>{digioTestResult.message}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
                         </div>
                       )}
 
+                      {settingsTab === 'security' && (
+                        <SecuritySettingsTab
+                          tenantData={tenantDetails || user?.tenant}
+                          onUpdate={async () => {
+                            await loadData(true);
+                          }}
+                        />
+                      )}
+
+                      {settingsTab === 'occupations' && (
+                        <OccupationsManager />
+                      )}
 
                       {/* Save Settings Footer */}
-                      <div className="mt-8 p-6 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/60 rounded-2xl flex items-center justify-between shadow-xl shadow-slate-200/20 dark:shadow-none animate-fade-in">
-                        <div>
-                          <h4 className="font-bold text-slate-800 dark:text-slate-200">Save Your Changes</h4>
-                          <p className="text-xs text-slate-500 mt-1">Make sure to save your settings before leaving this page.</p>
+                      {settingsTab !== 'occupations' && settingsTab !== 'security' && (
+                        <div className="mt-8 p-6 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/60 rounded-2xl flex items-center justify-between shadow-xl shadow-slate-200/20 dark:shadow-none animate-fade-in">
+                          <div>
+                            <h4 className="font-bold text-slate-800 dark:text-slate-200">Save Your Changes</h4>
+                            <p className="text-xs text-slate-500 mt-1">Make sure to save your settings before leaving this page.</p>
+                          </div>
+                          <button onClick={handleSaveSettings} className="bg-primary-600 hover:bg-primary-500 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 hover:shadow-primary-500/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center">
+                            <Save className="h-5 w-5 mr-2" /> Save Settings
+                          </button>
                         </div>
-                        <button onClick={handleSaveSettings} className="bg-primary-600 hover:bg-primary-500 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-primary-500/30 hover:shadow-primary-500/40 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center">
-                          <Save className="h-5 w-5 mr-2" /> Save Settings
-                        </button>
-                      </div>
+                      )}
                     </div>
                   )}
 

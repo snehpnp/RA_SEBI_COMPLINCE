@@ -43,8 +43,10 @@ export interface IAllCompany extends Document {
   digioClientId?: string | null;
   digioClientSecret?: string | null;
   digioKycTemplateName?: string | null;
+  digioEnvironment?: string | null;
   agreementContent?: string | null;
   activePaymentGateway?: string | null;
+  paymentGatewayEnabled?: boolean;
   razorpayKeyId?: string | null;
   razorpayKeySecret?: string | null;
   cashfreeAppId?: string | null;
@@ -54,6 +56,11 @@ export interface IAllCompany extends Document {
   ccavenueWorkingKey?: string | null;
   stripePublishableKey?: string | null;
   stripeSecretKey?: string | null;
+  upiQrEnabled?: boolean;
+  upiId?: string | null;
+  upiPayeeName?: string | null;
+  upiQrImageUrl?: string | null;
+  upiInstructions?: string | null;
   kycFirst?: boolean;
   welcomeEmailText?: string | null;
   termsPdfUrl?: string | null;
@@ -112,8 +119,10 @@ export const AllCompanySchema = new Schema<IAllCompany>(
     digioClientId: { type: String, default: null },
     digioClientSecret: { type: String, default: null },
     digioKycTemplateName: { type: String, default: null },
+    digioEnvironment: { type: String, default: 'SANDBOX' },
     agreementContent: { type: String, default: null },
     activePaymentGateway: { type: String, default: 'RAZORPAY' },
+    paymentGatewayEnabled: { type: Boolean, default: true },
     razorpayKeyId: { type: String, default: null },
     razorpayKeySecret: { type: String, default: null },
     cashfreeAppId: { type: String, default: null },
@@ -123,6 +132,11 @@ export const AllCompanySchema = new Schema<IAllCompany>(
     ccavenueWorkingKey: { type: String, default: null },
     stripePublishableKey: { type: String, default: null },
     stripeSecretKey: { type: String, default: null },
+    upiQrEnabled: { type: Boolean, default: false },
+    upiId: { type: String, default: null },
+    upiPayeeName: { type: String, default: null },
+    upiQrImageUrl: { type: String, default: null },
+    upiInstructions: { type: String, default: null },
     kycFirst: { type: Boolean, default: true },
     welcomeEmailText: { type: String, default: null },
     termsPdfUrl: { type: String, default: null },

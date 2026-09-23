@@ -1275,8 +1275,8 @@ export const updateSuperAdminPassword = async (req: AuthenticatedRequest, res: R
       return res.status(400).json({ success: false, message: 'Incorrect current password' });
     }
 
-    if (newPassword.length < 8) {
-      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters long' });
+    if (newPassword.length < 8 || newPassword.length > 15) {
+      return res.status(400).json({ success: false, message: 'New password must be between 8 and 15 characters long' });
     }
 
     const salt = await bcrypt.genSalt(10);

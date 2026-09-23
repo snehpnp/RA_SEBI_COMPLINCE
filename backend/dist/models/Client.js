@@ -43,14 +43,18 @@ exports.ClientSchema = new mongoose_1.Schema({
     email: { type: String, required: true },
     mobile: { type: String, required: true },
     dob: { type: Date, default: null },
-    pan: { type: String, required: true, unique: true },
-    aadhaar: { type: String, required: true, unique: true },
+    pan: { type: String, default: undefined },
+    aadhaar: { type: String, default: undefined },
     category: { type: String, default: 'INDIVIDUAL' },
     occupation: { type: String, default: null },
     status: { type: String, default: 'ACTIVE' },
+    kycStatus: { type: String, default: 'PENDING' },
+    agreementSigned: { type: Boolean, default: false },
     kraVerified: { type: Boolean, default: false },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null }
-}, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Client' });
+}, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Client', autoIndex: false });
+exports.ClientSchema.index({ pan: 1 }, { unique: true, partialFilterExpression: { pan: { $type: 'string' } } });
+exports.ClientSchema.index({ aadhaar: 1 }, { unique: true, partialFilterExpression: { aadhaar: { $type: 'string' } } });
 // Virtual relations
 exports.ClientSchema.virtual('user', {
     ref: 'User',

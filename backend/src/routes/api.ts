@@ -2,11 +2,11 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp } from '../controllers/authController';
+import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp, verify2FALogin, resend2FAOtp, getSecurityPolicy, requestLoginOtp, loginWithOtp } from '../controllers/authController';
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -22,7 +22,7 @@ import { getStates } from '../controllers/locationController';
 import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus } from '../controllers/kycController';
 import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
-import { getMarketOverview } from '../controllers/marketController';
+import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
 import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
 import { getGlobalBranding, updateGlobalBranding, testSmtpConnection } from '../controllers/systemSettingController';
@@ -30,6 +30,14 @@ import { getTenantPermissions, updateTenantPermissions } from '../controllers/pe
 import { bootstrapTenant, syncTenantUpdate, syncTenantStatus, syncTenantDelete, getTenantSyncConfig } from '../controllers/tenantSyncController';
 import { generateAgreementPdf } from '../services/pdfService';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
+import {
+  getPublicOccupations,
+  getAdminOccupations,
+  createOccupation,
+  updateOccupation,
+  toggleOccupationStatus,
+  deleteOccupation
+} from '../controllers/occupationController';
 
 const router = Router();
 
@@ -116,6 +124,11 @@ const upload = multer({
 // AUTHENTICATION
 // ----------------------------------------------------
 router.post('/auth/login', login);
+router.post('/auth/request-login-otp', requestLoginOtp);
+router.post('/auth/login-with-otp', loginWithOtp);
+router.post('/auth/verify-2fa', verify2FALogin);
+router.post('/auth/resend-2fa', resend2FAOtp);
+router.get('/auth/security-policy', getSecurityPolicy);
 router.post('/auth/refresh', refreshToken);
 router.post('/auth/forgot-password', forgotPassword);
 router.post('/auth/reset-password', resetPassword);
@@ -403,7 +416,8 @@ router.put(
     { name: 'termsPdf', maxCount: 1 },
     { name: 'privacyPdf', maxCount: 1 },
     { name: 'coSignature', maxCount: 1 },
-    { name: 'internalPolicyPdf', maxCount: 1 }
+    { name: 'internalPolicyPdf', maxCount: 1 },
+    { name: 'upiQrImage', maxCount: 1 }
   ]),
   updateTenantSettings
 );
@@ -435,6 +449,111 @@ router.get('/pages', getActivePages);
 router.get('/pages/:slug', getPageBySlug);
 router.get('/complaint-report', getComplaintReport);
 router.get('/complaint-report/history', getComplaintReportHistory);
+
+// Public Occupations Route (for Registration / Signup dropdowns)
+router.get('/occupations', getPublicOccupations);
+
+// Admin Occupations Management Routes
+router.get(
+  '/admin/occupations',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  getAdminOccupations
+);
+router.post(
+  '/admin/occupations',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  createOccupation
+);
+router.put(
+  '/admin/occupations/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  updateOccupation
+);
+router.post(
+  '/admin/occupations/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleOccupationStatus
+);
+router.patch(
+  '/admin/occupations/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleOccupationStatus
+);
+router.delete(
+  '/admin/occupations/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  deleteOccupation
+);
+
+// Admin SMS Templates & Gateway Routes
+router.get(
+  '/admin/sms-templates',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  getSmsTemplates
+);
+router.post(
+  '/admin/sms-templates',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  createSmsTemplate
+);
+router.put(
+  '/admin/sms-templates/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  updateSmsTemplate
+);
+router.post(
+  '/admin/sms-templates/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleSmsTemplateStatus
+);
+router.patch(
+  '/admin/sms-templates/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleSmsTemplateStatus
+);
+router.delete(
+  '/admin/sms-templates/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  deleteSmsTemplate
+);
+router.post(
+  '/admin/sms/test',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  testSmsGateway
+);
+router.post(
+  '/admin/test-digio',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  testDigioConfig
+);
 
 // ==========================================
 router.get(
@@ -822,6 +941,34 @@ router.post(
 );
 
 router.post(
+  '/client/kyc/initiate',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  initiateKyc
+);
+
+router.post(
+  '/client/agreement/initiate',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  initiateAgreementEsign
+);
+
+router.post(
+  '/client/kyc/status',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  updateKycAgreementStatus
+);
+
+router.post(
+  '/client/kyc-agreement/status',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  updateKycAgreementStatus
+);
+
+router.post(
   '/client/kyc/verify',
   authenticateJWT,
   requireRoles(['CLIENT']),
@@ -850,7 +997,7 @@ router.post(
   '/client/payments/manual',
   authenticateJWT,
   requireRoles(['CLIENT']),
-  upload.single('receipt'),
+  upload.fields([{ name: 'receipt', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]),
   submitManualPayment
 );
 router.post(
@@ -1058,6 +1205,12 @@ router.get(
   '/client/market-overview',
   authenticateJWT,
   getMarketOverview
+);
+
+router.get(
+  '/client/news-feed',
+  authenticateJWT,
+  getNewsFeed
 );
 
 router.get(
