@@ -32,13 +32,10 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireAnyPermission = exports.requirePermission = exports.requireRoles = exports.authenticateJWT = void 0;
 const jwt = __importStar(require("jsonwebtoken"));
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = require("../config/db");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 const authenticateJWT = (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -55,58 +52,59 @@ const authenticateJWT = (req, res, next) => {
             // Check user status in DB to auto-logout inactive/suspended users
             try {
                 if (!decoded.isImpersonated) {
-                    const user = await db_1.default.user.findUnique({
-                        where: { id: decoded.id },
-                        select: {
-                            status: true,
-                            tokenVersion: true,
-                            currentSessionId: true,
-                            role: { select: { name: true, allowMultiDeviceLogin: true } },
-                            tenant: { select: { status: true } }
-                        }
-                    });
-                    if (!user || user.status !== 'ACTIVE') {
-                        return res.status(403).json({
-                            success: false,
-                            message: 'Your account has been deactivated. Please contact admin.',
-                            errors: ['User inactive or suspended']
-                        });
+                    let user = await db_1.User.findById(decoded.id)
+                        .populate('role', 'name allowMultiDeviceLogin')
+                        .populate('tenant', 'status')
+                        .select('status tokenVersion currentSessionId roleId tenantId')
+                        .lean();
+                    if (!user) {
+                        user = await db_1.centralModels.User.findById(decoded.id)
+                            .populate('role', 'name allowMultiDeviceLogin')
+                            .populate('tenant', 'status')
+                            .select('status tokenVersion currentSessionId roleId tenantId')
+                            .lean();
                     }
-                    // Session validation
-                    if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
-                        return res.status(401).json({
-                            success: false,
-                            message: 'Session revoked. Please login again.',
-                            errors: ['Token version mismatch']
-                        });
-                    }
-                    if (!user.role.allowMultiDeviceLogin && decoded.sessionId && decoded.sessionId !== user.currentSessionId) {
-                        return res.status(401).json({
-                            success: false,
-                            message: 'Logged out because you logged in from another device.',
-                            errors: ['Single device constraint violated']
-                        });
-                    }
-                    if (user.tenant) {
-                        const tenantStatus = user.tenant.status;
-                        if (tenantStatus === 'DELETED') {
-                            return res.status(403).json({
+                    if (user) {
+                        // Session validation
+                        const decodedTokenVersion = Number(decoded.tokenVersion || 0);
+                        const userTokenVersion = Number(user.tokenVersion || 0);
+                        if (decoded.tokenVersion !== undefined && decodedTokenVersion !== userTokenVersion) {
+                            return res.status(401).json({
                                 success: false,
-                                message: 'Your organization account has been deleted.',
-                                errors: ['User inactive or suspended']
+                                message: 'Session revoked. Please login again.',
+                                errors: ['Token version mismatch']
                             });
                         }
-                        if (tenantStatus === 'SUSPENDED' && user.role.name !== 'CLIENT') {
-                            return res.status(403).json({
+                        const allowMultiDevice = user.role?.allowMultiDeviceLogin ?? (decoded.role === 'SUPER_ADMIN');
+                        if (!allowMultiDevice && decoded.sessionId && user.currentSessionId && decoded.sessionId !== user.currentSessionId) {
+                            return res.status(401).json({
                                 success: false,
-                                message: 'Your organization account is suspended. Please contact super admin.',
-                                errors: ['User inactive or suspended']
+                                message: 'Logged out because you logged in from another device.',
+                                errors: ['Single device constraint violated']
                             });
+                        }
+                        if (user.tenant) {
+                            const tenantStatus = user.tenant.status;
+                            if (tenantStatus === 'DELETED') {
+                                return res.status(403).json({
+                                    success: false,
+                                    message: 'Your organization account has been deleted.',
+                                    errors: ['User inactive or suspended', 'Tenant deleted']
+                                });
+                            }
+                            if (tenantStatus === 'SUSPENDED') {
+                                return res.status(403).json({
+                                    success: false,
+                                    message: 'Your organization account is suspended. Please contact super admin.',
+                                    errors: ['User inactive or suspended', 'Tenant suspended']
+                                });
+                            }
                         }
                     }
                 }
             }
             catch (dbErr) {
+                console.error('[AUTH DB ERROR]:', dbErr);
                 return res.status(500).json({ success: false, message: 'Database error' });
             }
             req.user = {
@@ -171,12 +169,26 @@ const requirePermission = (permission) => {
             return next();
         }
         try {
-            const hasPermission = await db_1.default.rolePermission.findFirst({
-                where: {
-                    role: { name: req.user.role },
-                    permission: { code: permission }
-                }
-            });
+            const role = await db_1.Role.findOne({ name: req.user.role }).lean();
+            if (!role) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access Forbidden',
+                    errors: [`Role not found`]
+                });
+            }
+            const perm = await db_1.Permission.findOne({ code: permission }).lean();
+            if (!perm) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access Forbidden',
+                    errors: [`Permission not found`]
+                });
+            }
+            const hasPermission = await db_1.RolePermission.findOne({
+                roleId: role._id,
+                permissionId: perm._id
+            }).lean();
             if (!hasPermission) {
                 return res.status(403).json({
                     success: false,
@@ -205,16 +217,24 @@ const requireAnyPermission = (permissions) => {
                 errors: ['User not authenticated']
             });
         }
-        if (req.user.role === 'SUPER_ADMIN') {
+        if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
             return next();
         }
         try {
-            const hasPermission = await db_1.default.rolePermission.findFirst({
-                where: {
-                    role: { name: req.user.role },
-                    permission: { code: { in: permissions } }
-                }
-            });
+            const role = await db_1.Role.findOne({ name: req.user.role }).lean();
+            if (!role) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access Forbidden',
+                    errors: [`Role not found`]
+                });
+            }
+            const perms = await db_1.Permission.find({ code: { $in: permissions } }).select('_id').lean();
+            const permIds = perms.map((p) => p._id);
+            const hasPermission = await db_1.RolePermission.findOne({
+                roleId: role._id,
+                permissionId: { $in: permIds }
+            }).lean();
             if (!hasPermission) {
                 return res.status(403).json({
                     success: false,

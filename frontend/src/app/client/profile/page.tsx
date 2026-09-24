@@ -167,7 +167,13 @@ export default function ClientProfilePage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Occupation</label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Briefcase className="h-5 w-5 text-gray-400" /></div>
-                <input type="text" value={formData.occupation} onChange={(e) => setFormData({ ...formData, occupation: e.target.value })} className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500" />
+                <input
+                  type="text"
+                  value={formData.occupation || ''}
+                  readOnly
+                  disabled
+                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 px-4 py-2 text-gray-500 cursor-not-allowed"
+                />
               </div>
             </div>
 

@@ -1,7 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.enforceTenantIsolation = void 0;
-const enforceTenantIsolation = (req, res, next) => {
+const db_1 = require("../config/db");
+const enforceTenantIsolation = async (req, res, next) => {
     if (!req.user) {
         return res.status(401).json({
             success: false,
@@ -13,12 +14,22 @@ const enforceTenantIsolation = (req, res, next) => {
     if (req.user.role === 'SUPER_ADMIN') {
         return next();
     }
-    const userTenantId = req.user.tenantId;
+    let userTenantId = req.user.tenantId;
+    if (!userTenantId) {
+        try {
+            const singleTenant = await db_1.centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await db_1.centralModels.Tenant.findOne().lean();
+            if (singleTenant) {
+                userTenantId = (singleTenant._id || singleTenant.id).toString();
+                req.user.tenantId = userTenantId;
+            }
+        }
+        catch { }
+    }
     if (!userTenantId) {
         return res.status(403).json({
             success: false,
             message: 'Forbidden',
-            errors: ['User does not belong to any tenant company']
+            errors: ['Company setup pending. Please contact admin.']
         });
     }
     // Resolve target tenantId from different request parameters

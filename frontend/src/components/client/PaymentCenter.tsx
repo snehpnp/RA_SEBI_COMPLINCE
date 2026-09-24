@@ -103,48 +103,92 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
     },
     {
       name: 'Plan',
-      cell: (txn: any) => <span className="text-sm font-medium">{typeof txn.plan === 'object' ? txn.plan?.name : 'Premium Plan'}</span>,
+      cell: (txn: any) => {
+        const planName = typeof txn.plan === 'object' ? txn.plan?.name : (txn.planName || 'VIP');
+        const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+        return (
+          <div>
+            <span className="text-sm font-bold text-premium-text block">{planName}</span>
+            {couponCode && (
+              <span className="inline-block mt-0.5 text-[10px] font-bold text-emerald-500 font-mono">
+                Coupon: {couponCode}
+              </span>
+            )}
+          </div>
+        );
+      },
       sortable: true,
+      minWidth: '130px',
+    },
+    {
+      name: 'Coupon',
+      cell: (txn: any) => {
+        const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+        const discount = txn.discountApplied || txn.discountAmount || txn.discount || txn.coupon?.discountValue || 0;
+        if (!couponCode && (!discount || discount === 0)) {
+          return <span className="text-premium-text/40 text-xs font-mono">-</span>;
+        }
+        return (
+          <div className="space-y-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-mono">
+              🎟️ {couponCode || 'APPLIED'}
+            </span>
+            {discount > 0 && (
+              <span className="block text-[10px] font-semibold text-emerald-500">
+                -₹{discount}
+              </span>
+            )}
+          </div>
+        );
+      },
+      sortable: true,
+      minWidth: '120px',
     },
     {
       name: 'Amount',
       cell: (txn: any) => {
-        const basePrice = txn.plan?.price || txn.amount || 0;
-        const discount = txn.discountAmount || txn.discountApplied || 0;
-        const taxableAmount = basePrice - discount;
-        let gst = 0;
-        const totalAmount = txn.amount || txn.amountPaid || 0;
-        if (totalAmount > taxableAmount) {
-          gst = totalAmount - taxableAmount;
-        }
-        
+        const totalAmount = Number(txn.amount || txn.amountPaid || 0);
+        const planPrice = Number(txn.plan?.amount || txn.plan?.price || 0);
+        const discount = Number(txn.discountApplied || txn.discountAmount || txn.discount || 0);
+        const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+
+        const basePrice = planPrice > 0 ? planPrice : (totalAmount / 1.18);
+        const baseDiscount = discount > (basePrice * 0.18) && planPrice > 0 ? Math.round(discount / 1.18) : discount;
+        const taxableAmount = Math.max(0, basePrice - baseDiscount);
+        const gst = taxableAmount * 0.18;
+
         return (
-          <div className="flex flex-col gap-0.5 w-full min-w-[120px]">
-            {totalAmount !== basePrice && (
+          <div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
+            {discount > 0 ? (
               <>
-                <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
-                  <span>Base:</span> <span>₹{basePrice.toFixed(2)}</span>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>Gross Base:</span> <span className="font-mono">₹{basePrice.toFixed(2)}</span>
                 </div>
-                {discount > 0 && (
-                  <div className="text-[10px] text-emerald-500 flex justify-between gap-4">
-                    <span>Discount {txn.coupon?.code && `(${txn.coupon.code})`}:</span> <span>-₹{discount.toFixed(2)}</span>
-                  </div>
-                )}
-                {gst > 0 && (
-                  <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
-                    <span>GST (18%):</span> <span>₹{gst.toFixed(2)}</span>
-                  </div>
-                )}
+                <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
+                  <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
+                </div>
               </>
-            )}
-            <div className="font-bold text-sm flex justify-between gap-4 mt-1 border-t border-premium-border/50 pt-1">
-              <span>Total:</span> <span className="text-premium-primary">₹{totalAmount.toFixed(2)}</span>
+            ) : totalAmount !== basePrice && basePrice > 0 ? (
+              <>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>Base:</span> <span className="font-mono">₹{basePrice.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>GST (18%):</span> <span className="font-mono">₹{(totalAmount - basePrice).toFixed(2)}</span>
+                </div>
+              </>
+            ) : null}
+            <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
+              <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
             </div>
           </div>
         );
       },
       sortable: true,
-      minWidth: '160px',
+      minWidth: '185px',
     },
     {
       name: 'Status',

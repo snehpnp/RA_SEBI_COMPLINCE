@@ -1,7 +1,8 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from './auth';
+import { centralModels } from '../config/db';
 
-export const enforceTenantIsolation = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const enforceTenantIsolation = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   if (!req.user) {
     return res.status(401).json({
       success: false,
@@ -15,13 +16,23 @@ export const enforceTenantIsolation = (req: AuthenticatedRequest, res: Response,
     return next();
   }
 
-  const userTenantId = req.user.tenantId;
+  let userTenantId = req.user.tenantId;
+
+  if (!userTenantId) {
+    try {
+      const singleTenant: any = await centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await centralModels.Tenant.findOne().lean();
+      if (singleTenant) {
+        userTenantId = (singleTenant._id || singleTenant.id).toString();
+        req.user.tenantId = userTenantId;
+      }
+    } catch {}
+  }
 
   if (!userTenantId) {
     return res.status(403).json({
       success: false,
       message: 'Forbidden',
-      errors: ['User does not belong to any tenant company']
+      errors: ['Company setup pending. Please contact admin.']
     });
   }
 

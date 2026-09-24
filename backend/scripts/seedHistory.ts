@@ -1,27 +1,27 @@
-import { PrismaClient } from '@prisma/client';
+import { centralModels, centralConnection } from '../src/services/tenantConnectionManager';
 import { calculateNextDueDate, getCompliancePeriod } from '../src/utils/complianceDateHelper';
 
-const prisma = new PrismaClient();
-
 async function seedHistory() {
-  const tenant = await prisma.tenant.findFirst({ where: { deletedAt: null } });
+  const tenant = await centralModels.Tenant.findOne({ deletedAt: null }).lean();
   if (!tenant) return console.log('No tenant found.');
 
-
   // 1. Wipe existing
-  await prisma.penalty.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.complianceAuditHistory.deleteMany({ where: { tenantId: tenant.id } });
-  await prisma.complianceAudit.deleteMany({ where: { tenantId: tenant.id } });
+  await centralModels.Penalty.deleteMany({ tenantId: tenant._id });
+  await centralModels.ComplianceAuditHistory.deleteMany({ tenantId: tenant._id });
+  await centralModels.ComplianceAudit.deleteMany({ tenantId: tenant._id });
 
-  const admin = await prisma.user.findFirst({ where: { tenantId: tenant.id, role: { name: 'TENANT_ADMIN' } } });
-  const adminId = admin ? admin.id : 'SYSTEM';
+  const adminRole = await centralModels.Role.findOne({ name: 'ADMIN' }).lean();
+  const admin = await centralModels.User.findOne({
+    tenantId: tenant._id,
+    ...(adminRole ? { roleId: adminRole._id } : {})
+  }).lean();
+  const adminId = admin ? admin._id : null;
 
-  const requirements = await prisma.complianceRequirement.findMany({ where: { isActive: true } });
+  const requirements = await centralModels.ComplianceRequirement.find({ isActive: true }).lean();
 
-  let startDate = new Date(2022, 3, 1); // April 1, 2022
+  let startDate = new Date(2022, 3, 1);
   const now = new Date();
 
-  // Create random statuses
   const getRandomStatus = () => {
     const rand = Math.random();
     if (rand < 0.8) return 'COMPLIANT';
@@ -32,80 +32,69 @@ async function seedHistory() {
   for (const rule of requirements) {
     let refDate = new Date(startDate);
     
-    // Check if initialNextDueDate is valid
     let nextDueDate = calculateNextDueDate(rule.frequencyType, rule.serialNo, refDate);
     if (!nextDueDate) continue;
 
-    // Loop through time
     while (nextDueDate && nextDueDate.getTime() < now.getTime()) {
       const period = getCompliancePeriod(rule.frequencyType, refDate);
-
       const status = getRandomStatus();
       
-      const audit = await prisma.complianceAudit.create({
-        data: {
-          tenantId: tenant.id,
-          requirementId: rule.id,
-          status,
-          dueDate: nextDueDate,
-          resolvedAt: status !== 'OVERDUE' ? new Date(nextDueDate.getTime() - 2 * 24 * 60 * 60 * 1000) : null,
-          updatedByUserId: adminId,
-          officerRemarks: status === 'COMPLIANT' ? 'Completed on time' : (status === 'OVERDUE' ? 'Missed deadline' : 'Penalty paid and resolved')
-        }
+      const audit = await centralModels.ComplianceAudit.create({
+        tenantId: tenant._id,
+        requirementId: rule._id,
+        status,
+        dueDate: nextDueDate,
+        resolvedAt: status !== 'OVERDUE' ? new Date(nextDueDate.getTime() - 2 * 24 * 60 * 60 * 1000) : null,
+        updatedByUserId: adminId,
+        officerRemarks: status === 'COMPLIANT' ? 'Completed on time' : (status === 'OVERDUE' ? 'Missed deadline' : 'Penalty paid and resolved')
       });
 
-      await prisma.complianceAuditHistory.create({
-        data: {
-          tenantId: tenant.id,
-          requirementId: rule.id,
-          auditId: audit.id,
-          previousStatus: 'PENDING',
-          newStatus: status,
-          officerRemarks: audit.officerRemarks,
-          updatedByUserId: adminId,
-          updatedByName: 'Seeder',
-          periodLabel: period.label,
-          createdAt: nextDueDate // Fake the creation date
-        }
+      await centralModels.ComplianceAuditHistory.create({
+        tenantId: tenant._id,
+        requirementId: rule._id,
+        auditId: audit._id,
+        previousStatus: 'PENDING',
+        newStatus: status,
+        officerRemarks: audit.officerRemarks,
+        updatedByUserId: adminId,
+        updatedByName: 'Seeder',
+        periodLabel: period.label,
+        createdAt: nextDueDate
       });
 
       if (status === 'OVERDUE' || status === 'PENALTY_RESOLVED') {
         const amountMatch = rule.penaltyAmount?.replace(/,/g, '').match(/\d+/);
         const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
 
-        await prisma.penalty.create({
-          data: {
-            tenantId: tenant.id,
-            auditId: audit.id,
-            amount: penaltyAmt,
-            reason: `Overdue compliance: ${rule.requirement}`,
-            status: status === 'OVERDUE' ? 'PENDING_PAYMENT' : 'PAID'
-          }
+        await centralModels.Penalty.create({
+          tenantId: tenant._id,
+          auditId: audit._id,
+          amount: penaltyAmt,
+          reason: `Overdue compliance: ${rule.requirement}`,
+          status: status === 'OVERDUE' ? 'PENDING_PAYMENT' : 'PAID'
         });
       }
 
-      refDate = new Date(nextDueDate.getTime() + 24 * 60 * 60 * 1000); // add 1 day
+      refDate = new Date(nextDueDate.getTime() + 24 * 60 * 60 * 1000);
       const newDueDate = calculateNextDueDate(rule.frequencyType, rule.serialNo, refDate);
       if (!newDueDate || newDueDate.getTime() <= nextDueDate.getTime()) {
-        break; // Infinite loop guard
+        break;
       }
       nextDueDate = newDueDate;
     }
     
-    // Create the current pending one
     if (nextDueDate && nextDueDate.getTime() >= now.getTime()) {
-      await prisma.complianceAudit.create({
-        data: {
-          tenantId: tenant.id,
-          requirementId: rule.id,
-          status: 'PENDING',
-          dueDate: nextDueDate
-        }
+      await centralModels.ComplianceAudit.create({
+        tenantId: tenant._id,
+        requirementId: rule._id,
+        status: 'PENDING',
+        dueDate: nextDueDate
       });
     }
   }
 
-
+  console.log('History seeded successfully.');
+  await centralConnection.close();
 }
 
-seedHistory().catch(console.error).finally(() => prisma.$disconnect());
+seedHistory().catch(console.error);
