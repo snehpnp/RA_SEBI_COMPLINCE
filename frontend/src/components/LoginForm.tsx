@@ -6,10 +6,21 @@ import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ShieldAlert
 import api from '../services/api';
 import { useBranding } from '@/contexts/BrandingContext';
 
-export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: string; onFlip?: () => void }) {
+export default function LoginForm({
+  defaultRole,
+  onFlip,
+  isAdminPortal
+}: {
+  defaultRole?: string;
+  onFlip?: () => void;
+  isAdminPortal?: boolean;
+}) {
   const { logoUrl, appName } = useBranding();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const roleParam = defaultRole || searchParams?.get('role') || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('role') : null);
+  const isAdmin = Boolean(isAdminPortal || roleParam === 'admin' || (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')));
 
   const [email, setEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -96,8 +107,8 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
       setEmail('superadmin@gmail.com');
       setPassword('Admin@987');
     } else if (roleParam === 'admin') {
-      setEmail('admin@alpharesearch.com');
-      setPassword('Admin@12345');
+      setEmail('admin@gmail.com');
+      setPassword('12345678');
     } else if (roleParam === 'client') {
       setEmail('client@demomail.com');
       setPassword('Admin@12345');
@@ -144,9 +155,15 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
       }
 
       if (res.success) {
+        const user = res.data.user;
+        if (isAdmin && user.role === 'CLIENT') {
+          setIsSubmitting(false);
+          setError('Access restricted: This portal is for Administrators and Staff only. Please use the Client Login.');
+          return;
+        }
+
         setIsSubmitting(false);
         setLoading(true);
-        const user = res.data.user;
         if (user.tenantName) setTenantName(user.tenantName);
         if (user.tenantLogo) setTenantLogo(user.tenantLogo);
 
@@ -371,6 +388,8 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
                 : 'Email Verification'
               : isForgotPassword
               ? 'Reset Password'
+              : isAdmin
+              ? 'Admin & Staff Portal'
               : 'Access Platform'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -384,6 +403,8 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
                 : 'Enter the 6-digit passcode sent to your email address'
               : isForgotPassword
               ? 'Enter your registered email to receive reset instructions'
+              : isAdmin
+              ? 'Enter your administrative credentials to sign in'
               : 'Enter your credentials to authenticate session'}
           </p>
         </div>
@@ -665,33 +686,35 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
           </form>
         ) : !isForgotPassword ? (
           <div>
-            {/* Login Mode Toggle Tabs */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl mb-5 border border-slate-200/80 dark:border-slate-700/60">
-              <button
-                type="button"
-                onClick={() => { setLoginMode('PASSWORD'); setError(null); setStepSuccess(null); }}
-                className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  loginMode === 'PASSWORD'
-                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-                }`}
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>Password Login</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setLoginMode('OTP'); setError(null); setStepSuccess(null); }}
-                className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  loginMode === 'OTP'
-                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>Login with OTP</span>
-              </button>
-            </div>
+            {/* Login Mode Toggle Tabs (Only for client/investors) */}
+            {!isAdmin && (
+              <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl mb-5 border border-slate-200/80 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={() => { setLoginMode('PASSWORD'); setError(null); setStepSuccess(null); }}
+                  className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    loginMode === 'PASSWORD'
+                      ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Password Login</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLoginMode('OTP'); setError(null); setStepSuccess(null); }}
+                  className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    loginMode === 'OTP'
+                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Login with OTP</span>
+                </button>
+              </div>
+            )}
 
             {loginMode === 'OTP' ? (
               <form onSubmit={handleLoginWithOtp} className="space-y-4 animate-in fade-in duration-200">
@@ -848,7 +871,7 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
                       <span>Authenticating...</span>
                     </>
                   ) : (
-                    <span>Authenticate Session</span>
+                    <span>{isAdmin ? 'Sign In to Management Console' : 'Authenticate Session'}</span>
                   )}
                 </button>
               </form>
@@ -864,23 +887,25 @@ export default function LoginForm({ defaultRole, onFlip }: { defaultRole?: strin
                   Forgot Password?
                 </button>
               )}
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Don&apos;t have an account?{' '}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    if (onFlip) {
-                      e.preventDefault();
-                      onFlip();
-                    } else {
-                      router.push('/register');
-                    }
-                  }}
-                  className="text-blue-600 dark:text-blue-400 font-semibold hover:underline cursor-pointer"
-                >
-                  Sign up here
-                </button>
-              </div>
+              {!isAdmin && (
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  Don&apos;t have an account?{' '}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      if (onFlip) {
+                        e.preventDefault();
+                        onFlip();
+                      } else {
+                        router.push('/register');
+                      }
+                    }}
+                    className="text-blue-600 dark:text-blue-400 font-semibold hover:underline cursor-pointer"
+                  >
+                    Sign up here
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ) : (

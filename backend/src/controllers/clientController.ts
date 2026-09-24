@@ -7,6 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
+import { logActivity } from '../services/activityService';
 import { sendWelcomeEmail } from '../services/emailService';
 import { generateAgreementPdf, getTenantComplianceAttachments } from '../services/pdfService';
 import { createKycRequest, getKycStatus, getDocumentStatus, downloadDocument, extractAadhaarDetailsFromDigio } from '../services/digioService';
@@ -243,6 +244,22 @@ export const registerClient = async (req: Request, res: Response) => {
       ipAddress: req.ip
     });
 
+    logActivity({
+      tenantId,
+      actorType: 'CLIENT',
+      actorId: user._id || user.id,
+      actorName: name,
+      actorEmail: email,
+      targetClientId: client._id || client.id,
+      category: 'AUTH',
+      action: 'CLIENT_SIGNUP',
+      title: 'New Client Registered',
+      description: `Registered as ${category || 'INDIVIDUAL'} investor`,
+      status: 'SUCCESS',
+      metadata: { pan, aadhaar, mobile },
+      req
+    });
+
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
 
     try {
@@ -417,6 +434,8 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
 
     let verifiedAadhaarName = '';
     let verifiedMaskedAadhaar = '';
+    let extractedDob: string | null = null;
+    let extractedPan: string | null = null;
     if (req.body.digioResponse) {
       const extracted = extractAadhaarDetailsFromDigio(req.body.digioResponse);
       if (extracted?.aadhaarName) {
@@ -425,13 +444,34 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       if (extracted?.maskedAadhaar) {
         verifiedMaskedAadhaar = extracted.maskedAadhaar;
       }
+      if (extracted?.dob) {
+        extractedDob = extracted.dob;
+      }
+      if (extracted?.panNumber) {
+        extractedPan = extracted.panNumber;
+      }
+
+      const profileUpdates: any = { isDigiLockerLocked: true };
+      if (extracted?.address) profileUpdates.addressLine1 = extracted.address;
+      if (extracted?.city) profileUpdates.city = extracted.city;
+      if (extracted?.state) profileUpdates.state = extracted.state;
+      if (extracted?.zipCode) profileUpdates.zipCode = extracted.zipCode;
+      if (extracted?.dob) profileUpdates.dob = extracted.dob;
+      if (verifiedAadhaarName) profileUpdates.panName = verifiedAadhaarName;
+
+      await dynamicDb.ClientProfile.findOneAndUpdate(
+        { clientId: client._id || client.id },
+        { $set: profileUpdates },
+        { upsert: true }
+      );
     }
 
     const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
     const updateSet: Record<string, any> = {
-      pan,
+      pan: pan || extractedPan,
       ...(aadhaar ? { aadhaar } : {}),
       ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {}),
+      ...(extractedDob ? { dob: extractedDob } : {}),
       status: nextStatus,
       kraVerified: statusInput !== 'FAIL'
     };
@@ -474,6 +514,26 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
         data: { kycStatus: 'MANUAL_REVIEW_REQUIRED' }
       });
     }
+
+    logActivity({
+      tenantId: tenantId!,
+      actorType: 'CLIENT',
+      actorId: req.user!.id,
+      actorName: verifiedAadhaarName || client.name,
+      actorEmail: client.email,
+      targetClientId: client._id || client.id,
+      category: 'KYC_COMPLIANCE',
+      action: 'KYC_VERIFIED',
+      title: 'DigiLocker KYC Verified',
+      description: `PAN (${pan}) & Aadhaar successfully authenticated via DigiLocker UIDAI`,
+      status: 'SUCCESS',
+      metadata: {
+        pan,
+        aadhaar: verifiedMaskedAadhaar || aadhaar,
+        name: verifiedAadhaarName || client.name
+      },
+      req
+    });
 
     return res.status(200).json({
       success: true,
@@ -702,6 +762,30 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
         status: newStatus,
         agreementSigned: true
       }
+    });
+
+    // Log Activity for Client Timeline
+    logActivity({
+      tenantId: client.tenantId || req.user?.tenantId,
+      actorType: 'CLIENT',
+      actorId: client._id || client.id,
+      actorName: signerName || client.name,
+      actorEmail: client.email,
+      targetClientId: client._id || client.id,
+      category: 'KYC_COMPLIANCE',
+      action: 'AGREEMENT_SIGNED',
+      title: 'Advisory Agreement Signed',
+      description: `Client digitally signed the Advisory Agreement via Aadhaar eSign`,
+      status: 'SUCCESS',
+      metadata: {
+        agreementId: agreement?._id || agreement?.id,
+        signerName,
+        maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+        esignMode: 'AADHAAR_ESIGN',
+        agreementUrl,
+        newStatus
+      },
+      req
     });
 
     return res.status(200).json({
@@ -1279,24 +1363,37 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
 };
 
 export const updateClientProfile = async (req: AuthenticatedRequest, res: Response) => {
-  const { addressLine1, city, state, zipCode } = req.body;
+  const { addressLine1, address, city, state, zipCode, mobile, dob, name } = req.body;
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id });
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
 
+    const finalAddress = addressLine1 || address;
     const clientId = client._id || client.id;
+    const profileUpdate: any = {};
+    if (finalAddress !== undefined) profileUpdate.addressLine1 = finalAddress;
+    if (city !== undefined) profileUpdate.city = city;
+    if (state !== undefined) profileUpdate.state = state;
+    if (zipCode !== undefined) profileUpdate.zipCode = zipCode;
+
     const profile = await dynamicDb.ClientProfile.findOneAndUpdate(
       { clientId },
-      {
-        $set: {
-          addressLine1,
-          city,
-          state,
-          zipCode
-        }
-      },
+      { $set: profileUpdate },
       { upsert: true, returnDocument: 'after', lean: true }
     );
+
+    const clientUpdate: any = {};
+    if (finalAddress !== undefined) clientUpdate.address = finalAddress;
+    if (mobile && mobile !== client.mobile) clientUpdate.mobile = mobile;
+    if (dob && dob !== client.dob) clientUpdate.dob = dob;
+    if (name && name !== client.name && !client.kraVerified) clientUpdate.name = name;
+
+    if (Object.keys(clientUpdate).length > 0) {
+      await dynamicDb.Client.findByIdAndUpdate(clientId, { $set: clientUpdate });
+      if (clientUpdate.mobile) {
+        await dynamicDb.User.findByIdAndUpdate(req.user!.id, { $set: { mobile: clientUpdate.mobile } });
+      }
+    }
 
     return res.status(200).json({ success: true, data: profile });
   } catch (error: any) {

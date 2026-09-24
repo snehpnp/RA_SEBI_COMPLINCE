@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ResearchAnalyticsSchema = exports.ResearchAnalytics = exports.ResearchReportSchema = exports.ResearchReport = exports.PaymentSchema = exports.Payment = exports.ConsentHistorySchema = exports.ConsentHistory = exports.ConsentSchema = exports.Consent = exports.AgreementHistorySchema = exports.AgreementHistory = exports.AgreementSchema = exports.Agreement = exports.CouponSchema = exports.Coupon = exports.SubscriptionSchema = exports.Subscription = exports.PlanSchema = exports.Plan = exports.PlanCategorySchema = exports.PlanCategory = exports.ClientIdentityHistorySchema = exports.ClientIdentityHistory = exports.ClientDocumentSchema = exports.ClientDocument = exports.ClientProfileSchema = exports.ClientProfile = exports.ClientSchema = exports.Client = exports.PersonAssociatedSchema = exports.PersonAssociated = exports.StaffSchema = exports.Staff = exports.RolePermissionSchema = exports.RolePermission = exports.PermissionSchema = exports.Permission = exports.RoleSchema = exports.Role = exports.UserSchema = exports.User = exports.AllCompanySchema = exports.AllCompany = exports.TenantSchema = exports.Tenant = exports.SmsTemplateSchema = exports.SmsTemplate = exports.OccupationSchema = exports.Occupation = void 0;
-exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = exports.AuditLogSchema = exports.AuditLog = exports.ComplianceAlertSchema = exports.ComplianceAlert = void 0;
+exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = exports.ActivityLogSchema = exports.ActivityLog = exports.AuditLogSchema = exports.AuditLog = exports.ComplianceAlertSchema = exports.ComplianceAlert = void 0;
 exports.registerTenantModels = registerTenantModels;
 // Import all Schemas & Models
 const Tenant_1 = require("./Tenant");
@@ -79,6 +79,9 @@ Object.defineProperty(exports, "ComplianceAlertSchema", { enumerable: true, get:
 const AuditLog_1 = require("./AuditLog");
 Object.defineProperty(exports, "AuditLog", { enumerable: true, get: function () { return AuditLog_1.AuditLog; } });
 Object.defineProperty(exports, "AuditLogSchema", { enumerable: true, get: function () { return AuditLog_1.AuditLogSchema; } });
+const ActivityLog_1 = require("./ActivityLog");
+Object.defineProperty(exports, "ActivityLog", { enumerable: true, get: function () { return ActivityLog_1.ActivityLog; } });
+Object.defineProperty(exports, "ActivityLogSchema", { enumerable: true, get: function () { return ActivityLog_1.ActivityLogSchema; } });
 const NotificationLog_1 = require("./NotificationLog");
 Object.defineProperty(exports, "NotificationLog", { enumerable: true, get: function () { return NotificationLog_1.NotificationLog; } });
 Object.defineProperty(exports, "NotificationLogSchema", { enumerable: true, get: function () { return NotificationLog_1.NotificationLogSchema; } });
@@ -175,6 +178,7 @@ function registerTenantModels(connection) {
         ResearchAnalytics: (connection.models.ResearchAnalytics || connection.model('ResearchAnalytics', ResearchAnalytics_1.ResearchAnalyticsSchema, 'ResearchAnalytics')),
         ComplianceAlert: (connection.models.ComplianceAlert || connection.model('ComplianceAlert', ComplianceAlert_1.ComplianceAlertSchema, 'ComplianceAlert')),
         AuditLog: (connection.models.AuditLog || connection.model('AuditLog', AuditLog_1.AuditLogSchema, 'AuditLog')),
+        ActivityLog: (connection.models.ActivityLog || connection.model('ActivityLog', ActivityLog_1.ActivityLogSchema, 'ActivityLog')),
         NotificationLog: (connection.models.NotificationLog || connection.model('NotificationLog', NotificationLog_1.NotificationLogSchema, 'NotificationLog')),
         SupportTicket: (connection.models.SupportTicket || connection.model('SupportTicket', SupportTicket_1.SupportTicketSchema, 'SupportTicket')),
         TicketMessage: (connection.models.TicketMessage || connection.model('TicketMessage', TicketMessage_1.TicketMessageSchema, 'TicketMessage')),
@@ -225,6 +229,7 @@ function registerTenantModels(connection) {
         researchAnalytics: models.ResearchAnalytics,
         complianceAlert: models.ComplianceAlert,
         auditLog: models.AuditLog,
+        activityLog: models.ActivityLog,
         notificationLog: models.NotificationLog,
         supportTicket: models.SupportTicket,
         ticketMessage: models.TicketMessage,

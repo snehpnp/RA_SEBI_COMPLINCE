@@ -53,6 +53,7 @@ const pdfService_1 = require("../services/pdfService");
 const axios_1 = __importDefault(require("axios"));
 const smsService_1 = require("../services/smsService");
 const digioService_1 = require("../services/digioService");
+const activityService_1 = require("../services/activityService");
 const maskEmail = (email) => {
     if (!email)
         return email;
@@ -1429,6 +1430,21 @@ const toggleClientStatus = async (req, res) => {
                 companyName: tenantObj?.companyName || 'RAGCP Platform'
             })).catch(e => console.error('[EMAIL] Failed:', e));
         }
+        // Log Activity for Client Timeline
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: 'ADMIN',
+            actorId: req.user.id,
+            actorName: req.user.email || 'Admin',
+            targetClientId: client?._id || clientUser?._id || id,
+            category: 'STAFF_ACTION',
+            action: 'STATUS_CHANGED',
+            title: `Account Status Changed to ${newStatus}`,
+            description: `Account status updated to ${newStatus} by Admin`,
+            status: 'SUCCESS',
+            metadata: { previousStatus: currentStatus, newStatus },
+            req
+        });
         return res.status(200).json({ success: true, message: `Client status updated to ${newStatus}` });
     }
     catch (error) {
@@ -2989,6 +3005,29 @@ const assignPlanByAdmin = async (req, res) => {
             module: 'PAYMENTS',
             newValue: { action: 'ADMIN_PLAN_ASSIGNMENT', clientId, planId, planName: plan.name, remark: adminRemark },
             ipAddress: req.ip
+        });
+        // Log Activity for Client Timeline
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: isAdmin ? 'ADMIN' : 'STAFF',
+            actorId: req.user.id,
+            actorName: assignerName,
+            targetClientId: actualClientId,
+            category: 'SUBSCRIPTION',
+            action: 'PLAN_ASSIGNED',
+            title: `Plan Assigned: ${plan.name}`,
+            description: `Plan "${plan.name}" assigned manually by ${assignerName || 'Admin'} (Ref: ${paymentRefId})`,
+            status: 'SUCCESS',
+            metadata: {
+                planId: plan._id || plan.id,
+                planName: plan.name,
+                paymentRefId,
+                paymentDate,
+                amount: payment?.amount,
+                finalRemark,
+                validityDays: planValidityDays
+            },
+            req
         });
         return res.status(200).json({
             success: true,

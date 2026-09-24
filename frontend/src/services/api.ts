@@ -74,7 +74,10 @@ class ApiClient {
           localStorage.removeItem('user');
           localStorage.removeItem('tenantId');
 
-          const loginPath = '/login';
+          const isAdminRoute = window.location.pathname.startsWith('/admin') ||
+            window.location.pathname.startsWith('/compliance-officer') ||
+            window.location.pathname.startsWith('/researcher');
+          const loginPath = isAdminRoute ? '/admin/login' : '/login';
 
           const isSuspended = (data.errors && (data.errors.includes('Tenant suspended') || data.errors.includes('User suspended'))) ||
             (data.message && data.message.toLowerCase().includes('suspended'));
@@ -525,6 +528,11 @@ class ApiClient {
 
   async getClientCommunicationsAdmin(id: string) {
     return this.request(`/admin/clients/${id}/communications`);
+  }
+
+  async getClientTimelineAdmin(id: string, params?: Record<string, any>) {
+    const query = params ? '?' + new URLSearchParams(Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '') as any).toString() : '';
+    return this.request(`/admin/clients/${id}/timeline${query}`);
   }
 
   async getAdminDeletedClients() {
