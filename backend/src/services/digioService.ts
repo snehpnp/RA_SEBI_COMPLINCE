@@ -36,6 +36,7 @@ export const testDigioConnection = async (
 ) => {
   const baseUrl = getDigioBaseUrl(clientId, environment);
   const auth = getDigioAuthHeader(clientId, clientSecret);
+  console.log("auth", auth, baseUrl)
   try {
     const res = await axios.get(`${baseUrl}/v2/client/document/templates`, {
       headers: { Authorization: auth },
@@ -43,6 +44,7 @@ export const testDigioConnection = async (
     });
     return { success: true, message: 'Digio connection verified successfully!' };
   } catch (err: any) {
+    console.log("err", err.response)
     if (err.response?.status === 401 || err.response?.status === 403) {
       return {
         success: false,

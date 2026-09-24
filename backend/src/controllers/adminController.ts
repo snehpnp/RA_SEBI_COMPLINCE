@@ -334,7 +334,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
         await dynamicDb.User.findByIdAndUpdate(existingPO._id || existingPO.id, {
           $set: { firstName: data.name, mobile: data.mobile, email }
         });
-        
+
         await dynamicDb.Staff.findOneAndUpdate(
           { userId: existingPO._id || existingPO.id },
           {
@@ -597,7 +597,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       title: 'Staff Account Created',
       message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${email}, Password: ${randomPassword}`,
       status: 'SENT'
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Write audit log
     await logAudit({
@@ -1882,7 +1882,7 @@ export const deleteClient = async (req: AuthenticatedRequest, res: Response) => 
 
     const now = new Date();
     const deleteSuffix = `_deleted_${actualClientId}`;
-    
+
     if (clientUser) {
       const newEmail = clientUser.email?.includes('_deleted_') ? clientUser.email : `${clientUser.email}${deleteSuffix}`;
       const newMobile = clientUser.mobile ? (clientUser.mobile.includes('_deleted_') ? clientUser.mobile : `${clientUser.mobile}${deleteSuffix}`) : clientUser.mobile;
@@ -2145,7 +2145,7 @@ export const createCategory = async (req: AuthenticatedRequest, res: Response) =
       name: name.trim().toUpperCase(),
       segments: segments.trim()
     });
-    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => { });
     return res.status(201).json({ success: true, message: 'Category created successfully', data: category });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2169,7 +2169,7 @@ export const updateCategory = async (req: AuthenticatedRequest, res: Response) =
       { $set: { name: name.trim().toUpperCase() } },
       { returnDocument: 'after', lean: true }
     );
-    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, message: 'Category updated successfully', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2186,19 +2186,19 @@ export const toggleCategoryStatus = async (req: AuthenticatedRequest, res: Respo
     if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
 
     const newStatus = category.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    
+
     const updated = await dynamicDb.PlanCategory.findByIdAndUpdate(
       id,
       { $set: { status: newStatus } },
       { returnDocument: 'after', lean: true }
     );
-    
+
     await dynamicDb.Plan.updateMany(
       { categoryId: id },
       { $set: { status: newStatus } }
     );
 
-    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'CATEGORY_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, message: `Category status updated to ${newStatus}`, data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2335,7 +2335,7 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     await logAudit({ tenantId, userId: req.user!.id, action: 'CREATE', module: 'TENANTS', newValue: plan, ipAddress: req.ip });
-    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
     return res.status(201).json({ success: true, message: 'Plan created successfully', data: plan });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2407,7 +2407,7 @@ export const updatePlan = async (req: AuthenticatedRequest, res: Response) => {
     );
 
     await logAudit({ tenantId, userId: req.user!.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
-    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, message: 'Plan updated successfully', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2428,7 +2428,7 @@ export const deletePlan = async (req: AuthenticatedRequest, res: Response) => {
     });
 
     await logAudit({ tenantId, userId: req.user!.id, action: 'DELETE', module: 'TENANTS', oldValue: existing, ipAddress: req.ip });
-    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, message: 'Plan deleted successfully.' });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2451,7 +2451,7 @@ export const restorePlan = async (req: AuthenticatedRequest, res: Response) => {
     );
 
     await logAudit({ tenantId, userId: req.user!.id, action: 'UPDATE', module: 'TENANTS', oldValue: existing, newValue: updated, ipAddress: req.ip });
-    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, message: 'Plan restored successfully.', data: updated });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2469,7 +2469,7 @@ export const togglePlanStatus = async (req: AuthenticatedRequest, res: Response)
 
     const newStatus = existing.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     await dynamicDb.Plan.findByIdAndUpdate(id, { $set: { status: newStatus } });
-    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'PLAN_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, message: `Plan status updated to ${newStatus}` });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -2641,7 +2641,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
         { key: 'GLOBAL_SMTP' },
         { $set: { value: JSON.stringify(finalSmtpConfig) }, $setOnInsert: { key: 'GLOBAL_SMTP' } },
         { upsert: true }
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     // Sync local Branding setting in dynamicDb.SystemSetting if applicable
@@ -2650,7 +2650,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
         const existingSetting: any = await dynamicDb.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean();
         let brandingData: any = {};
         if (existingSetting?.value) {
-          try { brandingData = JSON.parse(existingSetting.value); } catch {}
+          try { brandingData = JSON.parse(existingSetting.value); } catch { }
         }
         brandingData.logoUrl = dataToUpdate.logoUrl;
         if (dataToUpdate.companyName) brandingData.appName = dataToUpdate.companyName;
@@ -2658,19 +2658,19 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
           { key: 'GLOBAL_BRANDING' },
           { key: 'GLOBAL_BRANDING', value: JSON.stringify(brandingData) },
           { upsert: true }
-        ).catch(() => {});
-      } catch {}
+        ).catch(() => { });
+      } catch { }
     }
 
-    await logAudit({ 
-      tenantId: String(tenantId), 
-      userId: req.user!.id, 
-      action: 'UPDATE', 
-      module: 'TENANTS', 
+    await logAudit({
+      tenantId: String(tenantId),
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'TENANTS',
       oldValue: oldTenant,
-      newValue: updated, 
-      ipAddress: req.ip 
-    }).catch(() => {});
+      newValue: updated,
+      ipAddress: req.ip
+    }).catch(() => { });
 
     syncTenantToRemote(String(tenantId), { reason: 'SETTINGS_UPDATE' }).catch((err: any) => {
       console.warn('Background sync for tenant settings update error:', err);
@@ -2872,10 +2872,10 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 1000;
     const skip = (page - 1) * limit;
-    
+
     const search = req.query.search as string;
     let whereClause: any = { tenantId };
-    
+
     if (search) {
       whereClause.transactionRef = { $regex: search, $options: 'i' };
     }
@@ -3011,7 +3011,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
   const { planId, remarks, paymentRefId, paymentDate, couponCode, customAmount, customDays } = req.body;
 
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-  if (!planId)   return res.status(400).json({ success: false, message: 'planId is required.' });
+  if (!planId) return res.status(400).json({ success: false, message: 'planId is required.' });
   if (!paymentRefId) return res.status(400).json({ success: false, message: 'Payment Ref ID is required.' });
   if (!paymentDate) return res.status(400).json({ success: false, message: 'Payment Date is required.' });
 
@@ -3105,7 +3105,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
 
     const discountedBasePrice = plan.price - discountAmount;
     let totalAmount = discountedBasePrice;
-    
+
     if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
       totalAmount = discountedBasePrice * 1.18;
     }
@@ -3211,7 +3211,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       title: 'New Plan Assigned',
       message: `Your account has been assigned the "${plan.name}" plan by your advisor. The plan is now active and valid until ${new Date(Date.now() + assignedDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}.`,
       status: 'SENT'
-    }).catch(() => {});
+    }).catch(() => { });
 
     await logAudit({
       tenantId,
@@ -3290,7 +3290,7 @@ export const updateEmailTemplate = async (req: AuthenticatedRequest, res: Respon
       },
       { upsert: true, returnDocument: 'after', lean: true }
     );
-    syncTenantToRemote(tenantId, { reason: 'EMAIL_TEMPLATE_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'EMAIL_TEMPLATE_UPDATE' }).catch(() => { });
     return res.status(200).json({ success: true, data: updated, message: 'Template updated successfully' });
   } catch (err: any) {
     return res.status(500).json({ success: false, errors: [err.message] });
@@ -3309,7 +3309,7 @@ export const uploadSignature = async (req: AuthenticatedRequest, res: Response) 
       { returnDocument: 'after', lean: true }
     );
 
-    syncTenantToRemote(tenantId, { reason: 'SIGNATURE_UPDATE' }).catch(() => {});
+    syncTenantToRemote(tenantId, { reason: 'SIGNATURE_UPDATE' }).catch(() => { });
 
     res.status(200).json({ success: true, message: 'Signature updated successfully', data: updated });
   } catch (error: any) {
@@ -3334,7 +3334,7 @@ const getDateFilter = (req: AuthenticatedRequest) => {
 const arrayToCsv = (data: any[]) => {
   if (!data || !data.length) return '';
   const headers = Object.keys(data[0]);
-  const rows = data.map(row => 
+  const rows = data.map(row =>
     headers.map(header => {
       let cell = row[header] === null || row[header] === undefined ? '' : row[header].toString();
       cell = cell.replace(/"/g, '""');
@@ -3350,7 +3350,7 @@ const arrayToCsv = (data: any[]) => {
 export const exportInvoicesZip = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
     const filterQuery: any = { tenantId, status: 'SUCCESS' };
@@ -3362,10 +3362,10 @@ export const exportInvoicesZip = async (req: AuthenticatedRequest, res: Response
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="Invoices.zip"');
-    
+
     const archive = new (archiver as any).ZipArchive({ zlib: { level: 9 } });
     archive.pipe(res);
-    
+
     for (const payment of payments) {
       try {
         const client = clients.find(c => String(c._id || c.id) === String(payment.clientId));
@@ -3377,7 +3377,7 @@ export const exportInvoicesZip = async (req: AuthenticatedRequest, res: Response
         console.error(`Failed to generate invoice for payment ${payment._id || payment.id}`, err);
       }
     }
-    
+
     await archive.finalize();
   } catch (err: any) {
     if (!res.headersSent) {
@@ -3389,7 +3389,7 @@ export const exportInvoicesZip = async (req: AuthenticatedRequest, res: Response
 export const exportAgreementsZip = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
     const clients: any[] = await dynamicDb.Client.find({ tenantId }).lean();
@@ -3403,10 +3403,10 @@ export const exportAgreementsZip = async (req: AuthenticatedRequest, res: Respon
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="Agreements.zip"');
-    
+
     const archive = new (archiver as any).ZipArchive({ zlib: { level: 9 } });
     archive.pipe(res);
-    
+
     for (const agreement of agreements) {
       const client = clientMap.get(String(agreement.clientId));
       if (agreement.agreementUrl) {
@@ -3417,7 +3417,7 @@ export const exportAgreementsZip = async (req: AuthenticatedRequest, res: Respon
         }
       }
     }
-    
+
     await archive.finalize();
   } catch (err: any) {
     if (!res.headersSent) {
@@ -3429,7 +3429,7 @@ export const exportAgreementsZip = async (req: AuthenticatedRequest, res: Respon
 export const exportKRAZip = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
     const clients: any[] = await dynamicDb.Client.find({ tenantId }).lean();
@@ -3443,10 +3443,10 @@ export const exportKRAZip = async (req: AuthenticatedRequest, res: Response) => 
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="KRA_Documents.zip"');
-    
+
     const archive = new (archiver as any).ZipArchive({ zlib: { level: 9 } });
     archive.pipe(res);
-    
+
     for (const doc of documents) {
       const client = clientMap.get(String(doc.clientId));
       if (doc.fileUrl) {
@@ -3458,7 +3458,7 @@ export const exportKRAZip = async (req: AuthenticatedRequest, res: Response) => 
         }
       }
     }
-    
+
     await archive.finalize();
   } catch (err: any) {
     if (!res.headersSent) {
@@ -3470,7 +3470,7 @@ export const exportKRAZip = async (req: AuthenticatedRequest, res: Response) => 
 export const exportClientsCSV = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
 
@@ -3630,7 +3630,7 @@ export const exportClientsCSV = async (req: AuthenticatedRequest, res: Response)
 export const exportDeletedClientsCSV = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
     const clientRoles = await dynamicDb.Role.find({
@@ -3689,7 +3689,7 @@ export const exportDeletedClientsCSV = async (req: AuthenticatedRequest, res: Re
 export const exportPaymentsCSV = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
     const payFilter: any = { tenantId };
@@ -3730,7 +3730,7 @@ export const exportPaymentsCSV = async (req: AuthenticatedRequest, res: Response
 export const exportResearchReportsZip = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
-  
+
   try {
     const dateFilter = getDateFilter(req);
     const sigFilter: any = {
@@ -3746,10 +3746,10 @@ export const exportResearchReportsZip = async (req: AuthenticatedRequest, res: R
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="Research_Reports.zip"');
-    
+
     const archive = new (archiver as any).ZipArchive({ zlib: { level: 9 } });
     archive.pipe(res);
-    
+
     for (const signal of signals) {
       if (signal.reportUrl) {
         const filePath = path.join(__dirname, '../../..', signal.reportUrl);
@@ -3762,7 +3762,7 @@ export const exportResearchReportsZip = async (req: AuthenticatedRequest, res: R
         }
       }
     }
-    
+
     await archive.finalize();
   } catch (err: any) {
     if (!res.headersSent) {
@@ -3892,7 +3892,7 @@ export const resetClientKyc = async (req: any, res: any) => {
 
     client.kraVerified = false;
     client.status = 'ACTIVE';
-    
+
     // We should use findByIdAndUpdate or save. If it's a lean doc, we can't save. 
     // Wait, findOne doesn't return lean by default unless we chain .lean().
     // But since dynamicDb might return plain models, save is fine, or findByIdAndUpdate is safer.
@@ -4151,7 +4151,7 @@ export const testDigioConfig = async (req: AuthenticatedRequest, res: Response) 
         message: 'Digio Client ID and Client Secret cannot be identical. Please paste the actual Secret Key generated from your Digio dashboard.'
       });
     }
-
+    console.log("hi",clientId, clientSecret, environment)
     const testRes = await testDigioConnection(clientId, clientSecret, environment);
     return res.json(testRes);
   } catch (err: any) {
