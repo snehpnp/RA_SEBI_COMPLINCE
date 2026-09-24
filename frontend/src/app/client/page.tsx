@@ -8,6 +8,7 @@ import {
   Scale, LogOut, Menu, X, Loader2, ChevronRight, BarChart
 } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 // Components
 import Dashboard from '../../components/client/Dashboard';
@@ -183,7 +184,7 @@ function ClientPortalContent() {
       case 'complaint-status': return <CustomPageView page={{ slug: 'complaint-status', title: 'Complaint Data' }} />;
       case 'support': return <SupportCenter />;
       case 'notifications': return <Notifications />;
-      case 'profile': return <ProfileSettings />;
+      case 'profile': return <ProfileSettings onNavigateToKyc={() => handleTabChange('kyc')} />;
       case 'legal':
         const legalPages = [...pages];
         if (profile?.user?.tenant?.termsPdfUrl) {

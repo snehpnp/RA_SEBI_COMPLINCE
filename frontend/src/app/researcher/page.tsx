@@ -6748,29 +6748,6 @@ function AdminDashboardContent() {
                                       <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Country</span><strong className="text-slate-900 dark:text-white">{selectedClient.profile?.country || 'India'}</strong></div>
                                     </div>
                                   </div>
-
-                                  {/* Investment Profile */}
-                                  <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4 md:col-span-2">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Risk & Investment Profile</h4>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Risk Profile</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.riskProfile || 'MODERATE'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Net Worth</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.netWorth ? `₹${selectedClient.profile.netWorth.toLocaleString()}` : '—'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Investment Limit</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.investmentLimit ? `₹${selectedClient.profile.investmentLimit.toLocaleString()}` : '—'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Investment Period</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.investmentPeriod ? `${selectedClient.profile.investmentPeriod} Months` : '—'}</strong>
-                                      </div>
-                                    </div>
-                                  </div>
                                 </div>
                               )}
 
