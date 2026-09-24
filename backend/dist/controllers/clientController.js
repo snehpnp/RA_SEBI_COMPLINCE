@@ -335,18 +335,24 @@ exports.registerClient = registerClient;
 const initiateDigioKyc = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean();
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).populate('userId').lean();
         if (!client) {
             return res.status(404).json({ success: false, message: 'Client not found.' });
         }
         const tenant = await db_1.default.Tenant.findById(tenantId).lean();
-        if (!tenant?.digioClientId || !tenant?.digioClientSecret || !tenant?.digioKycTemplateName) {
+        if (!tenant?.digioClientId || !tenant?.digioClientSecret) {
             return res.status(400).json({ success: false, message: 'Digio KYC is not configured for this tenant.' });
         }
-        const customerIdentifier = client.email;
-        const customerName = client.name || 'Client';
+        const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
+        const reqUserAny = req.user || {};
+        const customerIdentifier = client.email || userObj.email || reqUserAny.email || client.mobile || userObj.mobile || reqUserAny.mobile;
+        const customerName = client.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || userObj.name || reqUserAny.name || 'Client';
+        if (!customerIdentifier) {
+            return res.status(400).json({ success: false, message: 'Client email or mobile is required to initiate Digio KYC.' });
+        }
+        const templateName = tenant.digioKycTemplateName || 'KYC_AGREEMENT';
         const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
-        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName, customerIdentifier, customerName, tenant.digioEnvironment);
+        const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, templateName, customerIdentifier, customerName, tenant.digioEnvironment);
         return res.status(200).json({
             success: true,
             message: 'Digio KYC request initiated',
@@ -355,6 +361,7 @@ const initiateDigioKyc = async (req, res) => {
         });
     }
     catch (error) {
+        console.error('[Digio KYC] Error initiating KYC:', error);
         return res.status(500).json({ success: false, message: error.message || 'Failed to initiate Digio KYC', errors: [error.message] });
     }
 };

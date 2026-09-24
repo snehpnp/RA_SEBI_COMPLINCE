@@ -11,15 +11,19 @@ const getDigioBaseUrl = (clientId, environment) => {
     if (process.env.DIGIO_API_URL)
         return process.env.DIGIO_API_URL;
     const envUpper = (environment || '').toUpperCase();
-    const isSandbox = envUpper === 'SANDBOX' ||
-        envUpper === 'UAT' ||
-        (clientId || '').startsWith('ACK') ||
+    if (envUpper === 'PRODUCTION' || envUpper === 'PROD' || envUpper === 'LIVE') {
+        return 'https://api.digio.in';
+    }
+    if (envUpper === 'SANDBOX' || envUpper === 'UAT' || envUpper === 'TEST') {
+        return 'https://ext.digio.in:444';
+    }
+    const isSandbox = (clientId || '').startsWith('ACK') ||
         (clientId || '').startsWith('AIK');
     return isSandbox ? 'https://ext.digio.in:444' : 'https://api.digio.in';
 };
 exports.getDigioBaseUrl = getDigioBaseUrl;
 const getDigioAuthHeader = (clientId, clientSecret) => {
-    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const credentials = Buffer.from(`${clientId.trim()}:${clientSecret.trim()}`).toString('base64');
     return `Basic ${credentials}`;
 };
 const isValidName = (n) => {
@@ -38,28 +42,51 @@ const isValidName = (n) => {
 };
 exports.isValidName = isValidName;
 const testDigioConnection = async (clientId, clientSecret, environment) => {
-    const baseUrl = (0, exports.getDigioBaseUrl)(clientId, environment);
-    const auth = getDigioAuthHeader(clientId, clientSecret);
+    const cleanClientId = (clientId || '').trim();
+    const cleanClientSecret = (clientSecret || '').trim();
+    const baseUrl = (0, exports.getDigioBaseUrl)(cleanClientId, environment);
+    const auth = getDigioAuthHeader(cleanClientId, cleanClientSecret);
     try {
-        const res = await axios_1.default.get(`${baseUrl}/v2/client/document/templates`, {
+        await axios_1.default.get(`${baseUrl}/v2/client/document/probe_auth_test_${Date.now()}`, {
             headers: { Authorization: auth },
             timeout: 10000
         });
-        return { success: true, message: 'Digio connection verified successfully!' };
+        return {
+            success: true,
+            message: `Digio connection verified successfully! (${baseUrl.includes('ext.digio') ? 'Sandbox/UAT' : 'Production'} active)`
+        };
     }
     catch (err) {
-        if (err.response?.status === 401 || err.response?.status === 403) {
-            return {
-                success: false,
-                status: err.response.status,
-                message: err.response.data?.message || 'Invalid Digio Client ID or Secret. Please recheck your credentials.'
-            };
-        }
         if (err.response) {
+            const status = err.response.status;
+            // Status 404 (Document not found) or 400 (Invalid ID) confirms HTTP Basic Auth passed!
+            if (status === 404 || status === 400) {
+                return {
+                    success: true,
+                    message: `Digio connection verified successfully! (${baseUrl.includes('ext.digio') ? 'Sandbox/UAT' : 'Production'} active)`
+                };
+            }
+            if (status === 401 || status === 403) {
+                const digioMsg = err.response.data?.message || err.response.data?.error || 'Invalid API credentials';
+                const isAckKey = cleanClientId.startsWith('ACK') || cleanClientId.startsWith('AIK');
+                const isProdUrl = !baseUrl.includes('ext.digio');
+                let hint = '';
+                if (isAckKey && isProdUrl) {
+                    hint = ' (Tip: Your Client ID starts with ACK/AIK which is a Sandbox key. Please switch Digio Environment to Sandbox)';
+                }
+                else if (!isAckKey && !isProdUrl) {
+                    hint = ' (Tip: Your Client ID appears to be a Production key. Please switch Digio Environment to Production)';
+                }
+                return {
+                    success: false,
+                    status,
+                    message: `${digioMsg}.${hint} Please verify Client ID and Secret Key in your Digio dashboard.`
+                };
+            }
             return {
                 success: false,
-                status: err.response.status,
-                message: err.response.data?.message || `Digio returned HTTP ${err.response.status}`
+                status,
+                message: err.response.data?.message || `Digio returned HTTP ${status}`
             };
         }
         return { success: false, message: err.message || 'Could not connect to Digio service.' };
@@ -70,10 +97,11 @@ const createKycRequest = async (clientId, clientSecret, kycTemplateName, custome
     const baseUrl = (0, exports.getDigioBaseUrl)(clientId, environment);
     try {
         const payload = {
-            customer_identifier: customerIdentifier,
-            customer_name: customerName,
-            template_name: kycTemplateName,
-            notify_customer: false
+            customer_identifier: customerIdentifier.trim(),
+            customer_name: (customerName || 'Client').trim(),
+            template_name: kycTemplateName.trim(),
+            notify_customer: false,
+            reference_id: `KYC_${Date.now()}`
         };
         console.log('[Digio KYC] Creating KYC Request payload:', payload, 'to URL:', baseUrl);
         const response = await axios_1.default.post(`${baseUrl}/client/kyc/v2/request/with_template`, payload, {
@@ -85,8 +113,13 @@ const createKycRequest = async (clientId, clientSecret, kycTemplateName, custome
         return response.data;
     }
     catch (error) {
-        console.error('[Digio KYC] Request Error:', error.response?.data || error.message);
-        throw new Error(error.response?.data?.message || 'Failed to create Digio KYC request');
+        const errData = error.response?.data;
+        console.error('[Digio KYC] Request Error:', errData || error.message);
+        const rawMsg = errData?.message || errData?.error || error.message || 'Failed to create Digio KYC request';
+        if (rawMsg.toLowerCase().includes('may not be empty') || errData?.code === 'REQUEST_VALIDATION_FAILED') {
+            throw new Error(`Digio KYC Template "${kycTemplateName}" is not valid or has no active workflow actions in your Digio Studio dashboard. Please create/publish a KYC workflow template (e.g. DIGILOCKER_AADHAAR_PAN) in Digio and update the Template Name in Settings.`);
+        }
+        throw new Error(rawMsg);
     }
 };
 exports.createKycRequest = createKycRequest;

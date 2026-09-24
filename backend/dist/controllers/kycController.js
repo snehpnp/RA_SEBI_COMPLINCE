@@ -20,9 +20,13 @@ const initiateKyc = async (req, res) => {
         if (!tenant || !tenant.digioClientId || !tenant.digioClientSecret) {
             return res.status(400).json({ success: false, message: 'Digio credentials not configured by Admin' });
         }
-        const identifier = client.email || req.user.email;
-        const userObj = client.userId || {};
-        const customerName = client.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || 'Client';
+        const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
+        const reqUserAny = req.user || {};
+        const identifier = client.email || userObj.email || reqUserAny.email || client.mobile || userObj.mobile || reqUserAny.mobile;
+        const customerName = client.name || `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim() || userObj.name || reqUserAny.name || 'Client';
+        if (!identifier) {
+            return res.status(400).json({ success: false, message: 'Client email or mobile is required for Digio KYC' });
+        }
         const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
         const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, tenant.digioKycTemplateName || 'DIGILOCKER_KYC', identifier, customerName, tenant.digioEnvironment);
         res.json({

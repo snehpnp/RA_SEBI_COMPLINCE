@@ -3876,6 +3876,7 @@ const testDigioConfig = async (req, res) => {
                 message: 'Digio Client ID and Client Secret cannot be identical. Please paste the actual Secret Key generated from your Digio dashboard.'
             });
         }
+        console.log("hi", clientId, clientSecret, environment);
         const testRes = await (0, digioService_1.testDigioConnection)(clientId, clientSecret, environment);
         return res.json(testRes);
     }
