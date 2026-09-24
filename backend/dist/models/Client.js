@@ -54,6 +54,7 @@ exports.ClientSchema = new mongoose_1.Schema({
     telegramLinkedAt: { type: Date, default: null },
     telegramAuthToken: { type: String, default: null, index: true },
     telegramAuthTokenExpiresAt: { type: Date, default: null },
+    telegramTargetPlanId: { type: String, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Client' });
 // Virtual relations
