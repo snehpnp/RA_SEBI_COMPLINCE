@@ -1237,9 +1237,10 @@ class ApiClient {
     return this.request('/client/telegram/status');
   }
 
-  async generateClientTelegramToken() {
+  async generateClientTelegramToken(planId?: string) {
     return this.request('/client/telegram/generate-token', {
-      method: 'POST'
+      method: 'POST',
+      body: JSON.stringify(planId ? { planId } : {})
     });
   }
 

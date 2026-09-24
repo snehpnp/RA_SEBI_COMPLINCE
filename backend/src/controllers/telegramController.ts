@@ -1293,6 +1293,7 @@ export const generateClientConnectTokenApi = async (req: AuthenticatedRequest, r
   try {
     const userId = req.user?.id;
     const tenantId = req.user?.tenantId || (req.headers['x-tenant-id'] as string);
+    const planId = req.body?.planId || req.query?.planId;
 
     if (!userId) {
       return res.status(401).json({ success: false, message: 'Authentication required.' });
@@ -1316,7 +1317,7 @@ export const generateClientConnectTokenApi = async (req: AuthenticatedRequest, r
       return res.status(404).json({ success: false, message: 'Client profile not found.' });
     }
 
-    const result = await telegramService.generateClientConnectToken(client._id.toString(), tenantId);
+    const result = await telegramService.generateClientConnectToken(client._id.toString(), tenantId, planId ? String(planId) : undefined);
 
     if (!result.success) {
       return res.status(400).json({ success: false, message: result.error || 'Failed to generate token' });

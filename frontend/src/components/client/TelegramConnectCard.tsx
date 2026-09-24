@@ -71,6 +71,7 @@ export default function TelegramConnectCard({
   const [loading, setLoading] = useState<boolean>(true);
   const [linking, setLinking] = useState<boolean>(false);
   const [unlinking, setUnlinking] = useState<boolean>(false);
+  const [joiningPlanId, setJoiningPlanId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -117,12 +118,47 @@ export default function TelegramConnectCard({
     setTimeout(() => setCopiedId(null), 2500);
   };
 
-  const handleJoin = (linkToOpen: string) => {
-    if (!linkToOpen) {
-      toast.error('Telegram invite link is currently being generated. Please retry in a moment.');
-      return;
+  // Redirect to Telegram Bot with plan token for 1-tap channel button
+  const handleJoinPlan = async (grp: TelegramGroupItem) => {
+    try {
+      setJoiningPlanId(grp.planId || 'active');
+      toast.loading(`Opening Telegram Bot for ${grp.planName}...`, { id: 'join-tg' });
+
+      const res = await api.generateClientTelegramToken(grp.planId);
+      if (res.success && res.data?.deepLink) {
+        toast.success(`Redirecting to Telegram Bot... Click START to enter ${grp.planName} channel!`, { id: 'join-tg' });
+        window.open(res.data.deepLink, '_blank', 'noopener,noreferrer');
+
+        // Poll for linking status in background
+        let pollCount = 0;
+        const interval = setInterval(async () => {
+          pollCount++;
+          if (pollCount > 10) {
+            clearInterval(interval);
+            return;
+          }
+          try {
+            const statusRes = await api.getClientTelegramStatus();
+            if (statusRes?.success && statusRes.data?.isLinked) {
+              setAccountStatus(statusRes.data);
+              clearInterval(interval);
+            }
+          } catch {}
+        }, 3000);
+        return;
+      }
+
+      // Fallback
+      toast.dismiss('join-tg');
+      const fallbackLink = grp.telegramInviteLink || defaultInviteLink || 'https://t.me/Complince_signal_bot';
+      window.open(fallbackLink, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      toast.dismiss('join-tg');
+      const fallbackLink = grp.telegramInviteLink || defaultInviteLink || 'https://t.me/Complince_signal_bot';
+      window.open(fallbackLink, '_blank', 'noopener,noreferrer');
+    } finally {
+      setJoiningPlanId(null);
     }
-    window.open(linkToOpen, '_blank', 'noopener,noreferrer');
   };
 
   // Connect Telegram Account via /start <token> Flow
@@ -288,11 +324,12 @@ export default function TelegramConnectCard({
         {groups.map((grp, idx) => {
           const link = grp.telegramInviteLink || defaultInviteLink || 'https://t.me/Complince_signal_bot';
           const isCopied = copiedId === grp.planId;
+          const isJoining = joiningPlanId === (grp.planId || 'active');
 
           return (
             <div
               key={grp.planId || idx}
-              onClick={() => handleJoin(link)}
+              onClick={() => handleJoinPlan(grp)}
               className="group relative overflow-hidden bg-gradient-to-r from-[#0088cc] via-[#1d98dc] to-[#027ebd] p-4 rounded-2xl text-white shadow-lg shadow-[#0088cc]/15 hover:shadow-xl hover:shadow-[#0088cc]/25 transition-all cursor-pointer border border-white/15"
             >
               <div className="flex items-center justify-between gap-4">
@@ -328,10 +365,21 @@ export default function TelegramConnectCard({
 
                   <button
                     type="button"
+                    disabled={isJoining}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleJoinPlan(grp);
+                    }}
                     className="flex items-center space-x-1.5 bg-white text-[#0088cc] hover:bg-blue-50 px-3.5 py-1.5 rounded-xl font-bold text-xs shadow transition-all group-hover:scale-[1.02]"
                   >
-                    <span>Join Channel</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
+                    {isJoining ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#0088cc]" />
+                    ) : (
+                      <>
+                        <span>Join Channel</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -537,10 +585,15 @@ export default function TelegramConnectCard({
             <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
               <button
                 type="button"
-                onClick={() => handleJoin(effectiveInviteLink)}
+                disabled={joiningPlanId === (activeGroup?.planId || 'active')}
+                onClick={() => activeGroup && handleJoinPlan(activeGroup)}
                 className="flex items-center justify-center space-x-2.5 bg-white text-[#0088cc] hover:bg-blue-50 px-6 py-3.5 rounded-2xl font-extrabold text-sm shadow-xl shadow-black/10 hover:shadow-2xl hover:-translate-y-0.5 active:translate-y-0 transition-all"
               >
-                <Send className="w-4 h-4 text-[#0088cc]" />
+                {joiningPlanId === (activeGroup?.planId || 'active') ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-[#0088cc]" />
+                ) : (
+                  <Send className="w-4 h-4 text-[#0088cc]" />
+                )}
                 <span>Join Channel</span>
                 <ExternalLink className="w-4 h-4 opacity-70" />
               </button>

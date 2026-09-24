@@ -21,6 +21,7 @@ export interface IClient extends Document {
   telegramLinkedAt?: Date | null;
   telegramAuthToken?: string | null;
   telegramAuthTokenExpiresAt?: Date | null;
+  telegramTargetPlanId?: string | null;
   createdById?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
@@ -45,6 +46,7 @@ export const ClientSchema = new Schema<IClient>(
     telegramLinkedAt: { type: Date, default: null },
     telegramAuthToken: { type: String, default: null, index: true },
     telegramAuthTokenExpiresAt: { type: Date, default: null },
+    telegramTargetPlanId: { type: String, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null }
   },
   { ...baseSchemaOptions, collection: 'Client' }

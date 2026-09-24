@@ -847,7 +847,8 @@ export class TelegramService {
    */
   public async generateClientConnectToken(
     clientId: string,
-    tenantId?: string
+    tenantId?: string,
+    planId?: string
   ): Promise<{
     success: boolean;
     token?: string;
@@ -892,6 +893,7 @@ export class TelegramService {
 
       client.telegramAuthToken = token;
       client.telegramAuthTokenExpiresAt = expiresAt;
+      client.telegramTargetPlanId = planId ? String(planId) : null;
       await client.save();
 
       const deepLink = `https://t.me/${botUsername}?start=${token}`;
@@ -1179,23 +1181,34 @@ export class TelegramService {
 
         // 2b. Token provided - Verify token in Client collection
         const now = new Date();
+        let parsedToken = token;
+        let targetPlanIdFromToken: string | null = null;
+        if (token.startsWith('plan_')) {
+          const tParts = token.split('_');
+          if (tParts.length >= 3) {
+            targetPlanIdFromToken = tParts[1];
+            parsedToken = tParts.slice(2).join('_');
+          }
+        }
+
         let client: any = null;
+        const tokenQuery = {
+          $or: [
+            { telegramAuthToken: parsedToken },
+            { telegramAuthToken: token }
+          ],
+          telegramAuthTokenExpiresAt: { $gte: now }
+        };
 
         if (dynamicDb?.Client) {
           try {
-            client = await dynamicDb.Client.findOne({
-              telegramAuthToken: token,
-              telegramAuthTokenExpiresAt: { $gte: now }
-            });
+            client = await dynamicDb.Client.findOne(tokenQuery);
           } catch {}
         }
 
         if (!client && centralModels?.Client) {
           try {
-            client = await centralModels.Client.findOne({
-              telegramAuthToken: token,
-              telegramAuthTokenExpiresAt: { $gte: now }
-            });
+            client = await centralModels.Client.findOne(tokenQuery);
           } catch {}
         }
 
@@ -1206,10 +1219,7 @@ export class TelegramService {
               try {
                 const tConn = await tenantConnectionManager.getTenantConnection(t._id.toString());
                 if (tConn?.models?.Client) {
-                  const foundClient = await tConn.models.Client.findOne({
-                    telegramAuthToken: token,
-                    telegramAuthTokenExpiresAt: { $gte: now }
-                  });
+                  const foundClient = await tConn.models.Client.findOne(tokenQuery);
                   if (foundClient) {
                     client = foundClient;
                     break;
@@ -1224,18 +1234,20 @@ export class TelegramService {
           const failMsg = [
             `❌ <b>Linking Failed</b>\n`,
             `The authorization token is invalid or has expired (tokens are valid for 15 minutes).\n`,
-            `Please return to your <b>Client Dashboard</b> and click <b>"Connect Telegram"</b> to generate a fresh link.`
+            `Please return to your <b>Client Dashboard</b> and click <b>"Join Channel"</b> or <b>"Connect Telegram"</b> to generate a fresh link.`
           ].join('\n');
           await this.sendMessage(failMsg, { chatId, botToken, parseMode: 'HTML' });
           return { handled: true, action: 'INVALID_OR_EXPIRED_TOKEN' };
         }
 
         // Token is valid: update Client record
+        const targetPlanId = targetPlanIdFromToken || client.telegramTargetPlanId;
         client.telegramChatId = chatId;
         client.telegramUsername = username;
         client.telegramLinkedAt = new Date();
         client.telegramAuthToken = null;
         client.telegramAuthTokenExpiresAt = null;
+        client.telegramTargetPlanId = null;
         await client.save();
 
         // Fetch active subscriptions and tenant branding
@@ -1244,57 +1256,149 @@ export class TelegramService {
           client.tenantId || tenantId
         );
 
-        let activePlansText = '';
-        const inlineKeyboard: any[] = [];
+        // Check if there is a targeted plan requested
+        let targetPlan: any = null;
+        if (targetPlanId) {
+          targetPlan = plans.find((p: any) => String(p._id) === String(targetPlanId) || String(p.id) === String(targetPlanId));
+          if (!targetPlan) {
+            try {
+              if (dynamicDb?.Plan) targetPlan = await dynamicDb.Plan.findById(targetPlanId).lean();
+              if (!targetPlan && centralModels?.Plan) targetPlan = await centralModels.Plan.findById(targetPlanId).lean();
+            } catch {}
+          }
+        }
 
-        if (plans.length > 0) {
-          activePlansText = plans.map((p: any) => `• <b>${(p.name || 'VIP SIGNALS').toUpperCase()}</b>`).join('\n');
-          for (const p of plans) {
-            const planInvite = p.telegramInviteLink || tenant?.telegramInviteLink;
-            if (planInvite) {
+        if (targetPlan) {
+          // Resolve channel invite link for the target plan
+          let planInvite = targetPlan.telegramInviteLink || '';
+          if (!planInvite && targetPlan.telegramChatId && botToken) {
+            try {
+              const linkRes = await this.getInviteLink({
+                tenantId: client.tenantId || tenantId,
+                botToken,
+                chatId: String(targetPlan.telegramChatId),
+                name: `${targetPlan.name || 'VIP'} Signal Channel`
+              });
+              if (linkRes.success && linkRes.inviteLink) {
+                planInvite = linkRes.inviteLink;
+              }
+            } catch {}
+          }
+          if (!planInvite && tenant?.telegramInviteLink) {
+            planInvite = tenant.telegramInviteLink;
+          }
+          if (!planInvite) {
+            planInvite = `https://t.me/${config.botToken ? 'Complince_signal_bot' : 'Complince_signal_bot'}`;
+          }
+
+          const planName = targetPlan.name || 'VIP Signals';
+          const inlineKeyboard: any[] = [];
+
+          // PRIMARY BUTTON: Click to go to the Channel!
+          inlineKeyboard.push([
+            {
+              text: `🚀 JOIN ${planName.toUpperCase()} CHANNEL NOW ➔`,
+              url: planInvite
+            }
+          ]);
+
+          // Other active plans (if any)
+          const otherPlans = plans.filter((p: any) => String(p._id || p.id) !== String(targetPlan._id || targetPlan.id || targetPlanId));
+          for (const op of otherPlans) {
+            const opInvite = op.telegramInviteLink || tenant?.telegramInviteLink;
+            if (opInvite) {
               inlineKeyboard.push([
                 {
-                  text: `🚀 JOIN ${p.name.toUpperCase()} VIP CHANNEL NOW ➔`,
-                  url: planInvite
+                  text: `📡 Join ${op.name.toUpperCase()} Channel ➔`,
+                  url: opInvite
                 }
               ]);
             }
           }
+
+          // Dashboard and Support buttons
+          inlineKeyboard.push([
+            {
+              text: `🌐 Open ${companyName} Dashboard`,
+              url: dashboardUrl
+            },
+            {
+              text: `💬 Talk to Expert`,
+              callback_data: 'action_expert'
+            }
+          ]);
+
+          const planWelcomeMsg = [
+            `🎉 <b>Congratulations, ${client.name || username}!</b>\n`,
+            `✅ Your <b>${companyName}</b> account is verified & connected!\n`,
+            `📢 <b>Your VIP Channel:</b> <b>${planName}</b>`,
+            `⚡ <b>Status:</b> <code>ACTIVE SUBSCRIBER 🟢</code>\n`,
+            `👇 <b>Click below to enter your ${planName} Channel immediately:</b>`
+          ].join('\n');
+
+          await this.sendMessage(planWelcomeMsg, {
+            chatId,
+            botToken,
+            parseMode: 'HTML',
+            replyMarkup: { inline_keyboard: inlineKeyboard }
+          });
         } else {
-          activePlansText = `• <b>STANDARD ADVISORY ACCESS</b>`;
-          if (tenant?.telegramInviteLink) {
-            inlineKeyboard.push([
-              {
-                text: `🚀 JOIN ${companyName.toUpperCase()} VIP CHANNEL NOW ➔`,
-                url: tenant.telegramInviteLink
+          // General welcome card with all active plans
+          let activePlansText = '';
+          const inlineKeyboard: any[] = [];
+
+          if (plans.length > 0) {
+            activePlansText = plans.map((p: any) => `• <b>${(p.name || 'VIP SIGNALS').toUpperCase()}</b>`).join('\n');
+            for (const p of plans) {
+              const planInvite = p.telegramInviteLink || tenant?.telegramInviteLink;
+              if (planInvite) {
+                inlineKeyboard.push([
+                  {
+                    text: `🚀 JOIN ${p.name.toUpperCase()} VIP CHANNEL NOW ➔`,
+                    url: planInvite
+                  }
+                ]);
               }
-            ]);
+            }
+          } else {
+            activePlansText = `• <b>STANDARD ADVISORY ACCESS</b>`;
+            if (tenant?.telegramInviteLink) {
+              inlineKeyboard.push([
+                {
+                  text: `🚀 JOIN ${companyName.toUpperCase()} VIP CHANNEL NOW ➔`,
+                  url: tenant.telegramInviteLink
+                }
+              ]);
+            }
           }
+
+          // Add Dashboard link button
+          inlineKeyboard.push([
+            {
+              text: `🌐 Open ${companyName} Dashboard`,
+              url: dashboardUrl
+            },
+            {
+              text: `💬 Talk to Expert`,
+              callback_data: 'action_expert'
+            }
+          ]);
+
+          const welcomeSuccessMsg = [
+            `🎉 <b>Congratulations, ${client.name || username}!</b>\n`,
+            `✅ Your <b>${companyName}</b> account is now <b>Successfully Connected!</b>\n`,
+            `📦 <b>Active VIP Subscriptions:</b>`,
+            activePlansText,
+            `\n👇 <b>Click below to enter your VIP Channels immediately:</b>`
+          ].join('\n');
+
+          await this.sendMessage(welcomeSuccessMsg, {
+            chatId,
+            botToken,
+            parseMode: 'HTML',
+            replyMarkup: { inline_keyboard: inlineKeyboard }
+          });
         }
-
-        // Add Dashboard link button
-        inlineKeyboard.push([
-          {
-            text: `🌐 Open ${companyName} Dashboard`,
-            url: dashboardUrl
-          }
-        ]);
-
-        // 1. Send the rich welcome card with inline join buttons (matching screenshot!)
-        const welcomeSuccessMsg = [
-          `🎉 <b>Congratulations, ${client.name || username}!</b>\n`,
-          `✅ Your <b>${companyName}</b> account is now <b>Successfully Connected!</b>\n`,
-          `📦 <b>Active VIP Subscriptions:</b>`,
-          activePlansText,
-          `\n👇 <b>Click below to enter your VIP Channels immediately:</b>`
-        ].join('\n');
-
-        await this.sendMessage(welcomeSuccessMsg, {
-          chatId,
-          botToken,
-          parseMode: 'HTML',
-          replyMarkup: { inline_keyboard: inlineKeyboard }
-        });
 
         // 2. Activate persistent ReplyKeyboardMarkup with 'Talk to Expert'
         await this.sendNavigationKeyboard(chatId, botToken);
@@ -1315,7 +1419,7 @@ export class TelegramService {
         return {
           handled: true,
           action: 'LINK_SUCCESS',
-          details: { clientId: client._id, name: client.name, chatId, username }
+          details: { clientId: client._id, name: client.name, chatId, username, targetPlanId }
         };
       }
 
