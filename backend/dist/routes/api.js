@@ -35,6 +35,7 @@ const tenantSyncController_1 = require("../controllers/tenantSyncController");
 const pdfService_1 = require("../services/pdfService");
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const occupationController_1 = require("../controllers/occupationController");
+const clientTimelineController_1 = require("../controllers/clientTimelineController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -297,6 +298,7 @@ router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePe
 router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
+router.get('/admin/clients/:clientId/timeline', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientTimelineController_1.getClientTimeline);
 // Admin Category Management
 router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
 router.post('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createCategory);

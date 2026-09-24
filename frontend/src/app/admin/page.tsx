@@ -37,6 +37,7 @@ import CouponsManager from '../../components/CouponsManager';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import OccupationsManager from '../../components/admin/OccupationsManager';
 import SecuritySettingsTab from '../../components/admin/SecuritySettingsTab';
+import ClientTimelineModal from '../../components/admin/ClientTimelineModal';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -899,7 +900,9 @@ function AdminDashboardContent() {
   const [editClientState, setEditClientState] = useState('');
   const [editClientZip, setEditClientZip] = useState('');
   const [editClientModalLoading, setEditClientModalLoading] = useState(false);
-  const [clientDetailsTab, setClientDetailsTab] = useState<'profile' | 'kyc' | 'subscriptions' | 'communications'>('profile');
+  const [clientDetailsTab, setClientDetailsTab] = useState<'profile' | 'kyc' | 'subscriptions' | 'communications' | 'timeline'>('profile');
+  const [selectedTimelineClient, setSelectedTimelineClient] = useState<{ id: string; name: string } | null>(null);
+  const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
   const [clientCommunications, setClientCommunications] = useState<any[]>([]);
 
   const { states } = useStates();
@@ -1487,7 +1490,7 @@ function AdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/login?error=expired');
+        router.push('/admin/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);
@@ -1917,7 +1920,7 @@ function AdminDashboardContent() {
 
   const handleLogout = async (allDevices: boolean = false) => {
     await api.logout(allDevices);
-    router.push('/login');
+    router.push('/admin/login');
   };
 
   const handleRevertImpersonate = () => {
@@ -3856,18 +3859,25 @@ function AdminDashboardContent() {
     },
     {
       name: 'Actions',
-      width: '260px',
+      width: '295px',
       right: true,
       cell: (row: any) => {
         const isDeleted = row.user?.deletedAt !== null && row.user?.deletedAt !== undefined;
         return (
-          <div className="flex justify-end space-x-2 whitespace-nowrap">
+          <div className="flex justify-end space-x-1.5 whitespace-nowrap">
             <button
               onClick={() => { setSelectedClient(row); setIsViewClientModalOpen(true); setClientDetailsTab('profile'); }}
               title="View Details"
-              className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
+              className="p-1.5 rounded-lg border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-white transition inline-flex items-center"
             >
               <Eye className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => { setSelectedTimelineClient({ id: row.id, name: row.name }); setIsTimelineModalOpen(true); }}
+              title="Client Activity Timeline & Audit"
+              className="p-1.5 rounded-lg border border-sky-500/20 bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 hover:text-sky-700 dark:text-sky-300 transition inline-flex items-center"
+            >
+              <Clock className="h-3.5 w-3.5" />
             </button>
             {row.user?.status === 'PENDING_APPROVAL' && (
               <button
@@ -3915,7 +3925,7 @@ function AdminDashboardContent() {
         );
       }
     }
-  ], [setSelectedClient, setIsViewClientModalOpen, setClientDetailsTab, handleApproveClient, startEditClient, handleDeleteClient, handleToggleClientStatus, setAssignPlanClient, setAssignPlanCategoryId, setAssignPlanId, setAssignPlanRemarks, setIsAssignPlanModalOpen, handleRestoreClient, isStaff, hasPermission]);
+  ], [setSelectedClient, setIsViewClientModalOpen, setClientDetailsTab, handleApproveClient, startEditClient, handleDeleteClient, handleToggleClientStatus, setAssignPlanClient, setAssignPlanCategoryId, setAssignPlanId, setAssignPlanRemarks, setIsAssignPlanModalOpen, handleRestoreClient, isStaff, hasPermission, setSelectedTimelineClient, setIsTimelineModalOpen]);
 
   if (loading) {
     return (
@@ -4617,7 +4627,7 @@ function AdminDashboardContent() {
                                       stroke="#64748b"
                                       fontSize={10}
                                       tickLine={false}
-                                      tickFormatter={(v) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
+                                      tickFormatter={(v: any) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
                                     />
                                     <Tooltip
                                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px' }}
@@ -7502,17 +7512,18 @@ function AdminDashboardContent() {
                             </div>
 
                             {/* Modal Tabs Selection */}
-                            <div className="flex px-8 border-b border-slate-400 dark:border-white/10 bg-white dark:bg-slate-900/60 p-1 space-x-2 text-xs">
+                            <div className="flex px-8 border-b border-slate-400 dark:border-white/10 bg-white dark:bg-slate-900/60 p-1 space-x-2 text-xs overflow-x-auto">
                               {[
                                 { id: 'profile', label: 'Profile Overview' },
                                 { id: 'kyc', label: 'KYC & Documents' },
                                 { id: 'subscriptions', label: 'Subscription Logs' },
-                                { id: 'communications', label: 'Communications' }
+                                { id: 'communications', label: 'Communications' },
+                                { id: 'timeline', label: 'Activity Timeline' }
                               ].map(tab => (
                                 <button
                                   key={tab.id}
                                   onClick={() => setClientDetailsTab(tab.id as any)}
-                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                  className={`px-4 py-2.5 font-bold transition rounded-lg whitespace-nowrap ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
                                 >
                                   {tab.label}
                                 </button>
@@ -7807,6 +7818,35 @@ function AdminDashboardContent() {
                                       ))}
                                     </div>
                                   )}
+                                </div>
+                              )}
+
+                              {clientDetailsTab === 'timeline' && (
+                                <div className="space-y-4">
+                                  <div className="glassmorphism p-6 rounded-2xl border border-slate-300 dark:border-white/10 text-center space-y-4">
+                                    <div className="w-14 h-14 mx-auto rounded-2xl bg-sky-500/10 text-sky-500 flex items-center justify-center border border-sky-500/20 shadow-sm">
+                                      <Clock className="w-7 h-7" />
+                                    </div>
+                                    <div>
+                                      <h4 className="text-base font-bold text-slate-900 dark:text-white">Client Activity Timeline & Audit</h4>
+                                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                                        Review complete onboarding lifecycle, DigiLocker KYC, Aadhaar eSign, login sessions, IP addresses, payment events, and staff changes for {selectedClient.name}.
+                                      </p>
+                                    </div>
+                                    <div className="pt-2">
+                                      <button
+                                        onClick={() => {
+                                          setSelectedTimelineClient({ id: selectedClient.id, name: selectedClient.name });
+                                          setIsTimelineModalOpen(true);
+                                        }}
+                                        className="px-5 py-2.5 rounded-xl font-bold text-xs bg-primary-600 hover:bg-primary-500 text-white shadow-lg shadow-primary-600/30 transition inline-flex items-center gap-2"
+                                      >
+                                        <Clock className="w-4 h-4" />
+                                        <span>Launch Full Interactive Timeline</span>
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -9928,6 +9968,17 @@ function AdminDashboardContent() {
           onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
           confirmLabel={confirmState.confirmLabel}
           cancelLabel={confirmState.cancelLabel}
+        />
+
+        {/* Client Activity Timeline & Audit Modal */}
+        <ClientTimelineModal
+          isOpen={isTimelineModalOpen}
+          onClose={() => {
+            setIsTimelineModalOpen(false);
+            setSelectedTimelineClient(null);
+          }}
+          clientId={selectedTimelineClient?.id || null}
+          clientName={selectedTimelineClient?.name}
         />
 
         {/* Report Modal */}

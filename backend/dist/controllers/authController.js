@@ -45,6 +45,7 @@ const tenantConnectionManager_2 = __importDefault(require("../services/tenantCon
 const bcrypt = __importStar(require("bcryptjs"));
 const jwt = __importStar(require("jsonwebtoken"));
 const auditService_1 = require("../services/auditService");
+const activityService_1 = require("../services/activityService");
 const emailService_1 = require("../services/emailService");
 const smsService_1 = require("../services/smsService");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
@@ -316,6 +317,28 @@ const login = async (req, res) => {
             module: 'USERS',
             ipAddress: req.ip
         });
+        if (user.role?.name === 'CLIENT') {
+            try {
+                const clientDoc = await db_1.Client.findOne({ userId }).lean();
+                if (clientDoc) {
+                    (0, activityService_1.logActivity)({
+                        tenantId: activeTenantId,
+                        actorType: 'CLIENT',
+                        actorId: userId,
+                        actorName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || clientDoc.name,
+                        actorEmail: user.email,
+                        targetClientId: clientDoc._id || clientDoc.id,
+                        category: 'AUTH',
+                        action: 'LOGIN',
+                        title: 'Client Logged In',
+                        description: 'Authenticated session started',
+                        status: 'SUCCESS',
+                        req
+                    });
+                }
+            }
+            catch (logErr) { }
+        }
         return res.status(200).json({
             success: true,
             message: 'Login successful',
@@ -1122,6 +1145,33 @@ const requestLoginOtp = async (req, res) => {
                 console.warn('[LOGIN-OTP] SMS dispatch error:', e.message);
             }
         }
+        if (user.role?.name === 'CLIENT' || !user.role || user.role?.name !== 'ADMIN') {
+            try {
+                const clientDoc = await db_1.Client.findOne({ $or: [{ userId: user._id || user.id }, { email: cleanEmail }] }).lean();
+                if (clientDoc) {
+                    (0, activityService_1.logActivity)({
+                        tenantId: activeTenantId,
+                        actorType: 'CLIENT',
+                        actorId: user._id || user.id,
+                        actorName: clientDoc.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Client',
+                        actorEmail: user.email,
+                        targetClientId: clientDoc._id || clientDoc.id,
+                        category: 'AUTH',
+                        action: 'LOGIN_OTP_SENT',
+                        title: 'Login OTP Requested',
+                        description: `Login OTP requested via ${isEmail ? `Email (${maskEmail(user.email)})` : `Mobile (${maskMobile(user.mobile)})`}`,
+                        status: 'SUCCESS',
+                        metadata: {
+                            identifier: isEmail ? user.email : user.mobile,
+                            channel: isEmail ? 'Email' : 'SMS',
+                            ipAddress: req.ip
+                        },
+                        req
+                    });
+                }
+            }
+            catch (logErr) { }
+        }
         return res.status(200).json({
             success: true,
             message: `OTP sent successfully to your registered ${isEmail ? 'email' : 'mobile'}.`,
@@ -1227,6 +1277,31 @@ const loginWithOtp = async (req, res) => {
             module: 'AUTH',
             ipAddress: req.ip
         });
+        try {
+            const clientDoc = await db_1.Client.findOne({ $or: [{ userId }, { email: user.email }] }).lean();
+            if (clientDoc) {
+                (0, activityService_1.logActivity)({
+                    tenantId: activeTenantId,
+                    actorType: 'CLIENT',
+                    actorId: userId,
+                    actorName: clientDoc.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Client',
+                    actorEmail: user.email,
+                    targetClientId: clientDoc._id || clientDoc.id,
+                    category: 'AUTH',
+                    action: 'LOGIN_OTP',
+                    title: 'Client Logged In via OTP',
+                    description: `Client entered OTP and logged in successfully`,
+                    status: 'SUCCESS',
+                    metadata: {
+                        loginMethod: 'OTP Verification (Email/SMS)',
+                        identifier: cleanInput,
+                        ipAddress: req.ip
+                    },
+                    req
+                });
+            }
+        }
+        catch (logErr) { }
         const permissions = user.role?.permissions?.map((rp) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
         const tenantTheme = user.tenant?.themeColor || '#2563eb';
         const isProfilePending = user.tenant?.status === 'PENDING_PROFILE';

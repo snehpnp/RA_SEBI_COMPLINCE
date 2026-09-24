@@ -77,6 +77,7 @@ export const ResearchReport = createDynamicModelProxy('ResearchReport');
 export const ResearchAnalytics = createDynamicModelProxy('ResearchAnalytics');
 export const ComplianceAlert = createDynamicModelProxy('ComplianceAlert');
 export const AuditLog = createDynamicModelProxy('AuditLog');
+export const ActivityLog = createDynamicModelProxy('ActivityLog');
 export const NotificationLog = createDynamicModelProxy('NotificationLog');
 export const SupportTicket = createDynamicModelProxy('SupportTicket');
 export const TicketMessage = createDynamicModelProxy('TicketMessage');

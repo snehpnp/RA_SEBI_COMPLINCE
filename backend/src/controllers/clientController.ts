@@ -7,6 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
+import { logActivity } from '../services/activityService';
 import { sendWelcomeEmail } from '../services/emailService';
 import { generateAgreementPdf, getTenantComplianceAttachments } from '../services/pdfService';
 import { createKycRequest, getKycStatus, getDocumentStatus, downloadDocument, extractAadhaarDetailsFromDigio } from '../services/digioService';
@@ -241,6 +242,22 @@ export const registerClient = async (req: Request, res: Response) => {
       module: 'CLIENTS',
       newValue: client,
       ipAddress: req.ip
+    });
+
+    logActivity({
+      tenantId,
+      actorType: 'CLIENT',
+      actorId: user._id || user.id,
+      actorName: name,
+      actorEmail: email,
+      targetClientId: client._id || client.id,
+      category: 'AUTH',
+      action: 'CLIENT_SIGNUP',
+      title: 'New Client Registered',
+      description: `Registered as ${category || 'INDIVIDUAL'} investor`,
+      status: 'SUCCESS',
+      metadata: { pan, aadhaar, mobile },
+      req
     });
 
     const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
@@ -498,6 +515,26 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       });
     }
 
+    logActivity({
+      tenantId: tenantId!,
+      actorType: 'CLIENT',
+      actorId: req.user!.id,
+      actorName: verifiedAadhaarName || client.name,
+      actorEmail: client.email,
+      targetClientId: client._id || client.id,
+      category: 'KYC_COMPLIANCE',
+      action: 'KYC_VERIFIED',
+      title: 'DigiLocker KYC Verified',
+      description: `PAN (${pan}) & Aadhaar successfully authenticated via DigiLocker UIDAI`,
+      status: 'SUCCESS',
+      metadata: {
+        pan,
+        aadhaar: verifiedMaskedAadhaar || aadhaar,
+        name: verifiedAadhaarName || client.name
+      },
+      req
+    });
+
     return res.status(200).json({
       success: true,
       message: 'KRA KYC verification successful.',
@@ -725,6 +762,30 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
         status: newStatus,
         agreementSigned: true
       }
+    });
+
+    // Log Activity for Client Timeline
+    logActivity({
+      tenantId: client.tenantId || req.user?.tenantId,
+      actorType: 'CLIENT',
+      actorId: client._id || client.id,
+      actorName: signerName || client.name,
+      actorEmail: client.email,
+      targetClientId: client._id || client.id,
+      category: 'KYC_COMPLIANCE',
+      action: 'AGREEMENT_SIGNED',
+      title: 'Advisory Agreement Signed',
+      description: `Client digitally signed the Advisory Agreement via Aadhaar eSign`,
+      status: 'SUCCESS',
+      metadata: {
+        agreementId: agreement?._id || agreement?.id,
+        signerName,
+        maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+        esignMode: 'AADHAAR_ESIGN',
+        agreementUrl,
+        newStatus
+      },
+      req
     });
 
     return res.status(200).json({

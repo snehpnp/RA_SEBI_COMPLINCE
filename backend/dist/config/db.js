@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SmsTemplate = exports.Occupation = exports.AdminPermission = exports.SystemSetting = exports.EmailVerification = exports.EmailTemplate = exports.CustomPage = exports.State = exports.TenantDocumentHistory = exports.Resource = exports.ComplaintMonthlyReport = exports.Complaint = exports.Penalty = exports.ComplianceAuditHistory = exports.ComplianceAudit = exports.ComplianceRequirement = exports.SignalMessage = exports.Signal = exports.Stock = exports.TicketMessage = exports.SupportTicket = exports.NotificationLog = exports.AuditLog = exports.ComplianceAlert = exports.ResearchAnalytics = exports.ResearchReport = exports.Payment = exports.ConsentHistory = exports.Consent = exports.AgreementHistory = exports.Agreement = exports.Coupon = exports.Subscription = exports.Plan = exports.PlanCategory = exports.ClientIdentityHistory = exports.ClientDocument = exports.ClientProfile = exports.Client = exports.PersonAssociated = exports.Staff = exports.RolePermission = exports.Permission = exports.Role = exports.User = exports.AllCompany = exports.Tenant = exports.dynamicDb = exports.centralModels = exports.centralConnection = void 0;
+exports.Occupation = exports.AdminPermission = exports.SystemSetting = exports.EmailVerification = exports.EmailTemplate = exports.CustomPage = exports.State = exports.TenantDocumentHistory = exports.Resource = exports.ComplaintMonthlyReport = exports.Complaint = exports.Penalty = exports.ComplianceAuditHistory = exports.ComplianceAudit = exports.ComplianceRequirement = exports.SignalMessage = exports.Signal = exports.Stock = exports.TicketMessage = exports.SupportTicket = exports.NotificationLog = exports.ActivityLog = exports.AuditLog = exports.ComplianceAlert = exports.ResearchAnalytics = exports.ResearchReport = exports.Payment = exports.ConsentHistory = exports.Consent = exports.AgreementHistory = exports.Agreement = exports.Coupon = exports.Subscription = exports.Plan = exports.PlanCategory = exports.ClientIdentityHistory = exports.ClientDocument = exports.ClientProfile = exports.Client = exports.PersonAssociated = exports.Staff = exports.RolePermission = exports.Permission = exports.Role = exports.User = exports.AllCompany = exports.Tenant = exports.dynamicDb = exports.centralModels = exports.centralConnection = void 0;
+exports.SmsTemplate = void 0;
 const tenantConnectionManager_1 = require("../services/tenantConnectionManager");
 Object.defineProperty(exports, "centralConnection", { enumerable: true, get: function () { return tenantConnectionManager_1.centralConnection; } });
 Object.defineProperty(exports, "centralModels", { enumerable: true, get: function () { return tenantConnectionManager_1.centralModels; } });
@@ -75,6 +76,7 @@ exports.ResearchReport = createDynamicModelProxy('ResearchReport');
 exports.ResearchAnalytics = createDynamicModelProxy('ResearchAnalytics');
 exports.ComplianceAlert = createDynamicModelProxy('ComplianceAlert');
 exports.AuditLog = createDynamicModelProxy('AuditLog');
+exports.ActivityLog = createDynamicModelProxy('ActivityLog');
 exports.NotificationLog = createDynamicModelProxy('NotificationLog');
 exports.SupportTicket = createDynamicModelProxy('SupportTicket');
 exports.TicketMessage = createDynamicModelProxy('TicketMessage');

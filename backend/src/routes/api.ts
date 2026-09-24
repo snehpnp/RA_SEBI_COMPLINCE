@@ -38,6 +38,7 @@ import {
   toggleOccupationStatus,
   deleteOccupation
 } from '../controllers/occupationController';
+import { getClientTimeline } from '../controllers/clientTimelineController';
 
 const router = Router();
 
@@ -745,6 +746,13 @@ router.post(
   requirePermission('ACCESS_CLIENTS'),
   enforceTenantIsolation,
   assignPlanByAdmin
+);
+router.get(
+  '/admin/clients/:clientId/timeline',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  getClientTimeline
 );
 
 // Admin Category Management

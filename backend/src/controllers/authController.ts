@@ -7,6 +7,7 @@ import tenantConnectionManager from '../services/tenantConnectionManager';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { logAudit } from '../services/auditService';
+import { logActivity } from '../services/activityService';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { sendForgotPasswordEmail, sendOtpEmail, sendTwoFactorLoginOtpEmail } from '../services/emailService';
 import { sendSms } from '../services/smsService';
@@ -331,6 +332,28 @@ export const login = async (req: Request, res: Response) => {
       module: 'USERS',
       ipAddress: req.ip
     });
+
+    if (user.role?.name === 'CLIENT') {
+      try {
+        const clientDoc = await Client.findOne({ userId }).lean();
+        if (clientDoc) {
+          logActivity({
+            tenantId: activeTenantId,
+            actorType: 'CLIENT',
+            actorId: userId,
+            actorName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || clientDoc.name,
+            actorEmail: user.email,
+            targetClientId: clientDoc._id || clientDoc.id,
+            category: 'AUTH',
+            action: 'LOGIN',
+            title: 'Client Logged In',
+            description: 'Authenticated session started',
+            status: 'SUCCESS',
+            req
+          });
+        }
+      } catch (logErr) {}
+    }
 
     return res.status(200).json({
       success: true,
@@ -1243,6 +1266,33 @@ export const requestLoginOtp = async (req: Request, res: Response) => {
       }
     }
 
+    if (user.role?.name === 'CLIENT' || !user.role || user.role?.name !== 'ADMIN') {
+      try {
+        const clientDoc: any = await Client.findOne({ $or: [{ userId: user._id || user.id }, { email: cleanEmail }] }).lean();
+        if (clientDoc) {
+          logActivity({
+            tenantId: activeTenantId,
+            actorType: 'CLIENT',
+            actorId: user._id || user.id,
+            actorName: clientDoc.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Client',
+            actorEmail: user.email,
+            targetClientId: clientDoc._id || clientDoc.id,
+            category: 'AUTH',
+            action: 'LOGIN_OTP_SENT',
+            title: 'Login OTP Requested',
+            description: `Login OTP requested via ${isEmail ? `Email (${maskEmail(user.email)})` : `Mobile (${maskMobile(user.mobile)})`}`,
+            status: 'SUCCESS',
+            metadata: {
+              identifier: isEmail ? user.email : user.mobile,
+              channel: isEmail ? 'Email' : 'SMS',
+              ipAddress: req.ip
+            },
+            req
+          });
+        }
+      } catch (logErr) {}
+    }
+
     return res.status(200).json({
       success: true,
       message: `OTP sent successfully to your registered ${isEmail ? 'email' : 'mobile'}.`,
@@ -1368,6 +1418,31 @@ export const loginWithOtp = async (req: Request, res: Response) => {
       module: 'AUTH',
       ipAddress: req.ip
     });
+
+    try {
+      const clientDoc: any = await Client.findOne({ $or: [{ userId }, { email: user.email }] }).lean();
+      if (clientDoc) {
+        logActivity({
+          tenantId: activeTenantId,
+          actorType: 'CLIENT',
+          actorId: userId,
+          actorName: clientDoc.name || `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Client',
+          actorEmail: user.email,
+          targetClientId: clientDoc._id || clientDoc.id,
+          category: 'AUTH',
+          action: 'LOGIN_OTP',
+          title: 'Client Logged In via OTP',
+          description: `Client entered OTP and logged in successfully`,
+          status: 'SUCCESS',
+          metadata: {
+            loginMethod: 'OTP Verification (Email/SMS)',
+            identifier: cleanInput,
+            ipAddress: req.ip
+          },
+          req
+        });
+      }
+    } catch (logErr) {}
 
     const permissions =
       user.role?.permissions?.map((rp: any) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];

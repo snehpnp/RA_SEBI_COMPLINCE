@@ -26,6 +26,7 @@ import { ResearchReport, ResearchReportSchema, IResearchReport } from './Researc
 import { ResearchAnalytics, ResearchAnalyticsSchema, IResearchAnalytics } from './ResearchAnalytics';
 import { ComplianceAlert, ComplianceAlertSchema, IComplianceAlert } from './ComplianceAlert';
 import { AuditLog, AuditLogSchema, IAuditLog } from './AuditLog';
+import { ActivityLog, ActivityLogSchema, IActivityLog } from './ActivityLog';
 import { NotificationLog, NotificationLogSchema, INotificationLog } from './NotificationLog';
 import { SupportTicket, SupportTicketSchema, ISupportTicket } from './SupportTicket';
 import { TicketMessage, TicketMessageSchema, ITicketMessage } from './TicketMessage';
@@ -78,6 +79,7 @@ export {
   ResearchAnalytics, ResearchAnalyticsSchema, IResearchAnalytics,
   ComplianceAlert, ComplianceAlertSchema, IComplianceAlert,
   AuditLog, AuditLogSchema, IAuditLog,
+  ActivityLog, ActivityLogSchema, IActivityLog,
   NotificationLog, NotificationLogSchema, INotificationLog,
   SupportTicket, SupportTicketSchema, ISupportTicket,
   TicketMessage, TicketMessageSchema, ITicketMessage,
@@ -130,6 +132,7 @@ export interface ITenantModels {
   ResearchAnalytics: Model<IResearchAnalytics>;
   ComplianceAlert: Model<IComplianceAlert>;
   AuditLog: Model<IAuditLog>;
+  ActivityLog: Model<IActivityLog>;
   NotificationLog: Model<INotificationLog>;
   SupportTicket: Model<ISupportTicket>;
   TicketMessage: Model<ITicketMessage>;
@@ -177,6 +180,7 @@ export interface ITenantModels {
   researchAnalytics: Model<IResearchAnalytics>;
   complianceAlert: Model<IComplianceAlert>;
   auditLog: Model<IAuditLog>;
+  activityLog: Model<IActivityLog>;
   notificationLog: Model<INotificationLog>;
   supportTicket: Model<ISupportTicket>;
   ticketMessage: Model<ITicketMessage>;
@@ -235,6 +239,7 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     ResearchAnalytics: (connection.models.ResearchAnalytics || connection.model<IResearchAnalytics>('ResearchAnalytics', ResearchAnalyticsSchema, 'ResearchAnalytics')) as Model<IResearchAnalytics>,
     ComplianceAlert: (connection.models.ComplianceAlert || connection.model<IComplianceAlert>('ComplianceAlert', ComplianceAlertSchema, 'ComplianceAlert')) as Model<IComplianceAlert>,
     AuditLog: (connection.models.AuditLog || connection.model<IAuditLog>('AuditLog', AuditLogSchema, 'AuditLog')) as Model<IAuditLog>,
+    ActivityLog: (connection.models.ActivityLog || connection.model<IActivityLog>('ActivityLog', ActivityLogSchema, 'ActivityLog')) as Model<IActivityLog>,
     NotificationLog: (connection.models.NotificationLog || connection.model<INotificationLog>('NotificationLog', NotificationLogSchema, 'NotificationLog')) as Model<INotificationLog>,
     SupportTicket: (connection.models.SupportTicket || connection.model<ISupportTicket>('SupportTicket', SupportTicketSchema, 'SupportTicket')) as Model<ISupportTicket>,
     TicketMessage: (connection.models.TicketMessage || connection.model<ITicketMessage>('TicketMessage', TicketMessageSchema, 'TicketMessage')) as Model<ITicketMessage>,
@@ -286,6 +291,7 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     researchAnalytics: models.ResearchAnalytics,
     complianceAlert: models.ComplianceAlert,
     auditLog: models.AuditLog,
+    activityLog: models.ActivityLog,
     notificationLog: models.NotificationLog,
     supportTicket: models.SupportTicket,
     ticketMessage: models.TicketMessage,

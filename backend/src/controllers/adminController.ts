@@ -15,6 +15,7 @@ import { resolveAttachmentFilePath, generateTermsAndConditionsPdf, generatePriva
 import axios from 'axios';
 import { sendSms, ensureDefaultSmsTemplates } from '../services/smsService';
 import { testDigioConnection } from '../services/digioService';
+import { logActivity } from '../services/activityService';
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return email;
@@ -1521,6 +1522,22 @@ export const toggleClientStatus = async (req: AuthenticatedRequest, res: Respons
         companyName: tenantObj?.companyName || 'RAGCP Platform'
       })).catch(e => console.error('[EMAIL] Failed:', e));
     }
+
+    // Log Activity for Client Timeline
+    logActivity({
+      tenantId,
+      actorType: 'ADMIN',
+      actorId: req.user!.id,
+      actorName: req.user!.email || 'Admin',
+      targetClientId: client?._id || clientUser?._id || id,
+      category: 'STAFF_ACTION',
+      action: 'STATUS_CHANGED',
+      title: `Account Status Changed to ${newStatus}`,
+      description: `Account status updated to ${newStatus} by Admin`,
+      status: 'SUCCESS',
+      metadata: { previousStatus: currentStatus, newStatus },
+      req
+    });
 
     return res.status(200).json({ success: true, message: `Client status updated to ${newStatus}` });
   } catch (error: any) {
@@ -3203,6 +3220,30 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       module: 'PAYMENTS',
       newValue: { action: 'ADMIN_PLAN_ASSIGNMENT', clientId, planId, planName: plan.name, remark: adminRemark },
       ipAddress: req.ip
+    });
+
+    // Log Activity for Client Timeline
+    logActivity({
+      tenantId,
+      actorType: isAdmin ? 'ADMIN' : 'STAFF',
+      actorId: req.user!.id,
+      actorName: assignerName,
+      targetClientId: actualClientId,
+      category: 'SUBSCRIPTION',
+      action: 'PLAN_ASSIGNED',
+      title: `Plan Assigned: ${plan.name}`,
+      description: `Plan "${plan.name}" assigned manually by ${assignerName || 'Admin'} (Ref: ${paymentRefId})`,
+      status: 'SUCCESS',
+      metadata: {
+        planId: plan._id || plan.id,
+        planName: plan.name,
+        paymentRefId,
+        paymentDate,
+        amount: payment?.amount,
+        finalRemark,
+        validityDays: planValidityDays
+      },
+      req
     });
 
     return res.status(200).json({
