@@ -960,6 +960,9 @@ function AdminDashboardContent() {
   const [digioClientId, setDigioClientId] = useState('');
   const [digioClientSecret, setDigioClientSecret] = useState('');
   const [digioKycTemplateName, setDigioKycTemplateName] = useState('');
+  const [verifyingDigio, setVerifyingDigio] = useState(false);
+  const [digioVerifyResult, setDigioVerifyResult] = useState<{ success: boolean; message: string; mode?: string; templateValid?: boolean; details?: any } | null>(null);
+
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -1838,6 +1841,51 @@ function AdminDashboardContent() {
       setVerifyingGateway(false);
     }
   };
+
+  const handleVerifyDigio = async () => {
+    if (!digioClientId || !digioClientId.trim()) {
+      toast.error('Please enter Digio Client ID');
+      return;
+    }
+    setVerifyingDigio(true);
+    setDigioVerifyResult(null);
+    try {
+      const res: any = await api.verifyDigioConnection({
+        digioClientId: digioClientId.trim(),
+        digioClientSecret: digioClientSecret ? digioClientSecret.trim() : undefined,
+        digioKycTemplateName: digioKycTemplateName ? digioKycTemplateName.trim() : undefined
+      });
+
+      if (res.success) {
+        setDigioVerifyResult({
+          success: true,
+          message: res.message || 'Digio Connection & Credentials Verified Successfully!',
+          mode: res.mode,
+          templateValid: res.templateValid,
+          details: res.details
+        });
+        toast.success(res.message || 'Digio credentials verified successfully!');
+      } else {
+        setDigioVerifyResult({
+          success: false,
+          message: res.message || 'Digio verification failed.',
+          templateValid: res.templateValid
+        });
+        toast.error(res.message || 'Digio verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify Digio connection.';
+      setDigioVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingDigio(false);
+    }
+  };
+
+
 
 
 
@@ -8311,22 +8359,84 @@ function AdminDashboardContent() {
                           {/* Digio KYC */}
                           {integrationTab === 'kyc' && (
                             <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
-                              <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300 mb-2">Digio KYC & eSign Configuration</h3>
-                              <p className="text-xs text-slate-500 mb-4">Configure your Digio credentials to enable Aadhaar KYC and Agreement eSigning for your clients.</p>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                  <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Digio KYC & eSign Configuration</h3>
+                                  <p className="text-xs text-slate-500 mt-1">Configure your Digio credentials to enable Aadhaar KYC and Agreement eSigning for your clients.</p>
+                                </div>
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800 self-start sm:self-auto">
+                                  <span>DigiKYC + DigiDocs (eSign)</span>
+                                </div>
+                              </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client ID</label>
-                                  <input type="text" value={digioClientId} onChange={e => setDigioClientId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. DID123XYZ..." />
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client ID <span className="text-rose-500">*</span></label>
+                                  <input type="text" value={digioClientId} onChange={e => setDigioClientId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. ACK260909... or DID123XYZ" />
                                 </div>
                                 <div>
-                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret</label>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret <span className="text-rose-500">*</span></label>
                                   <input type="password" value={digioClientSecret} onChange={e => setDigioClientSecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Leave blank to keep unchanged" />
                                 </div>
                                 <div className="md:col-span-2">
-                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio KYC Template Name</label>
-                                  <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_TEMPLATE_1" />
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio KYC Template Name (Optional for eSign only, Required for KYC)</label>
+                                  <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_AGREEMENT, 2WAY-VIDEO-KYC, DIGILOCKER_AADHAAR_PAN" />
                                 </div>
+                              </div>
+
+                              {/* Digio Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {digioVerifyResult ? (
+                                    <div className={`flex items-start space-x-2.5 text-xs p-3.5 rounded-xl transition-all ${digioVerifyResult.success ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-800 dark:text-rose-200 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none mt-0.5">{digioVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-bold">{digioVerifyResult.message}</p>
+                                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                                          <span className="inline-block text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700">
+                                            Basic Auth: {digioVerifyResult.success ? 'VERIFIED' : 'FAILED'}
+                                          </span>
+                                          {digioVerifyResult.mode && (
+                                            <span className="inline-block text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-500/20 text-purple-800 dark:text-purple-200 border border-purple-500/30">
+                                              Mode: {digioVerifyResult.mode}
+                                            </span>
+                                          )}
+                                          {digioVerifyResult.templateValid !== undefined && (
+                                            <span className={`inline-block text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded border ${digioVerifyResult.templateValid ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-500/30' : 'bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-500/30'}`}>
+                                              Template: {digioVerifyResult.templateValid ? 'ACTIVE & VALID' : 'CHECK TEMPLATE NAME'}
+                                            </span>
+                                          )}
+                                          <span className="inline-block text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/20 text-blue-800 dark:text-blue-200 border border-blue-500/30">
+                                            eSign Ready: {digioVerifyResult.success ? 'YES' : 'NO'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click <strong className="text-slate-700 dark:text-slate-300">Test & Verify Digio Connection</strong> to check your Client ID, Secret, and KYC template with Digio API.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyDigio}
+                                  disabled={verifyingDigio || !digioClientId}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingDigio ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Testing Digio Connection...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle2 className="h-4 w-4" />
+                                      <span>Test & Verify Digio Connection</span>
+                                    </>
+                                  )}
+                                </button>
                               </div>
                             </div>
                           )}

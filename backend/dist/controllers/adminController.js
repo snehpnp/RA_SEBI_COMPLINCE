@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyDigioConnection = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -49,6 +49,7 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const pdfService_1 = require("../services/pdfService");
+const digioService_1 = require("../services/digioService");
 const axios_1 = __importDefault(require("axios"));
 const maskEmail = (email) => {
     if (!email)
@@ -2635,6 +2636,58 @@ const verifyPaymentGateway = async (req, res) => {
     }
 };
 exports.verifyPaymentGateway = verifyPaymentGateway;
+const verifyDigioConnection = async (req, res) => {
+    try {
+        const { digioClientId, digioClientSecret, digioKycTemplateName } = req.body;
+        let clientId = digioClientId ? String(digioClientId).trim() : '';
+        let clientSecret = digioClientSecret ? String(digioClientSecret).trim() : '';
+        const templateName = digioKycTemplateName ? String(digioKycTemplateName).trim() : '';
+        // If clientId or clientSecret are not passed or left blank, retrieve existing from Tenant DB
+        if (!clientId || !clientSecret) {
+            const tenantId = req.user?.tenantId;
+            let tenant = null;
+            if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                tenant = await db_1.default.Tenant.findById(tenantId).lean();
+            }
+            if (!tenant && tenantId) {
+                tenant = await db_1.default.Tenant.findOne({
+                    $or: [{ id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            if (!tenant) {
+                tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+            }
+            if (tenant) {
+                if (!clientId)
+                    clientId = tenant.digioClientId || '';
+                if (!clientSecret)
+                    clientSecret = tenant.digioClientSecret || '';
+            }
+        }
+        if (!clientId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Digio Client ID is required to test connection.'
+            });
+        }
+        if (!clientSecret) {
+            return res.status(400).json({
+                success: false,
+                message: 'Digio Client Secret is required to test connection. Please enter your secret key.'
+            });
+        }
+        const result = await (0, digioService_1.testDigioConnection)(clientId, clientSecret, templateName);
+        return res.status(result.success ? 200 : 400).json(result);
+    }
+    catch (error) {
+        console.error('Error verifying Digio connection:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Internal server error while testing Digio connection'
+        });
+    }
+};
+exports.verifyDigioConnection = verifyDigioConnection;
 // ----------------------------------------------------
 // PAYMENT MANAGEMENT
 // ----------------------------------------------------

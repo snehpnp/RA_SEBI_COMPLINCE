@@ -224,6 +224,9 @@ router.put('/admin/email-templates/:type', auth_1.authenticateJWT, (0, auth_1.re
 router.post('/admin/test-smtp', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), adminController_1.testSmtp);
 router.post('/admin/test-smtp-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), systemSettingController_1.testSmtpConnection);
 router.post('/admin/verify-payment-gateway', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), adminController_1.verifyPaymentGateway);
+router.post('/admin/verify-digio', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PRINCIPAL_OFFICER']), adminController_1.verifyDigioConnection);
+router.post('/verify-digio', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PRINCIPAL_OFFICER']), adminController_1.verifyDigioConnection);
+router.post('/digio/verify', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PRINCIPAL_OFFICER']), adminController_1.verifyDigioConnection);
 // Bulk Exports
 router.get('/admin/exports/invoices', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EXPORT_DATA'), adminController_1.exportInvoicesZip);
 router.get('/admin/exports/agreements', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EXPORT_DATA'), adminController_1.exportAgreementsZip);

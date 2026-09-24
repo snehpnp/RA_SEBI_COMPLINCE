@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDocumentForEsign = exports.extractAadhaarDetailsFromDigio = exports.downloadDocument = exports.getDocumentStatus = exports.getKycStatus = exports.createKycRequest = exports.isValidName = void 0;
+exports.testDigioConnection = exports.createDocumentForEsign = exports.extractAadhaarDetailsFromDigio = exports.downloadDocument = exports.getDocumentStatus = exports.getKycStatus = exports.createKycRequest = exports.isValidName = void 0;
 const axios_1 = __importDefault(require("axios"));
 const form_data_1 = __importDefault(require("form-data"));
 // Digio API base URL - can be overridden by env for sandbox/production
@@ -270,3 +270,134 @@ const createDocumentForEsign = async (clientId, clientSecret, pdfBuffer, fileNam
     }
 };
 exports.createDocumentForEsign = createDocumentForEsign;
+const testDigioConnection = async (clientId, clientSecret, kycTemplateName) => {
+    if (!clientId || !clientId.trim()) {
+        return {
+            success: false,
+            authSuccess: false,
+            message: 'Digio Client ID is required.'
+        };
+    }
+    if (!clientSecret || !clientSecret.trim()) {
+        return {
+            success: false,
+            authSuccess: false,
+            message: 'Digio Client Secret is required.'
+        };
+    }
+    const cleanClientId = clientId.trim();
+    const cleanClientSecret = clientSecret.trim();
+    const authHeader = getDigioAuthHeader(cleanClientId, cleanClientSecret);
+    // 1. Verify Digio Basic Auth credentials with probe request
+    let authValid = false;
+    try {
+        await axios_1.default.get(`${DIGIO_BASE_URL}/v2/client/document/auth_ping_${Date.now()}`, {
+            headers: {
+                Authorization: authHeader
+            },
+            timeout: 10000
+        });
+        authValid = true;
+    }
+    catch (probeError) {
+        if (probeError.response) {
+            const status = probeError.response.status;
+            // 401 Unauthorized or 403 Forbidden means invalid credentials
+            if (status === 401 || status === 403) {
+                const errData = probeError.response.data;
+                const errorMsg = errData?.message || errData?.error || 'Invalid Digio Client ID or Client Secret.';
+                return {
+                    success: false,
+                    authSuccess: false,
+                    message: `Digio Authentication Failed (HTTP ${status}): ${errorMsg}`
+                };
+            }
+            // 404 (Document not found) or 400 (Invalid doc ID) confirms HTTP Basic Auth passed successfully
+            if (status === 404 || status === 400) {
+                authValid = true;
+            }
+        }
+        else {
+            return {
+                success: false,
+                authSuccess: false,
+                message: `Failed to connect to Digio API: ${probeError.message}`
+            };
+        }
+    }
+    if (!authValid) {
+        return {
+            success: false,
+            authSuccess: false,
+            message: 'Could not verify Digio credentials. Please check your Client ID and Client Secret.'
+        };
+    }
+    const isSandbox = DIGIO_BASE_URL.includes('ext.digio.in') || cleanClientId.toLowerCase().includes('test');
+    const envMode = isSandbox ? 'SANDBOX / TEST' : 'PRODUCTION / LIVE';
+    // 2. If KYC Template Name is provided, test template validity with Digio
+    if (kycTemplateName && kycTemplateName.trim()) {
+        const cleanTemplate = kycTemplateName.trim();
+        try {
+            const payload = {
+                customer_identifier: 'verify.connection@ragcp-compliance.in',
+                customer_name: 'Digio Connectivity Test',
+                template_name: cleanTemplate,
+                notify_customer: false
+            };
+            const kycResponse = await axios_1.default.post(`${DIGIO_BASE_URL}/client/kyc/v2/request/with_template`, payload, {
+                headers: {
+                    Authorization: authHeader,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 12000
+            });
+            const kycId = kycResponse.data?.id || kycResponse.data?.kyc_request_id || 'OK';
+            return {
+                success: true,
+                authSuccess: true,
+                templateValid: true,
+                mode: envMode,
+                message: `Digio connected successfully! Credentials are valid and KYC Template "${cleanTemplate}" is active & ready. (Test Request ID: ${kycId})`,
+                details: kycResponse.data
+            };
+        }
+        catch (templateError) {
+            if (templateError.response) {
+                const status = templateError.response.status;
+                const errData = templateError.response.data;
+                const errMsg = errData?.message || errData?.error || JSON.stringify(errData);
+                if (status === 401 || status === 403) {
+                    return {
+                        success: false,
+                        authSuccess: false,
+                        templateValid: false,
+                        message: `Digio Authentication Failed: ${errMsg}`
+                    };
+                }
+                return {
+                    success: false,
+                    authSuccess: true,
+                    templateValid: false,
+                    mode: envMode,
+                    message: `Digio credentials are VALID, but KYC Template "${cleanTemplate}" could not be verified: ${errMsg}`
+                };
+            }
+            return {
+                success: false,
+                authSuccess: true,
+                templateValid: false,
+                mode: envMode,
+                message: `Digio credentials valid, but template check failed: ${templateError.message}`
+            };
+        }
+    }
+    // If no template provided, credentials alone verified
+    return {
+        success: true,
+        authSuccess: true,
+        templateValid: undefined,
+        mode: envMode,
+        message: `Digio API credentials verified successfully! (${envMode} active - Ready for eSign & KYC)`
+    };
+};
+exports.testDigioConnection = testDigioConnection;

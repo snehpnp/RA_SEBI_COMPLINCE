@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
 import { resolveAttachmentFilePath, generateTermsAndConditionsPdf, generatePrivacyPolicyPdf, generateInternalPolicyPdf } from '../services/pdfService';
+import { testDigioConnection } from '../services/digioService';
 import axios from 'axios';
 
 const maskEmail = (email: string | null | undefined) => {
@@ -2841,6 +2842,60 @@ export const verifyPaymentGateway = async (req: AuthenticatedRequest, res: Respo
     return res.status(500).json({
       success: false,
       message: error.message || 'Payment gateway verification failed.'
+    });
+  }
+};
+
+export const verifyDigioConnection = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { digioClientId, digioClientSecret, digioKycTemplateName } = req.body;
+    let clientId = digioClientId ? String(digioClientId).trim() : '';
+    let clientSecret = digioClientSecret ? String(digioClientSecret).trim() : '';
+    const templateName = digioKycTemplateName ? String(digioKycTemplateName).trim() : '';
+
+    // If clientId or clientSecret are not passed or left blank, retrieve existing from Tenant DB
+    if (!clientId || !clientSecret) {
+      const tenantId = req.user?.tenantId;
+      let tenant: any = null;
+      if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+        tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+      }
+      if (!tenant && tenantId) {
+        tenant = await dynamicDb.Tenant.findOne({
+          $or: [{ id: tenantId }, { tenantId: tenantId }]
+        }).lean();
+      }
+      if (!tenant) {
+        tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+      }
+
+      if (tenant) {
+        if (!clientId) clientId = tenant.digioClientId || '';
+        if (!clientSecret) clientSecret = tenant.digioClientSecret || '';
+      }
+    }
+
+    if (!clientId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Digio Client ID is required to test connection.'
+      });
+    }
+
+    if (!clientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'Digio Client Secret is required to test connection. Please enter your secret key.'
+      });
+    }
+
+    const result = await testDigioConnection(clientId, clientSecret, templateName);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error: any) {
+    console.error('Error verifying Digio connection:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error while testing Digio connection'
     });
   }
 };

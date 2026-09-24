@@ -1075,6 +1075,14 @@ class ApiClient {
     });
   }
 
+  async verifyDigioConnection(data: { digioClientId?: string; digioClientSecret?: string; digioKycTemplateName?: string }) {
+    return this.request('/admin/verify-digio', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+
   // Telegram Integration Methods
   async getTelegramSettings() {
     return this.request('/telegram/settings');
