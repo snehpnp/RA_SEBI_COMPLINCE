@@ -101,13 +101,18 @@ const initiateAgreementEsign = async (req, res) => {
             aadhaarSuffix: verifiedMaskedAadhaar || undefined
         });
         // 2. Upload to Digio for eSign
-        const identifier = req.user.email || client.email;
+        const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
+        const reqUserAny = req.user || {};
+        const identifier = client.email || userObj.email || reqUserAny.email || client.mobile || userObj.mobile || reqUserAny.mobile;
         const fileName = `Agreement_${clientIdStr}.pdf`;
         const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
         const digioResponse = await (0, digioService_1.createDocumentForEsign)(tenant.digioClientId, tenant.digioClientSecret, pdfBuffer, fileName, identifier, signerName, tenant.digioEnvironment);
+        const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.signers?.[0]?.access_token?.id || digioResponse?.token_id || null;
         res.json({
             success: true,
             data: digioResponse,
+            tokenId: tokenId,
+            identifier: identifier,
             signerName: signerName,
             environment: isSandbox ? 'sandbox' : 'production'
         });

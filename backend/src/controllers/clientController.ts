@@ -371,10 +371,12 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
     );
 
     console.log("digioResponse", digioResponse);
+    const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.token_id || null;
     return res.status(200).json({
       success: true,
       message: 'Digio KYC request initiated',
       data: digioResponse,
+      tokenId: tokenId,
       environment: isSandbox ? 'sandbox' : 'production'
     });
   } catch (error: any) {

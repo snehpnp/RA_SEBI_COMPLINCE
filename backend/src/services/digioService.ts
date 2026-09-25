@@ -82,6 +82,53 @@ export const testDigioConnection = async (
   }
 };
 
+export const generateGatewayToken = async (
+  clientId: string,
+  clientSecret: string,
+  entityId: string,
+  identifier?: string,
+  environment?: string
+): Promise<string | null> => {
+  if (!entityId) return null;
+  const baseUrl = getDigioBaseUrl(clientId, environment);
+  const authHeader = getDigioAuthHeader(clientId, clientSecret);
+  try {
+    const payload: Record<string, any> = { entity_id: entityId };
+    if (identifier) payload.identifier = identifier;
+    console.log('[Digio Gateway Token] Requesting access token for entity:', entityId, 'identifier:', identifier);
+    let response;
+    try {
+      response = await axios.post(`${baseUrl}/user/auth/generate_token`, payload, {
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json'
+        }
+      });
+    } catch (err1: any) {
+      if (identifier) {
+        console.log('[Digio Gateway Token] Retrying generate_token with entity_id only...');
+        response = await axios.post(`${baseUrl}/user/auth/generate_token`, { entity_id: entityId }, {
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/json'
+          }
+        });
+      } else {
+        throw err1;
+      }
+    }
+    const token = response.data?.id || response.data?.access_token?.id || response.data?.token_id || response.data?.token;
+    if (token) {
+      console.log('[Digio Gateway Token] Successfully generated token:', token);
+      return String(token);
+    }
+    return null;
+  } catch (err: any) {
+    console.warn('[Digio Gateway Token] Note: Token generation response:', err.response?.data || err.message);
+    return null;
+  }
+};
+
 export const createKycRequest = async (
   clientId: string,
   clientSecret: string,
@@ -103,6 +150,8 @@ export const createKycRequest = async (
       customer_identifier: cId,
       customer_name: cName,
       notify_customer: false,
+      generate_access_token: true,
+      generateAccessToken: true,
       reference_id: refId,
       actions: [
         {
@@ -120,7 +169,18 @@ export const createKycRequest = async (
         'Content-Type': 'application/json'
       }
     });
-    return response.data;
+    const data = response.data;
+    if (data?.id) {
+      let tokenId = data?.access_token?.id || data?.token_id || data?.gateway_token_id;
+      if (!tokenId) {
+        tokenId = await generateGatewayToken(clientId, clientSecret, data.id, cId, environment);
+      }
+      if (tokenId) {
+        data.tokenId = tokenId;
+        if (!data.access_token) data.access_token = { id: tokenId };
+      }
+    }
+    return data;
   };
 
   // If a specific custom template is configured, attempt with_template first
@@ -137,6 +197,8 @@ export const createKycRequest = async (
         customer_name: cName,
         template_name: cleanTemplate,
         notify_customer: false,
+        generate_access_token: true,
+        generateAccessToken: true,
         reference_id: refId
       };
       console.log('[Digio KYC] Creating KYC Request with Template payload:', payload, 'to URL:', baseUrl);
@@ -146,7 +208,18 @@ export const createKycRequest = async (
           'Content-Type': 'application/json'
         }
       });
-      return response.data;
+      const data = response.data;
+      if (data?.id) {
+        let tokenId = data?.access_token?.id || data?.token_id || data?.gateway_token_id;
+        if (!tokenId) {
+          tokenId = await generateGatewayToken(clientId, clientSecret, data.id, cId, environment);
+        }
+        if (tokenId) {
+          data.tokenId = tokenId;
+          if (!data.access_token) data.access_token = { id: tokenId };
+        }
+      }
+      return data;
     } catch (templateError: any) {
       const errData = templateError.response?.data;
       console.warn('[Digio KYC] Template request failed, falling back to Direct DigiLocker KYC request:', errData || templateError.message);
@@ -445,7 +518,9 @@ export const createDocumentForEsign = async (
 
     const signerObj: Record<string, any> = {
       identifier: signerIdentifier,
-      reason: 'SEBI Research Advisory Agreement eSign'
+      reason: 'SEBI Research Advisory Agreement eSign',
+      generate_access_token: true,
+      generateAccessToken: true
     };
     if (signerName && isValidName(signerName)) {
       signerObj.name = signerName.trim();
@@ -454,7 +529,10 @@ export const createDocumentForEsign = async (
     const requestBody = {
       signers: [signerObj],
       expire_in_days: 10,
-      display_on_page: 'all'
+      display_on_page: 'all',
+      generate_access_token: true,
+      generateAccessToken: true,
+      notify_signers: false
     };
 
     formData.append('request', JSON.stringify(requestBody), {
@@ -469,7 +547,25 @@ export const createDocumentForEsign = async (
       }
     });
 
-    return response.data;
+    const data = response.data;
+    if (data?.id) {
+      let tokenId = 
+        data?.access_token?.id ||
+        data?.signers?.[0]?.access_token?.id ||
+        data?.signers?.[0]?.token_id ||
+        data?.token_id ||
+        data?.gateway_token_id ||
+        (typeof data?.access_token === 'string' ? data.access_token : null);
+
+      if (!tokenId) {
+        tokenId = await generateGatewayToken(clientId, clientSecret, data.id, signerIdentifier, environment);
+      }
+      if (tokenId) {
+        data.tokenId = String(tokenId);
+        if (!data.access_token) data.access_token = { id: String(tokenId) };
+      }
+    }
+    return data;
   } catch (error: any) {
     if (error.response) {
       console.error('[Digio eSign] Document Error:', JSON.stringify(error.response.data));

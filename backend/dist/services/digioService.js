@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDocumentForEsign = exports.extractAadhaarDetailsFromDigio = exports.downloadDocument = exports.getDocumentStatus = exports.getKycStatus = exports.createKycRequest = exports.testDigioConnection = exports.isValidName = exports.getDigioBaseUrl = void 0;
+exports.createDocumentForEsign = exports.extractAadhaarDetailsFromDigio = exports.downloadDocument = exports.getDocumentStatus = exports.getKycStatus = exports.createKycRequest = exports.generateGatewayToken = exports.testDigioConnection = exports.isValidName = exports.getDigioBaseUrl = void 0;
 const axios_1 = __importDefault(require("axios"));
 const form_data_1 = __importDefault(require("form-data"));
 // Digio API base URL - resolves dynamically based on environment or clientId prefix (ACK/AIK => sandbox)
@@ -88,6 +88,52 @@ const testDigioConnection = async (clientId, clientSecret, environment) => {
     }
 };
 exports.testDigioConnection = testDigioConnection;
+const generateGatewayToken = async (clientId, clientSecret, entityId, identifier, environment) => {
+    if (!entityId)
+        return null;
+    const baseUrl = (0, exports.getDigioBaseUrl)(clientId, environment);
+    const authHeader = getDigioAuthHeader(clientId, clientSecret);
+    try {
+        const payload = { entity_id: entityId };
+        if (identifier)
+            payload.identifier = identifier;
+        console.log('[Digio Gateway Token] Requesting access token for entity:', entityId, 'identifier:', identifier);
+        let response;
+        try {
+            response = await axios_1.default.post(`${baseUrl}/user/auth/generate_token`, payload, {
+                headers: {
+                    Authorization: authHeader,
+                    'Content-Type': 'application/json'
+                }
+            });
+        }
+        catch (err1) {
+            if (identifier) {
+                console.log('[Digio Gateway Token] Retrying generate_token with entity_id only...');
+                response = await axios_1.default.post(`${baseUrl}/user/auth/generate_token`, { entity_id: entityId }, {
+                    headers: {
+                        Authorization: authHeader,
+                        'Content-Type': 'application/json'
+                    }
+                });
+            }
+            else {
+                throw err1;
+            }
+        }
+        const token = response.data?.id || response.data?.access_token?.id || response.data?.token_id || response.data?.token;
+        if (token) {
+            console.log('[Digio Gateway Token] Successfully generated token:', token);
+            return String(token);
+        }
+        return null;
+    }
+    catch (err) {
+        console.warn('[Digio Gateway Token] Note: Token generation response:', err.response?.data || err.message);
+        return null;
+    }
+};
+exports.generateGatewayToken = generateGatewayToken;
 const createKycRequest = async (clientId, clientSecret, kycTemplateName, customerIdentifier, customerName, environment) => {
     const baseUrl = (0, exports.getDigioBaseUrl)(clientId, environment);
     const cleanTemplate = (kycTemplateName || '').trim();
@@ -101,6 +147,8 @@ const createKycRequest = async (clientId, clientSecret, kycTemplateName, custome
             customer_identifier: cId,
             customer_name: cName,
             notify_customer: false,
+            generate_access_token: true,
+            generateAccessToken: true,
             reference_id: refId,
             actions: [
                 {
@@ -118,7 +166,19 @@ const createKycRequest = async (clientId, clientSecret, kycTemplateName, custome
                 'Content-Type': 'application/json'
             }
         });
-        return response.data;
+        const data = response.data;
+        if (data?.id) {
+            let tokenId = data?.access_token?.id || data?.token_id || data?.gateway_token_id;
+            if (!tokenId) {
+                tokenId = await (0, exports.generateGatewayToken)(clientId, clientSecret, data.id, cId, environment);
+            }
+            if (tokenId) {
+                data.tokenId = tokenId;
+                if (!data.access_token)
+                    data.access_token = { id: tokenId };
+            }
+        }
+        return data;
     };
     // If a specific custom template is configured, attempt with_template first
     const isGenericTemplate = !cleanTemplate ||
@@ -133,6 +193,8 @@ const createKycRequest = async (clientId, clientSecret, kycTemplateName, custome
                 customer_name: cName,
                 template_name: cleanTemplate,
                 notify_customer: false,
+                generate_access_token: true,
+                generateAccessToken: true,
                 reference_id: refId
             };
             console.log('[Digio KYC] Creating KYC Request with Template payload:', payload, 'to URL:', baseUrl);
@@ -142,7 +204,19 @@ const createKycRequest = async (clientId, clientSecret, kycTemplateName, custome
                     'Content-Type': 'application/json'
                 }
             });
-            return response.data;
+            const data = response.data;
+            if (data?.id) {
+                let tokenId = data?.access_token?.id || data?.token_id || data?.gateway_token_id;
+                if (!tokenId) {
+                    tokenId = await (0, exports.generateGatewayToken)(clientId, clientSecret, data.id, cId, environment);
+                }
+                if (tokenId) {
+                    data.tokenId = tokenId;
+                    if (!data.access_token)
+                        data.access_token = { id: tokenId };
+                }
+            }
+            return data;
         }
         catch (templateError) {
             const errData = templateError.response?.data;
@@ -427,7 +501,9 @@ const createDocumentForEsign = async (clientId, clientSecret, pdfBuffer, fileNam
         formData.append('file', pdfBuffer, { filename: fileName, contentType: 'application/pdf' });
         const signerObj = {
             identifier: signerIdentifier,
-            reason: 'SEBI Research Advisory Agreement eSign'
+            reason: 'SEBI Research Advisory Agreement eSign',
+            generate_access_token: true,
+            generateAccessToken: true
         };
         if (signerName && (0, exports.isValidName)(signerName)) {
             signerObj.name = signerName.trim();
@@ -435,7 +511,10 @@ const createDocumentForEsign = async (clientId, clientSecret, pdfBuffer, fileNam
         const requestBody = {
             signers: [signerObj],
             expire_in_days: 10,
-            display_on_page: 'all'
+            display_on_page: 'all',
+            generate_access_token: true,
+            generateAccessToken: true,
+            notify_signers: false
         };
         formData.append('request', JSON.stringify(requestBody), {
             contentType: 'application/json'
@@ -447,7 +526,24 @@ const createDocumentForEsign = async (clientId, clientSecret, pdfBuffer, fileNam
                 ...formData.getHeaders()
             }
         });
-        return response.data;
+        const data = response.data;
+        if (data?.id) {
+            let tokenId = data?.access_token?.id ||
+                data?.signers?.[0]?.access_token?.id ||
+                data?.signers?.[0]?.token_id ||
+                data?.token_id ||
+                data?.gateway_token_id ||
+                (typeof data?.access_token === 'string' ? data.access_token : null);
+            if (!tokenId) {
+                tokenId = await (0, exports.generateGatewayToken)(clientId, clientSecret, data.id, signerIdentifier, environment);
+            }
+            if (tokenId) {
+                data.tokenId = String(tokenId);
+                if (!data.access_token)
+                    data.access_token = { id: String(tokenId) };
+            }
+        }
+        return data;
     }
     catch (error) {
         if (error.response) {

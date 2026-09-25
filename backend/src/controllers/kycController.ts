@@ -129,7 +129,9 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
     });
 
     // 2. Upload to Digio for eSign
-    const identifier = req.user!.email || client.email;
+    const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
+    const reqUserAny = (req.user as any) || {};
+    const identifier = client.email || userObj.email || reqUserAny.email || client.mobile || userObj.mobile || reqUserAny.mobile;
     const fileName = `Agreement_${clientIdStr}.pdf`;
 
     const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
@@ -143,9 +145,12 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
       tenant.digioEnvironment
     );
 
+    const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.signers?.[0]?.access_token?.id || digioResponse?.token_id || null;
     res.json({
       success: true,
       data: digioResponse,
+      tokenId: tokenId,
+      identifier: identifier,
       signerName: signerName,
       environment: isSandbox ? 'sandbox' : 'production'
     });

@@ -332,7 +332,13 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
           };
           const digio = new (window as any).Digio(options);
           digio.init();
-          digio.submit(res.data.id, formData.email || pan);
+          const customerId = formData.email || clientProfile?.email || clientProfile?.user?.email || pan;
+          const tokenId = res.tokenId || res.data?.tokenId || res.data?.access_token?.id || res.data?.token_id;
+          if (tokenId) {
+            digio.submit(res.data.id, customerId, tokenId);
+          } else {
+            digio.submit(res.data.id, customerId);
+          }
           return;
         }
       } catch (digioErr: any) {
@@ -405,7 +411,13 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
           };
           const digio = new (window as any).Digio(options);
           digio.init();
-          digio.submit(res.data.id, formData.email);
+          const customerId = (res as any).identifier || formData.email || clientProfile?.email || clientProfile?.user?.email;
+          const tokenId = (res as any).tokenId || res.data?.tokenId || res.data?.access_token?.id || res.data?.signers?.[0]?.access_token?.id || res.data?.token_id;
+          if (tokenId) {
+            digio.submit(res.data.id, customerId, tokenId);
+          } else {
+            digio.submit(res.data.id, customerId);
+          }
           return;
         } else if (hasDigio) {
           toast.error(res?.message || 'Could not initiate Digio eSign. Please verify Digio credentials in Admin Settings.');

@@ -125,7 +125,14 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         };
         const digio = new (window as any).Digio(options);
         digio.init();
-        digio.submit(res.data.id, profile?.email || profile?.user?.email);
+        const customerId = profile?.email || profile?.user?.email || profile?.mobile || profile?.user?.mobile;
+        const tokenId = res.tokenId || res.data?.tokenId || res.data?.access_token?.id || res.data?.token_id;
+        console.log('🚀 [Digio KYC SDK] Submitting request:', res.data.id, 'Identifier:', customerId, 'TokenId:', tokenId);
+        if (tokenId) {
+          digio.submit(res.data.id, customerId, tokenId);
+        } else {
+          digio.submit(res.data.id, customerId);
+        }
       } else {
         toast.error(res?.message || res?.errors?.[0] || 'Digio DigiLocker service unavailable. Please check tenant credentials.');
         setFetchingKyc(false);
@@ -183,7 +190,14 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         };
         const digio = new (window as any).Digio(options);
         digio.init();
-        digio.submit(res.data.id, profile?.email || profile?.user?.email);
+        const customerId = (res as any).identifier || profile?.email || profile?.user?.email || profile?.mobile || profile?.user?.mobile;
+        const tokenId = res.tokenId || res.data?.tokenId || res.data?.access_token?.id || res.data?.signers?.[0]?.access_token?.id || res.data?.token_id;
+        console.log('✍️ [Digio eSign SDK] Submitting document:', res.data.id, 'Identifier:', customerId, 'TokenId:', tokenId);
+        if (tokenId) {
+          digio.submit(res.data.id, customerId, tokenId);
+        } else {
+          digio.submit(res.data.id, customerId);
+        }
         return;
       } else {
         toast.error(res?.message || 'Could not initiate Digio eSign. Please verify Digio credentials in Admin Settings.');

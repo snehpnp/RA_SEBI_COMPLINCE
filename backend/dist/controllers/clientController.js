@@ -355,10 +355,12 @@ const initiateDigioKyc = async (req, res) => {
         const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
         const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, templateName, customerIdentifier, customerName, tenant.digioEnvironment);
         console.log("digioResponse", digioResponse);
+        const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.token_id || null;
         return res.status(200).json({
             success: true,
             message: 'Digio KYC request initiated',
             data: digioResponse,
+            tokenId: tokenId,
             environment: isSandbox ? 'sandbox' : 'production'
         });
     }
