@@ -12,6 +12,7 @@ import {
   extractAadhaarDetailsFromDigio
 } from '../services/digioService';
 import { generateAgreementPdf } from '../services/pdfService';
+import { sendSignedAgreementEmail } from '../services/emailService';
 
 export const initiateKyc = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -94,31 +95,42 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
         l.includes('@')
       );
     };
-
-    let verifiedDigioName = '';
+    // Resolve signer full name & masked Aadhaar directly from DB (from Step 1 DigiLocker KYC)
+    const profileObj = client.profile || {};
+    let signerName = '';
     let verifiedMaskedAadhaar = '';
-    console.log("req.body?.digioResponse", req.body?.digioResponse)
-    // Check if digioResponse or pki_signature_details passed
+
     if (req.body?.digioResponse) {
       const extracted = extractAadhaarDetailsFromDigio(req.body.digioResponse);
-
-      console.log("extracted", extracted)
       if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
-        verifiedDigioName = extracted.aadhaarName;
+        signerName = extracted.aadhaarName.trim();
       }
       if (extracted?.maskedAadhaar) {
         verifiedMaskedAadhaar = extracted.maskedAadhaar;
       }
     }
 
-
-    console.log("verifiedDigioName", verifiedDigioName)
-
-    // Resolve signer full name
-    let signerName = '';
-    if (verifiedDigioName && !isGeneric(verifiedDigioName)) {
-      signerName = verifiedDigioName;
+    if (!signerName) {
+      if (client.aadhaarName && !isGeneric(client.aadhaarName)) {
+        signerName = client.aadhaarName.trim();
+      } else if (client.panName && !isGeneric(client.panName)) {
+        signerName = client.panName.trim();
+      } else if (profileObj.aadhaarName && !isGeneric(profileObj.aadhaarName)) {
+        signerName = profileObj.aadhaarName.trim();
+      } else if (profileObj.panName && !isGeneric(profileObj.panName)) {
+        signerName = profileObj.panName.trim();
+      } else if (client.name && !isGeneric(client.name)) {
+        signerName = client.name.trim();
+      } else if (client.userId?.firstName || client.userId?.lastName) {
+        signerName = `${client.userId?.firstName || ''} ${client.userId?.lastName || ''}`.trim();
+      }
     }
+
+    if (!verifiedMaskedAadhaar) {
+      verifiedMaskedAadhaar = client.aadhaar || profileObj.aadhaar || '';
+    }
+
+    console.log('✍️ [Initiate Agreement eSign] Resolved Signer Name from DB KYC:', signerName, '| Aadhaar:', verifiedMaskedAadhaar);
 
     // 1. Generate PDF dynamically
     const pdfBuffer = await generateAgreementPdf(clientIdStr, {
@@ -143,9 +155,11 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
       tenant.digioEnvironment
     );
 
+    const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.token_id || null;
     res.json({
       success: true,
       data: digioResponse,
+      tokenId: tokenId,
       signerName: signerName,
       environment: isSandbox ? 'sandbox' : 'production'
     });
@@ -320,6 +334,22 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
       if (verifiedState) updateFields.state = verifiedState;
       if (verifiedZipCode) updateFields.zipCode = verifiedZipCode;
       if (rawDigioData) updateFields.digilockerData = rawDigioData;
+      if (updateFields.pan) {
+        const cleanPan = updateFields.pan.trim().toUpperCase();
+        const duplicateClient = await dynamicDb.Client.findOne({
+          pan: cleanPan,
+          _id: { $ne: clientId }
+        }).lean();
+
+        if (duplicateClient) {
+          return res.status(400).json({
+            success: false,
+            message: `This PAN card (${cleanPan}) is already registered with another account. Please use another PAN.`,
+            errors: [`This PAN card (${cleanPan}) is already registered with another account. Please use another PAN.`],
+            duplicateField: 'pan'
+          });
+        }
+      }
 
       const updatedClientDoc = await dynamicDb.Client.findByIdAndUpdate(clientId, { $set: updateFields }, { returnDocument: 'after', lean: true });
       console.log('💾 [DB Update] Client model updated with DigiLocker verified details:', {
@@ -462,6 +492,25 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
           agreementSigned: true
         }
       });
+
+      // Send Signed Agreement copy via Email directly to Client with attached PDF
+      const toEmail = client.email || req.user?.email;
+      if (toEmail) {
+        sendSignedAgreementEmail({
+          tenantId: client.tenantId || req.user?.tenantId,
+          toEmail,
+          clientName: signerName || client.name,
+          companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+          agreementUrl,
+          pdfBuffer,
+          maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+          signedAt: new Date()
+        }).then((sent) => {
+          if (sent) console.log(`[Agreement Email] 📧 Signed agreement PDF successfully emailed to client: ${toEmail}`);
+        }).catch((mailErr) => {
+          console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
+        });
+      }
     }
 
     res.json({
@@ -471,6 +520,31 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
     });
   } catch (error: any) {
     console.error('Update Status Error:', error);
-    res.status(500).json({ success: false, message: error.message || 'Server error' });
+    const rawMsg = String(error?.message || '');
+    if (error?.code === 11000 || error?.name === 'MongoServerError' || rawMsg.includes('E11000') || rawMsg.includes('duplicate key')) {
+      if (error?.keyPattern?.pan || rawMsg.includes('pan') || rawMsg.includes('pan_unique_partial')) {
+        const match = rawMsg.match(/dup key:\s*\{\s*pan:\s*"([^"]+)"/i) || rawMsg.match(/\{ pan:\s*"([^"]+)"\s*\}/i);
+        const panVal = match ? match[1] : '';
+        const msg = panVal
+          ? `This PAN (${panVal}) is already registered with another account. Please use another PAN.`
+          : 'This PAN is already registered with another account. Please use another PAN.';
+        return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'pan' });
+      }
+      if (error?.keyPattern?.aadhaar || rawMsg.includes('aadhaar')) {
+        const msg = 'This Aadhaar number is already registered with another account.';
+        return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'aadhaar' });
+      }
+      if (error?.keyPattern?.email || rawMsg.includes('email')) {
+        const msg = 'This email address is already registered with another account.';
+        return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'email' });
+      }
+      if (error?.keyPattern?.mobile || rawMsg.includes('mobile')) {
+        const msg = 'This mobile number is already registered with another account.';
+        return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'mobile' });
+      }
+      const msg = 'An account with these credentials already exists. Please use unique details.';
+      return res.status(400).json({ success: false, message: msg, errors: [msg] });
+    }
+    res.status(500).json({ success: false, message: error.message || 'Server error', errors: [error.message] });
   }
 };

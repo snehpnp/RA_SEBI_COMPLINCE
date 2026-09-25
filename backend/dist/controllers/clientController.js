@@ -355,10 +355,12 @@ const initiateDigioKyc = async (req, res) => {
         const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
         const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, templateName, customerIdentifier, customerName, tenant.digioEnvironment);
         console.log("digioResponse", digioResponse);
+        const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.token_id || null;
         return res.status(200).json({
             success: true,
             message: 'Digio KYC request initiated',
             data: digioResponse,
+            tokenId: tokenId,
             environment: isSandbox ? 'sandbox' : 'production'
         });
     }
@@ -794,6 +796,25 @@ const signAgreement = async (req, res) => {
             },
             req
         });
+        // 4. Send Signed Agreement copy via Email directly to Client with attached PDF
+        const toEmail = client.email || req.user?.email;
+        if (toEmail) {
+            (0, emailService_1.sendSignedAgreementEmail)({
+                tenantId: client.tenantId || req.user?.tenantId,
+                toEmail,
+                clientName: signerName || client.name,
+                companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+                agreementUrl,
+                pdfBuffer,
+                maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+                signedAt: new Date()
+            }).then((sent) => {
+                if (sent)
+                    console.log(`[Agreement Email] 📧 Signed agreement PDF successfully emailed to client: ${toEmail}`);
+            }).catch((mailErr) => {
+                console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Agreement signed successfully via Aadhaar eSign.',

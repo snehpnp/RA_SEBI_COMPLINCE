@@ -107,7 +107,24 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const errorMessage = data?.message || data?.error || (data?.errors && data.errors[0]) || `Request failed with status ${response.status}`;
+      let errorMessage = data?.message || data?.error || (data?.errors && data.errors[0]) || `Request failed with status ${response.status}`;
+      
+      // Clean up raw database duplicate errors into user-friendly message
+      if (typeof errorMessage === 'string' && (errorMessage.includes('E11000') || errorMessage.includes('duplicate key') || errorMessage.includes('findAndModify'))) {
+        if (errorMessage.toLowerCase().includes('pan')) {
+          const match = errorMessage.match(/dup key:\s*\{\s*pan:\s*"([^"]+)"/i) || errorMessage.match(/\{ pan:\s*"([^"]+)"\s*\}/i);
+          errorMessage = match ? `PAN card (${match[1]}) is already registered with another account. Please use another PAN.` : 'This PAN card is already registered with another account. Please use another PAN.';
+        } else if (errorMessage.toLowerCase().includes('aadhaar')) {
+          errorMessage = 'This Aadhaar number is already registered with another account.';
+        } else if (errorMessage.toLowerCase().includes('email')) {
+          errorMessage = 'This email address is already registered. Please login or use a different email.';
+        } else if (errorMessage.toLowerCase().includes('mobile')) {
+          errorMessage = 'This mobile number is already registered. Please login or use a different number.';
+        } else {
+          errorMessage = 'A duplicate record already exists with these details. Please use another.';
+        }
+      }
+
       const err = new Error(errorMessage) as any;
       err.response = { data, status: response.status };
       err.status = response.status;
@@ -1104,7 +1121,16 @@ class ApiClient {
     return this.request('/client/agreement/initiate', { method: 'POST' });
   }
 
-  async updateDigioStatus(data: { type: string, status: string, kycId?: string, digioResponse?: any }) {
+  async updateDigioStatus(data: {
+    type: string;
+    status: string;
+    kycId?: string;
+    digioKycId?: string;
+    documentId?: string;
+    signatureText?: string;
+    digioResponse?: any;
+    [key: string]: any;
+  }) {
     return this.request('/client/kyc/status', {
       method: 'POST',
       body: JSON.stringify(data),

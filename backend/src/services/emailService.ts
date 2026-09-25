@@ -587,3 +587,150 @@ export const sendComplaintNotificationEmail = async ({ tenantId, adminEmail, cli
   return await sendEmail(tenantId, adminEmail, `Action Required: New Complaint from ${clientName}`, html);
 };
 
+/**
+ * Send Signed Advisory Agreement PDF copy to Client upon eSign completion
+ */
+export async function sendSignedAgreementEmail(opts: {
+  tenantId?: string | null;
+  toEmail: string;
+  clientName: string;
+  companyName?: string;
+  agreementUrl?: string;
+  pdfBuffer?: Buffer | null;
+  maskedAadhaar?: string;
+  signedAt?: Date;
+}): Promise<boolean> {
+  const { tenantId, toEmail, clientName, companyName, agreementUrl, pdfBuffer, maskedAadhaar, signedAt } = opts;
+  const displayCompany = companyName || 'Research Analyst Advisory';
+  const formattedDate = (signedAt || new Date()).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const subject = `Your Signed Advisory Agreement — ${displayCompany}`;
+
+  const attachments: any[] = [];
+  if (pdfBuffer && Buffer.isBuffer(pdfBuffer)) {
+    attachments.push({
+      filename: `Advisory_Agreement_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+      content: pdfBuffer,
+      contentType: 'application/pdf'
+    });
+  }
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f1f5f9; color: #1e293b;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 36px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0;">
+          
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 28px; text-align: center;">
+              <div style="font-size: 32px; margin-bottom: 8px;">✍️ 📜</div>
+              <h1 style="color: #ffffff !important; margin: 0 0 6px; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">
+                Advisory Agreement Signed
+              </h1>
+              <p style="color: #bfdbfe !important; margin: 0; font-size: 13.5px; font-weight: 500;">
+                ${displayCompany} • SEBI Research Analyst
+              </p>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 28px 28px 24px;">
+              <p style="color: #1e293b !important; font-size: 15px; font-weight: 700; margin: 0 0 12px;">
+                Dear ${clientName},
+              </p>
+              <p style="color: #475569 !important; font-size: 14px; line-height: 1.6; margin: 0 0 20px;">
+                Thank you for completing your onboarding compliance. Your SEBI-mandated Research Analyst Advisory Agreement has been successfully signed and verified.
+              </p>
+
+              <!-- Agreement Summary Card -->
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin: 0 0 22px;">
+                <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b !important; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; width: 40%;">
+                      Signer Name
+                    </td>
+                    <td style="padding: 8px 0; font-size: 13px; font-weight: 700; color: #0f172a !important; text-align: right; border-bottom: 1px solid #e2e8f0;">
+                      ${clientName}
+                    </td>
+                  </tr>
+                  ${maskedAadhaar ? `
+                  <tr>
+                    <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b !important; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">
+                      Aadhaar (Verified)
+                    </td>
+                    <td style="padding: 8px 0; font-size: 13px; font-weight: 600; color: #0f172a !important; text-align: right; border-bottom: 1px solid #e2e8f0; font-family: monospace;">
+                      ${maskedAadhaar}
+                    </td>
+                  </tr>` : ''}
+                  <tr>
+                    <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b !important; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">
+                      Signed Timestamp
+                    </td>
+                    <td style="padding: 8px 0; font-size: 12.5px; font-weight: 600; color: #0f172a !important; text-align: right; border-bottom: 1px solid #e2e8f0;">
+                      ${formattedDate}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b !important; text-transform: uppercase;">
+                      Legal Status
+                    </td>
+                    <td style="padding: 8px 0; font-size: 12.5px; font-weight: 700; color: #16a34a !important; text-align: right;">
+                      ✅ Legally Binding & Executed
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- PDF Attachment Notice -->
+              <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 16px 18px; margin: 0 0 24px;">
+                <div style="font-weight: 800; color: #15803d !important; font-size: 13.5px; margin-bottom: 4px;">
+                  📎 Signed Agreement Copy Attached (PDF)
+                </div>
+                <div style="color: #166534 !important; font-size: 12.5px; line-height: 1.5;">
+                  A full copy of your signed agreement has been attached to this email as a PDF. Please download and retain it for your legal and regulatory records.
+                </div>
+              </div>
+
+              <p style="color: #64748b !important; font-size: 12.5px; line-height: 1.5; margin: 0 0 6px;">
+                You can also access or download this agreement at any time by logging into your client portal.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 20px 24px; text-align: center; background-color: #f8fafc; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b !important; font-size: 12px; line-height: 1.5; margin: 0 0 4px;">
+                Issued by <strong style="color: #334155 !important;">${displayCompany}</strong> in compliance with SEBI (Research Analysts) Regulations, 2014.
+              </p>
+              <p style="color: #94a3b8 !important; font-size: 11px; margin: 0;">
+                This is an automated system confirmation. Please do not reply directly to this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  return sendEmail(tenantId, toEmail, subject, html, attachments);
+}
+
