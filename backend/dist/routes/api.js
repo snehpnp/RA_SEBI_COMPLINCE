@@ -36,6 +36,7 @@ const pdfService_1 = require("../services/pdfService");
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const occupationController_1 = require("../controllers/occupationController");
 const clientTimelineController_1 = require("../controllers/clientTimelineController");
+const clientVaultController_1 = require("../controllers/clientVaultController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -61,7 +62,7 @@ const getUploadRoot = () => {
     return defaultDir;
 };
 const uploadRoot = getUploadRoot();
-const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources'];
+const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings'];
 folders.forEach(f => {
     const dir = path_1.default.join(uploadRoot, f);
     if (!fs_1.default.existsSync(dir)) {
@@ -78,6 +79,8 @@ const storage = multer_1.default.diskStorage({
         let folder = 'policies';
         if (req.path.includes('manual'))
             folder = 'payments';
+        else if (req.path.includes('recording') || req.path.includes('audio') || req.path.includes('vault'))
+            folder = 'recordings';
         else if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist'))
             folder = 'compliance';
         else if (req.path.includes('kyc'))
@@ -112,21 +115,22 @@ const fileFilter = (req, file, cb) => {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/vnd.ms-excel',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'text/csv'
+        'text/csv',
+        'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac'
     ];
     const ext = path_1.default.extname(file.originalname).toLowerCase();
-    const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv'];
+    const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac'];
     if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
         cb(null, true);
     }
     else {
-        cb(new Error('Only PDF, Word, Excel, and Image files are allowed!'), false);
+        cb(new Error('Only PDF, Word, Excel, Image, and Audio recording files are allowed!'), false);
     }
 };
 const upload = (0, multer_1.default)({
     storage,
     fileFilter,
-    limits: { fileSize: 20 * 1024 * 1024 } // Max 20MB
+    limits: { fileSize: 50 * 1024 * 1024 } // Max 50MB (supports call recordings)
 });
 // ----------------------------------------------------
 // AUTHENTICATION
@@ -299,6 +303,16 @@ router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requ
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
 router.get('/admin/clients/:clientId/timeline', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientTimelineController_1.getClientTimeline);
+// Admin Client Digital Vaults & File Explorer
+router.get('/admin/vaults', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.listClientVaults);
+router.get('/admin/vaults/:clientId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.getClientVaultDetails);
+router.post('/admin/vaults/:clientId/recordings', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, upload.single('file'), clientVaultController_1.uploadCallRecording);
+router.delete('/admin/vaults/:clientId/recordings/:recordingId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.deleteCallRecording);
+router.get('/admin/vaults/:clientId/export-zip', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.exportClientVaultZip);
+router.get('/admin/vaults/:clientId/export-folder/:folderKey', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.exportSingleFolder);
+router.get('/admin/vaults/:clientId/invoice/:paymentId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadSingleInvoice);
+router.get('/admin/vaults/:clientId/agreement', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadAgreementPdf);
+router.get('/admin/vaults/:clientId/research-report/:reportId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadSingleResearchReport);
 // Admin Category Management
 router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
 router.post('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createCategory);

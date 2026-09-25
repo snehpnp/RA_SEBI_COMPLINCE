@@ -49,9 +49,11 @@ import { SystemSetting, SystemSettingSchema, ISystemSetting } from './SystemSett
 import { AdminPermission, AdminPermissionSchema, IAdminPermission } from './AdminPermission';
 import { Occupation, OccupationSchema, IOccupation } from './Occupation';
 import { SmsTemplate, SmsTemplateSchema, ISmsTemplate } from './SmsTemplate';
+import { ClientCallRecording, ClientCallRecordingSchema, IClientCallRecording } from './ClientCallRecording';
 
 // Re-export all models and interfaces
 export {
+  ClientCallRecording, ClientCallRecordingSchema, IClientCallRecording,
   Occupation, OccupationSchema, IOccupation,
   SmsTemplate, SmsTemplateSchema, ISmsTemplate,
   Tenant, TenantSchema, ITenant,
@@ -205,6 +207,8 @@ export interface ITenantModels {
   occupation: Model<IOccupation>;
   SmsTemplate: Model<ISmsTemplate>;
   smsTemplate: Model<ISmsTemplate>;
+  ClientCallRecording: Model<IClientCallRecording>;
+  clientCallRecording: Model<IClientCallRecording>;
 
   [key: string]: any;
 }
@@ -261,7 +265,8 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     SystemSetting: (connection.models.SystemSetting || connection.model<ISystemSetting>('SystemSetting', SystemSettingSchema, 'SystemSetting')) as Model<ISystemSetting>,
     AdminPermission: (connection.models.AdminPermission || connection.model<IAdminPermission>('AdminPermission', AdminPermissionSchema, 'AdminPermission')) as Model<IAdminPermission>,
     Occupation: (connection.models.Occupation || connection.model<IOccupation>('Occupation', OccupationSchema, 'Occupation')) as Model<IOccupation>,
-    SmsTemplate: (connection.models.SmsTemplate || connection.model<ISmsTemplate>('SmsTemplate', SmsTemplateSchema, 'SmsTemplate')) as Model<ISmsTemplate>
+    SmsTemplate: (connection.models.SmsTemplate || connection.model<ISmsTemplate>('SmsTemplate', SmsTemplateSchema, 'SmsTemplate')) as Model<ISmsTemplate>,
+    ClientCallRecording: (connection.models.ClientCallRecording || connection.model<IClientCallRecording>('ClientCallRecording', ClientCallRecordingSchema, 'ClientCallRecording')) as Model<IClientCallRecording>
   };
 
   return {
@@ -313,6 +318,7 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     systemSetting: models.SystemSetting,
     adminPermission: models.AdminPermission,
     occupation: models.Occupation,
-    smsTemplate: models.SmsTemplate
+    smsTemplate: models.SmsTemplate,
+    clientCallRecording: models.ClientCallRecording
   };
 }
