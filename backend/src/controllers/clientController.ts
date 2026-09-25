@@ -348,6 +348,7 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
     if (!tenant?.digioClientId || !tenant?.digioClientSecret) {
       return res.status(400).json({ success: false, message: 'Digio KYC is not configured for this tenant.' });
     }
+    console.log("tenant", tenant);
 
     const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
     const reqUserAny = (req.user as any) || {};
@@ -359,7 +360,7 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
     }
 
     const templateName = tenant.digioKycTemplateName || 'KYC_AGREEMENT';
-    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
     const digioResponse = await createKycRequest(
       tenant.digioClientId,
       tenant.digioClientSecret,
@@ -369,6 +370,7 @@ export const initiateDigioKyc = async (req: AuthenticatedRequest, res: Response)
       tenant.digioEnvironment
     );
 
+    console.log("digioResponse", digioResponse);
     return res.status(200).json({
       success: true,
       message: 'Digio KYC request initiated',
@@ -1337,7 +1339,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
         gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
         isPaymentGatewayConfigured,
         hasDigioConfigured: Boolean(tenantObj.digioClientId && tenantObj.digioClientSecret),
-        digioEnvironment: tenantObj.digioEnvironment || (tenantObj.digioClientId?.startsWith('ACK') ? 'SANDBOX' : 'PRODUCTION'),
+        digioEnvironment: tenantObj.digioEnvironment || 'PRODUCTION',
         digioClientId: tenantObj.digioClientId || null
       };
     }

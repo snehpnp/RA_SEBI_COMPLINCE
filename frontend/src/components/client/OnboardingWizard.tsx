@@ -291,7 +291,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         const res = await api.initiateDigioKyc();
         if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
           digioInitiated = true;
-          const env = (res as any).environment || ((clientProfile?.user?.tenant?.digioEnvironment || '').toLowerCase() === 'sandbox' || (clientProfile?.user?.tenant?.digioClientId || '').startsWith('ACK') ? 'sandbox' : 'production');
+          const env = ((res as any).environment || (clientProfile?.user?.tenant?.digioEnvironment || '').toLowerCase() || 'production') as any;
           const options = {
             environment: env,
             callback: async function (response: any) {
@@ -379,7 +379,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       try {
         const res = await api.initiateDigioAgreement();
         if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
-          const env = (res as any).environment || ((clientProfile?.user?.tenant?.digioEnvironment || '').toLowerCase() === 'sandbox' || (clientProfile?.user?.tenant?.digioClientId || '').startsWith('ACK') ? 'sandbox' : 'production');
+          const env = ((res as any).environment || (clientProfile?.user?.tenant?.digioEnvironment || '').toLowerCase() || 'production') as any;
           const options = {
             environment: env,
             callback: async function (response: any) {

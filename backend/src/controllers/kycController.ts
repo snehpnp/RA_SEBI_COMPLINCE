@@ -36,7 +36,7 @@ export const initiateKyc = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ success: false, message: 'Client email or mobile is required for Digio KYC' });
     }
 
-    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
     const digioResponse = await createKycRequest(
       tenant.digioClientId as string,
       tenant.digioClientSecret as string,
@@ -132,7 +132,7 @@ export const initiateAgreementEsign = async (req: AuthenticatedRequest, res: Res
     const identifier = req.user!.email || client.email;
     const fileName = `Agreement_${clientIdStr}.pdf`;
 
-    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+    const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
     const digioResponse = await createDocumentForEsign(
       tenant.digioClientId as string,
       tenant.digioClientSecret as string,

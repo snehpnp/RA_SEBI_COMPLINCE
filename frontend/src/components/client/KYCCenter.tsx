@@ -73,7 +73,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
     try {
       const res = await api.initiateDigioKyc();
       if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
-        const env = res.environment || ((profile?.user?.tenant?.digioEnvironment || '').toLowerCase() === 'sandbox' || (profile?.user?.tenant?.digioClientId || '').startsWith('ACK') ? 'sandbox' : 'production');
+        const env = (res.environment || (profile?.user?.tenant?.digioEnvironment || '').toLowerCase() || 'production') as any;
         const options = {
           environment: env,
           callback: async function (response: any) {
@@ -126,7 +126,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
     try {
       const res = await api.initiateDigioAgreement();
       if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
-        const env = res.environment || ((profile?.user?.tenant?.digioEnvironment || '').toLowerCase() === 'sandbox' || (profile?.user?.tenant?.digioClientId || '').startsWith('ACK') ? 'sandbox' : 'production');
+        const env = (res.environment || (profile?.user?.tenant?.digioEnvironment || '').toLowerCase() || 'production') as any;
         const options = {
           environment: env,
           callback: async function (response: any) {

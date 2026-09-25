@@ -5,16 +5,10 @@ import FormData from 'form-data';
 export const getDigioBaseUrl = (clientId?: string, environment?: string) => {
   if (process.env.DIGIO_API_URL) return process.env.DIGIO_API_URL;
   const envUpper = (environment || '').toUpperCase();
-  if (envUpper === 'PRODUCTION' || envUpper === 'PROD' || envUpper === 'LIVE') {
-    return 'https://api.digio.in';
-  }
   if (envUpper === 'SANDBOX' || envUpper === 'UAT' || envUpper === 'TEST') {
     return 'https://ext.digio.in:444';
   }
-  const isSandbox =
-    (clientId || '').startsWith('ACK') ||
-    (clientId || '').startsWith('AIK');
-  return isSandbox ? 'https://ext.digio.in:444' : 'https://api.digio.in';
+  return 'https://api.digio.in';
 };
 
 const getDigioAuthHeader = (clientId: string, clientSecret: string) => {
@@ -97,30 +91,76 @@ export const createKycRequest = async (
   environment?: string
 ) => {
   const baseUrl = getDigioBaseUrl(clientId, environment);
-  try {
-    const payload = {
-      customer_identifier: customerIdentifier.trim(),
-      customer_name: (customerName || 'Client').trim(),
-      template_name: kycTemplateName.trim(),
+  const cleanTemplate = (kycTemplateName || '').trim();
+  const authHeader = getDigioAuthHeader(clientId, clientSecret);
+  const refId = `KYC_${Date.now()}`;
+  const cName = (customerName || 'Client').trim();
+  const cId = customerIdentifier.trim();
+
+  // Helper for direct DigiLocker KYC request (Aadhaar & PAN verification)
+  const createDirectKycRequest = async () => {
+    const directPayload = {
+      customer_identifier: cId,
+      customer_name: cName,
       notify_customer: false,
-      reference_id: `KYC_${Date.now()}`
+      reference_id: refId,
+      actions: [
+        {
+          type: 'DIGILOCKER',
+          title: 'DigiLocker KYC Verification',
+          description: 'Please complete your Aadhaar and PAN verification via DigiLocker',
+          document_types: ['AADHAAR', 'PAN']
+        }
+      ]
     };
-    console.log('[Digio KYC] Creating KYC Request payload:', payload, 'to URL:', baseUrl);
-    const response = await axios.post(`${baseUrl}/client/kyc/v2/request/with_template`, payload, {
+    console.log('[Digio KYC] Creating Direct DigiLocker KYC Request payload:', directPayload, 'to URL:', baseUrl);
+    const response = await axios.post(`${baseUrl}/client/kyc/v2/request`, directPayload, {
       headers: {
-        'Authorization': getDigioAuthHeader(clientId, clientSecret),
+        'Authorization': authHeader,
         'Content-Type': 'application/json'
       }
     });
-
     return response.data;
+  };
+
+  // If a specific custom template is configured, attempt with_template first
+  const isGenericTemplate = !cleanTemplate ||
+    cleanTemplate.toUpperCase() === 'KYC_AGREEMENT' ||
+    cleanTemplate.toUpperCase() === 'DIGILOCKER_KYC' ||
+    cleanTemplate.toUpperCase() === 'KYC_TEMPLATE_1' ||
+    cleanTemplate.toUpperCase() === 'DEFAULT';
+
+  if (!isGenericTemplate) {
+    try {
+      const payload = {
+        customer_identifier: cId,
+        customer_name: cName,
+        template_name: cleanTemplate,
+        notify_customer: false,
+        reference_id: refId
+      };
+      console.log('[Digio KYC] Creating KYC Request with Template payload:', payload, 'to URL:', baseUrl);
+      const response = await axios.post(`${baseUrl}/client/kyc/v2/request/with_template`, payload, {
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
+        }
+      });
+      return response.data;
+    } catch (templateError: any) {
+      const errData = templateError.response?.data;
+      console.warn('[Digio KYC] Template request failed, falling back to Direct DigiLocker KYC request:', errData || templateError.message);
+      // Fallback to direct DigiLocker request below
+    }
+  }
+
+  // Fallback / Default: Direct DigiLocker Aadhaar + PAN verification
+  try {
+    return await createDirectKycRequest();
   } catch (error: any) {
     const errData = error.response?.data;
-    console.error('[Digio KYC] Request Error:', errData || error.message);
+    console.error('[Digio KYC] Direct KYC Request Error:', errData || error.message);
     const rawMsg = errData?.message || errData?.error || error.message || 'Failed to create Digio KYC request';
-    if (rawMsg.toLowerCase().includes('may not be empty') || errData?.code === 'REQUEST_VALIDATION_FAILED') {
-      throw new Error(`Digio KYC Template "${kycTemplateName}" is not valid or has no active workflow actions in your Digio Studio dashboard. Please create/publish a KYC workflow template (e.g. DIGILOCKER_AADHAAR_PAN) in Digio and update the Template Name in Settings.`);
-    }
     throw new Error(rawMsg);
   }
 };
@@ -133,24 +173,36 @@ export const getKycStatus = async (
 ) => {
   if (!kycRequestId) return null;
   const baseUrl = getDigioBaseUrl(clientId, environment);
+  const authHeader = getDigioAuthHeader(clientId, clientSecret);
   try {
-    const response = await axios.get(`${baseUrl}/client/kyc/v2/${kycRequestId}/response`, {
+    // Digio KYC v2 requires POST /client/kyc/v2/:id/response
+    const response = await axios.post(`${baseUrl}/client/kyc/v2/${kycRequestId}/response`, {}, {
       headers: {
-        Authorization: getDigioAuthHeader(clientId, clientSecret)
+        Authorization: authHeader,
+        'Content-Type': 'application/json'
       }
     });
     return response.data;
   } catch (err: any) {
     try {
-      const altResponse = await axios.get(`${baseUrl}/v2/client/kyc/${kycRequestId}`, {
+      const altResponse = await axios.get(`${baseUrl}/client/kyc/v2/${kycRequestId}/response`, {
         headers: {
-          Authorization: getDigioAuthHeader(clientId, clientSecret)
+          Authorization: authHeader
         }
       });
       return altResponse.data;
     } catch (altErr: any) {
-      console.error('[Digio KYC] Error fetching KYC status:', err.response?.data || err.message);
-      return null;
+      try {
+        const altResponse2 = await axios.get(`${baseUrl}/v2/client/kyc/${kycRequestId}`, {
+          headers: {
+            Authorization: authHeader
+          }
+        });
+        return altResponse2.data;
+      } catch (altErr2: any) {
+        console.error('[Digio KYC] Error fetching KYC status:', err.response?.data || err.message);
+        return null;
+      }
     }
   }
 };
