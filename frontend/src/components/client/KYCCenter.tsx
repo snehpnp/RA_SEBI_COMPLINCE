@@ -25,6 +25,20 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
       const res = await api.getClientProfile();
       if (res?.success && res.data) {
         setProfile(res.data);
+        const data = res.data;
+        console.log('%c📋 [CLIENT PROFILE / KYC RECORDS LOADED]', 'background: #1e293b; color: #38bdf8; font-weight: bold; font-size: 12px; padding: 4px 8px; border-radius: 4px;');
+        console.table({
+          'Name': data.name || data.profile?.panName || '—',
+          'DOB': data.dob || data.profile?.dob || '—',
+          'PAN': data.pan || '—',
+          'Aadhaar': data.aadhaar || '—',
+          'Address': data.profile?.addressLine1 || data.address || '—',
+          'City': data.profile?.city || data.city || '—',
+          'State': data.profile?.state || data.state || '—',
+          'Pincode': data.profile?.zipCode || data.zipCode || '—',
+          'KYC Status': data.kraVerified ? 'VERIFIED (DigiLocker)' : (data.kycStatus || 'PENDING'),
+          'Agreement': data.agreementSigned ? 'SIGNED' : 'PENDING'
+        });
       } else {
         setError('Could not load KYC data.');
       }
@@ -77,6 +91,8 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         const options = {
           environment: env,
           callback: async function (response: any) {
+            console.log('%c🟢 [DIGILOCKER KYC CALLBACK RECEIVED]', 'background: #059669; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+            console.log('📌 Raw Digio Response:', response);
             if (response.hasOwnProperty('error_code')) {
               toast.error(response.message || 'DigiLocker KYC was cancelled or failed.');
               setFetchingKyc(false);
@@ -88,6 +104,8 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   kycId: response.digio_doc_id || res.data.id,
                   digioResponse: response
                 });
+                console.log('%c💾 [DIGILOCKER KYC SAVED TO BACKEND]', 'background: #2563EB; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+                console.log('📌 Save Result:', statusRes);
                 if (statusRes.success) {
                   toast.success('DigiLocker KYC completed successfully! Government data auto-filled.');
                   await fetchProfile();
@@ -95,6 +113,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   toast.error(statusRes.message || 'Failed to save KYC status.');
                 }
               } catch (saveErr: any) {
+                console.error('❌ [DigiLocker KYC Save Error]:', saveErr);
                 toast.error(saveErr.message || 'Failed to process DigiLocker response.');
               } finally {
                 setFetchingKyc(false);
@@ -130,6 +149,8 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         const options = {
           environment: env,
           callback: async function (response: any) {
+            console.log('%c✍️ [DIGIO eSIGN CALLBACK RECEIVED]', 'background: #7c3aed; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+            console.log('📌 Raw eSign Response:', response);
             if (response.hasOwnProperty('error_code')) {
               toast.error(response.message || 'Agreement eSign was cancelled or failed.');
               setSigningAgreement(false);
@@ -141,6 +162,8 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   kycId: response.digio_doc_id || res.data.id,
                   digioResponse: response
                 });
+                console.log('%c💾 [DIGIO AGREEMENT SAVED TO BACKEND]', 'background: #2563EB; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+                console.log('📌 Save Result:', statusRes);
                 if (statusRes.success) {
                   toast.success('Advisory Agreement signed successfully!');
                   await fetchProfile();
@@ -148,6 +171,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   toast.error(statusRes.message || 'Failed to update agreement status.');
                 }
               } catch (e: any) {
+                console.error('❌ [Digio Agreement Save Error]:', e);
                 toast.error(e.message || 'Failed to complete eSign.');
               } finally {
                 setSigningAgreement(false);

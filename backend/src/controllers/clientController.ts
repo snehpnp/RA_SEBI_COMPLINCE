@@ -443,31 +443,43 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     let verifiedAadhaarName = '';
+    let verifiedPanName = '';
     let verifiedMaskedAadhaar = '';
     let extractedDob: string | null = null;
     let extractedPan: string | null = null;
+    let extractedGender: string | null = null;
+    let extractedFatherName: string | null = null;
+    let extractedAddress: string | null = null;
+    let extractedCity: string | null = null;
+    let extractedState: string | null = null;
+    let extractedZipCode: string | null = null;
+
     if (req.body.digioResponse) {
       const extracted = extractAadhaarDetailsFromDigio(req.body.digioResponse);
-      if (extracted?.aadhaarName) {
-        verifiedAadhaarName = extracted.aadhaarName;
-      }
-      if (extracted?.maskedAadhaar) {
-        verifiedMaskedAadhaar = extracted.maskedAadhaar;
-      }
-      if (extracted?.dob) {
-        extractedDob = extracted.dob;
-      }
-      if (extracted?.panNumber) {
-        extractedPan = extracted.panNumber;
-      }
+      if (extracted?.aadhaarName) verifiedAadhaarName = extracted.aadhaarName;
+      if (extracted?.panName) verifiedPanName = extracted.panName;
+      if (extracted?.maskedAadhaar) verifiedMaskedAadhaar = extracted.maskedAadhaar;
+      if (extracted?.dob) extractedDob = extracted.dob;
+      if (extracted?.panNumber) extractedPan = extracted.panNumber;
+      if (extracted?.gender) extractedGender = extracted.gender;
+      if (extracted?.fatherName) extractedFatherName = extracted.fatherName;
+      if (extracted?.address) extractedAddress = extracted.address;
+      if (extracted?.city) extractedCity = extracted.city;
+      if (extracted?.state) extractedState = extracted.state;
+      if (extracted?.zipCode) extractedZipCode = extracted.zipCode;
 
-      const profileUpdates: any = { isDigiLockerLocked: true };
-      if (extracted?.address) profileUpdates.addressLine1 = extracted.address;
-      if (extracted?.city) profileUpdates.city = extracted.city;
-      if (extracted?.state) profileUpdates.state = extracted.state;
-      if (extracted?.zipCode) profileUpdates.zipCode = extracted.zipCode;
-      if (extracted?.dob) profileUpdates.dob = extracted.dob;
-      if (verifiedAadhaarName) profileUpdates.panName = verifiedAadhaarName;
+      const profileUpdates: any = { isDigiLockerLocked: true, country: 'India' };
+      if (extractedAddress) profileUpdates.addressLine1 = extractedAddress;
+      if (extractedCity) profileUpdates.city = extractedCity;
+      if (extractedState) profileUpdates.state = extractedState;
+      if (extractedZipCode) profileUpdates.zipCode = extractedZipCode;
+      if (extractedDob) profileUpdates.dob = extractedDob;
+      if (extractedGender) profileUpdates.gender = extractedGender;
+      if (extractedFatherName) profileUpdates.fatherName = extractedFatherName;
+      if (verifiedPanName) profileUpdates.panName = verifiedPanName;
+      else if (verifiedAadhaarName) profileUpdates.panName = verifiedAadhaarName;
+      if (verifiedAadhaarName) profileUpdates.aadhaarName = verifiedAadhaarName;
+      profileUpdates.digilockerData = req.body.digioResponse;
 
       await dynamicDb.ClientProfile.findOneAndUpdate(
         { clientId: client._id || client.id },
@@ -476,19 +488,46 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       );
     }
 
+    const primaryName = verifiedPanName || verifiedAadhaarName || '';
+
+    console.log('\n╔══════════════════════════════════════════════════════════════════╗');
+    console.log('║               🟢 [KRA / DIGIO KYC VERIFIED DATA]                 ║');
+    console.log('╠══════════════════════════════════════════════════════════════════╣');
+    console.log('║ Primary Verified Name  :', primaryName || '—');
+    console.log('║ Aadhaar Name           :', verifiedAadhaarName || '—');
+    console.log('║ PAN Name               :', verifiedPanName || '—');
+    console.log('║ PAN Number             :', pan || extractedPan || '—');
+    console.log('║ Masked Aadhaar         :', verifiedMaskedAadhaar || aadhaar || '—');
+    console.log('║ Date of Birth (DOB)    :', extractedDob || '—');
+    console.log('║ Gender                 :', extractedGender || '—');
+    console.log('║ Father / Guardian Name :', extractedFatherName || '—');
+    console.log('║ Full Address           :', extractedAddress || '—');
+    console.log('║ City / District        :', extractedCity || '—');
+    console.log('║ State                  :', extractedState || '—');
+    console.log('║ Pincode                :', extractedZipCode || '—');
+    console.log('╚══════════════════════════════════════════════════════════════════╝\n');
+
     const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
     const updateSet: Record<string, any> = {
       pan: pan || extractedPan,
       ...(aadhaar ? { aadhaar } : {}),
       ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {}),
       ...(extractedDob ? { dob: extractedDob } : {}),
+      ...(extractedGender ? { gender: extractedGender } : {}),
+      ...(extractedFatherName ? { fatherName: extractedFatherName } : {}),
+      ...(extractedAddress ? { address: extractedAddress } : {}),
+      ...(extractedCity ? { city: extractedCity } : {}),
+      ...(extractedState ? { state: extractedState } : {}),
+      ...(extractedZipCode ? { zipCode: extractedZipCode } : {}),
+      ...(req.body.digioResponse ? { digilockerData: req.body.digioResponse } : {}),
       status: nextStatus,
       kraVerified: statusInput !== 'FAIL'
     };
 
-    if (verifiedAadhaarName) {
-      updateSet.name = verifiedAadhaarName;
-      updateSet.panName = verifiedAadhaarName;
+    if (primaryName) {
+      updateSet.name = primaryName;
+      updateSet.panName = verifiedPanName || primaryName;
+      if (verifiedAadhaarName) updateSet.aadhaarName = verifiedAadhaarName;
     }
 
     const updatedClient = await dynamicDb.Client.findByIdAndUpdate(
@@ -497,14 +536,14 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       { returnDocument: 'after', lean: true }
     );
 
-    if (verifiedAadhaarName) {
-      const nameParts = verifiedAadhaarName.split(' ');
+    if (primaryName) {
+      const nameParts = primaryName.split(' ');
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       await dynamicDb.User.findByIdAndUpdate(req.user!.id, { $set: { firstName, lastName } });
       await dynamicDb.ClientProfile.findOneAndUpdate(
         { clientId: client._id || client.id },
-        { $set: { panName: verifiedAadhaarName } },
+        { $set: { panName: verifiedPanName || primaryName, aadhaarName: verifiedAadhaarName || primaryName } },
         { upsert: true }
       );
     }
@@ -1295,6 +1334,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
     }
 
     const clientId = client._id || client.id;
+    const userRecord: any = await dynamicDb.User.findById(req.user!.id).lean();
     const profile = await dynamicDb.ClientProfile.findOne({ $or: [{ clientId }, { clientId: client.userId }] }).lean();
     const subscriptions = await dynamicDb.Subscription.find({
       $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }]
@@ -1344,6 +1384,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
       };
     }
 
+    const nameParts = (client.name || '').trim().split(' ');
     const formatted = {
       ...client,
       id: String(clientId),
@@ -1360,7 +1401,11 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
       consents,
       user: {
         id: req.user!.id,
-        email: req.user!.email,
+        email: userRecord?.email || req.user!.email,
+        firstName: userRecord?.firstName || nameParts[0] || '',
+        lastName: userRecord?.lastName || nameParts.slice(1).join(' ') || '',
+        name: client.name || `${userRecord?.firstName || ''} ${userRecord?.lastName || ''}`.trim(),
+        mobile: userRecord?.mobile || client.mobile,
         role: req.user!.role,
         tenant: tenantFormatted
       }
@@ -1373,7 +1418,7 @@ export const getClientProfile = async (req: AuthenticatedRequest, res: Response)
 };
 
 export const updateClientProfile = async (req: AuthenticatedRequest, res: Response) => {
-  const { addressLine1, address, city, state, zipCode, mobile, dob, name } = req.body;
+  const { addressLine1, address, city, state, zipCode, mobile, dob, name, firstName, lastName } = req.body;
   try {
     const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id });
     if (!client) return res.status(404).json({ success: false, message: 'Client not found.' });
@@ -1385,6 +1430,7 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
     if (city !== undefined) profileUpdate.city = city;
     if (state !== undefined) profileUpdate.state = state;
     if (zipCode !== undefined) profileUpdate.zipCode = zipCode;
+    if (dob !== undefined) profileUpdate.dob = dob;
 
     const profile = await dynamicDb.ClientProfile.findOneAndUpdate(
       { clientId },
@@ -1403,6 +1449,13 @@ export const updateClientProfile = async (req: AuthenticatedRequest, res: Respon
       if (clientUpdate.mobile) {
         await dynamicDb.User.findByIdAndUpdate(req.user!.id, { $set: { mobile: clientUpdate.mobile } });
       }
+    }
+
+    if (!client.kraVerified && (firstName || lastName)) {
+      const userUpdate: any = {};
+      if (firstName) userUpdate.firstName = firstName;
+      if (lastName) userUpdate.lastName = lastName;
+      await dynamicDb.User.findByIdAndUpdate(req.user!.id, { $set: userUpdate });
     }
 
     return res.status(200).json({ success: true, data: profile });

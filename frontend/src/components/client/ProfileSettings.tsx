@@ -57,10 +57,25 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
       if (res.success && res.data) {
         const client = res.data;
         const profile = client.profile || {};
-        const formatDate = (d: any) => d ? new Date(d).toISOString().split('T')[0] : '';
+        
+        const formatDate = (d: any) => {
+          if (!d) return '';
+          const str = String(d).trim();
+          if (!str || str === '—' || str === 'null' || str === 'undefined') return '';
+          if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(str)) return str;
+          if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+          try {
+            const parsed = new Date(str);
+            if (!isNaN(parsed.getTime())) {
+              return parsed.toISOString().split('T')[0];
+            }
+          } catch { }
+          return str.split('T')[0];
+        };
         
         const kycDone = Boolean(
           client.kraVerified || 
+          client.kycStatus === 'VERIFIED' ||
           client.status === 'ACTIVE' || 
           client.status === 'AGREEMENT_PENDING' ||
           (client.pan && client.pan.length === 10)
@@ -68,18 +83,18 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
         setIsKycVerified(kycDone);
 
         setFormData({
-          name: client.name || client.user?.name || '',
+          name: client.name || profile.panName || profile.aadhaarName || client.user?.name || '',
           email: client.email || client.user?.email || '',
           mobile: client.mobile || client.phone || client.user?.mobile || '',
           dob: formatDate(client.dob || profile.dob),
-          pan: client.pan || '',
-          aadhaar: formatMaskedAadhaar(client.aadhaar),
+          pan: client.pan || profile.pan || '',
+          aadhaar: formatMaskedAadhaar(client.aadhaar || profile.aadhaar),
           category: client.category || 'INDIVIDUAL',
           occupation: client.occupation || 'Job / Salaried',
           address: profile.addressLine1 || client.address || '',
-          city: profile.city || '',
-          state: profile.state || '',
-          zipCode: profile.zipCode || '',
+          city: profile.city || client.city || '',
+          state: profile.state || client.state || '',
+          zipCode: profile.zipCode || client.zipCode || '',
           country: profile.country || 'India'
         });
       }

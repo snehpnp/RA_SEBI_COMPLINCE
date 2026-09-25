@@ -253,28 +253,106 @@ export const downloadDocument = async (
 export const extractAadhaarDetailsFromDigio = (data: any) => {
   if (!data || typeof data !== 'object') return null;
 
-  let aadhaarName = '';
-  let panName = '';
-  let panNumber = '';
-  let maskedAadhaar = '';
+  let aadhaarName: string | null = null;
+  let panName: string | null = null;
+  let panNumber: string | null = null;
+  let rawAadhaar: string | null = null;
   let dob: string | null = null;
+  let gender: string | null = null;
+  let fatherName: string | null = null;
   let address: string | null = null;
+  let city: string | null = null;
+  let state: string | null = null;
+  let zipCode: string | null = null;
+  let signatureText: string | null = null;
 
-  // 1. Check direct PKI signature details (from Aadhaar OTP eSign)
-  if (data.pki_signature_details) {
-    const pki = data.pki_signature_details;
-    if (isValidName(pki.name)) aadhaarName = pki.name.trim();
-    if (pki.aadhaar_suffix) maskedAadhaar = `XXXX-XXXX-${pki.aadhaar_suffix}`;
+  // Helper to extract address & city & state & zip from an address container
+  const extractAddressFields = (addrObj: any, rawAddrStr?: string) => {
+    if (addrObj && typeof addrObj === 'object') {
+      if (!city) {
+        city = addrObj.district_or_city || addrObj.district || addrObj.dist || addrObj.city || addrObj.locality_or_post_office || addrObj.vtc || addrObj.subdist || null;
+        if (city) city = String(city).trim();
+      }
+      if (!state && addrObj.state) {
+        state = String(addrObj.state).trim();
+      }
+      if (!zipCode) {
+        zipCode = addrObj.pincode || addrObj.pin_code || addrObj.zip_code || addrObj.zip || addrObj.postal_code || null;
+        if (zipCode) zipCode = String(zipCode).trim();
+      }
+      if (!address && addrObj.address) {
+        address = String(addrObj.address).trim();
+      }
+    }
+    if (!address && rawAddrStr && typeof rawAddrStr === 'string' && rawAddrStr.trim().length > 3) {
+      address = rawAddrStr.trim();
+    }
+  };
+
+  // ── PASS 1: Targeted Inspection of Government ID objects in actions array ──
+  const actionsList = Array.isArray(data.actions) ? data.actions : [];
+  for (const action of actionsList) {
+    const details = action?.details || {};
+
+    // 1. Aadhaar Card Object (DigiLocker UIDAI)
+    const aadhaarObj = details.aadhaar || details.aadhar || details.uidai || details.digilocker?.aadhaar || details.aadhaar_card;
+    if (aadhaarObj && typeof aadhaarObj === 'object') {
+      if (!aadhaarName && isValidName(aadhaarObj.name)) aadhaarName = aadhaarObj.name.trim();
+      if (!aadhaarName && isValidName(aadhaarObj.full_name)) aadhaarName = aadhaarObj.full_name.trim();
+      
+      if (!rawAadhaar) {
+        rawAadhaar = aadhaarObj.id_number || aadhaarObj.masked_aadhaar_number || aadhaarObj.aadhaar_number || aadhaarObj.uid || null;
+      }
+      if (!dob) {
+        dob = aadhaarObj.dob || aadhaarObj.date_of_birth || aadhaarObj.birth_date || null;
+      }
+      if (!gender && (aadhaarObj.gender || aadhaarObj.sex)) {
+        const g = String(aadhaarObj.gender || aadhaarObj.sex).toUpperCase().trim();
+        gender = g.startsWith('M') ? 'MALE' : (g.startsWith('F') ? 'FEMALE' : g);
+      }
+      if (!fatherName) {
+        const fn = aadhaarObj.father_name || aadhaarObj.fathers_name || aadhaarObj.care_of || aadhaarObj.co;
+        if (fn && typeof fn === 'string') {
+          fatherName = fn.replace(/^(S\/O|D\/O|W\/O|C\/O|s\/o|d\/o|w\/o|c\/o)[:\s]*/i, '').trim();
+        }
+      }
+
+      // Current & Permanent address details
+      extractAddressFields(aadhaarObj.current_address_details, aadhaarObj.current_address);
+      extractAddressFields(aadhaarObj.permanent_address_details, aadhaarObj.permanent_address);
+      extractAddressFields(aadhaarObj.split_address, aadhaarObj.address);
+    }
+
+    // 2. PAN Card Object (DigiLocker / NSDL Income Tax)
+    const panObj = details.pan || details.pan_details || details.pan_verification_record || details.digilocker?.pan;
+    if (panObj && typeof panObj === 'object') {
+      if (!panName && isValidName(panObj.name)) panName = panObj.name.trim();
+      if (!panName && isValidName(panObj.full_name)) panName = panObj.full_name.trim();
+      if (!panName && isValidName(panObj.pan_name)) panName = panObj.pan_name.trim();
+
+      if (!panNumber) {
+        const pn = panObj.id_number || panObj.pan_number || panObj.pan;
+        if (pn && typeof pn === 'string' && /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(pn.trim())) {
+          panNumber = pn.trim().toUpperCase();
+        }
+      }
+      if (!dob) {
+        dob = panObj.dob || panObj.date_of_birth || null;
+      }
+      if (!gender && (panObj.gender || panObj.sex)) {
+        const g = String(panObj.gender || panObj.sex).toUpperCase().trim();
+        gender = g.startsWith('M') ? 'MALE' : (g.startsWith('F') ? 'FEMALE' : g);
+      }
+    }
   }
 
-  // 2. Direct root fields
-  if (!aadhaarName && isValidName(data.aadhaar_name)) aadhaarName = data.aadhaar_name.trim();
-  if (!aadhaarName && isValidName(data.certificate_name)) aadhaarName = data.certificate_name.trim();
-  if (!aadhaarName && isValidName(data.signer_name)) aadhaarName = data.signer_name.trim();
-  if (!aadhaarName && isValidName(data.customer_name)) aadhaarName = data.customer_name.trim();
-  if (!aadhaarName && isValidName(data.name)) aadhaarName = data.name.trim();
+  // ── PASS 2: PKI Signature Details from Aadhaar eSign responses ──
+  if (data.pki_signature_details) {
+    const pki = data.pki_signature_details;
+    if (!aadhaarName && isValidName(pki.name)) aadhaarName = pki.name.trim();
+    if (!rawAadhaar && pki.aadhaar_suffix) rawAadhaar = `XXXX-XXXX-${pki.aadhaar_suffix}`;
+  }
 
-  // 3. Signing Parties / Signers array (from Digio Aadhaar eSign response & document status)
   const partyList = Array.isArray(data.signing_parties)
     ? data.signing_parties
     : (Array.isArray(data.signers) ? data.signers : []);
@@ -283,95 +361,72 @@ export const extractAadhaarDetailsFromDigio = (data: any) => {
     const pki = party?.pki_signature_details || {};
     const sDetails = party?.details || {};
 
-    if (isValidName(pki.name)) {
-      aadhaarName = pki.name.trim();
-    } else if (isValidName(pki.aadhaar_name)) {
-      aadhaarName = pki.aadhaar_name.trim();
-    } else if (isValidName(pki.certificate_name)) {
-      aadhaarName = pki.certificate_name.trim();
-    } else if (isValidName(party.aadhaar_name)) {
-      aadhaarName = party.aadhaar_name.trim();
-    } else if (isValidName(party.certificate_name)) {
-      aadhaarName = party.certificate_name.trim();
-    } else if (isValidName(sDetails.aadhaar_name)) {
-      aadhaarName = sDetails.aadhaar_name.trim();
-    } else if (isValidName(sDetails.certificate_name)) {
-      aadhaarName = sDetails.certificate_name.trim();
-    } else if (isValidName(sDetails.name)) {
-      aadhaarName = sDetails.name.trim();
-    } else if (isValidName(party.name) && !aadhaarName) {
-      aadhaarName = party.name.trim();
-    }
+    if (!aadhaarName && isValidName(pki.name)) aadhaarName = pki.name.trim();
+    if (!aadhaarName && isValidName(pki.aadhaar_name)) aadhaarName = pki.aadhaar_name.trim();
+    if (!aadhaarName && isValidName(party.aadhaar_name)) aadhaarName = party.aadhaar_name.trim();
+    if (!aadhaarName && isValidName(sDetails.aadhaar_name)) aadhaarName = sDetails.aadhaar_name.trim();
 
-    if (pki.aadhaar_suffix) {
-      maskedAadhaar = `XXXX-XXXX-${pki.aadhaar_suffix}`;
+    if (!rawAadhaar && pki.aadhaar_suffix) {
+      rawAadhaar = `XXXX-XXXX-${pki.aadhaar_suffix}`;
     }
+    if (party.signature) signatureText = String(party.signature);
+  }
 
-    if (!aadhaarName && party.reason && typeof party.reason === 'string') {
-      const match = party.reason.match(/by\s+([A-Za-z\s]{3,})$/i);
-      if (match && isValidName(match[1])) {
-        aadhaarName = match[1].trim();
-      }
+  // ── PASS 3: Top-level direct document fields (avoiding generic metadata) ──
+  if (!aadhaarName && isValidName(data.aadhaar_name)) aadhaarName = data.aadhaar_name.trim();
+  if (!aadhaarName && isValidName(data.certificate_name)) aadhaarName = data.certificate_name.trim();
+
+  // Format masked Aadhaar e.g. XXXX-XXXX-5691
+  let formattedMaskedAadhaar = '';
+  if (rawAadhaar) {
+    const str = String(rawAadhaar).trim();
+    const cleanDigits = str.replace(/[^0-9]/g, '');
+    if (cleanDigits.length === 12) {
+      formattedMaskedAadhaar = `XXXX-XXXX-${cleanDigits.slice(8)}`;
+    } else if (cleanDigits.length === 4) {
+      formattedMaskedAadhaar = `XXXX-XXXX-${cleanDigits}`;
+    } else if (str.toLowerCase().includes('x')) {
+      formattedMaskedAadhaar = str.toUpperCase();
+    } else {
+      formattedMaskedAadhaar = str;
     }
   }
 
-  // 4. Actions array (from DigiLocker / Aadhaar OTP verification)
-  if (Array.isArray(data.actions)) {
-    for (const action of data.actions) {
-      const details = action?.details || {};
-      const aadhar = details.aadhar || details.aadhaar || details.uidai || details.digilocker || {};
-      const pan = details.pan || {};
+  // Clean address from S/O or redundant prefix if city/state already split
+  let cleanAddress: string | null = address ? String(address).trim() : null;
 
-      if (!aadhaarName) {
-        if (isValidName(aadhar.name)) {
-          aadhaarName = aadhar.name.trim();
-        } else if (isValidName(aadhar.full_name)) {
-          aadhaarName = aadhar.full_name.trim();
-        } else if (isValidName(aadhar.signer_name)) {
-          aadhaarName = aadhar.signer_name.trim();
-        }
-      }
-
-      if (!maskedAadhaar) {
-        if (aadhar.masked_aadhaar_number) {
-          maskedAadhaar = String(aadhar.masked_aadhaar_number);
-        } else if (aadhar.aadhaar_number) {
-          maskedAadhaar = String(aadhar.aadhaar_number);
-        } else if (aadhar.uid) {
-          maskedAadhaar = String(aadhar.uid);
-        }
-      }
-
-      let city: string | null = null;
-      let state: string | null = null;
-      let zipCode: string | null = null;
-
-      if (aadhar.dob) dob = String(aadhar.dob);
-      if (aadhar.split_address && typeof aadhar.split_address === 'object') {
-        state = aadhar.split_address.state || null;
-        city = aadhar.split_address.dist || aadhar.split_address.vtc || aadhar.split_address.subdist || null;
-        zipCode = aadhar.split_address.pincode || null;
-      }
-      if (aadhar.address) {
-        address = typeof aadhar.address === 'string' ? aadhar.address : Object.values(aadhar.split_address || {}).filter(Boolean).join(', ');
-      }
-
-      if (isValidName(pan.name)) panName = pan.name.trim();
-      if (pan.pan_number && typeof pan.pan_number === 'string') panNumber = pan.pan_number.trim();
-    }
-  }
-
-  return {
-    aadhaarName: aadhaarName || panName || null,
+  const extractedResult = {
+    aadhaarName: aadhaarName || null,
     panName: panName || null,
     panNumber: panNumber || null,
-    maskedAadhaar: maskedAadhaar || null,
+    maskedAadhaar: formattedMaskedAadhaar || null,
     dob: dob || null,
-    address: address || null,
-    city: (data?.actions?.[0]?.details?.aadhar?.split_address?.dist || data?.actions?.[0]?.details?.aadhar?.split_address?.vtc) || null,
-    state: data?.actions?.[0]?.details?.aadhar?.split_address?.state || null,
-    zipCode: data?.actions?.[0]?.details?.aadhar?.split_address?.pincode || null
+    gender: gender || null,
+    fatherName: fatherName || null,
+    address: cleanAddress || null,
+    city: city || null,
+    state: state || null,
+    zipCode: zipCode || null,
+    signatureText: signatureText || null,
+    rawDigioData: data
   };
+
+  console.log('\n🔍 [Digio Parser] Extracted Government Details:', JSON.stringify({
+    aadhaarName: extractedResult.aadhaarName,
+    panName: extractedResult.panName,
+    panNumber: extractedResult.panNumber,
+    maskedAadhaar: extractedResult.maskedAadhaar,
+    dob: extractedResult.dob,
+    gender: extractedResult.gender,
+    fatherName: extractedResult.fatherName,
+    address: extractedResult.address,
+    city: extractedResult.city,
+    state: extractedResult.state,
+    zipCode: extractedResult.zipCode,
+    signatureText: extractedResult.signatureText
+  }, null, 2));
+
+  return extractedResult;
 };
 
 export const createDocumentForEsign = async (
