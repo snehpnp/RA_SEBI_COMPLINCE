@@ -39,6 +39,17 @@ import {
   deleteOccupation
 } from '../controllers/occupationController';
 import { getClientTimeline } from '../controllers/clientTimelineController';
+import {
+  listClientVaults,
+  getClientVaultDetails,
+  uploadCallRecording,
+  deleteCallRecording,
+  exportClientVaultZip,
+  exportSingleFolder,
+  downloadSingleInvoice,
+  downloadAgreementPdf,
+  downloadSingleResearchReport
+} from '../controllers/clientVaultController';
 
 const router = Router();
 
@@ -63,7 +74,7 @@ const getUploadRoot = () => {
 };
 
 const uploadRoot = getUploadRoot();
-const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources'];
+const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings'];
 folders.forEach(f => {
   const dir = path.join(uploadRoot, f);
   if (!fs.existsSync(dir)) {
@@ -77,6 +88,7 @@ const storage = multer.diskStorage({
     const root = getUploadRoot();
     let folder = 'policies';
     if (req.path.includes('manual')) folder = 'payments';
+    else if (req.path.includes('recording') || req.path.includes('audio') || req.path.includes('vault')) folder = 'recordings';
     else if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist')) folder = 'compliance';
     else if (req.path.includes('kyc')) folder = 'kyc';
     else if (req.path.includes('staff')) folder = 'staff';
@@ -103,22 +115,23 @@ const fileFilter = (req: any, file: any, cb: any) => {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'text/csv'
+    'text/csv',
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac'
   ];
   const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv'];
+  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac'];
 
   if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Only PDF, Word, Excel, and Image files are allowed!'), false);
+    cb(new Error('Only PDF, Word, Excel, Image, and Audio recording files are allowed!'), false);
   }
 };
 
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 } // Max 20MB
+  limits: { fileSize: 50 * 1024 * 1024 } // Max 50MB (supports call recordings)
 });
 
 // ----------------------------------------------------
@@ -753,6 +766,72 @@ router.get(
   requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getClientTimeline
+);
+
+// Admin Client Digital Vaults & File Explorer
+router.get(
+  '/admin/vaults',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  listClientVaults
+);
+router.get(
+  '/admin/vaults/:clientId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  getClientVaultDetails
+);
+router.post(
+  '/admin/vaults/:clientId/recordings',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  upload.single('file'),
+  uploadCallRecording
+);
+router.delete(
+  '/admin/vaults/:clientId/recordings/:recordingId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  deleteCallRecording
+);
+router.get(
+  '/admin/vaults/:clientId/export-zip',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  exportClientVaultZip
+);
+router.get(
+  '/admin/vaults/:clientId/export-folder/:folderKey',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  exportSingleFolder
+);
+router.get(
+  '/admin/vaults/:clientId/invoice/:paymentId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  downloadSingleInvoice
+);
+router.get(
+  '/admin/vaults/:clientId/agreement',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  downloadAgreementPdf
+);
+router.get(
+  '/admin/vaults/:clientId/research-report/:reportId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  downloadSingleResearchReport
 );
 
 // Admin Category Management

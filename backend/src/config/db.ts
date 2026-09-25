@@ -100,5 +100,6 @@ export const SystemSetting = createDynamicModelProxy('SystemSetting');
 export const AdminPermission = createDynamicModelProxy('AdminPermission');
 export const Occupation = createDynamicModelProxy('Occupation');
 export const SmsTemplate = createDynamicModelProxy('SmsTemplate');
+export const ClientCallRecording = createDynamicModelProxy('ClientCallRecording');
 
 export default dynamicDb;

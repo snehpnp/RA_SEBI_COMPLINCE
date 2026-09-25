@@ -1236,6 +1236,96 @@ class ApiClient {
       body: JSON.stringify(data)
     });
   }
+
+  // Client Digital Vaults & File Explorer
+  async getClientVaults(params?: { search?: string; planStatusFilter?: string; page?: number; limit?: number }) {
+    const q = new URLSearchParams();
+    if (params?.search) q.append('search', params.search);
+    if (params?.planStatusFilter) q.append('planStatusFilter', params.planStatusFilter);
+    if (params?.page) q.append('page', String(params.page));
+    if (params?.limit) q.append('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request(`/admin/vaults${qs}`);
+  }
+
+  async getClientVaultDetails(clientId: string) {
+    return this.request(`/admin/vaults/${clientId}`);
+  }
+
+  async downloadVaultInvoice(clientId: string, paymentId: string, invoiceNumber?: string) {
+    return this.downloadVaultFile(
+      `/admin/vaults/${clientId}/invoice/${paymentId}`,
+      `Invoice_${invoiceNumber || paymentId}.pdf`
+    );
+  }
+
+  async downloadVaultAgreement(clientId: string, clientName?: string) {
+    return this.downloadVaultFile(
+      `/admin/vaults/${clientId}/agreement`,
+      `Signed_Advisory_Agreement_${clientName || 'Client'}.pdf`
+    );
+  }
+
+  async downloadVaultResearchReport(clientId: string, reportId: string, fallbackTitle?: string) {
+    return this.downloadVaultFile(
+      `/admin/vaults/${clientId}/research-report/${reportId}`,
+      `${fallbackTitle ? fallbackTitle.replace(/[^a-zA-Z0-9_-]/g, '_') : `Research_Report_${reportId}`}.pdf`
+    );
+  }
+
+  async uploadCallRecording(clientId: string, formData: FormData) {
+    return this.request(`/admin/vaults/${clientId}/recordings`, {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async deleteCallRecording(clientId: string, recordingId: string) {
+    return this.request(`/admin/vaults/${clientId}/recordings/${recordingId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async downloadVaultFile(endpoint: string, fallbackFilename: string) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : '';
+    const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : '';
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'x-tenant-id': tenantId || ''
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Download failed with status ${response.status}`);
+    }
+
+    const disposition = response.headers.get('content-disposition');
+    let filename = fallbackFilename;
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match && match[1]) filename = match[1];
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }
+
+  async getClientTimeline(clientId: string, params?: { category?: string; search?: string; limit?: number }) {
+    const q = new URLSearchParams();
+    if (params?.category) q.append('category', params.category);
+    if (params?.search) q.append('search', params.search);
+    if (params?.limit) q.append('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request(`/admin/clients/${clientId}/timeline${qs}`);
+  }
 }
 
 export const api = new ApiClient();

@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -38,6 +38,7 @@ import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import OccupationsManager from '../../components/admin/OccupationsManager';
 import SecuritySettingsTab from '../../components/admin/SecuritySettingsTab';
 import ClientTimelineModal from '../../components/admin/ClientTimelineModal';
+import ClientVaultExplorer from '../../components/admin/vault/ClientVaultExplorer';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -118,6 +119,14 @@ const NAV_CONFIG: NavModule[] = [
       { code: 'VIEW_SENSITIVE_DATA', label: 'View Sensitive Data (Unmasked)', desc: 'Allows viewing original Email, Mobile, PAN, and Aadhaar without masking' },
       { code: 'EXPORT_DATA', label: 'Export Data (CSV/PDF)', desc: 'Allows exporting client details, staff directories, and compliance reports to CSV' },
     ],
+  },
+  {
+    tab: 'vaults',
+    label: 'Client Vaults',
+    icon: 'FolderArchive',
+    accessKey: 'ACCESS_CLIENTS',
+    moduleLabel: 'Client Digital Vaults Desk',
+    moduleDesc: 'Desktop-style hierarchical file explorer for client dossiers, trade performance, documents, and call recordings',
   },
   {
     tab: 'plans',
@@ -252,7 +261,7 @@ const NAV_CONFIG: NavModule[] = [
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder
 };
 
 // =============================================================================
@@ -6343,6 +6352,13 @@ function AdminDashboardContent() {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {/* ====================================================
+                CLIENT DIGITAL VAULTS TAB (Desktop File Explorer)
+               ==================================================== */}
+                  {activeTab === 'vaults' && (
+                    <ClientVaultExplorer />
                   )}
 
                   {/* ====================================================
