@@ -1,15 +1,15 @@
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import fs from 'fs';
+import path from 'path';
+import { Payment, Client, Tenant, Plan, SystemSetting, dynamicDb } from '../config/db';
 
 // Helper to convert number to words (simple version for INR)
 function numberToWords(num: number): string {
-  const a = ['','One ','Two ','Three ','Four ', 'Five ','Six ','Seven ','Eight ','Nine ','Ten ','Eleven ','Twelve ','Thirteen ','Fourteen ','Fifteen ','Sixteen ','Seventeen ','Eighteen ','Nineteen '];
-  const b = ['', '', 'Twenty','Thirty','Forty','Fifty', 'Sixty','Seventy','Eighty','Ninety'];
+  const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
-  if ((num = num.toString().replace(/[\, ]/g,'') as any) != parseFloat(num as any)) return 'not a number';
-  let n = ("000000000" + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
+  if ((num = num.toString().replace(/[\, ]/g, '') as any) != parseFloat(num as any)) return 'not a number';
+  let n = ('000000000' + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
   if (!n) return '';
   let str = '';
   str += (n[1] != '00') ? (a[Number(n[1])] || b[n[1][0] as any] + ' ' + a[n[1][1] as any]) + 'Crore ' : '';
@@ -20,43 +20,243 @@ function numberToWords(num: number): string {
   return str.trim() + ' Only';
 }
 
+// Indian currency formatting: ₹ 15,000.00
+function formatInr(amount: number): string {
+  const parts = Number(amount || 0).toFixed(2).split('.');
+  let integerPart = parts[0];
+  const decimalPart = parts[1];
+  const isNegative = integerPart.startsWith('-');
+  if (isNegative) integerPart = integerPart.substring(1);
+  let lastThree = integerPart.substring(integerPart.length - 3);
+  const otherNumbers = integerPart.substring(0, integerPart.length - 3);
+  if (otherNumbers !== '') lastThree = ',' + lastThree;
+  const formattedInt = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
+  return (isNegative ? '- ' : '') + '₹ ' + formattedInt + '.' + decimalPart;
+}
+
+// Monogram letters from company name
+function getInitials(name?: string): string {
+  if (!name) return 'RA';
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+  if (words.length === 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return (words[0][0] + words[1][0] + words[2][0]).toUpperCase();
+}
+
+/**
+ * Safely resolves the logo image file path on disk
+ */
+export const resolveLogoPath = (logoUrl?: string | null): string | null => {
+  if (!logoUrl || typeof logoUrl !== 'string') return null;
+  const trimmed = logoUrl.trim();
+  if (!trimmed) return null;
+
+  let cleanPath = trimmed;
+  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+    try {
+      const parsed = new URL(cleanPath);
+      cleanPath = parsed.pathname;
+    } catch {}
+  }
+
+  cleanPath = cleanPath.replace(/^[/\\]+/, '');
+  const fileName = path.basename(cleanPath);
+
+  const candidatePaths = [
+    path.resolve(process.cwd(), cleanPath),
+    path.resolve(process.cwd(), 'uploads', cleanPath.replace(/^uploads[/\\]?/, '')),
+    path.resolve(process.cwd(), '../uploads', cleanPath.replace(/^uploads[/\\]?/, '')),
+    path.resolve(process.cwd(), 'uploads/branding', fileName),
+    path.resolve(process.cwd(), '../uploads/branding', fileName),
+    path.resolve(__dirname, '../../../uploads', cleanPath.replace(/^uploads[/\\]?/, '')),
+    path.resolve(__dirname, '../../../uploads/branding', fileName),
+    path.resolve(__dirname, '../../uploads', cleanPath.replace(/^uploads[/\\]?/, '')),
+    path.resolve(__dirname, '../../uploads/branding', fileName),
+    path.resolve(process.cwd(), '../frontend/public', cleanPath.replace(/^frontend[/\\]public[/\\]?/, '')),
+    path.resolve(process.cwd(), '../frontend/public', fileName),
+    path.resolve(process.cwd(), 'frontend/public', fileName),
+    path.resolve(__dirname, '../../../frontend/public', fileName),
+    path.resolve(__dirname, '../../frontend/public', fileName),
+    path.resolve('d:/RA_SEBI_COMPLINCE/uploads/branding', fileName),
+    path.resolve('d:/RA_SEBI_COMPLINCE/frontend/public', fileName)
+  ];
+
+  for (const candidate of candidatePaths) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        const ext = path.extname(candidate).toLowerCase();
+        if (['.png', '.jpg', '.jpeg'].includes(ext)) {
+          return candidate;
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+};
+
 export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => {
   return new Promise(async (resolve, reject) => {
     try {
-      const payment = await prisma.payment.findUnique({
-        where: { id: paymentId },
-        include: { coupon: true }
-      });
+      let payment: any = null;
+      const isObjectId = /^[0-9a-fA-F]{24}$/.test(String(paymentId).trim());
+
+      if (isObjectId) {
+        try {
+          payment = await Payment.findById(paymentId).populate('coupon').populate('couponId').lean();
+        } catch {}
+        if (!payment && dynamicDb?.Payment) {
+          try {
+            payment = await dynamicDb.Payment.findById(paymentId).populate('coupon').populate('couponId').lean();
+          } catch {}
+        }
+      }
 
       if (!payment) {
-        return reject(new Error('Payment not found'));
+        const orConditions: any[] = [{ transactionRef: paymentId }, { gatewayPaymentId: paymentId }];
+        if (isObjectId) orConditions.unshift({ _id: paymentId });
+        try {
+          payment = await Payment.findOne({ $or: orConditions }).populate('coupon').populate('couponId').lean();
+        } catch {}
+        if (!payment && dynamicDb?.Payment) {
+          try {
+            payment = await dynamicDb.Payment.findOne({ $or: orConditions }).populate('coupon').populate('couponId').lean();
+          } catch {}
+        }
       }
 
-      const client = await prisma.client.findUnique({
-        where: { id: payment.clientId },
-        include: { user: true, profile: true }
-      });
+      if (!payment) {
+        return reject(new Error('Payment record not found'));
+      }
 
+      let client: any = null;
+      if (payment.clientId) {
+        try {
+          client = await Client.findById(payment.clientId).populate('user').populate('profile').lean();
+        } catch {}
+        if (!client && dynamicDb?.Client) {
+          try {
+            client = await dynamicDb.Client.findById(payment.clientId).populate('user').populate('profile').lean();
+          } catch {}
+        }
+      }
       if (!client) {
-        return reject(new Error('Client not found'));
+        client = {
+          name: payment.clientName,
+          email: payment.clientEmail || '',
+          mobile: payment.clientPhone || '',
+          pan: payment.clientPan || 'N/A',
+          profile: { addressLine1: 'India', state: 'MADHYA PRADESH', city: 'N/A', zipCode: 'N/A' }
+        };
       }
 
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: payment.tenantId }
-      });
-
+      let tenant: any = null;
+      if (payment.tenantId) {
+        try {
+          tenant = await Tenant.findById(payment.tenantId).lean();
+        } catch {}
+        if (!tenant && dynamicDb?.Tenant) {
+          try {
+            tenant = await dynamicDb.Tenant.findById(payment.tenantId).lean();
+          } catch {}
+        }
+      }
       if (!tenant) {
-        return reject(new Error('Tenant not found'));
+        try {
+          tenant = await Tenant.findOne({ deletedAt: null }).lean();
+        } catch {}
+      }
+      if (!tenant && dynamicDb?.Tenant) {
+        try {
+          tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+        } catch {}
+      }
+      if (!tenant) {
+        try {
+          tenant = await Tenant.findOne().lean();
+        } catch {}
+      }
+      if (!tenant) {
+        tenant = {
+          companyName: 'Alpha Research Partners',
+          address: 'India',
+          email: 'support@alpharesearch.com',
+          mobile: '9999999999',
+          sebiRegistration: 'INH000001234'
+        };
       }
 
-      let planName = 'Custom Plan';
+      // Check SystemSetting if logoUrl is not populated on tenant
+      if (!tenant.logoUrl) {
+        try {
+          const sysSetting: any = await SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean() ||
+                                  (dynamicDb?.SystemSetting ? await dynamicDb.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean() : null);
+          if (sysSetting && sysSetting.value) {
+            const parsed = typeof sysSetting.value === 'string' ? JSON.parse(sysSetting.value) : sysSetting.value;
+            if (parsed.logoUrl) tenant.logoUrl = parsed.logoUrl;
+          }
+        } catch {}
+      }
+
+      let planName = 'Advisory Plan';
       if (payment.planId) {
-        const plan = await prisma.plan.findUnique({ where: { id: payment.planId } });
-        if (plan) planName = plan.name;
+        try {
+          const plan: any = await Plan.findById(payment.planId).lean() || (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).lean() : null);
+          if (plan) planName = plan.name;
+        } catch {}
       }
+      if (!planName && payment.planName) planName = payment.planName;
 
-      const doc = new PDFDocument({ margin: 30, size: 'A4' });
+      const doc = new PDFDocument({ margin: 30, size: 'A4', compress: false });
       const buffers: Buffer[] = [];
+
+      // Resolve TrueType fonts for full Unicode support (e.g. ₹ Indian Rupee sign)
+      const resolveFont = (filenames: string[]): string | null => {
+        for (const filename of filenames) {
+          const candidatePaths = [
+            path.resolve(__dirname, '../../assets/fonts', filename),
+            path.resolve(__dirname, '../../../assets/fonts', filename),
+            path.resolve(process.cwd(), 'assets/fonts', filename),
+            path.resolve(process.cwd(), 'backend/assets/fonts', filename),
+            `C:\\Windows\\Fonts\\${filename}`,
+            `C:\\Windows\\Fonts\\${filename.toLowerCase()}`,
+            `C:\\Windows\\Fonts\\${filename.toUpperCase()}`
+          ];
+          for (const p of candidatePaths) {
+            try {
+              if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
+            } catch {}
+          }
+        }
+        return null;
+      };
+
+      const regularFontPath = resolveFont(['arial.ttf', 'Arial.ttf']);
+      const boldFontPath = resolveFont(['arialbd.ttf', 'ARIALBD.TTF', 'Arial-Bold.ttf', 'ArialBold.ttf']);
+      const italicFontPath = resolveFont(['ariali.ttf', 'ARIALI.TTF', 'Arial-Italic.ttf']);
+
+      let regularFont = 'Helvetica';
+      let boldFont = 'Helvetica-Bold';
+      let italicFont = 'Helvetica-Oblique';
+
+      if (regularFontPath) {
+        try {
+          doc.registerFont('App-Regular', regularFontPath);
+          regularFont = 'App-Regular';
+        } catch {}
+      }
+      if (boldFontPath) {
+        try {
+          doc.registerFont('App-Bold', boldFontPath);
+          boldFont = 'App-Bold';
+        } catch {}
+      }
+      if (italicFontPath) {
+        try {
+          doc.registerFont('App-Italic', italicFontPath);
+          italicFont = 'App-Italic';
+        } catch {}
+      }
 
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => {
@@ -64,16 +264,82 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         resolve(pdfData);
       });
 
-      // --- CALCULATE TAXES ---
-      // Assuming payment.amount is inclusive of 18% GST
-      const totalAmount = payment.amount;
-      const discount = payment.discountApplied || 0;
-      const taxableValue = totalAmount / 1.18;
-      const totalGst = totalAmount - taxableValue;
-      const baseProductPrice = taxableValue + discount;
-      
-      
-      
+      // --- CALCULATE TAXES & DISCOUNT ---
+      const totalAmount = Number(payment.amount || 0);
+      let couponObj: any = payment.coupon || payment.couponId;
+      if (payment.couponId && (!couponObj || typeof couponObj !== 'object' || !couponObj.code)) {
+        try {
+          couponObj = await dynamicDb.Coupon.findById(payment.couponId).lean();
+        } catch {}
+      }
+
+      const couponCodeText = couponObj?.code || payment.coupon?.code || payment.couponCode || '';
+
+      let planObj: any = null;
+      if (payment.planId) {
+        try {
+          planObj = await Plan.findById(payment.planId).lean() || (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).lean() : null);
+        } catch {}
+      }
+
+      const fullPlanPrice = Number(planObj?.amount || planObj?.price || 0);
+
+      // Determine raw discount
+      let rawDiscount = Number(payment.discountApplied || payment.discount || 0);
+
+      // Determine if GST is INCLUSIVE or EXCLUSIVE
+      // 1. Check tenant setting: 'INCLUSIVE' vs 'EXCLUSIVE'
+      // 2. Also check if the transaction amount was charged inclusive (i.e. amount equals plan price minus discount)
+      let isGstInclusive = tenant.gstCalculationType === 'INCLUSIVE';
+      if (!isGstInclusive && fullPlanPrice > 0 && totalAmount > 0) {
+        if (Math.abs(totalAmount - (fullPlanPrice - rawDiscount)) < 2) {
+          isGstInclusive = true;
+        }
+      }
+
+      let grossBase = 0;
+      let baseDiscount = 0;
+      let taxableValue = 0;
+      let totalGst = 0;
+      let netInvoiceTotal = 0;
+
+      if (isGstInclusive) {
+        // INCLUSIVE:
+        // 1. Discount is applied directly on the plan price:
+        //    Net Payable = Plan Price (e.g. 1500) - Discount (e.g. 500) = 1000 (Inc. GST)
+        netInvoiceTotal = totalAmount > 0 ? totalAmount : Math.max(0, fullPlanPrice - rawDiscount);
+
+        // 2. Gross Plan Value is the full direct plan price
+        grossBase = fullPlanPrice > 0 ? fullPlanPrice : Number((netInvoiceTotal + rawDiscount).toFixed(2));
+
+        // 3. Discount is the direct coupon discount (no GST on discount amount)
+        baseDiscount = rawDiscount;
+
+        // 4. Taxable value & GST are calculated from the remaining payable amount:
+        taxableValue = Number((netInvoiceTotal / 1.18).toFixed(2));
+        totalGst = Number((netInvoiceTotal - taxableValue).toFixed(2));
+      } else {
+        // EXCLUSIVE: Plan price is Base, 18% GST is added on top
+        // Example: Plan = ₹15000 (Base), Coupon = ₹500, Taxable = ₹14500, GST = ₹2610, Total = ₹17110
+        if (couponObj?.discountValue) {
+          if (couponObj.discountType === 'PERCENTAGE') {
+            baseDiscount = ((fullPlanPrice || totalAmount) * couponObj.discountValue) / 100;
+            if (couponObj.percentageType === 'CAPPED' && couponObj.maxDiscountValue && baseDiscount > couponObj.maxDiscountValue) {
+              baseDiscount = couponObj.maxDiscountValue;
+            }
+          } else {
+            baseDiscount = Number(couponObj.discountValue);
+          }
+        } else if (rawDiscount > 0) {
+          baseDiscount = rawDiscount;
+        }
+
+        grossBase = fullPlanPrice > 0 ? fullPlanPrice : (totalAmount > 0 ? Number((totalAmount / 1.18).toFixed(2)) : 0);
+        taxableValue = Math.max(0, grossBase - baseDiscount);
+        totalGst = Number((taxableValue * 0.18).toFixed(2));
+        netInvoiceTotal = totalAmount > 0 ? totalAmount : Number((taxableValue + totalGst).toFixed(2));
+      }
+
       const stateCodes: Record<string, string> = {
         'JAMMU AND KASHMIR': '01', 'HIMACHAL PRADESH': '02', 'PUNJAB': '03', 'CHANDIGARH': '04', 'UTTARAKHAND': '05',
         'HARYANA': '06', 'DELHI': '07', 'RAJASTHAN': '08', 'UTTAR PRADESH': '09', 'BIHAR': '10', 'SIKKIM': '11',
@@ -81,190 +347,339 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         'ASSAM': '18', 'WEST BENGAL': '19', 'JHARKHAND': '20', 'ODISHA': '21', 'CHHATTISGARH': '22', 'MADHYA PRADESH': '23',
         'GUJARAT': '24', 'DAMAN AND DIU': '25', 'DADRA AND NAGAR HAVELI': '26', 'MAHARASHTRA': '27', 'KARNATAKA': '29',
         'GOA': '30', 'LAKSHADWEEP': '31', 'KERALA': '32', 'TAMIL NADU': '33', 'PUDUCHERRY': '34', 'ANDAMAN AND NICOBAR ISLANDS': '35',
-        'TELANGANA': '36', 'ANDHRA PRADESH': '37', 'LADAKH': '38'
+        'TELANGANA': '36', 'ANDHRA PRADESH': '37', 'LADAKH': '38',
+        'MP': '23', 'MH': '27', 'DL': '07', 'GA': '30', 'UP': '09', 'HR': '06', 'RJ': '08', 'KA': '29', 'TN': '33', 'TS': '36', 'AP': '37', 'GJ': '24', 'WB': '19'
       };
-      
-      // Raw states for display
 
-      let displayClientState = client.profile?.state?.trim().toUpperCase() || 'UNKNOWN';
-      let displayTenantState = tenant.state ? tenant.state.trim().toUpperCase() : (tenant.address?.split(',').pop()?.trim().toUpperCase() || 'UNKNOWN');
+      const resolveStateCode = (st?: string | null): string => {
+        if (!st) return '';
+        const clean = st.trim().toUpperCase();
+        if (stateCodes[clean]) return stateCodes[clean];
+        const noSpace = clean.replace(/[^A-Z]/g, '');
+        for (const [k, v] of Object.entries(stateCodes)) {
+          if (k.replace(/[^A-Z]/g, '') === noSpace) return v;
+        }
+        return '';
+      };
 
-      // Normalized states for matching GST/IGST (removes all spaces)
-      const normClientState = displayClientState.replace(/\s+/g, '');
-      const normTenantState = displayTenantState.replace(/\s+/g, '');
+      let displayClientState = (client.profile?.state || client.state || 'MADHYA PRADESH').trim().toUpperCase();
+      let displayTenantState = (tenant.state ? tenant.state.trim().toUpperCase() : (tenant.address?.split(',').pop()?.trim().toUpperCase() || 'MAHARASHTRA'));
+
+      const normClientState = displayClientState.replace(/[^A-Z]/g, '');
+      const normTenantState = displayTenantState.replace(/[^A-Z]/g, '');
+      const isIntraState = normClientState === normTenantState && normClientState !== '';
 
       let cgst = 0, sgst = 0, igst = 0;
-      if (normClientState === normTenantState && normClientState !== 'UNKNOWN') {
-        cgst = totalGst / 2;
-        sgst = totalGst / 2;
+      if (isIntraState) {
+        cgst = Number((totalGst / 2).toFixed(2));
+        sgst = Number((totalGst - cgst).toFixed(2));
       } else {
         igst = totalGst;
       }
 
+      const clientStateCode = resolveStateCode(displayClientState);
+      const tenantStateCode = resolveStateCode(displayTenantState) || '27';
 
-      // --- HEADER ---
-      doc.rect(30, 30, 535, 750).stroke(); // Main Border
+      const clientFullName = (
+        client.name ||
+        (client.user ? `${client.user.firstName || ''} ${client.user.lastName || ''}`.trim() : '') ||
+        payment.clientName ||
+        'Valued Client'
+      );
+      const clientEmail = client.user?.email || client.email || payment.clientEmail || 'N/A';
+      const clientMobile = client.mobile || client.user?.mobile || payment.clientPhone || 'N/A';
+      const clientPan = client.pan || client.user?.pan || 'N/A';
+      const clientPincode = client.profile?.zipCode || client.zipCode || '';
+      const clientCity = client.profile?.city || client.city || '';
+      const clientAddressRaw = client.profile?.addressLine1
+        ? `${client.profile.addressLine1}${client.profile.addressLine2 ? ', ' + client.profile.addressLine2 : ''}`
+        : (client.address || 'India');
 
-      // Company Info (Right aligned)
-      doc.fontSize(12).font('Helvetica-Bold').text(tenant.companyName, 300, 40, { align: 'right' });
-      doc.fontSize(8).font('Helvetica').text(`Address: ${tenant.address}`, 300, 55, { align: 'right' });
-      doc.text(`E-Mail: ${tenant.email}`, 300, 65, { align: 'right' });
-      doc.text(`Phone: ${tenant.mobile}`, 300, 75, { align: 'right' });
-      if (tenant.website) doc.text(`Website: ${tenant.website}`, 300, 85, { align: 'right' });
+      let clientAddressDisplay = clientAddressRaw;
+      if (clientCity && clientCity !== 'N/A' && !clientAddressDisplay.includes(clientCity)) {
+        clientAddressDisplay = `${clientAddressDisplay}, ${clientCity}`;
+      }
+      if (clientPincode && clientPincode !== 'N/A' && !clientAddressDisplay.includes(clientPincode)) {
+        clientAddressDisplay = `${clientAddressDisplay} - ${clientPincode}`;
+      }
 
-      // Logo/Company name (Left aligned)
-      doc.fontSize(20).font('Helvetica-Bold').fillColor('#0055AA').text(tenant.companyName, 40, 50, { width: 250 });
-      doc.fillColor('black'); // reset color
+      const invoiceNo = payment.transactionRef ? `INV/${new Date().getFullYear()}/${String(payment.transactionRef).slice(-6).toUpperCase()}` : `INV/${new Date().getFullYear()}/001`;
+      const invoiceDate = payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-GB') : new Date(payment.createdAt || Date.now()).toLocaleDateString('en-GB');
 
-      // --- SUBHEADER ---
-      doc.moveTo(30, 100).lineTo(565, 100).stroke();
-      doc.fontSize(9).font('Helvetica-Bold').text(tenant.gst ? `GSTIN ${tenant.gst}` : '', 30, 105, { align: 'center', width: 535 });
-      
-      doc.moveTo(30, 118).lineTo(565, 118).stroke();
-      doc.text('Tax Invoice', 30, 122, { align: 'center', width: 535 });
+      // ==========================================
+      // 1. OUTER DOCUMENT BORDER
+      // ==========================================
+      doc.roundedRect(26, 26, 543, 755, 4).strokeColor('#CBD5E1').lineWidth(0.75).stroke();
 
-      doc.moveTo(30, 135).lineTo(565, 135).stroke();
+      // ==========================================
+      // 2. HEADER TOP ROW: LOGO & COMPANY INFO (Y: 34 to 90)
+      // ==========================================
+      const logoPath = resolveLogoPath(tenant.logoUrl);
+      let renderedLogo = false;
+      if (logoPath) {
+        try {
+          doc.image(logoPath, 36, 36, { fit: [140, 48] });
+          renderedLogo = true;
+        } catch {}
+      }
 
-      // --- INVOICE DETAILS ---
-      
-      const year = new Date(payment.createdAt).getFullYear();
-      const startOfYear = new Date(`${year}-01-01T00:00:00.000Z`);
-      const paymentCount = await prisma.payment.count({
-        where: {
-          tenantId: payment.tenantId,
-          createdAt: {
-            gte: startOfYear,
-            lt: payment.createdAt
-          }
-        }
-      });
-      const seqNo = String(paymentCount + 1).padStart(3, '0');
-      const invoiceNo = `INV/${year}/${seqNo}`;
+      if (!renderedLogo) {
+        // Render sleek monogram corporate badge
+        const initials = getInitials(tenant.companyName);
+        doc.roundedRect(36, 36, 44, 44, 5).fillColor('#0F2444').fill();
+        doc.font(boldFont).fontSize(14).fillColor('#FFFFFF').text(initials, 36, 50, { width: 44, align: 'center' });
 
-      const invoiceDate = payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB');
+        doc.font(boldFont).fontSize(12.5).fillColor('#0F2444').text(tenant.companyName, 88, 39);
+        doc.font(boldFont).fontSize(7.5).fillColor('#2563EB').text('SEBI REGISTERED RESEARCH ANALYST', 88, 55);
+        doc.font(regularFont).fontSize(7).fillColor('#64748B').text('Financial Research & Advisory Services', 88, 67);
+      }
 
-      doc.fontSize(9).font('Helvetica-Bold').text('Invoice No: ', 35, 140, { continued: true }).font('Helvetica').text(invoiceNo);
-      doc.moveTo(30, 153).lineTo(565, 153).stroke();
-      
-      doc.font('Helvetica-Bold').text('Invoice date: ', 35, 158, { continued: true }).font('Helvetica').text(invoiceDate);
-      doc.moveTo(30, 171).lineTo(565, 171).stroke();
+      // Right Side: Company Details
+      const tenantGst = tenant.gst || tenant.gstin || '';
+      doc.font(boldFont).fontSize(9).fillColor('#0F172A').text(tenant.companyName, 250, 36, { width: 310, align: 'right' });
+      doc.font(regularFont).fontSize(7.5).fillColor('#475569').text(tenant.address || 'India', 250, 48, { width: 310, align: 'right' });
+      doc.text(`Email: ${tenant.email || 'support@advisory.com'}  |  Mobile: ${tenant.mobile || 'N/A'}`, 250, 60, { width: 310, align: 'right' });
+      doc.text(`SEBI Regn: ${tenant.sebiRegistration || 'INH000001234'}  |  PAN: ${tenant.pan || 'N/A'}  |  GSTIN: ${tenantGst || 'N/A'}`, 250, 72, { width: 310, align: 'right' });
 
-      doc.text('Reverse Charge (Y/N)', 35, 176);
-      doc.moveTo(300, 171).lineTo(300, 207).stroke(); // vertical line
-      doc.text('N', 305, 176);
-      doc.moveTo(30, 189).lineTo(565, 189).stroke();
+      // Separator Line
+      doc.moveTo(26, 92).lineTo(569, 92).strokeColor('#E2E8F0').lineWidth(0.75).stroke();
 
-      doc.text(`State: ${displayTenantState}`, 35, 194);
-      doc.text(`State Code: ${stateCodes[displayTenantState.replace(/\s+/g, '')] || ''}`, 305, 194);
-      doc.moveTo(30, 207).lineTo(565, 207).stroke();
+      // ==========================================
+      // 3. TAX INVOICE RIBBON (Y: 98 to 122)
+      // ==========================================
+      doc.roundedRect(34, 98, 527, 24, 3).fillColor('#0F2444').fill();
+      doc.font(boldFont).fontSize(10.5).fillColor('#FFFFFF').text('TAX INVOICE', 34, 105, { width: 527, align: 'center' });
+      doc.font(boldFont).fontSize(7.5).fillColor('#93C5FD').text('ORIGINAL FOR RECIPIENT', 34, 106, { width: 517, align: 'right' });
+      doc.font(regularFont).fontSize(7.5).fillColor('#94A3B8').text('(Under Rule 46 of CGST Rules, 2017)', 44, 106, { width: 220, align: 'left' });
 
-      doc.font('Helvetica-Bold').text('SAC CODE: 997156', 35, 212); // Standard for financial services
-      doc.moveTo(30, 225).lineTo(565, 225).stroke();
+      // ==========================================
+      // 4. TWO-COLUMN METADATA CARDS (Y: 128 to 230)
+      // ==========================================
+      // Left Card: Invoice Details
+      doc.rect(34, 128, 260, 18).fillColor('#F1F5F9').fill();
+      doc.font(boldFont).fontSize(8).fillColor('#0F2444').text('INVOICE INFORMATION', 42, 133);
+      doc.roundedRect(34, 128, 260, 96, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.moveTo(34, 146).lineTo(294, 146).strokeColor('#CBD5E1').stroke();
 
-      doc.text('Bill to Party', 30, 230, { align: 'center', width: 535 });
-      doc.moveTo(30, 243).lineTo(565, 243).stroke();
+      const invLabels = [
+        ['Invoice No:', invoiceNo, true],
+        ['Invoice Date:', invoiceDate, false],
+        ['Place of Supply:', `${displayTenantState} (State Code: ${tenantStateCode})`, false],
+        ['SAC Code:', '997156 (Financial Advisory Services)', false],
+        ['Reverse Charge (Y/N):', 'No (N)', false]
+      ];
+      let invY = 151;
+      for (const [lbl, val, isBold] of invLabels) {
+        doc.font(boldFont).fontSize(7.5).fillColor('#475569').text(lbl as string, 42, invY, { width: 100 });
+        doc.font(isBold ? boldFont : regularFont).fontSize(7.5).fillColor('#0F172A').text(val as string, 142, invY, { width: 148 });
+        invY += 14;
+      }
 
-      // --- CLIENT DETAILS ---
-      const clientAddress = client.profile ? `${client.profile.addressLine1 || ''}, ${client.profile.city || ''}, ${client.profile.state || ''}` : 'N/A';
-      
-      doc.font('Helvetica').text(`Client Name: ${client.user.firstName} ${client.user.lastName}`, 35, 248, { width: 260 });
-      doc.moveTo(300, 243).lineTo(300, 315).stroke(); // vertical line
-      doc.text(`Mobile no: ${client.mobile}`, 305, 248);
-      doc.moveTo(30, 261).lineTo(565, 261).stroke();
+      // Right Card: Client Details
+      doc.rect(301, 128, 260, 18).fillColor('#F1F5F9').fill();
+      doc.font(boldFont).fontSize(8).fillColor('#0F2444').text('BILL TO (CLIENT DETAILS)', 309, 133);
+      doc.roundedRect(301, 128, 260, 96, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.moveTo(301, 146).lineTo(561, 146).strokeColor('#CBD5E1').stroke();
 
-      doc.text(`Address: ${clientAddress}`, 35, 266, { width: 260 });
-      doc.text(`Pincode: ${client.profile?.zipCode || 'N/A'}`, 305, 266);
-      
-      // city state 
-      doc.text(`City: ${client.profile?.city || 'N/A'}`, 35, 286, { continued: true }).text(`          State: ${displayClientState}`);
-      doc.text(`State Code: ${stateCodes[displayClientState.replace(/\s+/g, '')] || ''}`, 305, 286);
-      doc.moveTo(30, 298).lineTo(565, 298).stroke();
+      const clientLabels = [
+        ['Client Name:', clientFullName, true],
+        ['Mobile No:', clientMobile, false],
+        ['Address:', clientAddressDisplay, false],
+        ['State / State Code:', `${displayClientState} (Code: ${clientStateCode || 'N/A'})`, false],
+        ['Client PAN / Tax ID:', clientPan, false]
+      ];
+      let clY = 151;
+      for (const [lbl, val, isBold] of clientLabels) {
+        doc.font(boldFont).fontSize(7.5).fillColor('#475569').text(lbl as string, 309, clY, { width: 95 });
+        doc.font(isBold ? boldFont : regularFont).fontSize(7.5).fillColor('#0F172A').text(val as string, 404, clY, { width: 153 });
+        clY += 14;
+      }
 
-      doc.text(`Email: ${client.user.email}`, 35, 303, { width: 260 });
-      doc.text(`PAN: ${client.pan}`, 305, 303);
-      doc.moveTo(30, 315).lineTo(565, 315).stroke();
+      // ==========================================
+      // 5. SERVICES TABLE (Y: 232 to 308)
+      // ==========================================
+      const tableY = 232;
+      // Header row
+      doc.rect(34, tableY, 527, 22).fillColor('#F1F5F9').fill();
+      doc.roundedRect(34, tableY, 527, 22, 2).strokeColor('#94A3B8').lineWidth(0.5).stroke();
 
-      // --- LINE ITEMS ---
-      doc.font('Helvetica-Bold');
-      doc.text('S. No.', 35, 320, { width: 40, align: 'center' });
-      doc.text('Product', 80, 320, { width: 140, align: 'center' });
-      doc.text('Durations', 225, 320, { width: 120, align: 'center' });
-      doc.text('Received\nAmount', 350, 320, { width: 60, align: 'center' });
-      doc.text('Discount', 415, 320, { width: 60, align: 'center' });
-      doc.text('Taxable\nValues', 480, 320, { width: 80, align: 'center' });
-      doc.moveTo(30, 345).lineTo(565, 345).stroke();
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F172A');
+      doc.text('Sr.', 36, tableY + 7, { width: 26, align: 'center' });
+      doc.text('Description of Services', 66, tableY + 7, { width: 155, align: 'left' });
+      doc.text('SAC Code', 225, tableY + 7, { width: 50, align: 'center' });
+      doc.text('Validity Period', 280, tableY + 7, { width: 95, align: 'center' });
+      doc.text('Gross Amount', 370, tableY + 7, { width: 65, align: 'right' });
+      doc.text('Discount (-)', 440, tableY + 7, { width: 55, align: 'right' });
+      doc.text('Taxable Value', 500, tableY + 7, { width: 55, align: 'right' });
 
-      // vertical lines for table
-      const xPositions = [75, 220, 345, 410, 475];
-      xPositions.forEach(x => {
-        doc.moveTo(x, 315).lineTo(x, 400).stroke();
-      });
+      // Table Body Row
+      const bodyY = tableY + 22;
+      const bodyH = 48;
+      doc.rect(34, bodyY, 527, bodyH).fillColor('#FFFFFF').fill();
+      doc.roundedRect(34, bodyY, 527, bodyH, 2).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
 
-      doc.font('Helvetica').fontSize(8);
-      doc.text('1', 35, 355, { width: 40, align: 'center' });
-      doc.text(planName, 80, 355, { width: 140, align: 'center' });
-      if (payment.coupon) doc.fontSize(7).text(`(Coupon: ${payment.coupon.code})`, 80, 375, { width: 140, align: 'center' });
-      doc.fontSize(8);
-      
+      // Vertical grid dividers
+      const divXs = [64, 223, 278, 378, 438, 498];
+      for (const x of divXs) {
+        doc.moveTo(x, tableY).lineTo(x, bodyY + bodyH).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
+      }
+
+      // Sr. No
+      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('1', 36, bodyY + 17, { width: 26, align: 'center' });
+
+      // Description & Coupon Badge
+      doc.font(boldFont).fontSize(8.5).fillColor('#0F172A').text(planName, 68, bodyY + 11, { width: 150 });
+      if (couponCodeText) {
+        doc.roundedRect(68, bodyY + 26, 125, 14, 2).fillColor('#ECFDF5').strokeColor('#A7F3D0').lineWidth(0.5).fillAndStroke('#ECFDF5', '#A7F3D0');
+        doc.font(boldFont).fontSize(7).fillColor('#047857').text(`Coupon Applied: ${couponCodeText}`, 74, bodyY + 29);
+      } else {
+        doc.font(regularFont).fontSize(7).fillColor('#64748B').text('Research Analyst Advisory Subscription', 68, bodyY + 28, { width: 150 });
+      }
+
+      // SAC Code
+      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('997156', 225, bodyY + 17, { width: 50, align: 'center' });
+
+      // Validity Period
       const startDate = invoiceDate;
-      const endDate = new Date(Date.now() + (payment.planValidityDays || 30) * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
-      doc.text(`Services From :-\n${startDate} To : ${endDate}`, 225, 355, { width: 120, align: 'center' });
-      
-      doc.text(`${totalAmount.toFixed(2)} /-`, 350, 360, { width: 60, align: 'center' });
-      doc.text(discount > 0 ? `${discount.toFixed(2)}` : '-', 415, 360, { width: 60, align: 'center' });
-      doc.text(`${taxableValue.toFixed(2)} /-`, 480, 360, { width: 80, align: 'center' });
-      
-      doc.moveTo(30, 400).lineTo(565, 400).stroke();
+      const validityDays = payment.planValidityDays || 30;
+      const endDate = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F172A').text(`${startDate} - ${endDate}`, 280, bodyY + 13, { width: 95, align: 'center' });
+      doc.font(regularFont).fontSize(6.8).fillColor('#64748B').text(`${validityDays} Days Active Access`, 280, bodyY + 26, { width: 95, align: 'center' });
 
-      // --- TOTALS ---
-      doc.font('Helvetica-Bold');
-      doc.text(`Total Invoice amount in words: ${numberToWords(Math.round(totalAmount))}`, 35, 405, { width: 300 });
-      
-      // Totals Box
-      doc.moveTo(345, 400).lineTo(345, 490).stroke();
-      doc.moveTo(475, 400).lineTo(475, 490).stroke();
+      // Amounts (Right aligned!)
+      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text(formatInr(grossBase), 380, bodyY + 17, { width: 55, align: 'right' });
+      doc.font(boldFont).fontSize(8).fillColor('#047857').text(baseDiscount > 0 ? ('- ' + formatInr(baseDiscount)) : '-', 440, bodyY + 17, { width: 55, align: 'right' });
+      doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(formatInr(taxableValue), 500, bodyY + 17, { width: 55, align: 'right' });
 
-      doc.text('Add: CGST(9%)', 350, 405, { width: 120 });
-      doc.font('Helvetica').text(`${cgst.toFixed(2)} /-`, 480, 405, { width: 80, align: 'right' });
-      doc.moveTo(345, 418).lineTo(565, 418).stroke();
+      // ==========================================
+      // 6. SUMMARY & SETTLEMENT SECTION (Y: 310 to 475)
+      // ==========================================
+      const sumY = 310;
 
-      doc.font('Helvetica-Bold').text('Add: SGST(9%)', 350, 423, { width: 120 });
-      doc.font('Helvetica').text(`${sgst.toFixed(2)} /-`, 480, 423, { width: 80, align: 'right' });
-      doc.moveTo(345, 436).lineTo(565, 436).stroke();
+      // Left Box: Amount in words + Settlement Details
+      // Card 1: Words
+      doc.roundedRect(34, sumY, 310, 38, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.rect(34, sumY, 310, 15).fillColor('#F8FAFC').fill();
+      doc.font(boldFont).fontSize(7).fillColor('#64748B').text('TOTAL INVOICE AMOUNT (IN WORDS)', 42, sumY + 4);
+      doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(numberToWords(Math.round(netInvoiceTotal)), 42, sumY + 21, { width: 295 });
 
-      doc.font('Helvetica-Bold').text('Add: IGST(18%)', 350, 441, { width: 120 });
-      doc.font('Helvetica').text(`${igst.toFixed(2)} /-`, 480, 441, { width: 80, align: 'right' });
-      doc.moveTo(345, 454).lineTo(565, 454).stroke();
+      // Card 2: Settlement Info
+      const setY = sumY + 44;
+      doc.roundedRect(34, setY, 310, 114, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.rect(34, setY, 310, 16).fillColor('#F1F5F9').fill();
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('PAYMENT & SETTLEMENT DETAILS', 42, setY + 4);
 
-      doc.font('Helvetica-Bold').text('Total Amount GST', 350, 459, { width: 120 });
-      doc.text(`${totalGst.toFixed(2)} /-`, 480, 459, { width: 80, align: 'right' });
-      doc.moveTo(345, 472).lineTo(565, 472).stroke();
+      const pModeText = payment.paymentMode === 'UPI_QR' ? 'UPI / QR CODE' : (payment.paymentMode || 'ONLINE / GATEWAY');
+      const pDetails: any[] = [
+        ['Payment Status:', 'COMPLETED (PAID)', '#047857', true],
+        ['Payment Mode:', pModeText, '#0F172A', false],
+        ['Txn / UTR Reference:', payment.transactionRef || 'N/A', '#0F172A', false]
+      ];
+      if (couponCodeText) {
+        pDetails.push(['Coupon Redeemed:', `${couponCodeText} (Discount: ${formatInr(baseDiscount)})`, '#047857', false]);
+      }
+      if (tenant.bankName || tenant.bankAccountNo) {
+        pDetails.push(['Bank Account Ref:', `${tenant.bankName || 'N/A'} | A/C: ${tenant.bankAccountNo || 'N/A'} | IFSC: ${tenant.bankIfsc || 'N/A'}`, '#475569', false]);
+      }
+      pDetails.push(['GST on Reverse Charge:', 'No', '#475569', false]);
 
-      doc.text('Total Amount after Tax', 350, 477, { width: 120 });
-      doc.text(`${totalAmount.toFixed(2)} /-`, 480, 477, { width: 80, align: 'right' });
-      doc.moveTo(30, 490).lineTo(565, 490).stroke();
+      let py = setY + 21;
+      for (const [lbl, val, col, isB] of pDetails) {
+        doc.font(boldFont).fontSize(7.2).fillColor('#475569').text(lbl, 42, py, { width: 100 });
+        doc.font(isB ? boldFont : regularFont).fontSize(7.2).fillColor(col).text(val, 145, py, { width: 195 });
+        py += 14.5;
+      }
 
-      doc.text('Remark', 180, 495);
-      doc.moveTo(345, 490).lineTo(345, 508).stroke();
-      doc.text('GST on Reverse Charge', 350, 495);
-      doc.moveTo(30, 508).lineTo(565, 508).stroke();
+      // Right Box: Tax Breakdown Rows
+      const rightX = 352;
+      const rightW = 209;
+      doc.roundedRect(rightX, sumY, rightW, 158, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
 
-      // --- TERMS & CONDITIONS ---
-      doc.text('Terms & conditions', 30, 513, { align: 'center', width: 535 });
-      doc.fontSize(6).font('Helvetica').text(`This is Computer Generated Invoice No Need Any Sign. & Stamp.
-1. Investments in securities market are subject to market risks. Read all the related documents carefully before investing.
-2. Registration granted by SEBI, Membership of BASL and certification from NISM in no way guarantee performance of the intermediary or provide any assurance of returns to investors.
-3. Never Trade Without Stop Loss.
-4. Please read all terms and conditions carefully on our website: ${tenant.website || 'N/A'}
-5. If you have any queries concerning this invoice Contact us at : E-Mail: ${tenant.email} Phone: ${tenant.mobile}`, 35, 528);
-      
-      doc.moveTo(30, 570).lineTo(565, 570).stroke();
-      doc.fontSize(8).font('Helvetica-Bold').text('*Original For Recipient', 30, 575, { align: 'center', width: 535 });
+      const taxRows: [string, string, string, boolean][] = [];
+      if (baseDiscount > 0) {
+        taxRows.push(['Gross Plan Value', formatInr(grossBase), '#0F172A', false]);
+        taxRows.push([`Less: Discount (${couponCodeText || 'Coupon'})`, '- ' + formatInr(baseDiscount), '#047857', true]);
+        taxRows.push(['Net Taxable Value', formatInr(taxableValue), '#0F172A', true]);
+      } else {
+        taxRows.push(['Taxable Value', formatInr(taxableValue), '#0F172A', true]);
+      }
+
+      if (isIntraState) {
+        taxRows.push(['Add: CGST (9%)', formatInr(cgst), '#0F172A', false]);
+        taxRows.push(['Add: SGST (9%)', formatInr(sgst), '#0F172A', false]);
+      } else {
+        taxRows.push(['Add: IGST (18%)', formatInr(igst), '#0F172A', false]);
+        taxRows.push(['Add: CGST / SGST', '₹ 0.00', '#64748B', false]);
+      }
+      taxRows.push(['Total Tax Amount (GST)', formatInr(totalGst), '#0F172A', true]);
+
+      let rY = sumY;
+      const rowH = baseDiscount > 0 ? 21 : 25;
+      for (const [lbl, val, col, isB] of taxRows) {
+        doc.font(isB ? boldFont : regularFont).fontSize(7.5).fillColor('#475569').text(lbl, rightX + 8, rY + 6, { width: 115 });
+        doc.font(isB ? boldFont : regularFont).fontSize(7.5).fillColor(col).text(val, rightX + 115, rY + 6, { width: 86, align: 'right' });
+        rY += rowH;
+        doc.moveTo(rightX, rY).lineTo(rightX + rightW, rY).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
+      }
+
+      // Final Total Row Highlighted
+      const totalBarHeight = baseDiscount > 0 ? 32 : 33;
+      doc.rect(rightX, rY, rightW, totalBarHeight).fillColor('#0F2444').fill();
+      doc.font(boldFont).fontSize(8.5).fillColor('#FFFFFF').text('Total Amount (INR)', rightX + 8, rY + 9, { width: 110 });
+      doc.font(boldFont).fontSize(10).fillColor('#FFFFFF').text(formatInr(netInvoiceTotal), rightX + 110, rY + 8, { width: 91, align: 'right' });
+
+      // ==========================================
+      // 7. STATUTORY DISCLAIMERS & SIGNATORY (Y: 476 to 738)
+      // ==========================================
+      const discY = 476;
+      // Left: Disclaimers
+      doc.roundedRect(34, discY, 335, 256, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.rect(34, discY, 335, 18).fillColor('#F8FAFC').fill();
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('REGULATORY DISCLAIMERS & INVESTOR CHARTER', 42, discY + 5);
+
+      const discPoints = [
+        '• 1. Securities Market Risk: Investments in securities market are subject to market risks. Read all the related documents carefully before investing.',
+        '• 2. No Return Assurance: Registration granted by SEBI, membership of BASL and certification from NISM in no way guarantee performance of the intermediary or provide any assurance of returns to investors.',
+        '• 3. Compliance Mandate: Research advisory services are rendered in strict compliance with the SEBI (Research Analysts) Regulations, 2014 and code of conduct stipulated thereunder.',
+        '• 4. Fee & Refund Terms: Advisory subscription fees once remitted are non-refundable as agreed in the service terms and investor agreement.',
+        '• 5. Stop Loss Advisory: Investors are advised to adhere strictly to stop-loss guidelines and practice responsible risk management.',
+        `• 6. Grievance Redressal: For any service queries or unresolved grievances, please reach out to our Compliance Officer at ${tenant.email || 'support@advisory.com'} or phone ${tenant.mobile || 'N/A'}.`,
+        '• 7. SEBI Redressal Portals: Investors may also lodge grievances directly on SEBI SCORES portal (https://scores.sebi.gov.in) or access the SMART ODR platform (https://smartodr.in) for online conciliation.'
+      ];
+      let dy = discY + 26;
+      for (const p of discPoints) {
+        doc.font(regularFont).fontSize(6.5).fillColor('#475569').text(p, 42, dy, { width: 318, lineGap: 2.5 });
+        dy += (p.length > 130 ? 30 : 22);
+      }
+
+      // Right: Signatory Card
+      doc.roundedRect(378, discY, 183, 256, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.rect(378, discY, 183, 18).fillColor('#F8FAFC').fill();
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('AUTHORIZED SIGNATORY', 386, discY + 5);
+
+      doc.font(boldFont).fontSize(8.5).fillColor('#0F172A').text(`For ${tenant.companyName}`, 386, discY + 45, { width: 167, align: 'center' });
+
+      // Seal badge box
+      doc.roundedRect(405, discY + 80, 130, 52, 4).strokeColor('#93C5FD').lineWidth(0.75).stroke();
+      doc.rect(406, discY + 81, 128, 50).fillColor('#EFF6FF').fill();
+      doc.font(boldFont).fontSize(8).fillColor('#1D4ED8').text('DIGITALLY SIGNED', 405, discY + 92, { width: 130, align: 'center' });
+      doc.font(regularFont).fontSize(6.8).fillColor('#2563EB').text('Verified Electronic Invoice', 405, discY + 107, { width: 130, align: 'center' });
+
+      doc.font(boldFont).fontSize(8).fillColor('#334155').text('Authorized Signatory', 386, discY + 155, { width: 167, align: 'center' });
+      doc.font(italicFont).fontSize(6.5).fillColor('#64748B').text('(Computer generated document)', 386, discY + 172, { width: 167, align: 'center' });
+      doc.font(italicFont).fontSize(6.5).fillColor('#64748B').text('No physical signature required', 386, discY + 184, { width: 167, align: 'center' });
+
+      // ==========================================
+      // 8. BOTTOM FOOTER (Y: 746)
+      // ==========================================
+      const footY = 746;
+      doc.moveTo(34, footY).lineTo(561, footY).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.font(regularFont).fontSize(6.5).fillColor('#64748B').text('This is a system-generated electronic tax invoice issued under Rule 46 of the CGST Rules, 2017 & SEBI (Research Analysts) Regulations, 2014.', 34, footY + 8, { width: 420, align: 'left' });
+      doc.font(boldFont).fontSize(6.5).fillColor('#64748B').text('Page 1 of 1', 460, footY + 8, { width: 101, align: 'right' });
 
       doc.end();
-
     } catch (error) {
-      console.error("PDF Generation Error:", error);
+      console.error('PDF Generation Error:', error);
       reject(error);
     }
   });

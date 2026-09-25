@@ -1,16 +1,21 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ShieldCheck, FileText, CheckCircle2, AlertTriangle,
-  UploadCloud, PenTool, ExternalLink, Clock, XCircle,
-  AlertCircle, Loader2, RefreshCw, Check, Download
+  PenTool, ExternalLink, Clock, XCircle,
+  AlertCircle, Loader2, RefreshCw, Check, Download, ChevronRight, Lock, MapPin, User, Calendar
 } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding?: () => void }) {
+  const router = useRouter();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchingKyc, setFetchingKyc] = useState(false);
+  const [signingAgreement, setSigningAgreement] = useState(false);
   const [error, setError] = useState('');
 
   const fetchProfile = async () => {
@@ -20,6 +25,20 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
       const res = await api.getClientProfile();
       if (res?.success && res.data) {
         setProfile(res.data);
+        const data = res.data;
+        console.log('%c📋 [CLIENT PROFILE / KYC RECORDS LOADED]', 'background: #1e293b; color: #38bdf8; font-weight: bold; font-size: 12px; padding: 4px 8px; border-radius: 4px;');
+        console.table({
+          'Name': data.name || data.profile?.panName || '—',
+          'DOB': data.dob || data.profile?.dob || '—',
+          'PAN': data.pan || '—',
+          'Aadhaar': data.aadhaar || '—',
+          'Address': data.profile?.addressLine1 || data.address || '—',
+          'City': data.profile?.city || data.city || '—',
+          'State': data.profile?.state || data.state || '—',
+          'Pincode': data.profile?.zipCode || data.zipCode || '—',
+          'KYC Status': data.kraVerified ? 'VERIFIED (DigiLocker)' : (data.kycStatus || 'PENDING'),
+          'Agreement': data.agreementSigned ? 'SIGNED' : 'PENDING'
+        });
       } else {
         setError('Could not load KYC data.');
       }
@@ -34,154 +53,165 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
     fetchProfile();
   }, []);
 
-  // ── Status helpers ──────────────────────────────────────────────────────────
-  const status: string = profile?.status || 'PENDING_ONBOARDING';
+  // Check if DigiLocker KYC is genuinely completed
+  const isKycCompleted = Boolean(
+    profile?.kraVerified === true ||
+    profile?.kycStatus === 'VERIFIED' ||
+    profile?.kycStatus === 'APPROVED' ||
+    (profile?.pan && (profile?.profile?.isDigiLockerLocked || profile?.isDigiLockerLocked))
+  );
 
-  // Check if agreement is actually signed/active
-  const isAgreementSigned = profile?.agreements?.some(
-    (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
-  ) ?? false;
+  // Check if agreement is signed
+  const isAgreementSigned = Boolean(
+    profile?.agreementSigned === true ||
+    profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
+  );
 
-  // KRA is verified when status is past KYC stages
-  const isKraVerified =
-    status !== 'PENDING_ONBOARDING' &&
-    status !== 'KYC_PENDING' &&
-    status !== 'KYC_FAILED';
-
-  const getStatusBanner = () => {
-    // Fully verified: KRA done + agreement signed
-    if (status === 'ACTIVE' && isAgreementSigned) {
-      return {
-        border: 'border-premium-success/30',
-        glow: 'bg-premium-success/5',
-        iconBg: 'bg-premium-success/20',
-        Icon: ShieldCheck,
-        iconColor: 'text-premium-success',
-        title: 'Fully Verified',
-        titleColor: 'text-premium-success',
-        desc: 'Your KYC and onboarding are complete. You have full access to all premium features and research services.',
-        showDownload: true,
-      };
+  const maskAadhaar = (str?: string) => {
+    if (!str) return '•••• •••• ••••';
+    const clean = str.replace(/\D/g, '');
+    if (clean.length >= 4) {
+      return `•••• •••• ${clean.slice(-4)}`;
     }
-    // ACTIVE but agreement not yet signed
-    if (status === 'ACTIVE' && !isAgreementSigned) {
-      return {
-        border: 'border-premium-warning/30',
-        glow: 'bg-premium-warning/5',
-        iconBg: 'bg-premium-warning/20',
-        Icon: AlertCircle,
-        iconColor: 'text-premium-warning',
-        title: 'Agreement Pending',
-        titleColor: 'text-premium-warning',
-        desc: 'KYC verified. Please sign the Research Analyst Advisory Agreement to complete your onboarding.',
-        showDownload: false,
-      };
-    }
-    switch (status) {
-      case 'ACTIVE': // fallback (already handled above)
-        return {
-          border: 'border-premium-success/30',
-          glow: 'bg-premium-success/5',
-          iconBg: 'bg-premium-success/20',
-          Icon: ShieldCheck,
-          iconColor: 'text-premium-success',
-          title: 'Fully Verified',
-          titleColor: 'text-premium-success',
-          desc: 'Your KYC and onboarding are complete.',
-          showDownload: true,
+    return str;
+  };
+
+  const maskPan = (str?: string) => {
+    if (!str) return '••••••••••';
+    return str.toUpperCase();
+  };
+
+  // --- 1. Fetch KYC via Digio DigiLocker ---
+  const handleFetchKYC = async () => {
+    setFetchingKyc(true);
+    try {
+      const res = await api.initiateDigioKyc();
+      if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
+        const env = (res.environment || (profile?.user?.tenant?.digioEnvironment || '').toLowerCase() || 'production') as any;
+        const options = {
+          environment: env,
+          callback: async function (response: any) {
+            console.log('%c🟢 [DIGILOCKER KYC CALLBACK RECEIVED]', 'background: #059669; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+            console.log('📌 Raw Digio Response:', response);
+            if (response.hasOwnProperty('error_code')) {
+              toast.error(response.message || 'DigiLocker KYC was cancelled or failed.');
+              setFetchingKyc(false);
+            } else {
+              try {
+                const statusRes = await api.updateDigioStatus({
+                  type: 'KYC',
+                  status: 'COMPLETED',
+                  kycId: response.digio_doc_id || res.data.id,
+                  digioResponse: response
+                });
+                console.log('%c💾 [DIGILOCKER KYC SAVED TO BACKEND]', 'background: #2563EB; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+                console.log('📌 Save Result:', statusRes);
+                if (statusRes.success) {
+                  toast.success('DigiLocker KYC completed successfully! Government data auto-filled.');
+                  await fetchProfile();
+                } else {
+                  toast.error(statusRes.message || 'Failed to save KYC status.');
+                }
+              } catch (saveErr: any) {
+                console.error('❌ [DigiLocker KYC Save Error]:', saveErr);
+                toast.error(saveErr.message || 'Failed to process DigiLocker response.');
+              } finally {
+                setFetchingKyc(false);
+              }
+            }
+          },
+          logo: 'https://digio.in/images/logo.png',
+          theme: { primaryColor: '#1B42E0', secondaryColor: '#000000' }
         };
-      case 'KYC_FAILED':
-        return {
-          border: 'border-premium-danger/30',
-          glow: 'bg-premium-danger/5',
-          iconBg: 'bg-premium-danger/20',
-          Icon: XCircle,
-          iconColor: 'text-premium-danger',
-          title: 'KYC Failed',
-          titleColor: 'text-premium-danger',
-          desc: 'Your KYC verification failed. Please re-upload your documents or contact support.',
-          showDownload: false,
-        };
-      case 'KYC_PENDING':
-        return {
-          border: 'border-premium-warning/30',
-          glow: 'bg-premium-warning/5',
-          iconBg: 'bg-premium-warning/20',
-          Icon: Clock,
-          iconColor: 'text-premium-warning',
-          title: 'KYC Pending',
-          titleColor: 'text-premium-warning',
-          desc: 'Your KYC documents have been submitted and are under review. This usually takes 1–2 business days.',
-          showDownload: false,
-        };
-      case 'AGREEMENT_PENDING':
-        return {
-          border: 'border-premium-warning/30',
-          glow: 'bg-premium-warning/5',
-          iconBg: 'bg-premium-warning/20',
-          Icon: AlertCircle,
-          iconColor: 'text-premium-warning',
-          title: 'Agreement Pending',
-          titleColor: 'text-premium-warning',
-          desc: 'KYC verified. Please sign the Research Analyst Advisory Agreement to complete onboarding.',
-          showDownload: false,
-        };
-      case 'PAYMENT_PENDING':
-        return {
-          border: 'border-blue-400/30',
-          glow: 'bg-blue-400/5',
-          iconBg: 'bg-blue-400/20',
-          Icon: AlertCircle,
-          iconColor: 'text-blue-400',
-          title: 'Payment Pending',
-          titleColor: 'text-blue-400',
-          desc: 'KYC & agreement are complete. Please purchase a plan to activate your account.',
-          showDownload: false,
-        };
-      default: // PENDING_ONBOARDING
-        return {
-          border: 'border-premium-border',
-          glow: 'bg-premium-primary/5',
-          iconBg: 'bg-premium-primary/10',
-          Icon: AlertTriangle,
-          iconColor: 'text-premium-text/40',
-          title: 'KYC Not Started',
-          titleColor: 'text-premium-text/60',
-          desc: 'You have not started KYC yet. Please complete your identity verification to access all features.',
-          showDownload: false,
-        };
+        const digio = new (window as any).Digio(options);
+        digio.init();
+        digio.submit(res.data.id, profile?.email || profile?.user?.email);
+      } else {
+        toast.error(res?.message || res?.errors?.[0] || 'Digio DigiLocker service unavailable. Please check tenant credentials.');
+        setFetchingKyc(false);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to initiate DigiLocker KYC.');
+      setFetchingKyc(false);
     }
   };
 
-  const banner = getStatusBanner();
+  // --- 2. Sign Agreement via Digio eSign ---
+  const handleSignAgreement = async () => {
+    if (!isKycCompleted) {
+      return toast.error('Please complete Step 1 (Fetch KYC) before signing agreement.');
+    }
+    setSigningAgreement(true);
+    try {
+      const res = await api.initiateDigioAgreement();
+      if (res.success && res.data && res.data.id && typeof window !== 'undefined' && (window as any).Digio) {
+        const env = (res.environment || (profile?.user?.tenant?.digioEnvironment || '').toLowerCase() || 'production') as any;
+        const options = {
+          environment: env,
+          callback: async function (response: any) {
+            console.log('%c✍️ [DIGIO eSIGN CALLBACK RECEIVED]', 'background: #7c3aed; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+            console.log('📌 Raw eSign Response:', response);
+            if (response.hasOwnProperty('error_code')) {
+              toast.error(response.message || 'Agreement eSign was cancelled or failed.');
+              setSigningAgreement(false);
+            } else {
+              try {
+                const statusRes = await api.updateDigioStatus({
+                  type: 'AGREEMENT',
+                  status: 'COMPLETED',
+                  kycId: response.digio_doc_id || res.data.id,
+                  digioResponse: response
+                });
+                console.log('%c💾 [DIGIO AGREEMENT SAVED TO BACKEND]', 'background: #2563EB; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
+                console.log('📌 Save Result:', statusRes);
+                if (statusRes.success) {
+                  toast.success('Advisory Agreement signed successfully!');
+                  await fetchProfile();
+                } else {
+                  toast.error(statusRes.message || 'Failed to update agreement status.');
+                }
+              } catch (e: any) {
+                console.error('❌ [Digio Agreement Save Error]:', e);
+                toast.error(e.message || 'Failed to complete eSign.');
+              } finally {
+                setSigningAgreement(false);
+              }
+            }
+          },
+          logo: 'https://digio.in/images/logo.png',
+          theme: { primaryColor: '#1B42E0', secondaryColor: '#000000' }
+        };
+        const digio = new (window as any).Digio(options);
+        digio.init();
+        digio.submit(res.data.id, profile?.email || profile?.user?.email);
+        return;
+      } else {
+        toast.error(res?.message || 'Could not initiate Digio eSign. Please verify Digio credentials in Admin Settings.');
+        setSigningAgreement(false);
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to initiate Digio agreement signing. Please check Digio account setup.');
+      setSigningAgreement(false);
+    }
+  };
 
-  // ── Document helpers ────────────────────────────────────────────────────────
-  const maskAadhaar = (str: string) =>
-    str ? '••••••••' + str.slice(-4) : '—';
-
-  const maskPan = (str: string) => str || '—';
-
-  // Latest agreement
   const latestAgreement = profile?.agreements?.[0] ?? null;
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <Loader2 className="w-10 h-10 text-premium-primary animate-spin" />
-        <p className="text-premium-text/50 text-sm">Loading KYC data…</p>
+      <div className="flex flex-col items-center justify-center min-h-[45vh] gap-4">
+        <Loader2 className="w-10 h-10 text-primary-500 animate-spin" />
+        <p className="text-slate-500 text-sm">Loading KYC compliance records...</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <AlertTriangle className="w-10 h-10 text-premium-danger" />
-        <p className="text-premium-text/60 text-sm">{error}</p>
-        <button
-          onClick={fetchProfile}
-          className="flex items-center gap-2 text-sm text-premium-primary hover:underline"
-        >
+      <div className="flex flex-col items-center justify-center min-h-[45vh] gap-4">
+        <AlertTriangle className="w-10 h-10 text-red-500" />
+        <p className="text-slate-600 text-sm">{error}</p>
+        <button onClick={fetchProfile} className="flex items-center gap-2 text-sm text-primary-500 hover:underline">
           <RefreshCw className="w-4 h-4" /> Retry
         </button>
       </div>
@@ -189,180 +219,241 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
   }
 
   return (
-    <div className="space-y-6 font-sans text-premium-text animate-in fade-in duration-500 max-w-4xl">
-      <div className="flex justify-between items-center">
+    <div className="space-y-6 font-sans text-slate-900 dark:text-white animate-in fade-in duration-500 max-w-4xl mx-auto">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold">KYC Center</h1>
-          <p className="text-sm text-premium-text/60 mt-1">
-            Manage your verification documents and compliance agreements.
+          <h1 className="text-2xl font-black">KYC &amp; Agreement Center</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            SEBI Regulatory Compliance • 2-Step Sequential Verification
           </p>
         </div>
         <button
           onClick={fetchProfile}
-          className="flex items-center gap-2 text-xs text-premium-text/50 hover:text-premium-primary transition-colors"
+          className="flex items-center gap-2 text-xs text-slate-500 hover:text-primary-500 transition-colors border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5"
         >
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh Records
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-        {/* ── Status Banner ── */}
-        <div className={`md:col-span-3 bg-premium-cards border ${banner.border} rounded-3xl p-6 md:p-8 flex flex-col md:flex-row items-center gap-6 relative overflow-hidden`}>
-          <div className={`absolute right-0 top-0 w-64 h-64 ${banner.glow} rounded-full blur-[80px] pointer-events-none`} />
-
-          <div className={`w-20 h-20 rounded-full ${banner.iconBg} flex items-center justify-center shrink-0`}>
-            <banner.Icon className={`w-10 h-10 ${banner.iconColor}`} />
+      {/* Compliance Overview Banner */}
+      {isKycCompleted && isAgreementSigned ? (
+        <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/30 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-5">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-8 h-8" />
           </div>
-
-          <div className="text-center md:text-left flex-1">
-            <h2 className={`text-2xl font-bold ${banner.titleColor} flex items-center justify-center md:justify-start gap-2`}>
-              {banner.title}
-              {status === 'ACTIVE' && <CheckCircle2 className="w-5 h-5" />}
+          <div className="flex-1 text-center md:text-left">
+            <h2 className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+              100% SEBI Compliance Verified
             </h2>
-            <p className="text-sm text-premium-text/70 mt-1">{banner.desc}</p>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+              Your DigiLocker KYC and Advisory Agreement are active and locked. You have unrestricted access to all subscribed market research.
+            </p>
           </div>
-
-          {banner.showDownload && (
-            <div className="shrink-0">
-              <button className="bg-premium-bg border border-premium-border hover:border-premium-text/30 px-6 py-3 rounded-xl text-sm font-medium transition-colors">
-                Download Certificate
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* ── Identity Documents ── */}
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-premium-cards border border-premium-border rounded-3xl p-6">
-            <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-premium-primary" /> Identity Documents
-            </h3>
-
-            <div className="space-y-4">
-              {/* PAN */}
-              <div className="bg-premium-bg border border-premium-border p-4 rounded-2xl flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-premium-primary/10 rounded-xl flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-premium-primary" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-sm">PAN Card</p>
-                    {profile?.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED') ? (
-                      <p className="text-xs text-premium-warning">KRA: Failed</p>
-                    ) : isKraVerified ? (
-                      <p className="text-xs text-premium-success">KRA: Verified</p>
-                    ) : (
-                      <p className="text-xs text-premium-text/50">KRA: Pending</p>
-                    )}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-mono bg-premium-cards px-2 py-1 rounded">
-                    {maskPan(profile?.pan)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Aadhaar */}
-              <div className="bg-premium-bg border border-premium-border p-4 rounded-2xl flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-premium-primary/10 rounded-xl flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-premium-primary" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-sm">Aadhaar Card</p>
-                    {isAgreementSigned ? (
-                      <p className="text-xs text-premium-success">Verified via Digio</p>
-                    ) : isKraVerified ? (
-                      <p className="text-xs text-premium-warning">eSign Pending</p>
-                    ) : (
-                      <p className="text-xs text-premium-text/50">Pending eSign</p>
-                    )}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-mono bg-premium-cards px-2 py-1 rounded">
-                    {maskAadhaar(profile?.aadhaar)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* <div className="mt-6 pt-6 border-t border-premium-border">
-              <p className="text-xs text-premium-text/50 mb-3">Need to update your documents?</p>
-              <button className="flex items-center gap-2 text-sm text-premium-primary hover:underline">
-                <UploadCloud className="w-4 h-4" /> Request Re-upload
-              </button>
-            </div> */}
-          </div>
-        </div>
-
-        {/* ── Legal Agreement ── */}
-        <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 flex flex-col relative overflow-hidden">
-          {/* Subtle glow background */}
-          <div className="absolute bottom-[-10%] right-[-10%] w-40 h-40 bg-premium-primary/10 rounded-full blur-[50px] pointer-events-none" />
-
-          <h3 className="text-lg font-bold mb-6 flex items-center gap-2 relative z-10">
-            <PenTool className="w-5 h-5 text-premium-primary" /> Legal Agreement
-          </h3>
-
-          <div className="flex-1 flex flex-col justify-center p-5 bg-premium-bg rounded-2xl border border-premium-border mb-6 relative z-10">
-            <div className="space-y-6 relative">
-              {/* Vertical line */}
-              <div className="absolute left-[11px] top-4 bottom-4 w-0.5 bg-premium-border" />
-
-              {/* Step 1: KYC Verification */}
-              <div className="flex items-start gap-4 relative z-10 group">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : status === 'KYC_PENDING' ? 'bg-premium-warning text-premium-bg animate-pulse ring-4 ring-premium-warning/20' : 'bg-premium-cards border border-premium-border'}`}>
-                  {(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? <Check className="w-3 h-3" /> : (status === 'KYC_PENDING' ? <Loader2 className="w-3 h-3 animate-spin" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
-                </div>
-                <div>
-                  <p className={`text-sm font-bold ${(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'text-premium-success' : 'text-premium-text'}`}>KYC Verification</p>
-                  <p className="text-xs text-premium-text/60 mt-0.5">{(status === 'ACTIVE' || status === 'AGREEMENT_PENDING' || status === 'PAYMENT_PENDING') ? 'Verified successfully' : status === 'KYC_PENDING' ? 'Pending Completion' : 'Pending submission'}</p>
-                </div>
-              </div>
-
-              {/* Step 2: Agreement Signature */}
-              <div className="flex items-start gap-4 relative z-10 group">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center mt-0.5 shadow-md z-10 transition-colors ${isAgreementSigned ? 'bg-premium-success text-premium-bg ring-4 ring-premium-success/20' : (isKraVerified ? 'bg-premium-primary text-white animate-pulse ring-4 ring-premium-primary/20' : 'bg-premium-cards border border-premium-border')}`}>
-                  {isAgreementSigned ? <Check className="w-3 h-3" /> : (isKraVerified ? <PenTool className="w-3 h-3" /> : <div className="w-2 h-2 rounded-full bg-premium-text/20" />)}
-                </div>
-                <div className="flex-1">
-                  <p className={`text-sm font-bold ${isAgreementSigned ? 'text-premium-success' : 'text-premium-text'}`}>Advisory Agreement</p>
-                  {isAgreementSigned && latestAgreement ? (
-                    <div className="text-xs text-premium-text/60 mt-2 space-y-1.5 bg-premium-cards p-3 rounded-xl border border-premium-border shadow-sm">
-                      <p className="flex justify-between items-center"><span className="text-premium-text/40">Status:</span> <span className="text-premium-success font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Signed & Sealed</span></p>
-                      <p className="flex justify-between items-center"><span className="text-premium-text/40">Date:</span> <span>{new Date(latestAgreement.signedAt).toLocaleDateString()}</span></p>
-                      {latestAgreement.ipAddress && <p className="flex justify-between items-center"><span className="text-premium-text/40">IP Addr:</span> <span>{latestAgreement.ipAddress}</span></p>}
-                    </div>
-                  ) : isKraVerified ? (
-                    <p className="text-xs text-premium-warning mt-0.5">Pending your signature</p>
-                  ) : (
-                    <p className="text-xs text-premium-text/60 mt-0.5">Locked (Requires KYC)</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {latestAgreement?.agreementUrl ? (
+          {latestAgreement?.agreementUrl && (
             <a
-              href={latestAgreement.agreementUrl}
+              href={api.getDownloadUrl(latestAgreement.agreementUrl)}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full bg-gradient-to-r from-premium-success to-emerald-600 hover:from-emerald-500 hover:to-premium-success text-white shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_25px_rgba(16,185,129,0.4)] py-3.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 relative z-10"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-md transition-all shrink-0"
             >
-              Download Agreement <Download className="w-4 h-4" />
+              <Download className="w-4 h-4" /> Download Agreement
             </a>
-          ) : (
-            <button
-              onClick={onTriggerOnboarding}
-              className="w-full bg-premium-primary/10 hover:bg-premium-primary/20 border border-premium-primary/20 text-premium-primary py-3.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2 relative z-10 transition-colors"
-            >
-              Sign Agreement <ExternalLink className="w-4 h-4" />
-            </button>
           )}
+        </div>
+      ) : (
+        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-500/30 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-5">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <div className="flex-1 text-center md:text-left">
+            <h2 className="text-lg font-bold text-amber-600 dark:text-amber-400">
+              Compliance Onboarding Pending
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+              Per SEBI guidelines, you must complete the 2 sequential steps below: first fetch your verified details from DigiLocker, then eSign your Advisory Agreement.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* The 2 Sequential Action Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+        {/* ── CARD 1: Fetch KYC (DigiLocker) ── */}
+        <div className={`rounded-3xl p-6 border flex flex-col justify-between transition-all ${
+          isKycCompleted
+            ? 'bg-emerald-50/40 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-800'
+            : 'bg-white dark:bg-slate-900 border-primary-500/40 shadow-lg shadow-primary-500/5 ring-1 ring-primary-500/20'
+        }`}>
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300">
+                Step 1 of 2
+              </span>
+              {isKycCompleted ? (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2.5 py-1 rounded-full">
+                  <Check className="w-3.5 h-3.5" /> Verified via DigiLocker
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/40 px-2.5 py-1 rounded-full">
+                  Action Required
+                </span>
+              )}
+            </div>
+
+            <h3 className="text-lg font-bold flex items-center gap-2 mb-2">
+              <ShieldCheck className="w-5 h-5 text-primary-600" />
+              1. Fetch KYC (DigiLocker)
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
+              Directly fetches your Name, DOB, PAN, Aadhaar, and Address from DigiLocker. Eliminates all manual paperwork and guarantees 100% compliance.
+            </p>
+
+            {/* If Verified: Display Extracted Government Details (Read-Only) */}
+            {isKycCompleted && (
+              <div className="space-y-2 bg-white dark:bg-slate-800/60 rounded-2xl p-4 border border-emerald-200 dark:border-emerald-800/40 text-xs mb-4">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                  <span className="text-slate-500 flex items-center gap-1.5"><User className="w-3.5 h-3.5" /> Name:</span>
+                  <span className="font-bold">{profile?.name || profile?.profile?.panName || '—'}</span>
+                </div>
+                {(profile?.dob || profile?.profile?.dob) && (
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                    <span className="text-slate-500 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> DOB:</span>
+                    <span className="font-bold">{profile?.dob || profile?.profile?.dob}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                  <span className="text-slate-500 flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> PAN:</span>
+                  <span className="font-mono font-bold">{maskPan(profile?.pan)}</span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                  <span className="text-slate-500 flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Aadhaar:</span>
+                  <span className="font-mono font-bold">{maskAadhaar(profile?.aadhaar)}</span>
+                </div>
+                <div className="pt-1">
+                  <span className="text-slate-500 flex items-center gap-1.5 mb-1"><MapPin className="w-3.5 h-3.5" /> Verified Address:</span>
+                  <p className="text-[11px] text-slate-700 dark:text-slate-300 font-medium leading-relaxed pl-5">
+                    {profile?.profile?.addressLine1 || profile?.address || '—'}, {profile?.profile?.city || profile?.city || ''} {profile?.profile?.state || profile?.state || ''} {profile?.profile?.zipCode || profile?.zipCode || ''}
+                  </p>
+                </div>
+                <div className="pt-2 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                  <Lock className="w-3 h-3" /> Data Locked &amp; Verified via Government DigiLocker
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2">
+            {!isKycCompleted ? (
+              <button
+                onClick={handleFetchKYC}
+                disabled={fetchingKyc}
+                className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-500/25"
+              >
+                {fetchingKyc ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                <span>{fetchingKyc ? 'Connecting to DigiLocker...' : 'Fetch KYC via DigiLocker'}</span>
+              </button>
+            ) : (
+              <div className="w-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5">
+                <Check className="w-4 h-4" /> KYC Details Fetched &amp; Locked
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── CARD 2: Sign Agreement (Aadhaar eSign) ── */}
+        <div className={`rounded-3xl p-6 border flex flex-col justify-between transition-all ${
+          isAgreementSigned
+            ? 'bg-emerald-50/40 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-800'
+            : !isKycCompleted
+              ? 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-70'
+              : 'bg-white dark:bg-slate-900 border-primary-500/40 shadow-lg shadow-primary-500/5 ring-1 ring-primary-500/20'
+        }`}>
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                Step 2 of 2
+              </span>
+              {isAgreementSigned ? (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2.5 py-1 rounded-full">
+                  <Check className="w-3.5 h-3.5" /> Agreement eSigned
+                </span>
+              ) : !isKycCompleted ? (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full">
+                  <Lock className="w-3 h-3" /> Locked (Requires Step 1)
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/40 px-2.5 py-1 rounded-full">
+                  Ready to Sign
+                </span>
+              )}
+            </div>
+
+            <h3 className="text-lg font-bold flex items-center gap-2 mb-2">
+              <PenTool className="w-5 h-5 text-primary-600" />
+              2. Sign Agreement (Aadhaar eSign)
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
+              Pre-fills your DigiLocker verified details into the SEBI-mandated Research Analyst Advisory Agreement and signs digitally via Aadhaar OTP.
+            </p>
+
+            {/* If Agreement Signed: Display Signature Verification Card */}
+            {isAgreementSigned && latestAgreement && (
+              <div className="space-y-2 bg-white dark:bg-slate-800/60 rounded-2xl p-4 border border-emerald-200 dark:border-emerald-800/40 text-xs mb-4">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                  <span className="text-slate-500">Signer Name:</span>
+                  <span className="font-bold">{latestAgreement.signerName || profile?.name || 'Client'}</span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                  <span className="text-slate-500">Signed On:</span>
+                  <span className="font-medium">{new Date(latestAgreement.signedAt).toLocaleDateString()}</span>
+                </div>
+                {latestAgreement.ipAddress && (
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                    <span className="text-slate-500">Signer IP:</span>
+                    <span className="font-mono text-[11px]">{latestAgreement.ipAddress}</span>
+                  </div>
+                )}
+                <div className="pt-2 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Legally Binding eSign under IT Act 2000
+                </div>
+              </div>
+            )}
+
+            {!isKycCompleted && (
+              <div className="p-3 bg-slate-100 dark:bg-slate-800/60 rounded-xl text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mb-4">
+                <Lock className="w-4 h-4 shrink-0 text-slate-400" />
+                <span>Disabled until DigiLocker KYC is completed in Step 1.</span>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2">
+            {!isAgreementSigned ? (
+              <button
+                onClick={handleSignAgreement}
+                disabled={!isKycCompleted || signingAgreement}
+                className="w-full bg-primary-600 hover:bg-primary-500 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-500/25 disabled:shadow-none"
+              >
+                {signingAgreement ? <Loader2 className="w-4 h-4 animate-spin" /> : <PenTool className="w-4 h-4" />}
+                <span>{signingAgreement ? 'Preparing eSign...' : 'Sign Agreement via Aadhaar eSign'}</span>
+              </button>
+            ) : latestAgreement?.agreementUrl ? (
+              <a
+                href={api.getDownloadUrl(latestAgreement.agreementUrl)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md transition-all"
+              >
+                <Download className="w-4 h-4" /> Download Signed Copy
+              </a>
+            ) : (
+              <div className="w-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5">
+                <Check className="w-4 h-4" /> Advisory Agreement Signed
+              </div>
+            )}
+          </div>
         </div>
 
       </div>

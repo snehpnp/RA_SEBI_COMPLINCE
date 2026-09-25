@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, CreditCard, TrendingUp, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle } from 'lucide-react';
+import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp } from 'lucide-react';
 import api from '../../services/api';
 
 export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }: { profile: any, setActiveTab: (tab: string) => void, onTriggerOnboarding?: () => void }) {
@@ -11,8 +11,10 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
   const [topActivity, setTopActivity] = useState<any[]>([]);
   const [activeSub, setActiveSub] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [marketData, setMarketData] = useState<any[]>([]);
-  const [marketLoading, setMarketLoading] = useState(true);
+  const [newsData, setNewsData] = useState<any[]>([]);
+  const [newsLoading, setNewsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -27,9 +29,40 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
         if (sigRes.success && sigRes.data) {
           setTopSignals(sigRes.data.filter((s: any) => s.status === 'OPEN' || s.status === 'open').slice(0, 3));
         }
-        if (repRes.success && repRes.data) {
-          setTopReports(repRes.data.slice(0, 3));
-        }
+
+        // Combine research from both standalone articles and signal reports
+        const signalReports = (sigRes?.success && Array.isArray(sigRes.data))
+          ? sigRes.data
+              .filter((s: any) => s.reportUrl)
+              .map((s: any) => ({
+                id: s.id || s._id,
+                title: `${s.stock?.symbol || s.symbol || s.stockName || 'Research Report'} ${s.callType ? `• ${s.callType}` : ''}`,
+                symbol: s.stock?.symbol || s.symbol || 'STOCK',
+                segment: s.segment || 'CASH',
+                callType: s.callType || 'BUY',
+                reportUrl: s.reportUrl,
+                createdAt: s.createdAt,
+                type: 'SIGNAL_REPORT'
+              }))
+          : [];
+
+        const standaloneReports = (repRes?.success && Array.isArray(repRes.data))
+          ? repRes.data.map((r: any) => ({
+              id: r.id || r._id,
+              title: r.title,
+              symbol: r.symbol || r.category || 'RESEARCH',
+              segment: r.segment || 'ADVISORY',
+              reportUrl: r.fileUrl || r.pdfUrl || r.reportUrl,
+              createdAt: r.createdAt,
+              type: 'ARTICLE'
+            }))
+          : [];
+
+        const combinedReports = [...signalReports, ...standaloneReports].sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+
+        setTopReports(combinedReports.slice(0, 3));
         if (notifRes.success && notifRes.data) {
           setTopActivity(notifRes.data.slice(0, 4));
         }
@@ -46,42 +79,48 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
     fetchDashboardData();
   }, []);
 
-  useEffect(() => {
-    let isMounted = true;
-    
-    const fetchMarketData = async () => {
-      try {
-        const res = await api.getMarketOverview();
-        if (res.success && res.data && isMounted) {
-          setMarketData(res.data);
-        }
-      } catch (err) {
-        console.error('Error fetching market data', err);
-      } finally {
-        if (isMounted) setMarketLoading(false);
+  const fetchNewsData = async (manual = false) => {
+    if (manual) setIsRefreshing(true);
+    try {
+      const res = await api.getNewsFeed();
+      if (res.success && Array.isArray(res.data)) {
+        setNewsData(res.data);
+        setLastUpdated(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }));
       }
-    };
+    } catch (err) {
+      console.error('Error fetching news feed', err);
+    } finally {
+      setNewsLoading(false);
+      if (manual) {
+        setTimeout(() => setIsRefreshing(false), 500);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchNewsData();
     
-    // Initial fetch
-    fetchMarketData();
+    // Auto-refresh every 5 minutes
+    const intervalId = setInterval(() => {
+      fetchNewsData(false);
+    }, 5 * 60 * 1000);
     
-    // Auto-refresh every 15 seconds
-    const intervalId = setInterval(fetchMarketData, 15000);
-    
-    return () => {
-      isMounted = false;
-      clearInterval(intervalId);
-    };
+    return () => clearInterval(intervalId);
   }, []);
 
   // Derive KYC status from profile
+  const isKraVerified = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
+  const isAgreementSigned = profile?.agreements?.some(
+    (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
+  ) || !!profile?.agreementSigned;
   const kycStatus: string = profile?.status || 'PENDING_ONBOARDING';
+
   const getKycDisplay = () => {
-    if ((kycStatus === 'ACTIVE' && !!profile?.agreementSigned) || kycStatus === 'PAYMENT_PENDING' || profile?.kycStatus === 'VERIFIED') return { label: 'Verified', color: 'text-premium-success', bg: 'bg-premium-success/20', Icon: ShieldCheck };
+    if (isKraVerified && isAgreementSigned) return { label: 'Fully Verified', color: 'text-premium-success', bg: 'bg-premium-success/20', Icon: ShieldCheck };
     if (kycStatus === 'KYC_FAILED') return { label: 'KYC Failed', color: 'text-premium-danger', bg: 'bg-premium-danger/20', Icon: XCircle };
-    if (kycStatus === 'KYC_PENDING' || (kycStatus === 'ACTIVE' && !profile?.agreementSigned)) return { label: 'Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: Clock };
-    if (kycStatus === 'AGREEMENT_PENDING') return { label: 'Agreement Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: AlertCircle };
-    return { label: 'Not Started', color: 'text-premium-text/50', bg: 'bg-premium-text/10', Icon: AlertCircle };
+    if (isKraVerified && !isAgreementSigned) return { label: 'Agreement Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: AlertCircle };
+    if (kycStatus === 'KYC_PENDING') return { label: 'KYC Pending', color: 'text-premium-warning', bg: 'bg-premium-warning/20', Icon: Clock };
+    return { label: 'KYC Required', color: 'text-amber-500', bg: 'bg-amber-500/20', Icon: AlertCircle };
   };
   const kyc = getKycDisplay();
 
@@ -104,7 +143,7 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div
           className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4 cursor-pointer hover:border-premium-primary/40 transition-colors"
           onClick={() => setActiveTab('kyc')}
@@ -140,21 +179,7 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
           </div>
         </div>
 
-        <div className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center">
-            <TrendingUp className="w-6 h-6 text-amber-500" />
-          </div>
-          <div className="w-full">
-            <div className="flex justify-between items-center mb-1">
-              <p className="text-sm text-premium-text/60">Service Accuracy</p>
-              <p className="text-sm font-bold text-amber-500">92%</p>
-            </div>
-            <div className="w-full h-1.5 bg-premium-bg rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full" style={{ width: '92%' }}></div>
-            </div>
-            <p className="text-xs text-premium-text/40 mt-1">Based on closed signals</p>
-          </div>
-        </div>
+        
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -171,7 +196,21 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
           </div>
           
           <div className="space-y-4">
-            {loading ? (
+            {activeSub && !(isKraVerified && isAgreementSigned) ? (
+              <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center space-y-2">
+                <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
+                <h3 className="font-bold text-sm text-amber-500">Live Signals Locked (SEBI Compliance)</h3>
+                <p className="text-xs text-premium-text/70 max-w-sm mx-auto">
+                  Your advisory plan is active, but SEBI mandates completing DigiLocker KYC and eSigning the Advisory Agreement before receiving live signals.
+                </p>
+                <button
+                  onClick={() => setActiveTab('kyc')}
+                  className="mt-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition-colors inline-flex items-center gap-1.5"
+                >
+                  Complete KYC &amp; Agreement <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : loading ? (
               <div className="flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-premium-primary" /></div>
             ) : topSignals.length === 0 ? (
               <p className="text-sm text-premium-text/40">No active signals.</p>
@@ -205,19 +244,80 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
           </div>
         </div>
 
-        {/* Market Overview */}
-        <div className="bg-premium-cards border border-premium-border rounded-3xl p-6">
-          <h2 className="text-lg font-semibold mb-6">Market Overview</h2>
-          <div className="space-y-4">
-            {marketLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-premium-primary" /></div>
-            ) : marketData.length > 0 ? (
-              marketData.map((item, i) => (
-                <MarketItem key={i} name={item.name} value={item.value} change={item.change} isUp={item.isUp} />
-              ))
-            ) : (
-              <p className="text-sm text-premium-text/40">Market data unavailable.</p>
-            )}
+        {/* Market News (RSS Feeds) */}
+        <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center mb-5">
+              <div className="flex items-center gap-2">
+                <Newspaper className="w-5 h-5 text-premium-primary" />
+                <h2 className="text-lg font-bold text-premium-text">Market News</h2>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[11px] font-semibold">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  LIVE
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {lastUpdated && (
+                  <span className="text-[11px] text-premium-text/40 hidden sm:inline">{lastUpdated}</span>
+                )}
+                <button
+                  onClick={() => fetchNewsData(true)}
+                  disabled={isRefreshing}
+                  title="Refresh market news"
+                  className="p-1.5 rounded-lg hover:bg-premium-bg text-premium-text/60 hover:text-premium-primary transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-premium-primary' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+              {newsLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-premium-primary" />
+                  <span className="text-xs text-premium-text/40">Fetching market news...</span>
+                </div>
+              ) : newsData.length > 0 ? (
+                newsData.slice(0, 7).map((item, i) => (
+                  <a
+                    key={i}
+                    href={item.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group block p-3 bg-premium-bg/60 hover:bg-premium-bg border border-premium-border/80 hover:border-premium-primary/40 rounded-2xl transition-all duration-200"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-xs font-medium text-premium-text group-hover:text-premium-primary line-clamp-2 leading-relaxed transition-colors">
+                        {item.title}
+                      </h3>
+                      <ExternalLink className="w-3.5 h-3.5 text-premium-text/30 group-hover:text-premium-primary flex-shrink-0 mt-0.5 transition-colors" />
+                    </div>
+                    <div className="flex items-center gap-2 mt-2 text-[11px] text-premium-text/40">
+                      <span className="px-1.5 py-0.5 rounded-md font-semibold bg-premium-cards border border-premium-border text-premium-primary text-[10px]">
+                        {item.source || 'News'}
+                      </span>
+                      {item.timeAgo && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {item.timeAgo}
+                        </span>
+                      )}
+                    </div>
+                  </a>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <Newspaper className="w-8 h-8 text-premium-text/20 mx-auto mb-2" />
+                  <p className="text-sm text-premium-text/40">Market news unavailable.</p>
+                  <button onClick={() => fetchNewsData(true)} className="mt-2 text-xs text-premium-primary hover:underline">
+                    Try Reconnecting
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -232,19 +332,65 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {loading ? (
+            {activeSub && !(isKraVerified && isAgreementSigned) ? (
+              <div className="col-span-3 p-6 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center space-y-2">
+                <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
+                <h3 className="font-bold text-sm text-amber-500">Research Reports Locked (SEBI Compliance)</h3>
+                <p className="text-xs text-premium-text/70 max-w-sm mx-auto">
+                  Complete DigiLocker KYC and Advisory Agreement to access detailed technical and fundamental research reports.
+                </p>
+                <button
+                  onClick={() => setActiveTab('kyc')}
+                  className="mt-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition-colors inline-flex items-center gap-1.5"
+                >
+                  Go to KYC Center <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : loading ? (
               <div className="col-span-3 flex justify-center p-4"><Loader2 className="w-6 h-6 animate-spin text-premium-primary" /></div>
             ) : topReports.length === 0 ? (
               <p className="col-span-3 text-sm text-premium-text/40">No recent reports.</p>
             ) : (
               topReports.map((r, i) => (
-                <div key={i} onClick={() => setActiveTab('research')} className="bg-premium-bg border border-premium-border p-4 rounded-2xl hover:border-premium-primary/50 transition-colors group cursor-pointer">
-                  <FileText className="w-6 h-6 text-premium-text/50 group-hover:text-premium-primary mb-3 transition-colors" />
-                  <h3 className="font-semibold text-sm mb-1 line-clamp-1">{r.title}</h3>
-                  <p className="text-xs text-premium-text/50 mb-3">{new Date(r.createdAt || Date.now()).toLocaleDateString()}</p>
-                  <div className="flex items-center gap-1 text-xs text-premium-primary font-medium">
-                    <Download className="w-3 h-3" /> Download PDF
+                <div 
+                  key={i} 
+                  onClick={() => setActiveTab('research')} 
+                  className="bg-premium-bg border border-premium-border p-4 rounded-2xl hover:border-premium-primary/50 transition-all duration-300 group cursor-pointer flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="w-9 h-9 rounded-xl bg-premium-primary/10 flex items-center justify-center text-premium-primary group-hover:scale-105 transition-transform">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      {r.segment && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-premium-cards border border-premium-border text-premium-text/70 uppercase">
+                          {r.segment}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-semibold text-sm mb-1 text-premium-text group-hover:text-premium-primary transition-colors line-clamp-2">
+                      {r.title}
+                    </h3>
+                    <p className="text-xs text-premium-text/50 mb-3">
+                      {new Date(r.createdAt || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
                   </div>
+                  
+                  {r.reportUrl ? (
+                    <a
+                      href={api.getDownloadUrl(r.reportUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1.5 text-xs text-premium-primary hover:text-white bg-premium-primary/10 hover:bg-premium-primary px-3 py-1.5 rounded-lg font-bold transition-all w-fit mt-2"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download PDF
+                    </a>
+                  ) : (
+                    <span className="text-xs text-premium-primary font-semibold flex items-center gap-1 mt-2">
+                      View Report <ChevronRight className="w-3 h-3" />
+                    </span>
+                  )}
                 </div>
               ))
             )}
@@ -285,19 +431,7 @@ function UserIconProgress({ percentage }: { percentage: number }) {
        </svg>
        <span className="absolute text-[10px] font-bold text-premium-warning">{percentage}%</span>
     </div>
-  );
-}
-
-function MarketItem({ name, value, change, isUp }: { name: string, value: string, change: string, isUp: boolean }) {
-  return (
-    <div className="flex justify-between items-center">
-      <span className="text-sm text-premium-text/80 font-medium">{name}</span>
-      <div className="text-right">
-        <div className="text-sm font-semibold">{value}</div>
-        <div className={`text-xs ${isUp ? 'text-premium-success' : 'text-premium-danger'}`}>{change}</div>
-      </div>
-    </div>
-  );
+   );
 }
 
 function ReportCard({ title, date, icon: Icon }: { title: string, date: string, icon: any }) {

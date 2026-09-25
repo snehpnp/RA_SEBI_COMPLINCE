@@ -39,7 +39,7 @@ class ApiClient {
 
   async request(endpoint: string, options: RequestInit = {}) {
     const headers = this.getHeaders((options.headers as Record<string, string>) || {});
-    
+
     // Check if body is FormData (e.g. file upload), then let browser set boundary header
     const isFormData = options.body instanceof FormData;
     if (isFormData && headers instanceof Object) {
@@ -55,42 +55,65 @@ class ApiClient {
     if (response.status === 401 || response.status === 403) {
       const clone = response.clone();
       const data = await clone.json().catch(() => ({}));
-      
-      const isAuthError = response.status === 401 || 
-        (response.status === 403 && (data.errors?.includes('User inactive or suspended') || data.errors?.includes('User inactive')));
 
-      if (isAuthError && !endpoint.includes('/auth/login')) {
+      const isAuthError = response.status === 401 ||
+        (response.status === 403 && (
+          data.errors?.includes('User inactive or suspended') ||
+          data.errors?.includes('User inactive') ||
+          data.errors?.includes('Tenant suspended') ||
+          data.errors?.includes('User suspended') ||
+          (data.message && data.message.toLowerCase().includes('suspended'))
+        ));
+
+      if (isAuthError && !endpoint.startsWith('/auth/')) {
         if (typeof window !== 'undefined') {
-          if ((window as any).__isRedirecting) return new Promise(() => {});
+          if ((window as any).__isRedirecting) return new Promise(() => { });
           (window as any).__isRedirecting = true;
           localStorage.removeItem('accessToken');
           localStorage.removeItem('refreshToken');
           localStorage.removeItem('user');
           localStorage.removeItem('tenantId');
-          
-          let loginPath = '/admin/login';
-          const currentPath = window.location.pathname;
-          if (currentPath.startsWith('/client')) {
-            loginPath = '/client-login';
-          }
-          
-          if (response.status === 403) {
+
+          const isAdminRoute = window.location.pathname.startsWith('/admin') ||
+            window.location.pathname.startsWith('/compliance-officer') ||
+            window.location.pathname.startsWith('/researcher');
+          const loginPath = isAdminRoute ? '/admin/login' : '/login';
+
+          const isSuspended = (data.errors && (data.errors.includes('Tenant suspended') || data.errors.includes('User suspended'))) ||
+            (data.message && data.message.toLowerCase().includes('suspended'));
+
+          if (isSuspended) {
+            window.location.href = `${loginPath}?error=suspended`;
+          } else if (response.status === 403) {
             window.location.href = `${loginPath}?error=inactive`;
           } else {
             window.location.href = `${loginPath}?error=expired`;
           }
         }
-        return new Promise(() => {}); // Never resolve to prevent multiple alerts from component catch blocks
+        return new Promise(() => { }); // Never resolve to prevent multiple alerts from component catch blocks
       }
     }
 
-    const data = await response.json();
+    let data: any = {};
+    const text = await response.text();
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {
+        message: text && text.length < 200 && !text.includes('<!DOCTYPE')
+          ? text
+          : (response.status === 404 ? 'Resource or API route not found.' : `Server returned error (${response.status}: ${response.statusText})`)
+      };
+    }
+
     if (!response.ok) {
-      const err = new Error(data.message || 'Something went wrong') as any;
-      err.response = { data };
-      err.duplicateField = data.duplicateField;
-      err.duplicateFields = data.duplicateFields || [];
-      err.errors = data.errors;
+      const errorMessage = data?.message || data?.error || (data?.errors && data.errors[0]) || `Request failed with status ${response.status}`;
+      const err = new Error(errorMessage) as any;
+      err.response = { data, status: response.status };
+      err.status = response.status;
+      err.duplicateField = data?.duplicateField;
+      err.duplicateFields = data?.duplicateFields || [];
+      err.errors = data?.errors;
       throw err;
     }
     return data;
@@ -139,15 +162,73 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    if (res.success) {
+    if (res.success && res.data?.accessToken) {
       localStorage.setItem('accessToken', res.data.accessToken);
       localStorage.setItem('refreshToken', res.data.refreshToken);
       localStorage.setItem('user', JSON.stringify(res.data.user));
-      if (res.data.user.tenantId) {
+      if (res.data.user?.tenantId) {
         localStorage.setItem('tenantId', res.data.user.tenantId);
       }
     }
     return res;
+  }
+
+  async requestLoginOtp(identifier: string) {
+    return this.request('/auth/request-login-otp', {
+      method: 'POST',
+      body: JSON.stringify({ identifier })
+    });
+  }
+
+  async loginWithOtp(identifier: string, otp: string) {
+    const res = await this.request('/auth/login-with-otp', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, otp })
+    });
+    if (res.success && res.data?.accessToken) {
+      localStorage.setItem('accessToken', res.data.accessToken);
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      if (res.data.user?.tenantId) {
+        localStorage.setItem('tenantId', res.data.user.tenantId);
+      }
+    }
+    return res;
+  }
+
+  async verify2FA(payload: { tempToken: string; otp: string; type?: 'EMAIL' | 'SMS' }) {
+    const res = await this.request('/auth/verify-2fa', {
+      method: 'POST',
+      body: JSON.stringify({
+        twoFactorToken: payload.tempToken,
+        otp: payload.otp,
+        type: payload.type
+      })
+    });
+    if (res.success && res.data?.accessToken) {
+      localStorage.setItem('accessToken', res.data.accessToken);
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      if (res.data.user?.tenantId) {
+        localStorage.setItem('tenantId', res.data.user.tenantId);
+      }
+    }
+    return res;
+  }
+
+  async resend2FA(payload: { tempToken: string; type?: 'EMAIL' | 'SMS' }) {
+    return this.request('/auth/resend-2fa', {
+      method: 'POST',
+      body: JSON.stringify({
+        twoFactorToken: payload.tempToken,
+        type: payload.type
+      })
+    });
+  }
+
+  async getSecurityPolicy(tenantId?: string) {
+    const query = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
+    return this.request(`/auth/security-policy${query}`);
   }
 
   async logout(allDevices: boolean = false) {
@@ -178,6 +259,82 @@ class ApiClient {
     return this.request(`/super-admin/tenants/${id}/documents`);
   }
 
+  async getTenantClients(id: string) {
+    return this.request(`/super-admin/tenants/${id}/clients`);
+  }
+
+  async getTenantStaff(id: string) {
+    try {
+      const res = await this.request(`/super-admin/tenants/${id}/staff`);
+      if (res && res.success) return res;
+    } catch (err) {
+      // If 404 or backend server is running older process without restart, fallback to tenant details
+    }
+
+    try {
+      const tenantRes = await this.request(`/super-admin/tenants/${id}`);
+      if (tenantRes && (tenantRes.success || tenantRes.data)) {
+        const rawTenant = tenantRes.data?.tenant || tenantRes.tenant || {};
+        const rawUsers = rawTenant.users || tenantRes.data?.users || [];
+        const allStaff = (tenantRes.data?.allStaff || rawUsers.filter((u: any) => (u.role?.name || '').toUpperCase() !== 'CLIENT')).map((u: any) => ({
+          id: u.staff?.id || u.id,
+          userId: u.id,
+          employeeId: u.staff?.employeeId || u.employeeCode || `EMP-${(u.id || '').slice(-4).toUpperCase()}`,
+          name: u.staff?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Staff Member',
+          email: u.staff?.email || u.email,
+          mobile: u.staff?.mobile || u.mobile,
+          role: u.role?.name || u.role || 'STAFF',
+          status: u.staff?.status || u.status || 'ACTIVE',
+          nismNumber: u.staff?.nismNumber || null,
+          nismValidity: u.staff?.nismValidity || null,
+          joiningDate: u.staff?.joiningDate || u.createdAt,
+          createdAt: u.createdAt
+        }));
+
+        return {
+          success: true,
+          source: 'LOCAL_DATABASE',
+          company: rawTenant,
+          count: allStaff.length,
+          data: allStaff
+        };
+      }
+    } catch (fallbackErr: any) {
+      return { success: false, message: fallbackErr.message || 'Failed to fetch staff' };
+    }
+
+    return { success: false, message: 'Failed to fetch staff' };
+  }
+
+  async getTenantCompliance(id?: string) {
+    if (id && id !== 'ALL' && id !== 'all') {
+      try {
+        const res = await this.request(`/super-admin/tenants/${id}/compliance`);
+        if (res && (res.success || res.data)) return res;
+      } catch (e) {
+        // Fallback to compliance metrics with query param
+        return this.request(`/compliance/dashboard-metrics?tenantId=${id}`);
+      }
+    }
+    return this.request('/super-admin/tenants/ALL/compliance').catch(() =>
+      this.request('/compliance/dashboard-metrics')
+    );
+  }
+
+  async runTenantComplianceSweep(id?: string) {
+    if (id && id !== 'ALL' && id !== 'all') {
+      try {
+        const res = await this.request(`/super-admin/tenants/${id}/compliance/sweep`, { method: 'POST' });
+        if (res && res.success) return res;
+      } catch (e) {
+        return this.request(`/compliance/check?tenantId=${id}`, { method: 'POST' });
+      }
+    }
+    return this.request('/super-admin/tenants/ALL/compliance/sweep', { method: 'POST' }).catch(() =>
+      this.request('/compliance/check', { method: 'POST' })
+    );
+  }
+
   async createTenant(formData: FormData) {
     return this.request('/super-admin/tenants', {
       method: 'POST',
@@ -199,12 +356,63 @@ class ApiClient {
     });
   }
 
+  async provisionTenantDb(id: string) {
+    return this.request(`/super-admin/tenants/${id}/provision-db`, {
+      method: 'POST'
+    });
+  }
+
+  async syncTenantApi(id: string, targetUrl?: string) {
+    return this.request(`/super-admin/tenants/${id}/sync-api`, {
+      method: 'POST',
+      body: JSON.stringify({ targetUrl })
+    });
+  }
+
+  async syncAllTenants() {
+    return this.request('/super-admin/tenants/sync-all', {
+      method: 'POST'
+    });
+  }
+
   async getAuditLogs() {
     return this.request('/super-admin/logs');
   }
 
+  async getStates() {
+    return this.request('/locations/states');
+  }
+
   async getTelemetry() {
-    return this.request('/super-admin/telemetry');
+    try {
+      const res = await this.request('/super-admin/dashboard');
+      if (res && res.success) return res;
+      return await this.request('/super-admin/telemetry');
+    } catch {
+      return this.request('/super-admin/telemetry');
+    }
+  }
+
+  async getSuperAdminDashboard() {
+    return this.getTelemetry();
+  }
+
+  async getCompanyPanelStats(companyId: string) {
+    return this.request(`/super-admin/companies/${companyId}/panel-stats`);
+  }
+
+  async verifyDomainUrl(domainUrl: string) {
+    return this.request('/super-admin/verify-domain', {
+      method: 'POST',
+      body: JSON.stringify({ domainUrl })
+    });
+  }
+
+  async testMongoConnection(mongoDbUrl: string) {
+    return this.request('/super-admin/test-mongo-connection', {
+      method: 'POST',
+      body: JSON.stringify({ mongoDbUrl })
+    });
   }
 
   async parseSebiCertificate(formData: FormData) {
@@ -255,7 +463,7 @@ class ApiClient {
       const { nismFile, ...restData } = data;
       formData.append('data', JSON.stringify(restData));
       formData.append('nismFile', nismFile);
-      
+
       return this.request('/admin/profile-wizard', {
         method: 'POST',
         body: formData
@@ -293,9 +501,18 @@ class ApiClient {
   }
 
   async deleteStaff(id: string) {
-    return this.request(`/admin/staff/${id}`, {
-      method: 'DELETE'
-    });
+    try {
+      return await this.request(`/admin/staff/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err: any) {
+      if (err?.status === 404 || (err?.message && err.message.includes('404'))) {
+        return await this.request(`/admin/staff/${id}/delete`, {
+          method: 'POST'
+        });
+      }
+      throw err;
+    }
   }
 
   async restoreStaff(id: string) {
@@ -311,6 +528,11 @@ class ApiClient {
 
   async getClientCommunicationsAdmin(id: string) {
     return this.request(`/admin/clients/${id}/communications`);
+  }
+
+  async getClientTimelineAdmin(id: string, params?: Record<string, any>) {
+    const query = params ? '?' + new URLSearchParams(Object.entries(params).filter(([_, v]) => v !== undefined && v !== null && v !== '') as any).toString() : '';
+    return this.request(`/admin/clients/${id}/timeline${query}`);
   }
 
   async getAdminDeletedClients() {
@@ -333,9 +555,18 @@ class ApiClient {
   }
 
   async deleteAdminClient(id: string) {
-    return this.request(`/admin/clients/${id}`, {
-      method: 'DELETE'
-    });
+    try {
+      return await this.request(`/admin/clients/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (err: any) {
+      if (err?.status === 404 || (err?.message && err.message.includes('404'))) {
+        return await this.request(`/admin/clients/${id}/delete`, {
+          method: 'POST'
+        });
+      }
+      throw err;
+    }
   }
 
   async restoreAdminClient(id: string) {
@@ -404,7 +635,14 @@ class ApiClient {
   }
 
   async deletePlan(id: string) {
-    return this.request(`/admin/plans/${id}`, { method: 'DELETE' });
+    try {
+      return await this.request(`/admin/plans/${id}`, { method: 'DELETE' });
+    } catch (err: any) {
+      if (err?.status === 404 || (err?.message && err.message.includes('404'))) {
+        return await this.request(`/admin/plans/${id}/delete`, { method: 'POST' });
+      }
+      throw err;
+    }
   }
 
   async restorePlan(id: string) {
@@ -430,7 +668,7 @@ class ApiClient {
     });
   }
 
-  async verifyKRA(payload: { pan: string; statusInput?: string; aadhaar?: string }) {
+  async verifyKRA(payload: { pan: string; statusInput?: string; aadhaar?: string; digioResponse?: any }) {
     return this.request('/client/kyc/verify', {
       method: 'POST',
       body: JSON.stringify(payload)
@@ -450,10 +688,10 @@ class ApiClient {
     return this.request('/client/account', { method: 'DELETE' });
   }
 
-  async signAgreement(payload: { signatureText: string }) {
+  async signAgreement(payload?: { signatureText?: string, documentId?: string, digioResponse?: any }) {
     return this.request('/client/esign', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload || { signatureText: 'eSign Verified' })
     });
   }
 
@@ -485,6 +723,10 @@ class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).then(r => r.json());
+  }
+
+  async getPaymentGatewayStatus() {
+    return this.request('/payment/gateway-status');
   }
 
   async initiateCCAvenuePayment(payload: { planId: string, couponCode?: string }) {
@@ -646,6 +888,10 @@ class ApiClient {
 
   async getMarketOverview() {
     return this.request('/client/market-overview');
+  }
+
+  async getNewsFeed() {
+    return this.request('/client/news-feed');
   }
 
   async createTicket(data: any) {
@@ -824,8 +1070,15 @@ class ApiClient {
     return this.request('/client/agreement/initiate', { method: 'POST' });
   }
 
-  async updateDigioStatus(data: { type: string, status: string }) {
+  async updateDigioStatus(data: { type: string, status: string, kycId?: string, digioResponse?: any }) {
     return this.request('/client/kyc/status', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async testDigioConfig(data: { digioClientId?: string, digioClientSecret?: string, digioEnvironment?: string }) {
+    return this.request('/admin/test-digio', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -867,21 +1120,118 @@ class ApiClient {
     });
   }
 
-  async requestOtp(email: string, tenantId?: string) {
+  async requestOtp(param: string | { email?: string; mobile?: string; type?: 'EMAIL' | 'MOBILE'; tenantId?: string }, tenantId?: string) {
+    const payload = typeof param === 'string' ? { email: param, tenantId } : param;
     return this.request('/public/request-otp', {
       method: 'POST',
-      body: JSON.stringify({ email, tenantId })
+      body: JSON.stringify(payload)
     });
   }
 
-  async verifyOtp(email: string, otp: string) {
+  async verifyOtp(param: string | { email?: string; mobile?: string; otp: string; type?: 'EMAIL' | 'MOBILE' }, otp?: string) {
+    const payload = typeof param === 'string' ? { email: param, otp: otp! } : param;
     return this.request('/public/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ email, otp })
+      body: JSON.stringify(payload)
     });
   }
   async testSmtpConnection(data: any) {
     return this.request('/admin/test-smtp-connection', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async verifyPaymentGateway(data: any) {
+    return this.request('/admin/verify-payment-gateway', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  // Occupations
+  async getOccupations(tenantId?: string) {
+    const query = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : '';
+    return this.request(`/occupations${query}`);
+  }
+
+  async getAdminOccupations() {
+    return this.request('/admin/occupations');
+  }
+
+  async createOccupation(data: { name: string }) {
+    return this.request('/admin/occupations', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateOccupation(id: string, data: { name: string }) {
+    return this.request(`/admin/occupations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async toggleOccupationStatus(id: string) {
+    return this.request(`/admin/occupations/${id}/status`, {
+      method: 'POST'
+    });
+  }
+
+  async deleteOccupation(id: string) {
+    return this.request(`/admin/occupations/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // SMS Gateway & Templates
+  async getSmsTemplates() {
+    return this.request('/admin/sms-templates');
+  }
+
+  async createSmsTemplate(data: {
+    name: string;
+    dltTemplateId: string;
+    category?: string;
+    content: string;
+    description?: string;
+    isActive?: boolean;
+  }) {
+    return this.request('/admin/sms-templates', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateSmsTemplate(id: string, data: {
+    name?: string;
+    dltTemplateId?: string;
+    category?: string;
+    content?: string;
+    description?: string;
+    isActive?: boolean;
+  }) {
+    return this.request(`/admin/sms-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async toggleSmsTemplateStatus(id: string) {
+    return this.request(`/admin/sms-templates/${id}/status`, {
+      method: 'POST'
+    });
+  }
+
+  async deleteSmsTemplate(id: string) {
+    return this.request(`/admin/sms-templates/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async testSmsGateway(data: { destMobile: string; message?: string; dltTemplateId?: string }) {
+    return this.request('/admin/sms/test', {
       method: 'POST',
       body: JSON.stringify(data)
     });

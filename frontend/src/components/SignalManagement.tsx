@@ -148,7 +148,7 @@ export default function SignalManagement({
       if (!res.ok || contentType.includes('application/json')) {
         // Server returned JSON error (e.g. {success:false, message:"File not found"})
         let msg = 'File not found on server.';
-        try { const json = await res.json(); msg = json.message || msg; } catch {}
+        try { const json = await res.json(); msg = json.message || msg; } catch { }
         toast.error('❌ ' + msg);
         return;
       }
@@ -517,14 +517,21 @@ export default function SignalManagement({
         ),
       },
       {
-        name: 'Symbol',
-        minWidth: '150px',
-        selector: (row: any) => row.stock?.symbol,
+        name: 'Symbol / Stock',
+        minWidth: '180px',
+        selector: (row: any) => row.stock?.symbol || row.symbol || row.stockName || '',
         cell: (row: any) => (
-          <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap">
-            {row.stock?.symbol}
-            {row.strikePrice && <span className="ml-2 text-xs font-semibold text-slate-500">{row.strikePrice} {row.optionType || ''}</span>}
-          </span>
+          <div className="flex flex-col py-1">
+            <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap flex items-center gap-1.5">
+              {row.stock?.symbol || row.symbol || 'N/A'}
+              {row.strikePrice && <span className="text-xs font-semibold text-slate-500">({row.strikePrice} {row.optionType || ''})</span>}
+            </span>
+            {(row.stock?.name || row.stockName) && (
+              <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[200px]" title={row.stock?.name || row.stockName}>
+                {row.stock?.name || row.stockName}
+              </span>
+            )}
+          </div>
         ),
       },
       {
@@ -646,23 +653,23 @@ export default function SignalManagement({
     <div className={`text-slate-900 dark:text-white min-h-screen bg-white dark:bg-[#0f1523] pb-10 ${showMobilePreview ? 'lg:flex' : ''}`}>
       <div className={`flex-1 min-w-0`}>
         {view === 'ADD' && (
-        <div className="bg-white dark:bg-[#0B101E]/80 backdrop-blur-lg px-6 py-5 flex items-center justify-between border-b border-slate-300 dark:border-white/5 mb-6 shadow-xl sticky top-0 z-20">
-          <h1 className="text-lg font-bold flex items-center space-x-2">
-            <ArrowLeft className="h-5 w-5 cursor-pointer hover:text-primary-600 dark:text-primary-400" onClick={() => setView('TABLE')} />
-            <span>| Add Signal</span>
-          </h1>
-          <div className="flex items-center gap-2">
-            <div className="flex space-x-4">
-              <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
-                <ArrowLeft className="h-4 w-4" /> <span>Back</span>
-              </button>
-              <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
-                <Bell className="h-4 w-4" /> <span>Alert</span>
-              </button>
+          <div className="bg-white dark:bg-[#0B101E]/80 backdrop-blur-lg px-6 py-5 flex items-center justify-between border-b border-slate-300 dark:border-white/5 mb-6 shadow-xl sticky top-0 z-20">
+            <h1 className="text-lg font-bold flex items-center space-x-2">
+              <ArrowLeft className="h-5 w-5 cursor-pointer hover:text-primary-600 dark:text-primary-400" onClick={() => setView('TABLE')} />
+              <span>| Add Signal</span>
+            </h1>
+            <div className="flex items-center gap-2">
+              <div className="flex space-x-4">
+                <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
+                  <ArrowLeft className="h-4 w-4" /> <span>Back</span>
+                </button>
+                <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
+                  <Bell className="h-4 w-4" /> <span>Alert</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {view !== 'ADD' && (
           <div className="bg-white dark:bg-[#151c2c]/60 backdrop-blur-md p-6 rounded-2xl border border-slate-300 dark:border-white/5 shadow-2xl mx-6">
@@ -683,31 +690,26 @@ export default function SignalManagement({
                 </button>
               </div>
 
-              {!isViewOnly && (
-                <div className="flex space-x-2">
-                  <button onClick={() => setView('TABLE')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'TABLE' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>Table View</button>
-                  <button onClick={() => setView('CARD')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'CARD' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>Card View</button>
-                </div>
-              )}
+             
             </div>
 
             {/* Action Bar */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
               {showMobilePreview && (
-              <button
-                onClick={() => setIsMobileVisible(prev => !prev)}
-                title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
+                <button
+                  onClick={() => setIsMobileVisible(prev => !prev)}
+                  title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
                     ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-slate-900 dark:border-white'
                     : 'text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/20 hover:bg-slate-100 dark:hover:bg-white/10'
-                  }`}
-              >
-                {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
-                <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
-              </button>
-            )}
-            
-            <div className="relative w-full md:w-64">
+                    }`}
+                >
+                  {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                  <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
+                </button>
+              )}
+
+              <div className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-600 dark:text-gray-400" />
                 <input
                   type="text"
@@ -1396,7 +1398,13 @@ export default function SignalManagement({
               <div className="p-6 overflow-y-auto space-y-6 bg-white dark:bg-[#151c2c]">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Segment</p><p className="font-semibold">{viewSignalDetails.segment || 'N/A'}</p></div>
-                  <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Stock Symbol</p><p className="font-bold text-lime-700 dark:text-[#d4f23b]">{viewSignalDetails.stock?.symbol || 'N/A'}</p></div>
+                  <div>
+                    <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Stock Symbol</p>
+                    <p className="font-bold text-lime-700 dark:text-[#d4f23b]">{viewSignalDetails.stock?.symbol || viewSignalDetails.symbol || 'N/A'}</p>
+                    {(viewSignalDetails.stock?.name || viewSignalDetails.stockName) && (
+                      <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{viewSignalDetails.stock?.name || viewSignalDetails.stockName}</p>
+                    )}
+                  </div>
                   <div>
                     <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Strike Price</p>
                     <p className="font-semibold">{viewSignalDetails.strikePrice ? `${viewSignalDetails.strikePrice} ${viewSignalDetails.optionType || ''}` : 'N/A'}</p>

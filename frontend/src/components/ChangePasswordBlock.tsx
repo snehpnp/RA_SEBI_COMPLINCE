@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
 import api from '../services/api';
 
@@ -13,6 +13,25 @@ export default function ChangePasswordBlock() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [passwordPolicy, setPasswordPolicy] = useState<'NORMAL' | 'STRONG'>('NORMAL');
+
+  useEffect(() => {
+    const userStr = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+    const user = userStr ? JSON.parse(userStr) : null;
+    const tenantId = user?.tenantId || (typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null);
+
+    api.getSecurityPolicy(tenantId || undefined).then((res: any) => {
+      if (res && res.success && res.data?.passwordPolicy) {
+        setPasswordPolicy(res.data.passwordPolicy);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const hasLength = newPassword.length >= 8 && newPassword.length <= 15;
+  const hasUpperCase = /[A-Z]/.test(newPassword);
+  const hasLowerCase = /[a-z]/.test(newPassword);
+  const hasNumber = /[0-9]/.test(newPassword);
+  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>_\-]/.test(newPassword);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,9 +43,33 @@ export default function ChangePasswordBlock() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (currentPassword === newPassword) {
+      setError('New password cannot be the same as your current password.');
       return;
+    }
+
+    if (!newPassword || newPassword.length < 8 || newPassword.length > 15) {
+      setError('Password must be between 8 and 15 characters long.');
+      return;
+    }
+
+    if (passwordPolicy === 'STRONG') {
+      if (!hasUpperCase) {
+        setError('Password must contain at least 1 uppercase letter.');
+        return;
+      }
+      if (!hasLowerCase) {
+        setError('Password must contain at least 1 lowercase letter.');
+        return;
+      }
+      if (!hasNumber) {
+        setError('Password must contain at least 1 number.');
+        return;
+      }
+      if (!hasSpecialChar) {
+        setError('Password must contain at least 1 special character (!@#$%^&*...).');
+        return;
+      }
     }
 
     try {
@@ -91,7 +134,14 @@ export default function ChangePasswordBlock() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">New Password</label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">New Password</label>
+            {passwordPolicy === 'STRONG' && (
+              <span className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">
+                Strong Policy Enforced
+              </span>
+            )}
+          </div>
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Lock className="h-5 w-5 text-gray-400" />
@@ -100,6 +150,7 @@ export default function ChangePasswordBlock() {
               type={showNew ? 'text' : 'password'}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              maxLength={15}
               className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
               required
             />
@@ -111,6 +162,38 @@ export default function ChangePasswordBlock() {
               {showNew ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
           </div>
+
+          {passwordPolicy === 'STRONG' ? (
+            <div className="mt-2.5 p-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/60 rounded-xl space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+              <p className="font-semibold text-slate-700 dark:text-slate-300 text-[11px] uppercase tracking-wider">
+                Password Requirements:
+              </p>
+              <div className="grid grid-cols-2 gap-1 text-[11px]">
+                <div className={`flex items-center gap-1.5 ${hasLength ? 'text-emerald-600 dark:text-emerald-400 font-medium' : ''}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${hasLength ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  8 - 15 characters
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasUpperCase ? 'text-emerald-600 dark:text-emerald-400 font-medium' : ''}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${hasUpperCase ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  1 uppercase letter
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasLowerCase ? 'text-emerald-600 dark:text-emerald-400 font-medium' : ''}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${hasLowerCase ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  1 lowercase letter
+                </div>
+                <div className={`flex items-center gap-1.5 ${hasNumber ? 'text-emerald-600 dark:text-emerald-400 font-medium' : ''}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${hasNumber ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  1 number
+                </div>
+                <div className={`col-span-2 flex items-center gap-1.5 ${hasSpecialChar ? 'text-emerald-600 dark:text-emerald-400 font-medium' : ''}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${hasSpecialChar ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                  1 special character (!@#$%^&*...)
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">8 - 15 characters</p>
+          )}
         </div>
 
         <div>
@@ -123,6 +206,7 @@ export default function ChangePasswordBlock() {
               type={showConfirm ? 'text' : 'password'}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              maxLength={15}
               className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
               required
             />

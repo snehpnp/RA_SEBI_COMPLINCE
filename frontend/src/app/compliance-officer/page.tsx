@@ -55,8 +55,9 @@ import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -65,6 +66,7 @@ import ComplaintReportAdmin from '../../components/admin/ComplaintReportAdmin';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
 import AdminResearchReports from '../../components/admin/AdminResearchReports';
+import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import CustomPageView from '../../components/client/CustomPageView';
 import Legal from '../../components/client/Legal';
 import MobilePreview from '../../components/MobilePreview';
@@ -294,7 +296,7 @@ function AdminDashboardContent() {
     return 'dashboard';
   });
   const activeTabRef = useRef<string>(activeTab);
-  useEffect(() => { 
+  useEffect(() => {
     activeTabRef.current = activeTab;
     if (typeof window !== 'undefined') {
       localStorage.setItem('complianceOfficerActiveTab', activeTab);
@@ -781,6 +783,16 @@ function AdminDashboardContent() {
   const [coNism, setCoNism] = useState('');
 
   const [policyUrl, setPolicyUrl] = useState('');
+  const [termsPdfUrl, setTermsPdfUrl] = useState('');
+  const [privacyPdfUrl, setPrivacyPdfUrl] = useState('');
+  const [pdfPreviewModal, setPdfPreviewModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    url: string;
+    badgeText: string;
+    downloadFilename?: string;
+  } | null>(null);
+  const [copiedVariable, setCopiedVariable] = useState<string | null>(null);
   const [gstCalculationType, setGstCalculationType] = useState('EXCLUSIVE');
   const [tenantState, setTenantState] = useState('');
   const [kycFirst, setKycFirst] = useState(true);
@@ -811,6 +823,7 @@ function AdminDashboardContent() {
   const [digioClientId, setDigioClientId] = useState('');
   const [digioClientSecret, setDigioClientSecret] = useState('');
   const [digioKycTemplateName, setDigioKycTemplateName] = useState('');
+  const [digioEnvironment, setDigioEnvironment] = useState('SANDBOX');
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -822,6 +835,8 @@ function AdminDashboardContent() {
   const [ccavenueWorkingKey, setCcavenueWorkingKey] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [verifyingGateway, setVerifyingGateway] = useState(false);
+  const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
@@ -937,6 +952,77 @@ function AdminDashboardContent() {
     return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
   };
 
+  const AGREEMENT_VARIABLES = [
+    { key: '{{CLIENT_NAME}}', label: 'Client Full Name' },
+    { key: '{{CLIENT_EMAIL}}', label: 'Client Email' },
+    { key: '{{CLIENT_MOBILE}}', label: 'Mobile Number' },
+    { key: '{{PAN_NUMBER}}', label: 'PAN Number' },
+    { key: '{{AADHAAR_NUMBER}}', label: 'Aadhaar Number' },
+    { key: '{{CLIENT_ADDRESS}}', label: 'Client Address' },
+    { key: '{{COMPANY_NAME}}', label: 'Company Name' },
+    { key: '{{COMPANY_ADDRESS}}', label: 'Company Address' },
+    { key: '{{SEBI_REGISTRATION}}', label: 'SEBI Reg. No.' },
+    { key: '{{DATE}}', label: 'Agreement Date' },
+  ];
+
+  const handleCopyVariable = (variableKey: string, variableLabel?: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(variableKey);
+      setCopiedVariable(variableKey);
+      toast.success(`Copied ${variableKey} (${variableLabel || 'variable'}) to clipboard!`);
+      setTimeout(() => setCopiedVariable(null), 2000);
+    }
+  };
+
+  const openPdfPreview = (
+    docType: 'terms' | 'privacy' | 'internal',
+    title: string,
+    fileObj: any,
+    savedUrl: string
+  ) => {
+    let previewUrl = '';
+    let badge = 'Default SEBI Template';
+    let defaultFilename = `${docType}_document.pdf`;
+
+    if (fileObj) {
+      previewUrl = URL.createObjectURL(fileObj);
+      badge = 'New File (Ready to save)';
+      defaultFilename = fileObj.name || `${docType}.pdf`;
+    } else if (savedUrl) {
+      previewUrl = getFullUrl(savedUrl);
+      badge = 'Custom Uploaded Document';
+      defaultFilename = savedUrl.split('/').pop() || `${docType}.pdf`;
+    } else {
+      const typeParam = docType === 'terms' ? 'terms' : docType === 'privacy' ? 'privacy' : 'internal-policy';
+      previewUrl = `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}/api/v1/system-settings/preview-pdf/${typeParam}`;
+      badge = 'Default SEBI Template';
+      defaultFilename = `SEBI_${docType}_Policy.pdf`;
+    }
+
+    setPdfPreviewModal({
+      isOpen: true,
+      title,
+      url: previewUrl,
+      badgeText: badge,
+      downloadFilename: defaultFilename
+    });
+  };
+
+  const getPdfDirectUrl = (
+    docType: 'terms' | 'privacy' | 'internal',
+    fileObj: any,
+    savedUrl: string
+  ) => {
+    if (fileObj) {
+      return URL.createObjectURL(fileObj);
+    }
+    if (savedUrl) {
+      return getFullUrl(savedUrl);
+    }
+    const typeParam = docType === 'terms' ? 'terms' : docType === 'privacy' ? 'privacy' : 'internal-policy';
+    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}/api/v1/system-settings/preview-pdf/${typeParam}`;
+  };
+
   const handleDownloadCSV = (type: string) => {
     let dataToExport: any[] = [];
     let filename = `${type}.csv`;
@@ -1018,6 +1104,8 @@ function AdminDashboardContent() {
               if (t.mobile) setOrgMobile(t.mobile);
               if (t.gst) setOrgGst(t.gst);
               if (t.internalPolicyUrl) setPolicyUrl(t.internalPolicyUrl);
+              if (t.termsPdfUrl) setTermsPdfUrl(t.termsPdfUrl);
+              if (t.privacyPdfUrl) setPrivacyPdfUrl(t.privacyPdfUrl);
               if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
@@ -1037,6 +1125,7 @@ function AdminDashboardContent() {
               if (t.digioClientId) setDigioClientId(t.digioClientId);
               if (t.digioClientSecret) setDigioClientSecret(t.digioClientSecret);
               if (t.digioKycTemplateName) setDigioKycTemplateName(t.digioKycTemplateName);
+              if (t.digioEnvironment) setDigioEnvironment(t.digioEnvironment);
               if (t.activePaymentGateway) setActivePaymentGateway(t.activePaymentGateway);
               if (t.razorpayKeyId) setRazorpayKeyId(t.razorpayKeyId);
               if (t.razorpayKeySecret) setRazorpayKeySecret(t.razorpayKeySecret);
@@ -1124,7 +1213,7 @@ function AdminDashboardContent() {
 
       if (tab === 'compliance' || tab === 'checklist') {
         api.request('/compliance/complaints').then(res => { if (Array.isArray(res)) setComplaints(res); }).catch(() => { });
-        api.getComplianceAlerts().then(res => { if (res.success && res.data.length > 0) setAlerts(res.data); }).catch(() => { });
+        api.getComplianceAlerts().then(res => { if (res.success && Array.isArray(res.data)) setAlerts(res.data); }).catch(() => { });
         api.getComplianceChecklist().then(res => { if (res.success) setChecklist(res.data); }).catch(() => { });
         api.getPenalties().then(res => { if (res.success) setPenalties(res.data); }).catch(() => { });
         api.getComplianceChecklistHistory().then(res => { if (res.success) setChecklistHistory(res.data); }).catch(() => { });
@@ -1223,7 +1312,7 @@ function AdminDashboardContent() {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
+        router.push('/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);
@@ -1537,6 +1626,7 @@ function AdminDashboardContent() {
       if (digioClientId) formData.append('digioClientId', digioClientId);
       if (digioClientSecret) formData.append('digioClientSecret', digioClientSecret);
       if (digioKycTemplateName) formData.append('digioKycTemplateName', digioKycTemplateName);
+      if (digioEnvironment) formData.append('digioEnvironment', digioEnvironment);
       if (activePaymentGateway) formData.append('activePaymentGateway', activePaymentGateway);
       if (razorpayKeyId) formData.append('razorpayKeyId', razorpayKeyId);
       if (razorpayKeySecret) formData.append('razorpayKeySecret', razorpayKeySecret);
@@ -1566,6 +1656,49 @@ function AdminDashboardContent() {
     } catch (err: any) { toast(err.message); }
   };
 
+  const handleVerifyPaymentGateway = async () => {
+    setVerifyingGateway(true);
+    setGatewayVerifyResult(null);
+    try {
+      const res: any = await api.verifyPaymentGateway({
+        gateway: activePaymentGateway,
+        razorpayKeyId,
+        razorpayKeySecret,
+        cashfreeAppId,
+        cashfreeSecretKey,
+        ccavenueMerchantId,
+        ccavenueAccessCode,
+        ccavenueWorkingKey,
+        stripePublishableKey,
+        stripeSecretKey
+      });
+
+      if (res.success) {
+        setGatewayVerifyResult({
+          success: true,
+          message: res.message || 'Payment Gateway Verified Successfully!',
+          mode: res.mode
+        });
+        toast.success(res.message || 'Payment Gateway connection verified!');
+      } else {
+        setGatewayVerifyResult({
+          success: false,
+          message: res.message || 'Payment Gateway Verification Failed.'
+        });
+        toast.error(res.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify payment gateway connection.';
+      setGatewayVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingGateway(false);
+    }
+  };
+
   const handleTestSmtp = async () => {
     try {
       const email = prompt('Enter email address to send test email to:');
@@ -1589,6 +1722,10 @@ function AdminDashboardContent() {
     e.preventDefault();
     if (profileNewPassword !== profileConfirmPassword) {
       toast('New passwords do not match!');
+      return;
+    }
+    if (!profileNewPassword || profileNewPassword.length < 8 || profileNewPassword.length > 15) {
+      toast('Password must be between 8 and 15 characters.');
       return;
     }
     setIsChangingPassword(true);
@@ -2030,7 +2167,10 @@ function AdminDashboardContent() {
           const res = await api.runComplianceCheck();
           if (res.success) {
             loadData();
-            toast(`Sweep done. ${res.alertsGenerated} alert(s) generated.`);
+            const msg = (res.alertsGenerated && res.alertsGenerated > 0)
+              ? `Sweep done. ${res.alertsGenerated} new alert(s) generated (${res.totalActiveAlerts || res.alertsGenerated} active).`
+              : `Sweep done. ${res.totalActiveAlerts || 0} active compliance alert(s) found.`;
+            toast(msg);
           }
         } catch (err: any) {
           toast.error(err.message || 'Sweep failed.');
@@ -2060,7 +2200,7 @@ function AdminDashboardContent() {
       }
 
       const res = await api.getPeriodicReportData(startDateStr, endDateStr);
-      console.log("RECEIVED REPORT DATA:", res.data);
+      
       if (res.success) {
         generatePeriodicReport(res.data, periodName, endDateStr);
         setShowReportModal(false);
@@ -2530,8 +2670,8 @@ function AdminDashboardContent() {
           }
         }}
         className={`p-3.5 rounded-xl border transition flex items-start space-x-3 cursor-pointer ${isChecked
-            ? 'bg-primary-500/5 border-primary-500/20'
-            : 'bg-slate-100 dark:bg-slate-950/20 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'
+          ? 'bg-primary-500/5 border-primary-500/20'
+          : 'bg-slate-100 dark:bg-slate-950/20 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10'
           } ${effectivelyDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
       >
         <input
@@ -2697,8 +2837,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                                ? 'bg-premium-primary/10 text-premium-primary font-medium'
-                                : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
+                              ? 'bg-premium-primary/10 text-premium-primary font-medium'
+                              : 'text-premium-text/60 hover:text-premium-text hover:bg-premium-bg'
                               }`}
                           >
                             {page.title}
@@ -2727,8 +2867,8 @@ function AdminDashboardContent() {
                     setIsMobileMenuOpen(false);
                   }}
                   className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                      ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                      : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
+                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
                     } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                   title={isSidebarCollapsed ? mod.label : undefined}
                 >
@@ -2745,8 +2885,8 @@ function AdminDashboardContent() {
               <button
                 onClick={() => { setActiveTab('legalView'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${activeTab === 'legalView'
-                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
+                  ? 'bg-premium-primary/10 text-premium-primary font-semibold'
+                  : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
                 title={isSidebarCollapsed ? "Legal & Disclosures" : undefined}
               >
@@ -2758,66 +2898,62 @@ function AdminDashboardContent() {
               </button>
             )}
           </div>
-
-          {/* User Footer */}
-          <div className={`p-4 border-t border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-            {/* Subtle background glow */}
-            <div className="absolute inset-0 bg-gradient-to-t from-premium-primary/10 to-transparent pointer-events-none" />
-
-            <div
-              onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-premium-bg/80 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-premium-border/50 hover:border-premium-primary/50 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-
-              {/* Shimmer effect inside the card */}
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/5 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-              <div className="relative shrink-0">
-                {/* Pulsing ring around avatar */}
-                <div className="absolute inset-0 rounded-full border-2 border-premium-primary/50 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-premium-primary to-indigo-600 flex items-center justify-center font-bold text-premium-bg shadow-[0_0_10px_var(--tw-colors-premium-primary)] relative z-10">
-                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : 'A'}
-                </div>
-                {/* Online indicator */}
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-premium-success border-2 border-premium-bg rounded-full z-20" />
-              </div>
-
-              {!isSidebarCollapsed && (
-                <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-premium-text">{user?.firstName || 'Admin'}</p>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-premium-primary" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-premium-primary via-indigo-200 to-premium-primary animate-pulse">
-                      {user?.role || 'Staff'}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {!isSidebarCollapsed && (
-                <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
-              )}
-            </div>
-            <div className={`flex-1 mt-4 border-t border-slate-200/20 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-premium-danger/10 rounded-xl text-premium-text/60 hover:text-premium-danger transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
-                {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-                <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-              </button>
-            </div>
-          </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-          {user?.isImpersonated && (
-            <button
-              onClick={handleRevertImpersonate}
-              className="fixed top-4 right-16 z-50 px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition flex items-center space-x-1.5 font-semibold shadow-lg"
-              title="Back to Super Admin"
-            >
-              <LogOut className="h-3.5 w-3.5 rotate-180" />
-              <span className="hidden sm:inline">Back to Super Admin</span>
-            </button>
-          )}
+          {/* Top Header Bar with Theme, User & Logout */}
+          <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+            <div className="flex items-center gap-3">
+              {/* Mobile menu toggle */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                title="Open Navigation"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+              <div>
+                <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                  {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Compliance Officer'}
+                </h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                  {user?.tenant?.companyName ? `${user.tenant.companyName} Compliance Officer Workspace` : 'Governance & Audit Oversight'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 md:gap-4">
+              {user?.isImpersonated && (
+                <button
+                  onClick={handleRevertImpersonate}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 font-bold text-xs shadow-md shadow-indigo-600/20"
+                  title="Back to Super Admin"
+                >
+                  <LogOut className="h-3.5 w-3.5 rotate-180" />
+                  <span className="hidden sm:inline">Back to Super Admin</span>
+                </button>
+              )}
+
+              {/* Theme Toggle */}
+              <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                <ThemeToggle />
+              </div>
+
+              {/* Profile Dropdown with Username & Logout */}
+              <UserProfileDropdown
+                user={{
+                  name: user?.firstName || 'Compliance Officer',
+                  firstName: user?.firstName,
+                  email: user?.email,
+                  role: user?.role || 'COMPLIANCE_OFFICER'
+                }}
+                badgeColor="emerald"
+                onProfileClick={() => setActiveTab('profile')}
+                onLogoutClick={() => setIsLogoutModalOpen(true)}
+              />
+            </div>
+          </header>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
             <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
@@ -2987,45 +3123,6 @@ function AdminDashboardContent() {
            ==================================================== */}
               {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
                 <div className="space-y-8">
-                  {/* UNIFIED PAGE HEADER FOR TABS WITHOUT NATIVE HEADERS */}
-                  {(() => {
-                    const currentNav = NAV_CONFIG.find(n =>
-                      n.tab === activeTab ||
-                      (activeTab.startsWith('customPages_') && n.tab === 'customPages')
-                    );
-
-                    if (!currentNav || activeTab === 'dashboard') return null;
-
-                    const tabsMissingHeader = [
-                      'checklist',
-                      'compliance',
-                      'plans',
-                      'signature_settings',
-                      'activeClientSummary',
-                      'complaintDataView',
-                      'legalView'
-                    ];
-
-                    if (!tabsMissingHeader.includes(activeTab) && !activeTab.startsWith('customPages_')) {
-                      return null;
-                    }
-
-                    return (
-                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-4 mb-2">
-                        <div>
-                          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {activeTab.startsWith('customPages_')
-                              ? adminPagesList?.find((p: any) => p.slug === activeTab.split('_')[1])?.title || 'Custom Page'
-                              : currentNav.label}
-                          </h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                            {currentNav.moduleDesc || 'Manage and view details for this section.'}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {/* PROFILE TAB */}
                   {activeTab === 'profile' && (
                     <>
@@ -5264,8 +5361,8 @@ function AdminDashboardContent() {
                                     {pageData.length > 0 ? pageData.map((item: any) => (
                                       <div key={item.id} className="p-4 bg-white dark:bg-slate-900/40 border border-slate-300 dark:border-white/5 rounded-xl flex items-start gap-4 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition">
                                         <div className={`p-2 rounded-lg mt-1 shrink-0 ${item.type === 'ALERT_RESOLVED' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
-                                            item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
-                                              'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                          item.type === 'PENALTY_PAID' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
+                                            'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                           }`}>
                                           {item.type === 'ALERT_RESOLVED' && <AlertTriangle className="h-4 w-4" />}
                                           {item.type === 'PENALTY_PAID' && <FileText className="h-4 w-4" />}
@@ -5758,24 +5855,16 @@ function AdminDashboardContent() {
                                             <td className="py-4 px-5">
                                               <div className="flex flex-col gap-1.5 items-start">
                                                 {/* KRA Status Badge */}
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                                    : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                      : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
+                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.kraVerified
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                  : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
                                                   }`}>
-                                                  KRA: {
-                                                    cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                      ? 'FAILED'
-                                                      : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                        ? 'VERIFIED'
-                                                        : 'PENDING'
-                                                  }
+                                                  KRA: {cl.kraVerified ? 'VERIFIED' : 'PENDING'}
                                                 </span>
                                                 {/* eSign Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
-                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                                                   }`}>
                                                   eSign: {cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
                                                 </span>
@@ -5949,56 +6038,74 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Select Active Plan <span className="text-rose-600 dark:text-rose-400">*</span>
                                   </label>
-                                  {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).length === 0 ? (
-                                    <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
-                                      No active plans found in this category.
-                                    </div>
-                                  ) : (
-                                    <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
-                                      {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).map((p) => {
-                                        const isSelected = assignPlanId === p.id;
-                                        return (
-                                          <div
-                                            key={p.id}
-                                            onClick={() => {
-                                              setAssignPlanId(p.id);
-                                              setAssignCustomAmount('');
-                                              setAssignCustomDays('');
-                                            }}
-                                            className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
-                                          >
-                                            <div className="flex justify-between items-start">
-                                              <div>
-                                                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
-                                                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                  {(() => {
+                                    const selectedCat = categories.find((c: any) => String(c.id || c._id) === String(assignPlanCategoryId) || String(c.name).toUpperCase() === String(assignPlanCategoryId).toUpperCase());
+                                    const selectedCatName = (selectedCat?.name || '').toUpperCase();
+                                    const filteredPlans = adminPlans.filter((p: any) => {
+                                      const pCatId = typeof p.categoryId === 'object' && p.categoryId ? String(p.categoryId._id || p.categoryId.id) : String(p.categoryId || '');
+                                      const pCatObjId = p.category ? (typeof p.category === 'object' ? String(p.category.id || p.category._id) : String(p.category)) : '';
+                                      const pCatName = (p.category?.name || (typeof p.categoryId === 'object' ? p.categoryId.name : '') || '').toUpperCase();
+                                      
+                                      const matchesCategory = 
+                                        pCatId === String(assignPlanCategoryId) ||
+                                        pCatObjId === String(assignPlanCategoryId) ||
+                                        (selectedCatName && (pCatName === selectedCatName || pCatId === selectedCatName)) ||
+                                        (pCatName && pCatName === String(assignPlanCategoryId).toUpperCase());
+
+                                      return matchesCategory && p.status === 'ACTIVE' && !p.deletedAt;
+                                    });
+
+                                    return filteredPlans.length === 0 ? (
+                                      <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+                                        No active plans found in this category.
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
+                                        {filteredPlans.map((p: any) => {
+                                          const isSelected = assignPlanId === p.id;
+                                          return (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                setAssignPlanId(p.id);
+                                                setAssignCustomAmount('');
+                                                setAssignCustomDays('');
+                                              }}
+                                              className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
+                                            >
+                                              <div className="flex justify-between items-start">
+                                                <div>
+                                                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
+                                                  <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                                </div>
+                                                <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
+                                                  {gstCalculationType === 'EXCLUSIVE' ? (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
+                                                    </div>
+                                                  )}
+                                                  <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
+                                                </div>
                                               </div>
-                                              <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
-                                                {gstCalculationType === 'EXCLUSIVE' ? (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
-                                                  </div>
-                                                ) : (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
-                                                  </div>
-                                                )}
-                                                <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
-                                              </div>
+                                              {isSelected && (
+                                                <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
+                                                  <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
+                                                </div>
+                                              )}
                                             </div>
-                                            {isSelected && (
-                                              <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
-                                                <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
 
@@ -6193,244 +6300,189 @@ function AdminDashboardContent() {
                       )}
 
                       {/* Add Client Modal */}
+                      {/* Add Client Modal */}
                       {isClientModalOpen && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                          <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+                          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[90vh] overflow-y-auto">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between px-8 py-6 border-b border-slate-400 dark:border-white/10">
+                            <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200 dark:border-white/10">
                               <div>
                                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Register New Client</h3>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Client will be onboarded with KYC_PENDING status</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Quick Direct Onboarding • Zero Manual KYC Paperwork</p>
                               </div>
-                              <button onClick={() => setIsClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
-                                <X className="h-5 w-5" />
-                              </button>
-                            </div>
-
-                            <div className="px-8 py-6 space-y-5">
-                              {/* Personal Info */}
-                              <div>
-                                <p className="text-[10px] text-primary-600 dark:text-primary-400 font-bold uppercase tracking-widest mb-3">Personal Information</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Full Name *</label>
-                                    <input
-                                      value={clientName}
-                                      onChange={e => setClientName(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Rahul Sharma"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Email *</label>
-                                    <input
-                                      type="email"
-                                      value={clientEmail}
-                                      onChange={e => {
-                                        setClientEmail(e.target.value);
-                                        if (clientDuplicateField === 'email') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="rahul@example.com"
-                                    />
-                                    {clientDuplicateField === 'email' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Mobile *</label>
-                                    <input
-                                      type="tel"
-                                      value={clientMobile}
-                                      onChange={e => {
-                                        setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
-                                        if (clientDuplicateField === 'mobile') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="10-digit mobile number"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'mobile' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Password *</label>
-                                    <input
-                                      type="password" value={clientPassword}
-                                      onChange={e => setClientPassword(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="Min 8 characters"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Occupation</label>
-                                    <input
-                                      value={clientOccupation}
-                                      onChange={e => setClientOccupation(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Engineer, Business"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* KYC Info */}
-                              <div>
-                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest mb-3">KYC Documents</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">PAN Number *</label>
-                                    <input
-                                      value={clientPan}
-                                      onChange={e => {
-                                        setClientPan(formatPan(e.target.value));
-                                        if (clientDuplicateField === 'pan') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'pan' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="ABCDE1234F"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'pan' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Aadhaar Number *</label>
-                                    <input
-                                      value={clientAadhaar}
-                                      onChange={e => {
-                                        setClientAadhaar(formatAadhaar(e.target.value));
-                                        if (clientDuplicateField === 'aadhaar') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'aadhaar' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="12-digit Aadhaar"
-                                      maxLength={12}
-                                    />
-                                    {clientDuplicateField === 'aadhaar' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Category</label>
-                                    <select
-                                      value={clientCategory}
-                                      onChange={e => setClientCategory(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none transition"
-                                    >
-                                      <option value="INDIVIDUAL">INDIVIDUAL</option>
-                                      <option value="NON_INDIVIDUAL">NON-INDIVIDUAL</option>
-                                    </select>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Address */}
-                              <div>
-                                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest mb-3">Address</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Address Line 1</label>
-                                    <input
-                                      value={clientAddress}
-                                      onChange={e => setClientAddress(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Street address, Area"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">State</label>
-                                    <select
-                                      value={clientState}
-                                      onChange={e => {
-                                        setClientState(e.target.value);
-                                        setClientCity(''); // Reset city when state changes
-                                      }}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition appearance-none"
-                                    >
-                                      <option value="">Select State</option>
-                                      {states.map((s: any) => (
-                                        <option key={s.id} value={s.name}>{s.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">City</label>
-                                    <input
-                                      value={clientCity}
-                                      onChange={e => setClientCity(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Select or type city"
-                                      list="client-city-options"
-                                      disabled={!clientState}
-                                    />
-                                    <datalist id="client-city-options">
-                                      {clientCities.map((c: any, i: number) => (
-                                        <option key={i} value={c.name} />
-                                      ))}
-                                    </datalist>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">ZIP Code</label>
-                                    <input
-                                      value={clientZip}
-                                      onChange={e => setClientZip(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="400001"
-                                      maxLength={6}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 flex space-x-3">
                               <button
                                 onClick={() => {
                                   setIsClientModalOpen(false);
                                   setClientDuplicateField(null);
                                   setClientDuplicateError(null);
                                 }}
-                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
+                                className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            <div className="px-8 py-6 space-y-5">
+                              {/* SEBI DigiLocker Notice */}
+                              <div className="p-3.5 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl flex items-start space-x-3">
+                                <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                                <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                  <span className="font-bold">DigiLocker KYC Compliance:</span> Full Legal Name, PAN, Aadhaar, DOB, and Address will be automatically fetched directly from DigiLocker when the client logs in. Direct registration requires no manual KYC paperwork or OTP verification.
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Email */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Email Address *
+                                  </label>
+                                  <input
+                                    type="email"
+                                    value={clientEmail}
+                                    onChange={e => {
+                                      setClientEmail(e.target.value);
+                                      if (clientDuplicateField === 'email') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="client@example.com"
+                                  />
+                                  {clientDuplicateField === 'email' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Mobile */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Mobile Number *
+                                  </label>
+                                  <input
+                                    type="tel"
+                                    value={clientMobile}
+                                    onChange={e => {
+                                      setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
+                                      if (clientDuplicateField === 'mobile') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="10-digit mobile number"
+                                    maxLength={10}
+                                  />
+                                  {clientDuplicateField === 'mobile' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Password */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Password *
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+                                        let pwd = 'Pass@';
+                                        for (let i = 0; i < 5; i++) {
+                                          pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+                                        }
+                                        setClientPassword(pwd);
+                                        toast.success(`Generated password: ${pwd}`);
+                                      }}
+                                      className="text-[10px] font-semibold text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
+                                    >
+                                      <span>🎲 Generate Password</span>
+                                    </button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={clientPassword}
+                                    onChange={e => setClientPassword(e.target.value)}
+                                    maxLength={15}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition font-mono"
+                                    placeholder="8 - 15 characters (e.g. Pass@12345)"
+                                  />
+                                </div>
+
+                                {/* Full Name (Optional) */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Full Name <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                                    </label>
+                                    <span className="text-[10px] text-slate-400">Synced from DigiLocker on KYC</span>
+                                  </div>
+                                  <input
+                                    value={clientName}
+                                    onChange={e => setClientName(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Rahul Sharma"
+                                  />
+                                </div>
+
+                                {/* Category */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Category
+                                  </label>
+                                  <select
+                                    value={clientCategory}
+                                    onChange={e => setClientCategory(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-primary-500 focus:outline-none transition cursor-pointer"
+                                  >
+                                    <option value="INDIVIDUAL">INDIVIDUAL</option>
+                                    <option value="HUF">HUF</option>
+                                    <option value="COMPANY">COMPANY</option>
+                                    <option value="PARTNERSHIP">PARTNERSHIP / LLP</option>
+                                  </select>
+                                </div>
+
+                                {/* Occupation */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Occupation
+                                  </label>
+                                  <input
+                                    value={clientOccupation}
+                                    onChange={e => setClientOccupation(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Salaried, Business"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-8 py-5 border-t border-slate-200 dark:border-white/10 flex space-x-3">
+                              <button
+                                onClick={() => {
+                                  setIsClientModalOpen(false);
+                                  setClientDuplicateField(null);
+                                  setClientDuplicateError(null);
+                                }}
+                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
                               >
                                 Cancel
                               </button>
                               <button
                                 disabled={clientModalLoading}
                                 onClick={async () => {
-                                  // Validate required fields
-                                  if (!clientName.trim() || clientName.trim().length < 2) {
-                                    toast('Full name must be at least 2 characters.'); return;
-                                  }
                                   const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                                  if (!emailRx.test(clientEmail)) {
-                                    setWizardErrors({ coEmail: 'Please enter a valid email address.' }); return;
+                                  if (!emailRx.test(clientEmail.trim())) {
+                                    toast.error('Please enter a valid email address.'); return;
                                   }
-                                  if (!/^\d{10}$/.test(clientMobile)) {
-                                    toast('Mobile number must be exactly 10 digits.'); return;
+                                  if (!/^\d{10}$/.test(clientMobile.trim())) {
+                                    toast.error('Mobile number must be exactly 10 digits.'); return;
                                   }
-                                  if (!clientPassword || clientPassword.length < 8) {
-                                    toast('Password must be at least 8 characters.'); return;
-                                  }
-                                  const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-                                  if (!panRx.test(clientPan)) {
-                                    toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
-                                  }
-                                  if (!/^\d{12}$/.test(clientAadhaar)) {
-                                    toast('Aadhaar number must be exactly 12 digits.'); return;
+                                  if (!clientPassword || clientPassword.length < 8 || clientPassword.length > 15) {
+                                    toast.error('Password must be between 8 and 15 characters.'); return;
                                   }
 
                                   setClientModalLoading(true);
@@ -6439,38 +6491,42 @@ function AdminDashboardContent() {
                                   try {
                                     const payload = {
                                       tenantId: user.tenantId,
-                                      name: clientName.trim(),
-                                      email: clientEmail.trim(),
+                                      name: clientName.trim() || clientEmail.split('@')[0],
+                                      email: clientEmail.trim().toLowerCase(),
                                       mobile: clientMobile.trim(),
                                       password: clientPassword,
-                                      pan: clientPan.toUpperCase(),
-                                      aadhaar: clientAadhaar,
-                                      category: clientCategory,
+                                      category: clientCategory || 'INDIVIDUAL',
                                       occupation: clientOccupation || undefined,
-                                      addressLine1: clientAddress || undefined,
-                                      city: clientCity || undefined,
-                                      state: clientState || undefined,
-                                      zipCode: clientZip || undefined,
                                       createdById: user.id
                                     };
                                     const r = await api.registerClient(payload);
                                     if (r.success) {
                                       setIsClientModalOpen(false);
+                                      setClientName('');
+                                      setClientEmail('');
+                                      setClientMobile('');
+                                      setClientPassword('');
+                                      setClientOccupation('');
+                                      setClientCategory('INDIVIDUAL');
                                       loadData();
-                                      toast.success(`Client "${clientName}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete KYC.`);
+                                      toast.success(`Client "${payload.name}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete DigiLocker KYC.`);
                                     }
                                   } catch (e: any) {
                                     if (e.duplicateField) {
                                       setClientDuplicateField(e.duplicateField);
-                                      setClientDuplicateError(e.message || 'Duplicate value detected.');
+                                      const msg = e.duplicateField === 'email'
+                                        ? 'This email address is already registered.'
+                                        : 'This mobile number is already registered.';
+                                      setClientDuplicateError(msg);
+                                      toast.error(msg);
                                     } else {
-                                      toast.error(e.message || 'Failed to register client.');
+                                      toast.error(e.message || (e.errors && e.errors[0]) || 'Failed to register client.');
                                     }
                                   } finally {
                                     setClientModalLoading(false);
                                   }
                                 }}
-                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition"
+                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-600/20"
                               >
                                 {clientModalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                                 <span>{clientModalLoading ? 'Registering...' : 'Register Client'}</span>
@@ -6732,29 +6788,6 @@ function AdminDashboardContent() {
                                       <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Country</span><strong className="text-slate-900 dark:text-white">{selectedClient.profile?.country || 'India'}</strong></div>
                                     </div>
                                   </div>
-
-                                  {/* Investment Profile */}
-                                  <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4 md:col-span-2">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Risk & Investment Profile</h4>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Risk Profile</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.riskProfile || 'MODERATE'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Net Worth</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.netWorth ? `₹${selectedClient.profile.netWorth.toLocaleString()}` : '—'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Investment Limit</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.investmentLimit ? `₹${selectedClient.profile.investmentLimit.toLocaleString()}` : '—'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Investment Period</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.investmentPeriod ? `${selectedClient.profile.investmentPeriod} Months` : '—'}</strong>
-                                      </div>
-                                    </div>
-                                  </div>
                                 </div>
                               )}
 
@@ -6808,7 +6841,7 @@ function AdminDashboardContent() {
                                               <div className="text-[10px] text-slate-500 dark:text-slate-500">Signed on {new Date(agr.signedAt).toLocaleDateString('en-IN')} via {agr.esignMode}</div>
                                             </div>
                                             <a
-                                              href={`${api.getBaseUrl()}${agr.agreementUrl}`}
+                                              href={api.getDownloadUrl(agr.agreementUrl)}
                                               target="_blank"
                                               rel="noreferrer"
                                               className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
@@ -7001,8 +7034,8 @@ function AdminDashboardContent() {
                                               <p className="text-xs text-slate-500 mt-1">To: {log.recipient} • {new Date(log.createdAt).toLocaleString()}</p>
                                             </div>
                                             <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${log.status === 'SENT' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                                                log.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                              log.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                                               }`}>
                                               {log.status}
                                             </span>
@@ -7312,49 +7345,262 @@ function AdminDashboardContent() {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Terms & Conditions PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setTermsPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
+                              {/* Terms & Conditions PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Terms & Conditions PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      termsPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : termsPdfUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {termsPdf ? '● New File Selected' : termsPdfUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Sent automatically to client in the Welcome Email upon onboarding.
+                                  </p>
+
+                                  <div className="space-y-3">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setTermsPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('terms', 'Terms & Conditions PDF', termsPdf, termsPdfUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Terms PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('terms', termsPdf, termsPdfUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Privacy Policy PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setPrivacyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
+
+                              {/* Privacy Policy PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Privacy Policy PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      privacyPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : privacyPdfUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {privacyPdf ? '● New File Selected' : privacyPdfUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Sent automatically to client in the Welcome Email upon onboarding.
+                                  </p>
+
+                                  <div className="space-y-3">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setPrivacyPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('privacy', 'Privacy Policy PDF', privacyPdf, privacyPdfUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Privacy PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('privacy', privacyPdf, privacyPdfUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5 md:col-span-2">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Internal Policy PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Written internal policies & controls for SEBI compliance. Not visible to clients.</p>
+
+                              {/* Internal Policy PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all md:col-span-2">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Internal Policy PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      internalPolicyPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : policyUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {internalPolicyPdf ? '● New File Selected' : policyUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Written internal supervisory policies & controls for SEBI compliance audit trail. Not visible to clients.
+                                  </p>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('internal', 'Internal Policy PDF', internalPolicyPdf, policyUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2.5 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Internal Policy PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('internal', internalPolicyPdf, policyUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
 
-                            <div className="border-t border-slate-400 dark:border-white/10 pt-6 space-y-6">
+                            <div className="border-t border-slate-300 dark:border-white/10 pt-6 space-y-6">
                               <div>
-                                <div className="flex justify-between items-center mb-1">
-                                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Service Agreement Content</label>
-                                  <span className="text-[10px] bg-primary-100 text-primary-700 px-2 py-1 rounded">Supports Variables</span>
+                                <div className="flex justify-between items-center mb-2">
+                                  <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                    Service Agreement Content
+                                  </label>
+                                  <span className="text-[10px] bg-primary-100 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 px-2.5 py-1 rounded-full font-bold border border-primary-200 dark:border-primary-800/60">
+                                    Supports Dynamic Variables
+                                  </span>
                                 </div>
-                                <p className="text-[11px] text-slate-500 mb-2">
-                                  Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
-                                </p>
-                                <textarea
-                                  value={agreementContent}
-                                  onChange={e => setAgreementContent(e.target.value)}
-                                  rows={6}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                />
+                                <div className="bg-slate-50 dark:bg-slate-900/60 p-3.5 rounded-xl border border-slate-200 dark:border-white/5 mb-3">
+                                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                                    <span>Click any variable below to copy it with one click:</span>
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {AGREEMENT_VARIABLES.map(v => {
+                                      const isCopied = copiedVariable === v.key;
+                                      return (
+                                        <button
+                                          key={v.key}
+                                          type="button"
+                                          onClick={() => handleCopyVariable(v.key, v.label)}
+                                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all duration-150 border cursor-pointer ${
+                                            isCopied
+                                              ? 'bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-300 shadow-sm'
+                                              : 'bg-white hover:bg-primary-50 dark:bg-slate-800 dark:hover:bg-primary-950/40 border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600 text-slate-700 dark:text-slate-200 hover:text-primary-700 dark:hover:text-primary-300'
+                                          }`}
+                                          title={`Click to copy ${v.key} (${v.label})`}
+                                        >
+                                          {isCopied ? (
+                                            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                          ) : (
+                                            <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors" />
+                                          )}
+                                          <span className="font-semibold">{v.key}</span>
+                                          <span className="text-[10px] text-slate-400 font-sans group-hover:text-primary-500">
+                                            {isCopied ? 'Copied!' : `(${v.label})`}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={agreementContent}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setAgreementContent(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={agreementContent}
+                                      onChange={e => setAgreementContent(e.target.value)}
+                                      rows={6}
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
+                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={welcomeEmailText}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setWelcomeEmailText(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={reportDisclaimer}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setReportDisclaimer(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -7549,6 +7795,48 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Gateway Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {gatewayVerifyResult ? (
+                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                        {gatewayVerifyResult.mode && (
+                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                            Status: {gatewayVerifyResult.mode} MODE
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyPaymentGateway}
+                                  disabled={verifyingGateway}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingGateway ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Verifying Credentials...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      <span>Verify Gateway Connection</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -7593,7 +7881,18 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret</label>
                                   <input type="password" value={digioClientSecret} onChange={e => setDigioClientSecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Leave blank to keep unchanged" />
                                 </div>
-                                <div className="md:col-span-2">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Environment</label>
+                                  <select
+                                    value={digioEnvironment}
+                                    onChange={e => setDigioEnvironment(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs"
+                                  >
+                                    <option value="SANDBOX">Sandbox / UAT (ext.digio.in:444) — For Testing (ACK/AIK keys)</option>
+                                    <option value="PRODUCTION">Production (api.digio.in) — Live Accounts</option>
+                                  </select>
+                                </div>
+                                <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio KYC Template Name</label>
                                   <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_TEMPLATE_1" />
                                 </div>
@@ -7625,6 +7924,8 @@ function AdminDashboardContent() {
                                 <input
                                   type="password" required
                                   minLength={8}
+                                  maxLength={15}
+                                  placeholder="8 - 15 characters"
                                   value={profileNewPassword}
                                   onChange={e => setProfileNewPassword(e.target.value)}
                                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
@@ -7635,6 +7936,8 @@ function AdminDashboardContent() {
                                 <input
                                   type="password" required
                                   minLength={8}
+                                  maxLength={15}
+                                  placeholder="8 - 15 characters"
                                   value={profileConfirmPassword}
                                   onChange={e => setProfileConfirmPassword(e.target.value)}
                                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
@@ -7660,89 +7963,13 @@ function AdminDashboardContent() {
                   {activeTab === 'complaintReport' && <ComplaintReportAdmin />}
 
                   {activeTab === 'signature_settings' && (
-                    <div className="max-w-4xl mx-auto space-y-6 pb-20">
-                      <div className="flex items-center space-x-3 mb-6">
-                        <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                          <Settings className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Personal Settings</h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Configure your UI preferences and signature</p>
-                        </div>
-                      </div>
-
-                      {/* UI Preferences Section */}
-                      <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/10 p-6">
-                        <h3 className="text-lg font-bold mb-4">UI Preferences</h3>
-                        <div className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                          <div>
-                            <h4 className="font-bold text-sm">Show Mobile Preview in Signal Desk</h4>
-                            <p className="text-xs text-slate-500 mt-1">Enable or disable the right-side mobile app preview panel when managing signals.</p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
-                          </label>
-                        </div>
-                      </div>
-
-                      {/* Signature Section */}
-                      {(user?.role === 'RESEARCHER' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                        <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/10 p-6">
-                          <h3 className="text-lg font-bold mb-4">Research Analyst Signature</h3>
-                          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 p-4 rounded-xl mb-6 flex items-start space-x-3">
-                            <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <h4 className="font-bold text-sm">Why is this required?</h4>
-                              <p className="text-xs mt-1 leading-relaxed">
-                                As per SEBI guidelines, every Research Report generated must bear the signature of the responsible Research Analyst.
-                                When you upload your signature here, it will be securely saved and automatically appended to the footer of all PDF
-                                Research Reports generated from the Signal Management desk.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="space-y-4">
-                            {user?.tenant?.coSignatureUrl && (
-                              <div className="mb-4 p-4 bg-slate-50 dark:bg-[#1A2235] rounded-xl border border-slate-200 dark:border-white/10 inline-block">
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2 font-bold uppercase">Current Signature</p>
-                                <img
-                                  src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${api.getBaseUrl()}${user.tenant.coSignatureUrl}`}
-                                  alt="Current Signature"
-                                  className="h-20 object-contain mix-blend-multiply dark:mix-blend-normal bg-white"
-                                />
-                              </div>
-                            )}
-                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Upload Your Signature</label>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Accepted formats: PNG, JPG, JPEG (Max 2MB). A clear signature on a white background is recommended.</p>
-
-                            <div className="mt-2">
-                              <input
-                                type="file"
-                                id="coSignatureUploadSettings"
-                                className="hidden"
-                                accept="image/*"
-                                onChange={(e) => {
-                                  if (window.confirm("Notice: This signature will be applied to all your generated PDF Research Reports. Do you want to proceed?")) {
-                                    handleUploadCoSignature(e);
-                                  } else {
-                                    e.target.value = '';
-                                  }
-                                }}
-                                disabled={uploadingCoSignature}
-                              />
-                              <label
-                                htmlFor="coSignatureUploadSettings"
-                                className={`inline-flex px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer ${uploadingCoSignature ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              >
-                                {uploadingCoSignature ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                                <span>Select & Upload Signature File</span>
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <SignatureSettingsTab
+                      user={user}
+                      setUser={setUser}
+                      loadData={loadData}
+                      showMobilePreview={showMobilePreview}
+                      toggleMobilePreview={toggleMobilePreview}
+                    />
                   )}
 
                   {activeTab === 'resources' && (
@@ -7789,7 +8016,7 @@ function AdminDashboardContent() {
                             )}
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-2 max-h-[480px] overflow-y-auto custom-scrollbar pr-1.5">
                             {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
                               const isSelected = selectedRole?.id === r.id;
                               const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
@@ -8029,7 +8256,7 @@ function AdminDashboardContent() {
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Category</label>
                           <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
                             <option value="">Select Category</option>
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name} ({c.segments})</option>)}
+                            {categories.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name} ({c.segments})</option>)}
                           </select>
                         </div>
 
@@ -8795,6 +9022,63 @@ function AdminDashboardContent() {
                   </div>
                 )}
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* PDF Preview Modal */}
+        {pdfPreviewModal?.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-5xl h-[92vh] rounded-3xl shadow-2xl border border-slate-200 dark:border-white/10 flex flex-col overflow-hidden animate-fade-in-up">
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 rounded-xl">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {pdfPreviewModal.title}
+                      </h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/60 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-700">
+                        {pdfPreviewModal.badgeText}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Live document view with official compliance headers and formatting
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={pdfPreviewModal.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setPdfPreviewModal(null)}
+                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF View Container */}
+              <div className="flex-1 bg-slate-100 dark:bg-slate-950 p-2 sm:p-4 overflow-hidden">
+                <iframe
+                  src={pdfPreviewModal.url}
+                  className="w-full h-full rounded-2xl border border-slate-300 dark:border-slate-800 shadow-inner bg-white"
+                  title={pdfPreviewModal.title}
+                />
+              </div>
             </div>
           </div>
         )}
