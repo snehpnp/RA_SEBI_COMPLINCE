@@ -1070,7 +1070,16 @@ class ApiClient {
     return this.request('/client/agreement/initiate', { method: 'POST' });
   }
 
-  async updateDigioStatus(data: { type: string, status: string, kycId?: string, digioResponse?: any }) {
+  async updateDigioStatus(data: {
+    type: string;
+    status: string;
+    kycId?: string;
+    digioKycId?: string;
+    documentId?: string;
+    signatureText?: string;
+    digioResponse?: any;
+    [key: string]: any;
+  }) {
     return this.request('/client/kyc/status', {
       method: 'POST',
       body: JSON.stringify(data),

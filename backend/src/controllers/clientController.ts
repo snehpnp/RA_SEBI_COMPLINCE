@@ -8,7 +8,7 @@ import * as jwt from 'jsonwebtoken';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
 import { logActivity } from '../services/activityService';
-import { sendWelcomeEmail } from '../services/emailService';
+import { sendWelcomeEmail, sendSignedAgreementEmail } from '../services/emailService';
 import { generateAgreementPdf, getTenantComplianceAttachments } from '../services/pdfService';
 import { createKycRequest, getKycStatus, getDocumentStatus, downloadDocument, extractAadhaarDetailsFromDigio } from '../services/digioService';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
@@ -41,10 +41,10 @@ export const registerClient = async (req: Request, res: Response) => {
     try {
       const token = authHeader.split(' ')[1];
       decodedUser = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-    } catch {}
+    } catch { }
   }
   const isAdminAdd = Boolean(
-    createdById || 
+    createdById ||
     (decodedUser && ['ADMIN', 'SUPER_ADMIN', 'STAFF', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCH_ANALYST', 'RESEARCHER'].includes(decodedUser.role))
   );
 
@@ -232,7 +232,7 @@ export const registerClient = async (req: Request, res: Response) => {
       const cleanMobile = mobile.trim();
       await EmailVerification.deleteMany({
         $or: [{ email: cleanEmail }, ...(cleanMobile ? [{ mobile: cleanMobile }] : [])]
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     await logAudit({
@@ -287,7 +287,7 @@ export const registerClient = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     if (createdUser && createdUser._id) {
-      await dynamicDb.User.findByIdAndDelete(createdUser._id).catch(() => {});
+      await dynamicDb.User.findByIdAndDelete(createdUser._id).catch(() => { });
     }
 
     let friendlyMessage = 'Registration failed. Please check your information and try again.';
@@ -839,6 +839,25 @@ export const signAgreement = async (req: AuthenticatedRequest, res: Response) =>
       req
     });
 
+    // 4. Send Signed Agreement copy via Email directly to Client with attached PDF
+    const toEmail = client.email || req.user?.email;
+    if (toEmail) {
+      sendSignedAgreementEmail({
+        tenantId: client.tenantId || req.user?.tenantId,
+        toEmail,
+        clientName: signerName || client.name,
+        companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+        agreementUrl,
+        pdfBuffer,
+        maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+        signedAt: new Date()
+      }).then((sent) => {
+        if (sent) console.log(`[Agreement Email] 📧 Signed agreement PDF successfully emailed to client: ${toEmail}`);
+      }).catch((mailErr) => {
+        console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Agreement signed successfully via Aadhaar eSign.',
@@ -1157,7 +1176,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
         if (payment.couponId) {
           await dynamicDb.Coupon.findByIdAndUpdate(payment.couponId, {
             $inc: { usedCount: 1 }
-          }).catch(() => {});
+          }).catch(() => { });
         }
       }
     }

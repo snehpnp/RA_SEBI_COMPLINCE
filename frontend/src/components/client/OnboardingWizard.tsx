@@ -393,9 +393,9 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 toast.error("Digio eSign Failed or Cancelled");
                 setLoading(false);
               } else {
-                await api.signAgreement({ 
+                await api.signAgreement({
                   signatureText: formData.name || clientProfile?.name || 'Digio eSign',
-                  documentId: response.digio_doc_id,
+                  documentId: response.digio_doc_id || res.data.id,
                   digioResponse: response
                 });
                 setAgreementSigned(true);
@@ -433,16 +433,18 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
         }
       }
 
-      const signRes = await api.signAgreement({ signatureText: formData.name || clientProfile?.name || 'Aadhaar eSign' });
+      const verifiedName = clientProfile?.panName || clientProfile?.aadhaarName || clientProfile?.name || formData.name || 'Client';
+      const signRes = await api.signAgreement({ signatureText: verifiedName });
       if (signRes.success) {
         setAgreementSigned(true);
         toast.success('Advisory Agreement signed successfully!');
       } else {
         toast.error(signRes.message || 'Failed to sign agreement');
       }
-      setLoading(false);
     } catch (err: any) {
+      console.error(err);
       toast.error(err.message || 'Failed to sign agreement');
+    } finally {
       setLoading(false);
     }
   };
@@ -1340,8 +1342,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                     >
                       {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (
                         isGwEnabled && isUpiEnabled ? 'Select & Pay' :
-                        isUpiEnabled ? 'Pay with QR / UPI' :
-                        isGwEnabled ? 'Pay Online' : 'Contact Admin'
+                          isUpiEnabled ? 'Pay with QR / UPI' :
+                            isGwEnabled ? 'Pay Online' : 'Contact Admin'
                       )}
                     </button>
                   </div>

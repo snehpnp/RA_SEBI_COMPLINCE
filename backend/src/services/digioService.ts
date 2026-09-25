@@ -95,28 +95,13 @@ export const generateGatewayToken = async (
   try {
     const payload: Record<string, any> = { entity_id: entityId };
     if (identifier) payload.identifier = identifier;
-    console.log('[Digio Gateway Token] Requesting access token for entity:', entityId, 'identifier:', identifier);
-    let response;
-    try {
-      response = await axios.post(`${baseUrl}/user/auth/generate_token`, payload, {
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json'
-        }
-      });
-    } catch (err1: any) {
-      if (identifier) {
-        console.log('[Digio Gateway Token] Retrying generate_token with entity_id only...');
-        response = await axios.post(`${baseUrl}/user/auth/generate_token`, { entity_id: entityId }, {
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/json'
-          }
-        });
-      } else {
-        throw err1;
+    console.log('[Digio Gateway Token] Requesting access token for entity:', entityId);
+    const response = await axios.post(`${baseUrl}/user/auth/generate_token`, payload, {
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json'
       }
-    }
+    });
     const token = response.data?.id || response.data?.access_token?.id || response.data?.token_id || response.data?.token;
     if (token) {
       console.log('[Digio Gateway Token] Successfully generated token:', token);
@@ -372,7 +357,7 @@ export const extractAadhaarDetailsFromDigio = (data: any) => {
     if (aadhaarObj && typeof aadhaarObj === 'object') {
       if (!aadhaarName && isValidName(aadhaarObj.name)) aadhaarName = aadhaarObj.name.trim();
       if (!aadhaarName && isValidName(aadhaarObj.full_name)) aadhaarName = aadhaarObj.full_name.trim();
-      
+
       if (!rawAadhaar) {
         rawAadhaar = aadhaarObj.id_number || aadhaarObj.masked_aadhaar_number || aadhaarObj.aadhaar_number || aadhaarObj.uid || null;
       }
@@ -518,9 +503,7 @@ export const createDocumentForEsign = async (
 
     const signerObj: Record<string, any> = {
       identifier: signerIdentifier,
-      reason: 'SEBI Research Advisory Agreement eSign',
-      generate_access_token: true,
-      generateAccessToken: true
+      reason: 'SEBI Research Advisory Agreement eSign'
     };
     if (signerName && isValidName(signerName)) {
       signerObj.name = signerName.trim();
@@ -531,8 +514,8 @@ export const createDocumentForEsign = async (
       expire_in_days: 10,
       display_on_page: 'all',
       generate_access_token: true,
-      generateAccessToken: true,
-      notify_signers: false
+      notify_signers: true,
+      send_sign_link: false
     };
 
     formData.append('request', JSON.stringify(requestBody), {
@@ -549,20 +532,13 @@ export const createDocumentForEsign = async (
 
     const data = response.data;
     if (data?.id) {
-      let tokenId = 
-        data?.access_token?.id ||
-        data?.signers?.[0]?.access_token?.id ||
-        data?.signers?.[0]?.token_id ||
-        data?.token_id ||
-        data?.gateway_token_id ||
-        (typeof data?.access_token === 'string' ? data.access_token : null);
-
+      let tokenId = data?.access_token?.id || data?.token_id || data?.gateway_token_id;
       if (!tokenId) {
         tokenId = await generateGatewayToken(clientId, clientSecret, data.id, signerIdentifier, environment);
       }
       if (tokenId) {
-        data.tokenId = String(tokenId);
-        if (!data.access_token) data.access_token = { id: String(tokenId) };
+        data.tokenId = tokenId;
+        if (!data.access_token) data.access_token = { id: tokenId };
       }
     }
     return data;

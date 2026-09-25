@@ -9,6 +9,7 @@ const fs_1 = __importDefault(require("fs"));
 const db_1 = __importDefault(require("../config/db"));
 const digioService_1 = require("../services/digioService");
 const pdfService_1 = require("../services/pdfService");
+const emailService_1 = require("../services/emailService");
 const initiateKyc = async (req, res) => {
     try {
         const userId = req.user.id;
@@ -73,26 +74,43 @@ const initiateAgreementEsign = async (req, res) => {
                 l === 'user' ||
                 l.includes('@'));
         };
-        let verifiedDigioName = '';
+        // Resolve signer full name & masked Aadhaar directly from DB (from Step 1 DigiLocker KYC)
+        const profileObj = client.profile || {};
+        let signerName = '';
         let verifiedMaskedAadhaar = '';
-        console.log("req.body?.digioResponse", req.body?.digioResponse);
-        // Check if digioResponse or pki_signature_details passed
         if (req.body?.digioResponse) {
             const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(req.body.digioResponse);
-            console.log("extracted", extracted);
             if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) {
-                verifiedDigioName = extracted.aadhaarName;
+                signerName = extracted.aadhaarName.trim();
             }
             if (extracted?.maskedAadhaar) {
                 verifiedMaskedAadhaar = extracted.maskedAadhaar;
             }
         }
-        console.log("verifiedDigioName", verifiedDigioName);
-        // Resolve signer full name
-        let signerName = '';
-        if (verifiedDigioName && !isGeneric(verifiedDigioName)) {
-            signerName = verifiedDigioName;
+        if (!signerName) {
+            if (client.aadhaarName && !isGeneric(client.aadhaarName)) {
+                signerName = client.aadhaarName.trim();
+            }
+            else if (client.panName && !isGeneric(client.panName)) {
+                signerName = client.panName.trim();
+            }
+            else if (profileObj.aadhaarName && !isGeneric(profileObj.aadhaarName)) {
+                signerName = profileObj.aadhaarName.trim();
+            }
+            else if (profileObj.panName && !isGeneric(profileObj.panName)) {
+                signerName = profileObj.panName.trim();
+            }
+            else if (client.name && !isGeneric(client.name)) {
+                signerName = client.name.trim();
+            }
+            else if (client.userId?.firstName || client.userId?.lastName) {
+                signerName = `${client.userId?.firstName || ''} ${client.userId?.lastName || ''}`.trim();
+            }
         }
+        if (!verifiedMaskedAadhaar) {
+            verifiedMaskedAadhaar = client.aadhaar || profileObj.aadhaar || '';
+        }
+        console.log('✍️ [Initiate Agreement eSign] Resolved Signer Name from DB KYC:', signerName, '| Aadhaar:', verifiedMaskedAadhaar);
         // 1. Generate PDF dynamically
         const pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
             ipAddress: req.ip,
@@ -101,18 +119,15 @@ const initiateAgreementEsign = async (req, res) => {
             aadhaarSuffix: verifiedMaskedAadhaar || undefined
         });
         // 2. Upload to Digio for eSign
-        const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
-        const reqUserAny = req.user || {};
-        const identifier = client.email || userObj.email || reqUserAny.email || client.mobile || userObj.mobile || reqUserAny.mobile;
+        const identifier = req.user.email || client.email;
         const fileName = `Agreement_${clientIdStr}.pdf`;
         const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
         const digioResponse = await (0, digioService_1.createDocumentForEsign)(tenant.digioClientId, tenant.digioClientSecret, pdfBuffer, fileName, identifier, signerName, tenant.digioEnvironment);
-        const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.signers?.[0]?.access_token?.id || digioResponse?.token_id || null;
+        const tokenId = digioResponse?.tokenId || digioResponse?.access_token?.id || digioResponse?.token_id || null;
         res.json({
             success: true,
             data: digioResponse,
             tokenId: tokenId,
-            identifier: identifier,
             signerName: signerName,
             environment: isSandbox ? 'sandbox' : 'production'
         });
@@ -456,6 +471,25 @@ const updateKycAgreementStatus = async (req, res) => {
                     agreementSigned: true
                 }
             });
+            // Send Signed Agreement copy via Email directly to Client with attached PDF
+            const toEmail = client.email || req.user?.email;
+            if (toEmail) {
+                (0, emailService_1.sendSignedAgreementEmail)({
+                    tenantId: client.tenantId || req.user?.tenantId,
+                    toEmail,
+                    clientName: signerName || client.name,
+                    companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+                    agreementUrl,
+                    pdfBuffer,
+                    maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+                    signedAt: new Date()
+                }).then((sent) => {
+                    if (sent)
+                        console.log(`[Agreement Email] 📧 Signed agreement PDF successfully emailed to client: ${toEmail}`);
+                }).catch((mailErr) => {
+                    console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
+                });
+            }
         }
         res.json({
             success: true,

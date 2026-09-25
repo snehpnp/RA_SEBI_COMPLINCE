@@ -423,13 +423,20 @@ export const generateAgreementPdf = async (
 
       // Resolve true legal client full name (pki_signature_details.name / Digio verified Aadhaar name prioritized)
       let clientFullName = '';
-
-     
-
-      if (options?.signerName) {
+      if (options?.signerName && !isGenericName(options.signerName)) {
         clientFullName = options.signerName.trim();
+      } else if (client.panName && !isGenericName(client.panName)) {
+        clientFullName = client.panName.trim();
+      } else if (profileObj.panName && !isGenericName(profileObj.panName)) {
+        clientFullName = profileObj.panName.trim();
+      } else if (profileObj.aadhaarName && !isGenericName(profileObj.aadhaarName)) {
+        clientFullName = profileObj.aadhaarName.trim();
+      } else if (client.name && !isGenericName(client.name)) {
+        clientFullName = client.name.trim();
+      } else if (userObj.firstName || userObj.lastName) {
+        clientFullName = `${userObj.firstName || ''} ${userObj.lastName || ''}`.trim();
       } else {
-        clientFullName = "Ram Kumar"
+        clientFullName = 'Client';
       }
 
 

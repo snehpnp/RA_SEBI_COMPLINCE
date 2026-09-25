@@ -796,6 +796,25 @@ const signAgreement = async (req, res) => {
             },
             req
         });
+        // 4. Send Signed Agreement copy via Email directly to Client with attached PDF
+        const toEmail = client.email || req.user?.email;
+        if (toEmail) {
+            (0, emailService_1.sendSignedAgreementEmail)({
+                tenantId: client.tenantId || req.user?.tenantId,
+                toEmail,
+                clientName: signerName || client.name,
+                companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+                agreementUrl,
+                pdfBuffer,
+                maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
+                signedAt: new Date()
+            }).then((sent) => {
+                if (sent)
+                    console.log(`[Agreement Email] 📧 Signed agreement PDF successfully emailed to client: ${toEmail}`);
+            }).catch((mailErr) => {
+                console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
+            });
+        }
         return res.status(200).json({
             success: true,
             message: 'Agreement signed successfully via Aadhaar eSign.',

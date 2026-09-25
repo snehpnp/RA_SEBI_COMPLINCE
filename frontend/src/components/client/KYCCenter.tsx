@@ -143,7 +143,9 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
     }
   };
 
-  // --- 2. Sign Agreement via Digio eSign ---
+  // --- 2. Sign Agreement via Digio Aadhaar eSign (Digio sends signed PDF directly to client email) ---
+  const verifiedSignerName = profile?.name || profile?.profile?.panName || profile?.panName || profile?.aadhaarName || `${profile?.user?.firstName || ''} ${profile?.user?.lastName || ''}`.trim() || 'Client';
+
   const handleSignAgreement = async () => {
     if (!isKycCompleted) {
       return toast.error('Please complete Step 1 (Fetch KYC) before signing agreement.');
@@ -167,12 +169,13 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   type: 'AGREEMENT',
                   status: 'COMPLETED',
                   kycId: response.digio_doc_id || res.data.id,
+                  documentId: response.digio_doc_id || res.data.id,
                   digioResponse: response
                 });
                 console.log('%c💾 [DIGIO AGREEMENT SAVED TO BACKEND]', 'background: #2563EB; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
                 console.log('📌 Save Result:', statusRes);
                 if (statusRes.success) {
-                  toast.success('Advisory Agreement signed successfully!');
+                  toast.success('Advisory Agreement signed successfully! Digio has emailed your copy.');
                   await fetchProfile();
                 } else {
                   toast.error(statusRes.message || 'Failed to update agreement status.');
@@ -200,11 +203,21 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         }
         return;
       } else {
-        toast.error(res?.message || 'Could not initiate Digio eSign. Please verify Digio credentials in Admin Settings.');
-        setSigningAgreement(false);
+        // Fallback to direct sign if Digio credentials not present
+        const signRes = await api.signAgreement({
+          signatureText: verifiedSignerName
+        });
+        if (signRes.success) {
+          toast.success('Advisory Agreement signed successfully!');
+          await fetchProfile();
+        } else {
+          toast.error(signRes.message || 'Failed to sign agreement.');
+        }
       }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to initiate Digio agreement signing. Please check Digio account setup.');
+      console.error('Agreement eSign Error:', err);
+      toast.error(err.message || 'Failed to initiate Digio agreement signing.');
+    } finally {
       setSigningAgreement(false);
     }
   };
@@ -295,11 +308,10 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* ── CARD 1: Fetch KYC (DigiLocker) ── */}
-        <div className={`rounded-3xl p-6 border flex flex-col justify-between transition-all ${
-          isKycCompleted
-            ? 'bg-emerald-50/40 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-800'
-            : 'bg-white dark:bg-slate-900 border-primary-500/40 shadow-lg shadow-primary-500/5 ring-1 ring-primary-500/20'
-        }`}>
+        <div className={`rounded-3xl p-6 border flex flex-col justify-between transition-all ${isKycCompleted
+          ? 'bg-emerald-50/40 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-800'
+          : 'bg-white dark:bg-slate-900 border-primary-500/40 shadow-lg shadow-primary-500/5 ring-1 ring-primary-500/20'
+          }`}>
           <div>
             <div className="flex items-center justify-between mb-4">
               <span className="text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300">
@@ -377,13 +389,12 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
         </div>
 
         {/* ── CARD 2: Sign Agreement (Aadhaar eSign) ── */}
-        <div className={`rounded-3xl p-6 border flex flex-col justify-between transition-all ${
-          isAgreementSigned
-            ? 'bg-emerald-50/40 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-800'
-            : !isKycCompleted
-              ? 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-70'
-              : 'bg-white dark:bg-slate-900 border-primary-500/40 shadow-lg shadow-primary-500/5 ring-1 ring-primary-500/20'
-        }`}>
+        <div className={`rounded-3xl p-6 border flex flex-col justify-between transition-all ${isAgreementSigned
+          ? 'bg-emerald-50/40 dark:bg-emerald-950/10 border-emerald-300 dark:border-emerald-800'
+          : !isKycCompleted
+            ? 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 opacity-70'
+            : 'bg-white dark:bg-slate-900 border-primary-500/40 shadow-lg shadow-primary-500/5 ring-1 ring-primary-500/20'
+          }`}>
           <div>
             <div className="flex items-center justify-between mb-4">
               <span className="text-[10px] font-black tracking-widest uppercase px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
@@ -409,8 +420,25 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               2. Sign Agreement (Aadhaar eSign)
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
-              Pre-fills your DigiLocker verified details into the SEBI-mandated Research Analyst Advisory Agreement and signs digitally via Aadhaar OTP.
+              Pre-fills your DigiLocker verified details into the SEBI-mandated Research Analyst Advisory Agreement and signs digitally via Digio Aadhaar OTP. Digio automatically emails a signed copy to your inbox upon completion.
             </p>
+
+            {/* If KYC Completed & Agreement not signed: show verified signer preview */}
+            {isKycCompleted && !isAgreementSigned && (
+              <div className="space-y-2 bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-200 dark:border-slate-700/60 text-xs mb-4">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200/60 dark:border-slate-700/60">
+                  <span className="text-slate-500">Signer Name:</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{verifiedSignerName}</span>
+                </div>
+                <div className="flex justify-between items-center pb-1">
+                  <span className="text-slate-500">Aadhaar (DigiLocker):</span>
+                  <span className="font-mono">{maskAadhaar(profile?.aadhaar || profile?.profile?.aadhaar)}</span>
+                </div>
+                <div className="pt-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Details pre-filled from Step 1 — Ready for Digio eSign OTP
+                </div>
+              </div>
+            )}
 
             {/* If Agreement Signed: Display Signature Verification Card */}
             {isAgreementSigned && latestAgreement && (
@@ -430,7 +458,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   </div>
                 )}
                 <div className="pt-2 text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Legally Binding eSign under IT Act 2000
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Legally Binding eSign under IT Act 2000
                 </div>
               </div>
             )}
@@ -451,7 +479,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                 className="w-full bg-primary-600 hover:bg-primary-500 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-500/25 disabled:shadow-none"
               >
                 {signingAgreement ? <Loader2 className="w-4 h-4 animate-spin" /> : <PenTool className="w-4 h-4" />}
-                <span>{signingAgreement ? 'Preparing eSign...' : 'Sign Agreement via Aadhaar eSign'}</span>
+                <span>{signingAgreement ? 'Preparing Digio eSign...' : 'Sign Agreement via Aadhaar eSign'}</span>
               </button>
             ) : latestAgreement?.agreementUrl ? (
               <a
