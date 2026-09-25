@@ -37,6 +37,7 @@ const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const occupationController_1 = require("../controllers/occupationController");
 const clientTimelineController_1 = require("../controllers/clientTimelineController");
 const clientVaultController_1 = require("../controllers/clientVaultController");
+const faqController_1 = require("../controllers/faqController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -303,16 +304,24 @@ router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requ
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
 router.get('/admin/clients/:clientId/timeline', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientTimelineController_1.getClientTimeline);
-// Admin Client Digital Vaults & File Explorer
-router.get('/admin/vaults', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.listClientVaults);
-router.get('/admin/vaults/:clientId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.getClientVaultDetails);
-router.post('/admin/vaults/:clientId/recordings', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, upload.single('file'), clientVaultController_1.uploadCallRecording);
-router.delete('/admin/vaults/:clientId/recordings/:recordingId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.deleteCallRecording);
-router.get('/admin/vaults/:clientId/export-zip', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.exportClientVaultZip);
-router.get('/admin/vaults/:clientId/export-folder/:folderKey', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.exportSingleFolder);
-router.get('/admin/vaults/:clientId/invoice/:paymentId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadSingleInvoice);
-router.get('/admin/vaults/:clientId/agreement', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadAgreementPdf);
-router.get('/admin/vaults/:clientId/research-report/:reportId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadSingleResearchReport);
+// Admin Client Digital Vaults & File Explorer (Role-Permission controlled)
+router.get('/admin/vaults', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']), tenant_1.enforceTenantIsolation, clientVaultController_1.listClientVaults);
+router.get('/admin/vaults/:clientId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']), tenant_1.enforceTenantIsolation, clientVaultController_1.getClientVaultDetails);
+router.post('/admin/vaults/:clientId/recordings', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']), tenant_1.enforceTenantIsolation, upload.single('file'), clientVaultController_1.uploadCallRecording);
+router.delete('/admin/vaults/:clientId/recordings/:recordingId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']), tenant_1.enforceTenantIsolation, clientVaultController_1.deleteCallRecording);
+router.get('/admin/vaults/:clientId/export-zip', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_VAULTS_FULL'), tenant_1.enforceTenantIsolation, clientVaultController_1.exportClientVaultZip);
+router.get('/admin/vaults/:clientId/export-folder/:folderKey', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_VAULTS_FULL'), tenant_1.enforceTenantIsolation, clientVaultController_1.exportSingleFolder);
+router.get('/admin/vaults/:clientId/invoice/:paymentId', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_VAULTS_FULL'), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadSingleInvoice);
+router.get('/admin/vaults/:clientId/agreement', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_VAULTS_FULL'), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadAgreementPdf);
+router.get('/admin/vaults/:clientId/research-report/:reportId', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_VAULTS_FULL'), tenant_1.enforceTenantIsolation, clientVaultController_1.downloadSingleResearchReport);
+// ============================================================================
+// Frequently Asked Questions (FAQ) - Client & Admin Endpoints
+// ============================================================================
+router.get('/faqs', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, faqController_1.getPublicFaqs);
+router.get('/admin/faqs', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.getAdminFaqs);
+router.post('/admin/faqs', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.createFaq);
+router.put('/admin/faqs/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.updateFaq);
+router.delete('/admin/faqs/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.deleteFaq);
 // Admin Category Management
 router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
 router.post('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createCategory);

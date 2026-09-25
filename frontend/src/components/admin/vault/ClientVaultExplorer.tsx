@@ -180,11 +180,49 @@ const SUBFOLDER_METADATA: Record<string, {
   }
 };
 
-export default function ClientVaultExplorer() {
+interface ClientVaultExplorerProps {
+  canDownload?: boolean;
+  isMasked?: boolean;
+}
+
+const maskMobile = (val?: string) => {
+  if (!val) return 'N/A';
+  if (val.includes('*')) return val;
+  const clean = val.replace(/\D/g, '');
+  if (clean.length < 4) return '******' + clean;
+  return clean.substring(0, 4) + '****' + clean.substring(clean.length - 2);
+};
+
+const maskEmail = (val?: string) => {
+  if (!val) return 'N/A';
+  if (val.includes('*')) return val;
+  const parts = val.split('@');
+  if (parts.length !== 2) return '***@***.com';
+  const name = parts[0];
+  const maskedName = name.length > 2 ? name.substring(0, 2) + '*'.repeat(name.length - 2) : name + '*';
+  return `${maskedName}@${parts[1]}`;
+};
+
+const maskPan = (val?: string) => {
+  if (!val) return 'N/A';
+  if (val.includes('*')) return val;
+  const clean = val.trim();
+  if (clean.length <= 4) return '****';
+  return clean.substring(0, 2) + '*'.repeat(clean.length - 4) + clean.substring(clean.length - 2);
+};
+
+export default function ClientVaultExplorer({ canDownload: propCanDownload, isMasked: propIsMasked }: ClientVaultExplorerProps = {}) {
   // Navigation states: 'ROOT' | 'CLIENT' | 'SUBFOLDER'
   const [navLevel, setNavLevel] = useState<'ROOT' | 'CLIENT' | 'SUBFOLDER'>('ROOT');
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [selectedSubfolderKey, setSelectedSubfolderKey] = useState<string | null>(null);
+
+  // Dynamic RBAC Permission & Masking state (synced with backend & props)
+  const [serverCanDownload, setServerCanDownload] = useState<boolean>(true);
+  const [serverIsMasked, setServerIsMasked] = useState<boolean>(false);
+
+  const effectiveCanDownload = (propCanDownload !== undefined ? propCanDownload : true) && serverCanDownload;
+  const effectiveIsMasked = (propIsMasked !== undefined ? propIsMasked : false) || serverIsMasked;
 
   // Filter state: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'NO_PLAN'
   const [planStatusFilter, setPlanStatusFilter] = useState<'ALL' | 'ACTIVE' | 'EXPIRED' | 'NO_PLAN'>('ALL');
@@ -225,6 +263,8 @@ export default function ClientVaultExplorer() {
       });
       if (res && res.success) {
         setVaults(res.data || []);
+        if (res.canDownload !== undefined) setServerCanDownload(res.canDownload);
+        if (res.isMasked !== undefined) setServerIsMasked(res.isMasked);
       } else {
         toast.error(res?.message || 'Failed to load client vaults');
       }
@@ -260,6 +300,8 @@ export default function ClientVaultExplorer() {
       const res = await api.getClientVaultDetails(clientId);
       if (res && res.success) {
         setVaultDetails(res.data);
+        if (res.canDownload !== undefined) setServerCanDownload(res.canDownload);
+        if (res.isMasked !== undefined) setServerIsMasked(res.isMasked);
       } else {
         toast.error(res?.message || 'Could not load vault details');
       }
@@ -587,7 +629,7 @@ export default function ClientVaultExplorer() {
               </>
             )}
 
-            {navLevel === 'CLIENT' && vaultDetails && (
+            {navLevel === 'CLIENT' && vaultDetails && effectiveCanDownload && (
               <button
                 onClick={() => handleDownloadFullZip(vaultDetails.client?.id, vaultDetails.client?.name)}
                 className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-sm font-semibold shadow-md transition"
@@ -597,7 +639,7 @@ export default function ClientVaultExplorer() {
               </button>
             )}
 
-            {navLevel === 'SUBFOLDER' && selectedSubfolderKey && (
+            {navLevel === 'SUBFOLDER' && selectedSubfolderKey && effectiveCanDownload && (
               <button
                 onClick={() => handleDownloadFolder(selectedSubfolderKey)}
                 className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-black dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl text-sm font-semibold shadow-md transition"
@@ -738,16 +780,18 @@ export default function ClientVaultExplorer() {
                             </span>
                           )}
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownloadFullZip(vault.clientId, vault.name);
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
-                            title="Download Complete Dossier (ZIP)"
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
+                          {effectiveCanDownload && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadFullZip(vault.clientId, vault.name);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
+                              title="Download Complete Dossier (ZIP)"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -802,16 +846,22 @@ export default function ClientVaultExplorer() {
                       <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-slate-400">
                         <div className="flex items-center justify-between">
                           <span>Mobile:</span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">{vault.mobile || 'N/A'}</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                            {effectiveIsMasked ? maskMobile(vault.mobile) : (vault.mobile || 'N/A')}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Email:</span>
-                          <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[130px]">{vault.email || 'N/A'}</span>
+                          <span className="font-medium text-slate-700 dark:text-slate-300 truncate max-w-[130px]">
+                            {effectiveIsMasked ? maskEmail(vault.email) : (vault.email || 'N/A')}
+                          </span>
                         </div>
                         {vault.pan && (
                           <div className="flex items-center justify-between">
                             <span>PAN:</span>
-                            <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{vault.pan}</span>
+                            <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                              {effectiveIsMasked ? maskPan(vault.pan) : vault.pan}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -879,9 +929,15 @@ export default function ClientVaultExplorer() {
                           <td className="p-3.5 font-semibold text-slate-800 dark:text-slate-200">
                             {vault.registeredAtFormatted || new Date(vault.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </td>
-                          <td className="p-3.5 text-slate-700 dark:text-slate-300 font-medium">{vault.mobile || 'N/A'}</td>
-                          <td className="p-3.5 text-slate-700 dark:text-slate-300">{vault.email || 'N/A'}</td>
-                          <td className="p-3.5 font-mono text-slate-600 dark:text-slate-400">{vault.pan || '-'}</td>
+                          <td className="p-3.5 text-slate-700 dark:text-slate-300 font-medium">
+                            {effectiveIsMasked ? maskMobile(vault.mobile) : (vault.mobile || 'N/A')}
+                          </td>
+                          <td className="p-3.5 text-slate-700 dark:text-slate-300">
+                            {effectiveIsMasked ? maskEmail(vault.email) : (vault.email || 'N/A')}
+                          </td>
+                          <td className="p-3.5 font-mono text-slate-600 dark:text-slate-400">
+                            {effectiveIsMasked ? maskPan(vault.pan) : (vault.pan || '-')}
+                          </td>
                           <td className="p-3.5">
                             <span className="font-semibold text-slate-700 dark:text-slate-200">
                               {vault.metrics?.activeSubscriptions || 0}
@@ -904,13 +960,17 @@ export default function ClientVaultExplorer() {
                             )}
                           </td>
                           <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => handleDownloadFullZip(vault.clientId, vault.name)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-lg text-xs font-semibold transition"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              <span>ZIP</span>
-                            </button>
+                            {effectiveCanDownload ? (
+                              <button
+                                onClick={() => handleDownloadFullZip(vault.clientId, vault.name)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-lg text-xs font-semibold transition"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>ZIP</span>
+                              </button>
+                            ) : (
+                              <span className="text-slate-400 text-xs italic">View Only</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -956,28 +1016,36 @@ export default function ClientVaultExplorer() {
                         📁 {vaultDetails.folderName}
                       </div>
                       <div className="mt-3 flex items-center gap-4 sm:gap-6 text-xs text-white/70 flex-wrap">
-                        <div>📞 <span className="font-semibold text-white">{vaultDetails.client.mobile || 'N/A'}</span></div>
-                        <div>✉️ <span className="font-semibold text-white">{vaultDetails.client.email || 'N/A'}</span></div>
+                        <div>📞 <span className="font-semibold text-white">
+                          {effectiveIsMasked ? maskMobile(vaultDetails.client.mobile) : (vaultDetails.client.mobile || 'N/A')}
+                        </span></div>
+                        <div>✉️ <span className="font-semibold text-white">
+                          {effectiveIsMasked ? maskEmail(vaultDetails.client.email) : (vaultDetails.client.email || 'N/A')}
+                        </span></div>
                         {vaultDetails.client.pan && (
-                          <div>🪪 PAN: <span className="font-mono font-semibold text-amber-300">{vaultDetails.client.pan}</span></div>
+                          <div>🪪 PAN: <span className="font-mono font-semibold text-amber-300">
+                            {effectiveIsMasked ? maskPan(vaultDetails.client.pan) : vaultDetails.client.pan}
+                          </span></div>
                         )}
                         <div>📅 Registered: <span className="font-semibold text-white">{new Date(vaultDetails.client.registeredAt).toLocaleDateString()}</span></div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
-                    <button
-                      onClick={() => handleDownloadFullZip(vaultDetails.client.id, vaultDetails.client.name)}
-                      className="flex items-center justify-center gap-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg transition"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download Entire Dossier (ZIP)</span>
-                    </button>
-                    <div className="text-[11px] text-center text-white/60">
-                      Extracts into 8 categorized folders with CSVs & Audio
+                  {effectiveCanDownload && (
+                    <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
+                      <button
+                        onClick={() => handleDownloadFullZip(vaultDetails.client.id, vaultDetails.client.name)}
+                        className="flex items-center justify-center gap-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg transition"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download Entire Dossier (ZIP)</span>
+                      </button>
+                      <div className="text-[11px] text-center text-white/60">
+                        Extracts into 8 categorized folders with CSVs & Audio
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -1074,16 +1142,18 @@ export default function ClientVaultExplorer() {
                             📁 Open Folder
                           </span>
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownloadFolder(folderData.key);
-                              }}
-                              className="p-1 hover:text-blue-600 text-slate-400 transition"
-                              title="Export this folder"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
+                            {effectiveCanDownload && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadFolder(folderData.key);
+                                }}
+                                className="p-1 hover:text-blue-600 text-slate-400 transition"
+                                title="Export this folder"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 group-hover:text-blue-600 transition-all" />
                           </div>
                         </div>
@@ -1130,13 +1200,15 @@ export default function ClientVaultExplorer() {
                   </button>
                 )}
 
-                <button
-                  onClick={() => handleDownloadFolder(selectedSubfolderKey)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download This Folder</span>
-                </button>
+                {effectiveCanDownload && (
+                  <button
+                    onClick={() => handleDownloadFolder(selectedSubfolderKey)}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download This Folder</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1158,17 +1230,23 @@ export default function ClientVaultExplorer() {
 
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                   <div className="text-xs text-slate-400">Mobile Phone</div>
-                  <div className="text-base font-bold text-slate-800 dark:text-white mt-1">{vaultDetails.client.mobile || 'N/A'}</div>
+                  <div className="text-base font-bold text-slate-800 dark:text-white mt-1">
+                    {effectiveIsMasked ? maskMobile(vaultDetails.client.mobile) : (vaultDetails.client.mobile || 'N/A')}
+                  </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                   <div className="text-xs text-slate-400">Email Address</div>
-                  <div className="text-base font-bold text-slate-800 dark:text-white mt-1 truncate">{vaultDetails.client.email || 'N/A'}</div>
+                  <div className="text-base font-bold text-slate-800 dark:text-white mt-1 truncate">
+                    {effectiveIsMasked ? maskEmail(vaultDetails.client.email) : (vaultDetails.client.email || 'N/A')}
+                  </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
                   <div className="text-xs text-slate-400">PAN Number</div>
-                  <div className="text-base font-mono font-bold text-amber-600 dark:text-amber-400 mt-1">{vaultDetails.client.pan || 'Not Submitted'}</div>
+                  <div className="text-base font-mono font-bold text-amber-600 dark:text-amber-400 mt-1">
+                    {effectiveIsMasked ? maskPan(vaultDetails.client.pan) : (vaultDetails.client.pan || 'Not Submitted')}
+                  </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
@@ -1330,14 +1408,18 @@ export default function ClientVaultExplorer() {
                               </td>
 
                               <td className="p-3.5 text-right">
-                                <button
-                                  onClick={() => handleDownloadInvoice(sub.paymentId || sub._id, sub.transactionRef)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-bold border border-blue-200 dark:border-blue-800 transition shadow-sm"
-                                  title="Download Official SEBI Tax Invoice PDF"
-                                >
-                                  <FileDown className="w-3.5 h-3.5" />
-                                  <span>Invoice (PDF)</span>
-                                </button>
+                                {effectiveCanDownload ? (
+                                  <button
+                                    onClick={() => handleDownloadInvoice(sub.paymentId || sub._id, sub.transactionRef)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-bold border border-blue-200 dark:border-blue-800 transition shadow-sm"
+                                    title="Download Official SEBI Tax Invoice PDF"
+                                  >
+                                    <FileDown className="w-3.5 h-3.5" />
+                                    <span>Invoice (PDF)</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-400 text-xs italic">View Only</span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -1407,13 +1489,17 @@ export default function ClientVaultExplorer() {
                               </span>
                             </td>
                             <td className="p-3.5 text-right">
-                              <button
-                                onClick={() => handleDownloadInvoice(pay._id || pay.id, pay.transactionRef)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-bold border border-emerald-200 dark:border-emerald-800 transition shadow-sm"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>Download Invoice (PDF)</span>
-                              </button>
+                              {effectiveCanDownload ? (
+                                <button
+                                  onClick={() => handleDownloadInvoice(pay._id || pay.id, pay.transactionRef)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-bold border border-emerald-200 dark:border-emerald-800 transition shadow-sm"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>Download Invoice (PDF)</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 text-xs italic">View Only</span>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -1439,13 +1525,15 @@ export default function ClientVaultExplorer() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
-                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition shrink-0"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Signed Agreement (PDF)</span>
-                </button>
+                {effectiveCanDownload && (
+                  <button
+                    onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition shrink-0"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Signed Agreement (PDF)</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -1704,16 +1792,18 @@ export default function ClientVaultExplorer() {
                           </div>
 
                           <div className="flex items-center gap-2 self-end sm:self-center">
-                            <a
-                              href={rec.fileUrl}
-                              download={rec.fileName}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
-                              title="Download Audio (.mp3)"
-                            >
-                              <Download className="w-4 h-4" />
-                            </a>
+                            {effectiveCanDownload && (
+                              <a
+                                href={rec.fileUrl}
+                                download={rec.fileName}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
+                                title="Download Audio (.mp3)"
+                              >
+                                <Download className="w-4 h-4" />
+                              </a>
+                            )}
                             <button
                               onClick={() => handleDeleteRecording(rec._id)}
                               className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition"
@@ -1875,13 +1965,15 @@ export default function ClientVaultExplorer() {
                               : 'Published'}
                           </span>
 
-                          <button
-                            onClick={() => handleDownloadResearchReport(rep._id, rep.title || rep.stockSymbol, rep.fileUrl)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-bold border border-amber-200 dark:border-amber-800/60 shadow-sm transition"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download PDF</span>
-                          </button>
+                          {effectiveCanDownload && (
+                            <button
+                              onClick={() => handleDownloadResearchReport(rep._id, rep.title || rep.stockSymbol, rep.fileUrl)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-bold border border-amber-200 dark:border-amber-800/60 shadow-sm transition"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download PDF</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -1913,13 +2005,15 @@ export default function ClientVaultExplorer() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
-                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition shrink-0"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download Official Agreement (PDF)</span>
-                  </button>
+                  {effectiveCanDownload && (
+                    <button
+                      onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
+                      className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition shrink-0"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Official Agreement (PDF)</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1959,7 +2053,7 @@ export default function ClientVaultExplorer() {
                         </div>
                       </div>
 
-                      {(item.fileUrl || item.agreementUrl) && (
+                      {(item.fileUrl || item.agreementUrl) && effectiveCanDownload && (
                         <a
                           href={item.fileUrl || item.agreementUrl}
                           target="_blank"

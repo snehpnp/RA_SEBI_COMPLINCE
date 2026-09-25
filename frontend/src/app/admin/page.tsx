@@ -13,11 +13,12 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
 import TicketManagement from '../../components/admin/TicketManagement';
+import FaqManagement from '../../components/admin/FaqManagement';
 import ComplaintReportAdmin from '../../components/admin/ComplaintReportAdmin';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
@@ -124,9 +125,14 @@ const NAV_CONFIG: NavModule[] = [
     tab: 'vaults',
     label: 'Client Vaults',
     icon: 'FolderArchive',
-    accessKey: 'ACCESS_CLIENTS',
+    accessKey: 'ACCESS_VAULTS',
     moduleLabel: 'Client Digital Vaults Desk',
     moduleDesc: 'Desktop-style hierarchical file explorer for client dossiers, trade performance, documents, and call recordings',
+    subPermissions: [
+      { code: 'ACCESS_VAULTS_VIEW', label: 'Only View (No Downloads)', desc: 'Allows viewing client vault records. All download buttons are hidden' },
+      { code: 'ACCESS_VAULTS_FULL', label: 'Full Access (View & Download)', desc: 'Full access to view and download all client vault files, folders, and complete ZIP dossiers' },
+      { code: 'MASK_VAULT_DATA', label: 'Mask Sensitive Data', desc: 'Masks client PAN, Mobile, and Email in vault views. Download buttons will also remain hidden' }
+    ]
   },
   {
     tab: 'plans',
@@ -190,11 +196,11 @@ const NAV_CONFIG: NavModule[] = [
   },
   {
     tab: 'tickets',
-    label: 'Ticket System',
+    label: 'Support / Ticket System',
     icon: 'LifeBuoy',
     accessKey: 'ACCESS_TICKETS',
-    moduleLabel: 'Support Ticket Desk',
-    moduleDesc: 'Manage and resolve customer support tickets and queries',
+    moduleLabel: 'Support & Helpdesk Desk',
+    moduleDesc: 'Manage customer support tickets, chat with clients, and manage FAQs displayed in client portal',
     subPermissions: [
       { code: 'VIEW_ALL_TICKETS', label: 'View All Tickets', desc: 'Allows viewing and replying to all client tickets' },
       { code: 'VIEW_OWN_TICKETS', label: 'View Own Tickets', desc: 'Allows viewing and replying to tickets only from own onboarding clients' },
@@ -467,6 +473,11 @@ function AdminDashboardContent() {
 
   const hasPermission = (permCode: string) => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
+    if (permCode === 'ACCESS_VAULTS') {
+      return user?.permissions?.includes('ACCESS_VAULTS') || 
+             user?.permissions?.includes('ACCESS_VAULTS_VIEW') || 
+             user?.permissions?.includes('ACCESS_VAULTS_FULL') || false;
+    }
     return user?.permissions?.includes(permCode) || false;
   };
 
@@ -475,9 +486,28 @@ function AdminDashboardContent() {
 
     setSelectedRole((prev: any) => {
       const currentPerms = prev.permissions || [];
-      const newPerms = currentPerms.includes(permCode)
+      let newPerms = currentPerms.includes(permCode)
         ? currentPerms.filter((p: string) => p !== permCode)
         : [...currentPerms, permCode];
+
+      // Mutually exclusive handling for Vaults: Only View vs Full Access vs Masking
+      if (permCode === 'ACCESS_VAULTS_VIEW' && !currentPerms.includes('ACCESS_VAULTS_VIEW')) {
+        newPerms = newPerms.filter((p: string) => p !== 'ACCESS_VAULTS_FULL');
+        if (!newPerms.includes('ACCESS_VAULTS')) newPerms.push('ACCESS_VAULTS');
+      }
+      if (permCode === 'ACCESS_VAULTS_FULL' && !currentPerms.includes('ACCESS_VAULTS_FULL')) {
+        newPerms = newPerms.filter((p: string) => p !== 'ACCESS_VAULTS_VIEW' && p !== 'MASK_VAULT_DATA');
+        if (!newPerms.includes('ACCESS_VAULTS')) newPerms.push('ACCESS_VAULTS');
+      }
+      if (permCode === 'MASK_VAULT_DATA' && !currentPerms.includes('MASK_VAULT_DATA')) {
+        newPerms = newPerms.filter((p: string) => p !== 'ACCESS_VAULTS_FULL');
+        if (!newPerms.includes('ACCESS_VAULTS_VIEW')) newPerms.push('ACCESS_VAULTS_VIEW');
+        if (!newPerms.includes('ACCESS_VAULTS')) newPerms.push('ACCESS_VAULTS');
+      }
+      if (permCode === 'ACCESS_VAULTS' && currentPerms.includes('ACCESS_VAULTS')) {
+        newPerms = newPerms.filter((p: string) => !['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL', 'MASK_VAULT_DATA'].includes(p));
+      }
+
       return { ...prev, permissions: newPerms };
     });
   };
@@ -678,12 +708,13 @@ function AdminDashboardContent() {
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
 
-  // Support Tickets Admin State
+  // Support Tickets & FAQ Admin State
   const [adminTickets, setAdminTickets] = useState<any[]>([]);
   const [selectedAdminTicket, setSelectedAdminTicket] = useState<any>(null);
   const [adminReplyText, setAdminReplyText] = useState('');
   const [adminReplyAttachment, setAdminReplyAttachment] = useState<File | null>(null);
   const [adminTicketStatusFilter, setAdminTicketStatusFilter] = useState<'ALL' | 'PENDING' | 'OPEN' | 'CLOSED'>('ALL');
+  const [supportSubTab, setSupportSubTab] = useState<'tickets' | 'faqs'>('tickets');
 
   // Plan modal state
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -1371,6 +1402,12 @@ function AdminDashboardContent() {
         api.getTenantAuditLogs().then(res => {
           if (res.success) setActivityLogs(res.data);
         }).catch(() => { });
+        api.listAdminTickets().then(res => {
+          if (res.success) setAdminTickets(res.data);
+        }).catch(() => { });
+      }
+
+      if (tab === 'tickets') {
         api.listAdminTickets().then(res => {
           if (res.success) setAdminTickets(res.data);
         }).catch(() => { });
@@ -3994,7 +4031,7 @@ function AdminDashboardContent() {
           </div>
 
           {/* Navigation */}
-          <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 hide-scrollbar">
+          <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
             {NAV_CONFIG.map((mod) => {
               if (!hasPermission(mod.accessKey)) return null;
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
@@ -6357,8 +6394,19 @@ function AdminDashboardContent() {
                   {/* ====================================================
                 CLIENT DIGITAL VAULTS TAB (Desktop File Explorer)
                ==================================================== */}
-                  {activeTab === 'vaults' && (
-                    <ClientVaultExplorer />
+                  {activeTab === 'vaults' && hasPermission('ACCESS_VAULTS') && (
+                    <ClientVaultExplorer 
+                      canDownload={
+                        (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')
+                          ? !user?.permissions?.includes('MASK_VAULT_DATA')
+                          : (user?.permissions?.includes('ACCESS_VAULTS_FULL') && !user?.permissions?.includes('MASK_VAULT_DATA'))
+                      } 
+                      isMasked={
+                        user?.role === 'SUPER_ADMIN'
+                          ? false
+                          : (user?.permissions?.includes('MASK_VAULT_DATA') || (!user?.permissions?.includes('VIEW_SENSITIVE_DATA') && !user?.permissions?.includes('ACCESS_VAULTS_FULL')))
+                      } 
+                    />
                   )}
 
                   {/* ====================================================
@@ -9121,17 +9169,63 @@ function AdminDashboardContent() {
                     </div>
                   )}
 
-                  {/* ROLES TAB */}
                   {activeTab === 'tickets' && hasPermission('ACCESS_TICKETS') && (
-                    <TicketManagement
-                      adminTickets={adminTickets}
-                      fetchAdminTickets={async () => {
-                        const listRes = await api.listAdminTickets();
-                        if (listRes.success) setAdminTickets(listRes.data);
-                      }}
-                      adminTicketStatusFilter={adminTicketStatusFilter}
-                      setAdminTicketStatusFilter={setAdminTicketStatusFilter}
-                    />
+                    <div className="space-y-6">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+                        <div>
+                          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                            <LifeBuoy className="w-7 h-7 text-primary-500" />
+                            <span>Support & Helpdesk Desk</span>
+                          </h2>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            Resolve client queries and manage dynamic FAQ knowledge base displayed on the client portal.
+                          </p>
+                        </div>
+                        <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-inner">
+                          <button
+                            onClick={() => setSupportSubTab('tickets')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                              supportSubTab === 'tickets'
+                                ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            <LifeBuoy className="w-4 h-4" />
+                            <span>Support Tickets</span>
+                            {adminTickets.filter((t: any) => t.status === 'OPEN' || t.status === 'PENDING').length > 0 && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary-500 text-white">
+                                {adminTickets.filter((t: any) => t.status === 'OPEN' || t.status === 'PENDING').length}
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => setSupportSubTab('faqs')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                              supportSubTab === 'faqs'
+                                ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            <HelpCircle className="w-4 h-4" />
+                            <span>FAQ Management</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {supportSubTab === 'tickets' ? (
+                        <TicketManagement
+                          adminTickets={adminTickets}
+                          fetchAdminTickets={async () => {
+                            const listRes = await api.listAdminTickets();
+                            if (listRes.success) setAdminTickets(listRes.data);
+                          }}
+                          adminTicketStatusFilter={adminTicketStatusFilter}
+                          setAdminTicketStatusFilter={setAdminTicketStatusFilter}
+                        />
+                      ) : (
+                        <FaqManagement />
+                      )}
+                    </div>
                   )}
                   {activeTab === 'roles' && hasPermission('ACCESS_ROLES') && (
                     <div className="space-y-6">

@@ -936,6 +936,40 @@ class ApiClient {
       method: 'POST'
     });
   }
+
+  // FAQ APIs
+  async getFaqs() {
+    return this.request('/faqs');
+  }
+
+  async getAdminFaqs(params?: { search?: string; category?: string }) {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.append('search', params.search);
+    if (params?.category) qs.append('category', params.category);
+    const queryStr = qs.toString();
+    return this.request(`/admin/faqs${queryStr ? `?${queryStr}` : ''}`);
+  }
+
+  async createFaq(data: { question: string; answer: string; category?: string; order?: number; isActive?: boolean }) {
+    return this.request('/admin/faqs', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateFaq(id: string, data: any) {
+    return this.request(`/admin/faqs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async deleteFaq(id: string) {
+    return this.request(`/admin/faqs/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
   async getStocks(query?: string) {
     return this.request(`/stocks${query ? `?query=${query}` : ''}`);
   }

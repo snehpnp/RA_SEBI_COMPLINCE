@@ -50,6 +50,13 @@ import {
   downloadAgreementPdf,
   downloadSingleResearchReport
 } from '../controllers/clientVaultController';
+import {
+  getPublicFaqs,
+  getAdminFaqs,
+  createFaq,
+  updateFaq,
+  deleteFaq
+} from '../controllers/faqController';
 
 const router = Router();
 
@@ -768,25 +775,25 @@ router.get(
   getClientTimeline
 );
 
-// Admin Client Digital Vaults & File Explorer
+// Admin Client Digital Vaults & File Explorer (Role-Permission controlled)
 router.get(
   '/admin/vaults',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']),
   enforceTenantIsolation,
   listClientVaults
 );
 router.get(
   '/admin/vaults/:clientId',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']),
   enforceTenantIsolation,
   getClientVaultDetails
 );
 router.post(
   '/admin/vaults/:clientId/recordings',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
   enforceTenantIsolation,
   upload.single('file'),
   uploadCallRecording
@@ -794,44 +801,82 @@ router.post(
 router.delete(
   '/admin/vaults/:clientId/recordings/:recordingId',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
   enforceTenantIsolation,
   deleteCallRecording
 );
 router.get(
   '/admin/vaults/:clientId/export-zip',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requirePermission('ACCESS_VAULTS_FULL'),
   enforceTenantIsolation,
   exportClientVaultZip
 );
 router.get(
   '/admin/vaults/:clientId/export-folder/:folderKey',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requirePermission('ACCESS_VAULTS_FULL'),
   enforceTenantIsolation,
   exportSingleFolder
 );
 router.get(
   '/admin/vaults/:clientId/invoice/:paymentId',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requirePermission('ACCESS_VAULTS_FULL'),
   enforceTenantIsolation,
   downloadSingleInvoice
 );
 router.get(
   '/admin/vaults/:clientId/agreement',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requirePermission('ACCESS_VAULTS_FULL'),
   enforceTenantIsolation,
   downloadAgreementPdf
 );
 router.get(
   '/admin/vaults/:clientId/research-report/:reportId',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  requirePermission('ACCESS_VAULTS_FULL'),
   enforceTenantIsolation,
   downloadSingleResearchReport
+);
+
+// ============================================================================
+// Frequently Asked Questions (FAQ) - Client & Admin Endpoints
+// ============================================================================
+router.get(
+  '/faqs',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getPublicFaqs
+);
+router.get(
+  '/admin/faqs',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  getAdminFaqs
+);
+router.post(
+  '/admin/faqs',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  createFaq
+);
+router.put(
+  '/admin/faqs/:id',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  updateFaq
+);
+router.delete(
+  '/admin/faqs/:id',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  deleteFaq
 );
 
 // Admin Category Management

@@ -166,6 +166,64 @@ function generateResearchReportPdf(report: any, tenant: any): Promise<Buffer> {
   });
 }
 
+/**
+ * Sensitive Data Masking Helpers
+ */
+export const maskEmail = (email: string | null | undefined): string => {
+  if (!email) return 'N/A';
+  const parts = email.split('@');
+  if (parts.length !== 2) return '***@***.com';
+  const name = parts[0];
+  const maskedName = name.length > 2 ? name.substring(0, 2) + '*'.repeat(name.length - 2) : name + '*';
+  return `${maskedName}@${parts[1]}`;
+};
+
+export const maskMobile = (mobile: string | null | undefined): string => {
+  if (!mobile) return 'N/A';
+  const clean = mobile.replace(/\D/g, '');
+  if (clean.length < 4) return '******' + clean;
+  return clean.substring(0, 4) + '****' + clean.substring(clean.length - 2);
+};
+
+export const maskDocument = (doc: string | null | undefined): string => {
+  if (!doc) return 'N/A';
+  const clean = doc.trim();
+  if (clean.length <= 4) return '****';
+  return clean.substring(0, 2) + '*'.repeat(clean.length - 4) + clean.substring(clean.length - 2);
+};
+
+/**
+ * Checks role-based permission for vault downloads and sensitive data masking
+ */
+export async function checkVaultAccessAndMasking(req: AuthenticatedRequest): Promise<{ canDownload: boolean; isMasked: boolean }> {
+  const isFullAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
+  if (isFullAdmin) {
+    return { canDownload: true, isMasked: false };
+  }
+
+  const userRole = await dynamicDb.Role.findOne({ name: req.user?.role }).lean();
+  if (!userRole) {
+    return { canDownload: false, isMasked: true };
+  }
+
+  const rolePerms = await dynamicDb.RolePermission.find({
+    roleId: userRole._id || userRole.id
+  }).populate('permissionId').lean();
+
+  const permCodes = rolePerms.map((rp: any) => rp.permissionId?.code || rp.permission?.code).filter(Boolean);
+
+  const hasFull = permCodes.includes('ACCESS_VAULTS_FULL');
+  const hasMask = permCodes.includes('MASK_VAULT_DATA');
+  const hasViewSensitive = permCodes.includes('VIEW_SENSITIVE_DATA');
+
+  // If role explicitly has MASK_VAULT_DATA, or lacks VIEW_SENSITIVE_DATA (and not full) -> mask
+  const isMasked = hasMask || (!hasViewSensitive && !hasFull);
+  // Downloads are only allowed if full access is granted AND data is NOT masked
+  const canDownload = hasFull && !hasMask;
+
+  return { canDownload, isMasked };
+}
+
 // ============================================================================
 // 1. LIST CLIENT VAULTS (with Plan Status Filter & Registration Sorting)
 // ============================================================================
@@ -276,10 +334,20 @@ export const listClientVaults = async (req: AuthenticatedRequest, res: Response)
       clientActivePlansMap.set(cId, existing);
     }
 
+    // Check user role permissions for download ability and data masking
+    const { canDownload, isMasked } = await checkVaultAccessAndMasking(req);
+
     let vaults = clients.map((client: any) => {
       const cId = String(client._id || client.id);
       const subs = subMap.get(cId) || { total: 0, active: 0 };
-      const folderName = buildClientFolderName(client);
+      
+      const displayMobile = isMasked ? maskMobile(client.mobile) : client.mobile;
+      const displayEmail = isMasked ? maskEmail(client.email) : client.email;
+      const displayPan = isMasked ? maskDocument(client.pan) : client.pan;
+
+      const folderName = isMasked
+        ? `${sanitizeFileName(client.name || 'Client')}_${sanitizeFileName(displayMobile)}_${sanitizeFileName(displayEmail)}`
+        : buildClientFolderName(client);
 
       // Determine plan status category
       let planStatus: 'ACTIVE_PLAN' | 'EXPIRED_PLAN' | 'NO_PLAN' = 'NO_PLAN';
@@ -306,9 +374,9 @@ export const listClientVaults = async (req: AuthenticatedRequest, res: Response)
       return {
         clientId: cId,
         name: client.name,
-        mobile: client.mobile,
-        email: client.email,
-        pan: client.pan,
+        mobile: displayMobile,
+        email: displayEmail,
+        pan: displayPan,
         category: client.category || 'INDIVIDUAL',
         status: client.status || 'ACTIVE',
         kycStatus: client.kycStatus || 'PENDING',
@@ -318,6 +386,8 @@ export const listClientVaults = async (req: AuthenticatedRequest, res: Response)
         folderName,
         planStatus,
         activePlanNames,
+        canDownload,
+        isMasked,
         metrics: {
           totalSubscriptions: subs.total,
           activeSubscriptions: subs.active,
@@ -344,6 +414,8 @@ export const listClientVaults = async (req: AuthenticatedRequest, res: Response)
       success: true,
       data: vaults,
       totalCount: totalClients,
+      canDownload,
+      isMasked,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -373,7 +445,15 @@ export const getClientVaultDetails = async (req: AuthenticatedRequest, res: Resp
       return res.status(404).json({ success: false, message: 'Client vault not found.' });
     }
 
-    const folderName = buildClientFolderName(client);
+    const { canDownload, isMasked } = await checkVaultAccessAndMasking(req);
+
+    const displayMobile = isMasked ? maskMobile(client.mobile) : client.mobile;
+    const displayEmail = isMasked ? maskEmail(client.email) : client.email;
+    const displayPan = isMasked ? maskDocument(client.pan) : client.pan;
+
+    const folderName = isMasked
+      ? `${sanitizeFileName(client.name || 'Client')}_${sanitizeFileName(displayMobile)}_${sanitizeFileName(displayEmail)}`
+      : buildClientFolderName(client);
 
     // Parallel fetch all data required for 8 subfolders
     const [
@@ -543,11 +623,20 @@ export const getClientVaultDetails = async (req: AuthenticatedRequest, res: Resp
         description: 'Account Dossier, KYC Bio, Risk Profiling, Contact Details',
         fileCount: 1,
         data: {
-          client,
-          profile: clientProfile,
+          client: {
+            ...client,
+            mobile: displayMobile,
+            email: displayEmail,
+            pan: displayPan
+          },
+          profile: clientProfile ? {
+            ...clientProfile,
+            panNumber: isMasked ? maskDocument((clientProfile as any).panNumber) : (clientProfile as any).panNumber,
+            aadharNumber: isMasked ? maskDocument((clientProfile as any).aadharNumber) : (clientProfile as any).aadharNumber
+          } : null,
           user: userAccount ? {
             id: (userAccount as any)._id,
-            email: (userAccount as any).email,
+            email: isMasked ? maskEmail((userAccount as any).email) : (userAccount as any).email,
             status: (userAccount as any).status,
             createdAt: (userAccount as any).createdAt,
             lastLogin: (userAccount as any).lastLogin
@@ -656,9 +745,9 @@ export const getClientVaultDetails = async (req: AuthenticatedRequest, res: Resp
         client: {
           id: client._id,
           name: client.name,
-          mobile: client.mobile,
-          email: client.email,
-          pan: client.pan,
+          mobile: displayMobile,
+          email: displayEmail,
+          pan: displayPan,
           category: client.category,
           status: client.status,
           agreementSigned: Boolean(client.agreementSigned || (agreements && agreements.length > 0)),
@@ -669,6 +758,8 @@ export const getClientVaultDetails = async (req: AuthenticatedRequest, res: Resp
           })
         },
         folderName,
+        canDownload,
+        isMasked,
         folders
       }
     });
@@ -824,6 +915,11 @@ export const deleteCallRecording = async (req: AuthenticatedRequest, res: Respon
 // ============================================================================
 export const downloadSingleInvoice = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { canDownload } = await checkVaultAccessAndMasking(req);
+    if (!canDownload) {
+      return res.status(403).json({ success: false, message: 'Downloading invoice PDF is disabled for your role permissions.' });
+    }
+
     const { paymentId } = req.params;
     if (!paymentId) return res.status(400).json({ success: false, message: 'Payment ID is required.' });
 
@@ -846,6 +942,11 @@ export const downloadSingleInvoice = async (req: AuthenticatedRequest, res: Resp
 // ============================================================================
 export const downloadAgreementPdf = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { canDownload } = await checkVaultAccessAndMasking(req);
+    if (!canDownload) {
+      return res.status(403).json({ success: false, message: 'Downloading agreement PDF is disabled for your role permissions.' });
+    }
+
     const { clientId } = req.params;
     if (!clientId) return res.status(400).json({ success: false, message: 'Client ID is required.' });
 
@@ -883,6 +984,11 @@ export const downloadAgreementPdf = async (req: AuthenticatedRequest, res: Respo
 // ============================================================================
 export const exportClientVaultZip = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { canDownload } = await checkVaultAccessAndMasking(req);
+    if (!canDownload) {
+      return res.status(403).json({ success: false, message: 'Downloading client vault ZIP is disabled for your role permissions.' });
+    }
+
     const tenantId = req.user?.tenantId;
     const { clientId } = req.params;
 
@@ -1183,6 +1289,11 @@ Regulations, 2014. Unauthorized reproduction, transmission, or dissemination is 
 // ============================================================================
 export const exportSingleFolder = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { canDownload } = await checkVaultAccessAndMasking(req);
+    if (!canDownload) {
+      return res.status(403).json({ success: false, message: 'Exporting vault folder is disabled for your role permissions.' });
+    }
+
     const tenantId = req.user?.tenantId;
     const { clientId, folderKey } = req.params;
 
@@ -1695,6 +1806,11 @@ export const exportSingleFolder = async (req: AuthenticatedRequest, res: Respons
 // ============================================================================
 export const downloadSingleResearchReport = async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const { canDownload } = await checkVaultAccessAndMasking(req);
+    if (!canDownload) {
+      return res.status(403).json({ success: false, message: 'Downloading research report PDF is disabled for your role permissions.' });
+    }
+
     const tenantId = req.user?.tenantId;
     const { clientId, reportId } = req.params;
 

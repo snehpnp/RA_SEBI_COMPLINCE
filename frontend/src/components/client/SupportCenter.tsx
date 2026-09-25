@@ -17,6 +17,27 @@ export default function SupportCenter() {
   const [submitting, setSubmitting] = useState(false);
   const [replyText, setReplyText] = useState('');
 
+  // FAQ interactive state
+  const [faqs, setFaqs] = useState<any[]>([]);
+  const [faqsLoading, setFaqsLoading] = useState(false);
+  const [expandedFaqId, setExpandedFaqId] = useState<string | null>(null);
+  const [faqSearch, setFaqSearch] = useState('');
+  const [faqCategory, setFaqCategory] = useState('ALL');
+
+  const fetchFaqs = async () => {
+    try {
+      setFaqsLoading(true);
+      const res = await api.getFaqs();
+      if (res && res.success) {
+        setFaqs(res.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch FAQs:', err);
+    } finally {
+      setFaqsLoading(false);
+    }
+  };
+
   const fetchTickets = async () => {
     try {
       const res = await api.listTickets();
@@ -41,6 +62,7 @@ export default function SupportCenter() {
 
   useEffect(() => {
     fetchTickets();
+    fetchFaqs();
   }, []);
 
   useEffect(() => {
@@ -241,31 +263,102 @@ export default function SupportCenter() {
       )}
 
       {activeTab === 'faqs' && (
-        <div className="bg-premium-cards border border-premium-border rounded-3xl p-8 max-w-3xl">
-          <div className="relative mb-8">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-premium-text/40" />
-            <input 
-              type="text" 
-              placeholder="Search frequently asked questions..." 
-              className="w-full bg-premium-bg border border-premium-border rounded-xl pl-12 pr-4 py-4 focus:outline-none focus:border-premium-primary focus:ring-1 focus:ring-premium-primary transition-all"
-            />
+        <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 sm:p-8 max-w-4xl shadow-xl">
+          <div className="mb-6">
+            <h3 className="text-xl font-bold text-premium-text mb-1">Frequently Asked Questions</h3>
+            <p className="text-xs text-premium-text/60">Find quick answers to common questions about research signals, advisory packages, KYC verification, and SEBI compliance.</p>
+          </div>
+
+          {/* Search & Category Filter */}
+          <div className="space-y-4 mb-8">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-premium-text/40" />
+              <input 
+                type="text" 
+                placeholder="Search frequently asked questions..." 
+                value={faqSearch}
+                onChange={e => setFaqSearch(e.target.value)}
+                className="w-full bg-premium-bg border border-premium-border rounded-2xl pl-12 pr-4 py-3.5 text-sm focus:outline-none focus:border-premium-primary focus:ring-1 focus:ring-premium-primary transition-all text-premium-text placeholder:text-premium-text/40"
+              />
+            </div>
+
+            {/* Category Filter Pills */}
+            {faqs.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 hide-scrollbar">
+                {['ALL', ...Array.from(new Set(faqs.map(f => f.category || 'General')))].map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setFaqCategory(cat)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+                      faqCategory === cat
+                        ? 'bg-premium-primary text-white shadow-sm'
+                        : 'bg-premium-bg border border-premium-border text-premium-text/70 hover:border-premium-primary/40'
+                    }`}
+                  >
+                    {cat === 'ALL' ? 'All Questions' : cat}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           
-          <div className="space-y-4">
-            {[
-              "How to read risk-reward ratio in signals?",
-              "What is the difference between Swing and Positional?",
-              "How can I upgrade my subscription plan?",
-              "Is there any refund policy?"
-            ].map((q, i) => (
-              <div key={i} className="border border-premium-border rounded-2xl p-5 hover:border-premium-primary/50 transition-colors cursor-pointer group">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-semibold">{q}</h4>
-                  <ChevronDown className="w-5 h-5 text-premium-text/40 group-hover:text-premium-primary transition-colors" />
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* Interactive Accordion List */}
+          {faqsLoading ? (
+            <div className="flex flex-col items-center justify-center p-12 text-premium-text/50">
+              <Loader2 className="w-8 h-8 animate-spin mb-3 text-premium-primary" />
+              <p className="text-xs">Loading answers...</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {faqs
+                .filter(f => {
+                  const matchesCat = faqCategory === 'ALL' || f.category === faqCategory;
+                  const q = faqSearch.toLowerCase().trim();
+                  const matchesSearch = !q || 
+                    f.question.toLowerCase().includes(q) || 
+                    f.answer.toLowerCase().includes(q) ||
+                    (f.category && f.category.toLowerCase().includes(q));
+                  return matchesCat && matchesSearch;
+                })
+                .map((faq) => {
+                  const isOpen = expandedFaqId === faq.id;
+                  return (
+                    <div 
+                      key={faq.id} 
+                      className={`border rounded-2xl transition-all duration-200 overflow-hidden ${
+                        isOpen 
+                          ? 'border-premium-primary/60 bg-premium-bg/50 shadow-md ring-1 ring-premium-primary/20' 
+                          : 'border-premium-border bg-premium-bg/20 hover:border-premium-primary/40'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedFaqId(isOpen ? null : faq.id)}
+                        className="w-full text-left p-5 flex items-center justify-between gap-4 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-premium-primary/10 text-premium-primary shrink-0">
+                            {faq.category || 'General'}
+                          </span>
+                          <h4 className="font-semibold text-sm text-premium-text">{faq.question}</h4>
+                        </div>
+                        <ChevronDown 
+                          className={`w-5 h-5 shrink-0 transition-transform duration-200 ${
+                            isOpen ? 'rotate-180 text-premium-primary' : 'text-premium-text/40'
+                          }`} 
+                        />
+                      </button>
+
+                      {isOpen && (
+                        <div className="px-5 pb-5 pt-1 text-sm text-premium-text/80 whitespace-pre-line leading-relaxed border-t border-premium-border/40 font-normal animate-in fade-in duration-150">
+                          {faq.answer}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
       )}
 

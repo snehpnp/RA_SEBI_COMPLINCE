@@ -89,6 +89,10 @@ async function seedInitial() {
         { code: 'VIEW_RESEARCH', name: 'View Only Research' },
         { code: 'ADD_RESEARCH', name: 'Add Research' },
         { code: 'OWN_RESEARCH', name: 'Own Research' },
+        { code: 'ACCESS_VAULTS', name: 'Access Client Digital Vaults' },
+        { code: 'ACCESS_VAULTS_VIEW', name: 'View Only Vaults (No Downloads)' },
+        { code: 'ACCESS_VAULTS_FULL', name: 'Full Access Vaults (View & Download)' },
+        { code: 'MASK_VAULT_DATA', name: 'Mask Sensitive Data in Vaults' },
         { code: 'VIEW_SENSITIVE_DATA', name: 'View Sensitive Client Details (Unmask)' },
         { code: 'EXPORT_DATA', name: 'Export Data to CSV' }
     ];
