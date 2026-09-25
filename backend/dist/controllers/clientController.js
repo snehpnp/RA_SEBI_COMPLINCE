@@ -298,14 +298,6 @@ const registerClient = async (req, res) => {
                 duplicateField = 'mobile';
                 friendlyMessage = 'This mobile number is already registered. Please login or use a different number.';
             }
-            else if (error.keyPattern?.pan || rawMsg.includes('pan')) {
-                duplicateField = 'pan';
-                friendlyMessage = 'This PAN card number is already registered with another account.';
-            }
-            else if (error.keyPattern?.aadhaar || rawMsg.includes('aadhaar')) {
-                duplicateField = 'aadhaar';
-                friendlyMessage = 'This Aadhaar number is already registered with another account.';
-            }
             else {
                 friendlyMessage = 'An account with these credentials already exists. Please verify your details or login.';
             }
@@ -316,14 +308,14 @@ const registerClient = async (req, res) => {
                 duplicateField
             });
         }
-        if (error.name === 'ValidationError') {
-            friendlyMessage = Object.values(error.errors || {}).map((e) => e.message).join('. ') || 'Invalid details provided.';
-            return res.status(400).json({
-                success: false,
-                message: friendlyMessage,
-                errors: [friendlyMessage]
-            });
-        }
+        // if (error.name === 'ValidationError') {
+        //   friendlyMessage = Object.values(error.errors || {}).map((e: any) => e.message).join('. ') || 'Invalid details provided.';
+        //   return res.status(400).json({
+        //     success: false,
+        //     message: friendlyMessage,
+        //     errors: [friendlyMessage]
+        //   });
+        // }
         return res.status(500).json({
             success: false,
             message: friendlyMessage,
