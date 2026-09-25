@@ -343,6 +343,7 @@ const initiateDigioKyc = async (req, res) => {
         if (!tenant?.digioClientId || !tenant?.digioClientSecret) {
             return res.status(400).json({ success: false, message: 'Digio KYC is not configured for this tenant.' });
         }
+        console.log("tenant", tenant);
         const userObj = (client.userId && typeof client.userId === 'object') ? client.userId : {};
         const reqUserAny = req.user || {};
         const customerIdentifier = client.email || userObj.email || reqUserAny.email || client.mobile || userObj.mobile || reqUserAny.mobile;
@@ -351,8 +352,9 @@ const initiateDigioKyc = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Client email or mobile is required to initiate Digio KYC.' });
         }
         const templateName = tenant.digioKycTemplateName || 'KYC_AGREEMENT';
-        const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioClientId || '').startsWith('ACK') || (tenant.digioClientId || '').startsWith('AIK');
+        const isSandbox = (tenant.digioEnvironment || '').toUpperCase() === 'SANDBOX' || (tenant.digioEnvironment || '').toUpperCase() === 'UAT';
         const digioResponse = await (0, digioService_1.createKycRequest)(tenant.digioClientId, tenant.digioClientSecret, templateName, customerIdentifier, customerName, tenant.digioEnvironment);
+        console.log("digioResponse", digioResponse);
         return res.status(200).json({
             success: true,
             message: 'Digio KYC request initiated',
@@ -418,58 +420,110 @@ const verifyKRA = async (req, res) => {
             });
         }
         let verifiedAadhaarName = '';
+        let verifiedPanName = '';
         let verifiedMaskedAadhaar = '';
         let extractedDob = null;
         let extractedPan = null;
+        let extractedGender = null;
+        let extractedFatherName = null;
+        let extractedAddress = null;
+        let extractedCity = null;
+        let extractedState = null;
+        let extractedZipCode = null;
         if (req.body.digioResponse) {
             const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(req.body.digioResponse);
-            if (extracted?.aadhaarName) {
+            if (extracted?.aadhaarName)
                 verifiedAadhaarName = extracted.aadhaarName;
-            }
-            if (extracted?.maskedAadhaar) {
+            if (extracted?.panName)
+                verifiedPanName = extracted.panName;
+            if (extracted?.maskedAadhaar)
                 verifiedMaskedAadhaar = extracted.maskedAadhaar;
-            }
-            if (extracted?.dob) {
-                extractedDob = extracted.dob;
-            }
-            if (extracted?.panNumber) {
-                extractedPan = extracted.panNumber;
-            }
-            const profileUpdates = { isDigiLockerLocked: true };
-            if (extracted?.address)
-                profileUpdates.addressLine1 = extracted.address;
-            if (extracted?.city)
-                profileUpdates.city = extracted.city;
-            if (extracted?.state)
-                profileUpdates.state = extracted.state;
-            if (extracted?.zipCode)
-                profileUpdates.zipCode = extracted.zipCode;
             if (extracted?.dob)
-                profileUpdates.dob = extracted.dob;
-            if (verifiedAadhaarName)
+                extractedDob = extracted.dob;
+            if (extracted?.panNumber)
+                extractedPan = extracted.panNumber;
+            if (extracted?.gender)
+                extractedGender = extracted.gender;
+            if (extracted?.fatherName)
+                extractedFatherName = extracted.fatherName;
+            if (extracted?.address)
+                extractedAddress = extracted.address;
+            if (extracted?.city)
+                extractedCity = extracted.city;
+            if (extracted?.state)
+                extractedState = extracted.state;
+            if (extracted?.zipCode)
+                extractedZipCode = extracted.zipCode;
+            const profileUpdates = { isDigiLockerLocked: true, country: 'India' };
+            if (extractedAddress)
+                profileUpdates.addressLine1 = extractedAddress;
+            if (extractedCity)
+                profileUpdates.city = extractedCity;
+            if (extractedState)
+                profileUpdates.state = extractedState;
+            if (extractedZipCode)
+                profileUpdates.zipCode = extractedZipCode;
+            if (extractedDob)
+                profileUpdates.dob = extractedDob;
+            if (extractedGender)
+                profileUpdates.gender = extractedGender;
+            if (extractedFatherName)
+                profileUpdates.fatherName = extractedFatherName;
+            if (verifiedPanName)
+                profileUpdates.panName = verifiedPanName;
+            else if (verifiedAadhaarName)
                 profileUpdates.panName = verifiedAadhaarName;
+            if (verifiedAadhaarName)
+                profileUpdates.aadhaarName = verifiedAadhaarName;
+            profileUpdates.digilockerData = req.body.digioResponse;
             await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: profileUpdates }, { upsert: true });
         }
+        const primaryName = verifiedPanName || verifiedAadhaarName || '';
+        console.log('\n╔══════════════════════════════════════════════════════════════════╗');
+        console.log('║               🟢 [KRA / DIGIO KYC VERIFIED DATA]                 ║');
+        console.log('╠══════════════════════════════════════════════════════════════════╣');
+        console.log('║ Primary Verified Name  :', primaryName || '—');
+        console.log('║ Aadhaar Name           :', verifiedAadhaarName || '—');
+        console.log('║ PAN Name               :', verifiedPanName || '—');
+        console.log('║ PAN Number             :', pan || extractedPan || '—');
+        console.log('║ Masked Aadhaar         :', verifiedMaskedAadhaar || aadhaar || '—');
+        console.log('║ Date of Birth (DOB)    :', extractedDob || '—');
+        console.log('║ Gender                 :', extractedGender || '—');
+        console.log('║ Father / Guardian Name :', extractedFatherName || '—');
+        console.log('║ Full Address           :', extractedAddress || '—');
+        console.log('║ City / District        :', extractedCity || '—');
+        console.log('║ State                  :', extractedState || '—');
+        console.log('║ Pincode                :', extractedZipCode || '—');
+        console.log('╚══════════════════════════════════════════════════════════════════╝\n');
         const nextStatus = statusInput === 'FAIL' ? 'KYC_FAILED' : 'AGREEMENT_PENDING';
         const updateSet = {
             pan: pan || extractedPan,
             ...(aadhaar ? { aadhaar } : {}),
             ...(verifiedMaskedAadhaar ? { aadhaar: verifiedMaskedAadhaar } : {}),
             ...(extractedDob ? { dob: extractedDob } : {}),
+            ...(extractedGender ? { gender: extractedGender } : {}),
+            ...(extractedFatherName ? { fatherName: extractedFatherName } : {}),
+            ...(extractedAddress ? { address: extractedAddress } : {}),
+            ...(extractedCity ? { city: extractedCity } : {}),
+            ...(extractedState ? { state: extractedState } : {}),
+            ...(extractedZipCode ? { zipCode: extractedZipCode } : {}),
+            ...(req.body.digioResponse ? { digilockerData: req.body.digioResponse } : {}),
             status: nextStatus,
             kraVerified: statusInput !== 'FAIL'
         };
-        if (verifiedAadhaarName) {
-            updateSet.name = verifiedAadhaarName;
-            updateSet.panName = verifiedAadhaarName;
+        if (primaryName) {
+            updateSet.name = primaryName;
+            updateSet.panName = verifiedPanName || primaryName;
+            if (verifiedAadhaarName)
+                updateSet.aadhaarName = verifiedAadhaarName;
         }
         const updatedClient = await db_1.default.Client.findByIdAndUpdate(client._id || client.id, { $set: updateSet }, { returnDocument: 'after', lean: true });
-        if (verifiedAadhaarName) {
-            const nameParts = verifiedAadhaarName.split(' ');
+        if (primaryName) {
+            const nameParts = primaryName.split(' ');
             const firstName = nameParts[0] || '';
             const lastName = nameParts.slice(1).join(' ') || '';
             await db_1.default.User.findByIdAndUpdate(req.user.id, { $set: { firstName, lastName } });
-            await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: { panName: verifiedAadhaarName } }, { upsert: true });
+            await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: { panName: verifiedPanName || primaryName, aadhaarName: verifiedAadhaarName || primaryName } }, { upsert: true });
         }
         if (statusInput === 'FAIL') {
             await db_1.default.ComplianceAlert.create({
@@ -1211,6 +1265,7 @@ const getClientProfile = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Client profile not found.' });
         }
         const clientId = client._id || client.id;
+        const userRecord = await db_1.default.User.findById(req.user.id).lean();
         const profile = await db_1.default.ClientProfile.findOne({ $or: [{ clientId }, { clientId: client.userId }] }).lean();
         const subscriptions = await db_1.default.Subscription.find({
             $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user.id }]
@@ -1254,10 +1309,11 @@ const getClientProfile = async (req, res) => {
                 gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
                 isPaymentGatewayConfigured,
                 hasDigioConfigured: Boolean(tenantObj.digioClientId && tenantObj.digioClientSecret),
-                digioEnvironment: tenantObj.digioEnvironment || (tenantObj.digioClientId?.startsWith('ACK') ? 'SANDBOX' : 'PRODUCTION'),
+                digioEnvironment: tenantObj.digioEnvironment || 'PRODUCTION',
                 digioClientId: tenantObj.digioClientId || null
             };
         }
+        const nameParts = (client.name || '').trim().split(' ');
         const formatted = {
             ...client,
             id: String(clientId),
@@ -1274,7 +1330,11 @@ const getClientProfile = async (req, res) => {
             consents,
             user: {
                 id: req.user.id,
-                email: req.user.email,
+                email: userRecord?.email || req.user.email,
+                firstName: userRecord?.firstName || nameParts[0] || '',
+                lastName: userRecord?.lastName || nameParts.slice(1).join(' ') || '',
+                name: client.name || `${userRecord?.firstName || ''} ${userRecord?.lastName || ''}`.trim(),
+                mobile: userRecord?.mobile || client.mobile,
                 role: req.user.role,
                 tenant: tenantFormatted
             }
@@ -1287,7 +1347,7 @@ const getClientProfile = async (req, res) => {
 };
 exports.getClientProfile = getClientProfile;
 const updateClientProfile = async (req, res) => {
-    const { addressLine1, address, city, state, zipCode, mobile, dob, name } = req.body;
+    const { addressLine1, address, city, state, zipCode, mobile, dob, name, firstName, lastName } = req.body;
     try {
         const client = await db_1.default.Client.findOne({ userId: req.user.id });
         if (!client)
@@ -1303,6 +1363,8 @@ const updateClientProfile = async (req, res) => {
             profileUpdate.state = state;
         if (zipCode !== undefined)
             profileUpdate.zipCode = zipCode;
+        if (dob !== undefined)
+            profileUpdate.dob = dob;
         const profile = await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, { $set: profileUpdate }, { upsert: true, returnDocument: 'after', lean: true });
         const clientUpdate = {};
         if (finalAddress !== undefined)
@@ -1318,6 +1380,14 @@ const updateClientProfile = async (req, res) => {
             if (clientUpdate.mobile) {
                 await db_1.default.User.findByIdAndUpdate(req.user.id, { $set: { mobile: clientUpdate.mobile } });
             }
+        }
+        if (!client.kraVerified && (firstName || lastName)) {
+            const userUpdate = {};
+            if (firstName)
+                userUpdate.firstName = firstName;
+            if (lastName)
+                userUpdate.lastName = lastName;
+            await db_1.default.User.findByIdAndUpdate(req.user.id, { $set: userUpdate });
         }
         return res.status(200).json({ success: true, data: profile });
     }

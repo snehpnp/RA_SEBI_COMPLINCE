@@ -38,16 +38,24 @@ const mongoose_1 = __importStar(require("mongoose"));
 const _schemaOptions_1 = require("./_schemaOptions");
 exports.ClientProfileSchema = new mongoose_1.Schema({
     clientId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Client', required: true, unique: true },
+    panName: { type: String, default: null },
+    aadhaarName: { type: String, default: null },
+    dob: { type: mongoose_1.Schema.Types.Mixed, default: null },
+    gender: { type: String, default: null },
+    fatherName: { type: String, default: null },
     addressLine1: { type: String, default: null },
     addressLine2: { type: String, default: null },
     city: { type: String, default: null },
     state: { type: String, default: null },
-    country: { type: String, default: null },
+    country: { type: String, default: 'India' },
     zipCode: { type: String, default: null },
     riskProfile: { type: String, default: 'MODERATE' },
     netWorth: { type: Number, default: null },
     investmentLimit: { type: Number, default: null },
-    investmentPeriod: { type: Number, default: null }
+    investmentPeriod: { type: Number, default: null },
+    kraVerified: { type: Boolean, default: false },
+    isDigiLockerLocked: { type: Boolean, default: false },
+    digilockerData: { type: mongoose_1.Schema.Types.Mixed, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'ClientProfile' });
 exports.ClientProfileSchema.virtual('client', {
     ref: 'Client',
