@@ -516,7 +516,15 @@ const updateKycAgreementStatus = async (req, res) => {
         console.error('Update Status Error:', error);
         const rawMsg = String(error?.message || '');
         if (error?.code === 11000 || error?.name === 'MongoServerError' || rawMsg.includes('E11000') || rawMsg.includes('duplicate key')) {
-            if (error?.keyPattern?.pan || rawMsg.includes('pan') || rawMsg.includes('pan_unique_partial')) {
+            if (error?.keyPattern?.email || /\bemail\b/i.test(rawMsg)) {
+                const msg = 'This email address is already registered with another account.';
+                return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'email' });
+            }
+            if (error?.keyPattern?.mobile || /\b(mobile|phone)\b/i.test(rawMsg)) {
+                const msg = 'This mobile number is already registered with another account.';
+                return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'mobile' });
+            }
+            if (error?.keyPattern?.pan || /\bpan_unique_partial\b/i.test(rawMsg) || /index:\s*pan/i.test(rawMsg) || /dup key:\s*\{\s*pan:/i.test(rawMsg) || /\bpan\b/i.test(rawMsg)) {
                 const match = rawMsg.match(/dup key:\s*\{\s*pan:\s*"([^"]+)"/i) || rawMsg.match(/\{ pan:\s*"([^"]+)"\s*\}/i);
                 const panVal = match ? match[1] : '';
                 const msg = panVal
@@ -524,17 +532,9 @@ const updateKycAgreementStatus = async (req, res) => {
                     : 'This PAN is already registered with another account. Please use another PAN.';
                 return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'pan' });
             }
-            if (error?.keyPattern?.aadhaar || rawMsg.includes('aadhaar')) {
+            if (error?.keyPattern?.aadhaar || /\baadhaar\b/i.test(rawMsg)) {
                 const msg = 'This Aadhaar number is already registered with another account.';
                 return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'aadhaar' });
-            }
-            if (error?.keyPattern?.email || rawMsg.includes('email')) {
-                const msg = 'This email address is already registered with another account.';
-                return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'email' });
-            }
-            if (error?.keyPattern?.mobile || rawMsg.includes('mobile')) {
-                const msg = 'This mobile number is already registered with another account.';
-                return res.status(400).json({ success: false, message: msg, errors: [msg], duplicateField: 'mobile' });
             }
             const msg = 'An account with these credentials already exists. Please use unique details.';
             return res.status(400).json({ success: false, message: msg, errors: [msg] });

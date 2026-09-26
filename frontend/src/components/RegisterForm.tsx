@@ -192,15 +192,16 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
       }
     } catch (err: any) {
       let msg = '';
-      const rawMsg = err.message || (err.errors && err.errors[0]) || '';
-      
-      if (err.duplicateField === 'email' || rawMsg.toLowerCase().includes('email')) {
+      const rawMsg = String(err.message || (err.errors && err.errors[0]) || '');
+      if (err.duplicateField === 'email' || /\bemail\b/i.test(rawMsg)) {
         msg = 'This email address is already registered. Please login or use a different email.';
-      } else if (err.duplicateField === 'mobile' || rawMsg.toLowerCase().includes('mobile') || rawMsg.toLowerCase().includes('phone')) {
+        setStep(1);
+      } else if (err.duplicateField === 'mobile' || /\b(mobile|phone)\b/i.test(rawMsg)) {
         msg = 'This mobile number is already registered. Please login or use a different mobile number.';
-      } else if (err.duplicateField === 'pan' || rawMsg.toLowerCase().includes('pan')) {
+        setStep(1);
+      } else if (err.duplicateField === 'pan' || (err.duplicateField == null && (/\b(pan|pan_1|pan_unique_partial)\b/i.test(rawMsg) || /index:\s*pan/i.test(rawMsg) || /dup key:\s*\{\s*pan:/i.test(rawMsg)))) {
         msg = 'This PAN card number is already registered with an existing account.';
-      } else if (err.duplicateField === 'aadhaar' || rawMsg.toLowerCase().includes('aadhaar')) {
+      } else if (err.duplicateField === 'aadhaar' || (err.duplicateField == null && /\baadhaar\b/i.test(rawMsg))) {
         msg = 'This Aadhaar number is already registered with an existing account.';
       } else if (err.errors && err.errors.length > 0 && err.errors[0]) {
         msg = err.errors[0];
@@ -215,9 +216,6 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
 
       setError(msg);
       toast.error(msg);
-      if (err.duplicateField === 'email' || err.duplicateField === 'mobile') {
-        setStep(1);
-      }
     } finally {
       setLoading(false);
     }

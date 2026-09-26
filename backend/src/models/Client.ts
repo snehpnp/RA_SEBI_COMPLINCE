@@ -70,11 +70,11 @@ export const ClientSchema = new Schema<IClient>(
 
 ClientSchema.index(
   { pan: 1 },
-  { unique: true, partialFilterExpression: { pan: { $type: 'string' } } }
+  { unique: true, partialFilterExpression: { pan: { $type: 'string', $gt: '' } }, name: 'pan_unique_partial' }
 );
 ClientSchema.index(
   { aadhaar: 1 },
-  { unique: true, partialFilterExpression: { aadhaar: { $type: 'string' } } }
+  { unique: true, partialFilterExpression: { aadhaar: { $type: 'string', $gt: '' } }, name: 'aadhaar_unique_partial' }
 );
 
 // Virtual relations

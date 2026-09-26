@@ -290,19 +290,19 @@ const registerClient = async (req, res) => {
         let duplicateField = null;
         if (error.code === 11000 || error.name === 'MongoServerError' || String(error.message).includes('E11000')) {
             const rawMsg = String(error.message || '');
-            if (error.keyPattern?.email || rawMsg.includes('email')) {
+            if (error.keyPattern?.email || /\bemail\b/i.test(rawMsg)) {
                 duplicateField = 'email';
                 friendlyMessage = 'This email address is already registered. Please login or use a different email.';
             }
-            else if (error.keyPattern?.mobile || rawMsg.includes('mobile')) {
+            else if (error.keyPattern?.mobile || /\b(mobile|phone)\b/i.test(rawMsg)) {
                 duplicateField = 'mobile';
                 friendlyMessage = 'This mobile number is already registered. Please login or use a different number.';
             }
-            else if (error.keyPattern?.pan || rawMsg.includes('pan')) {
+            else if (error.keyPattern?.pan || /\bpan_unique_partial\b/i.test(rawMsg) || /index:\s*pan/i.test(rawMsg) || /dup key:\s*\{\s*pan:/i.test(rawMsg) || /\bpan\b/i.test(rawMsg)) {
                 duplicateField = 'pan';
                 friendlyMessage = 'This PAN card number is already registered with another account.';
             }
-            else if (error.keyPattern?.aadhaar || rawMsg.includes('aadhaar')) {
+            else if (error.keyPattern?.aadhaar || /\baadhaar\b/i.test(rawMsg)) {
                 duplicateField = 'aadhaar';
                 friendlyMessage = 'This Aadhaar number is already registered with another account.';
             }
