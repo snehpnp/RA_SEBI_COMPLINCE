@@ -20,6 +20,34 @@ export const centralConnection = mongoose.createConnection(
 // Central Models
 export const centralModels: ITenantModels = registerTenantModels(centralConnection);
 
+// Ensure index sanity for Client collection
+centralConnection.on('open', async () => {
+  try {
+    const clientCol = centralConnection.db?.collection('Client');
+    if (clientCol) {
+      const idxs = await clientCol.indexes();
+      const legacyPanIdx = idxs.find((idx: any) => idx.name === 'pan_1' && !idx.partialFilterExpression);
+      if (legacyPanIdx) {
+        await clientCol.dropIndex('pan_1').catch(() => {});
+      }
+      const legacyAadhaarIdx = idxs.find((idx: any) => idx.name === 'aadhaar_1' && !idx.partialFilterExpression);
+      if (legacyAadhaarIdx) {
+        await clientCol.dropIndex('aadhaar_1').catch(() => {});
+      }
+      await clientCol.createIndex(
+        { pan: 1 },
+        { unique: true, partialFilterExpression: { pan: { $type: 'string', $gt: '' } }, name: 'pan_unique_partial', background: true }
+      ).catch(() => {});
+      await clientCol.createIndex(
+        { aadhaar: 1 },
+        { unique: true, partialFilterExpression: { aadhaar: { $type: 'string', $gt: '' } }, name: 'aadhaar_unique_partial', background: true }
+      ).catch(() => {});
+    }
+  } catch (err: any) {
+    console.warn('[DB] Index sync notice:', err?.message || err);
+  }
+});
+
 export interface CachedTenantMeta {
   id: string;
   companyName: string;

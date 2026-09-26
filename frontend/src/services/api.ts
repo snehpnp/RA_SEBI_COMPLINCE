@@ -111,15 +111,15 @@ class ApiClient {
       
       // Clean up raw database duplicate errors into user-friendly message
       if (typeof errorMessage === 'string' && (errorMessage.includes('E11000') || errorMessage.includes('duplicate key') || errorMessage.includes('findAndModify'))) {
-        if (errorMessage.toLowerCase().includes('pan')) {
+        if (/\bemail\b/i.test(errorMessage)) {
+          errorMessage = 'This email address is already registered. Please login or use a different email.';
+        } else if (/\b(mobile|phone)\b/i.test(errorMessage)) {
+          errorMessage = 'This mobile number is already registered. Please login or use a different number.';
+        } else if (/\b(pan|pan_1|pan_unique_partial)\b/i.test(errorMessage) || /index:\s*pan/i.test(errorMessage) || /dup key:\s*\{\s*pan:/i.test(errorMessage)) {
           const match = errorMessage.match(/dup key:\s*\{\s*pan:\s*"([^"]+)"/i) || errorMessage.match(/\{ pan:\s*"([^"]+)"\s*\}/i);
           errorMessage = match ? `PAN card (${match[1]}) is already registered with another account. Please use another PAN.` : 'This PAN card is already registered with another account. Please use another PAN.';
-        } else if (errorMessage.toLowerCase().includes('aadhaar')) {
+        } else if (/\baadhaar\b/i.test(errorMessage)) {
           errorMessage = 'This Aadhaar number is already registered with another account.';
-        } else if (errorMessage.toLowerCase().includes('email')) {
-          errorMessage = 'This email address is already registered. Please login or use a different email.';
-        } else if (errorMessage.toLowerCase().includes('mobile')) {
-          errorMessage = 'This mobile number is already registered. Please login or use a different number.';
         } else {
           errorMessage = 'A duplicate record already exists with these details. Please use another.';
         }
