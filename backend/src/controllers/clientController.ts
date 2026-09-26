@@ -285,7 +285,8 @@ export const registerClient = async (req: Request, res: Response) => {
       message: 'Client registered and activated successfully.',
       data: client
     });
-  } catch (error: any) {
+  } 
+  catch (error: any) {
     if (createdUser && createdUser._id) {
       await dynamicDb.User.findByIdAndDelete(createdUser._id).catch(() => { });
     }
