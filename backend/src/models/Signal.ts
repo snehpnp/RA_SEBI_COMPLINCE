@@ -22,6 +22,8 @@ export interface ISignal extends Document {
   stoploss: number;
   description?: string | null;
   reportUrl?: string | null;
+  signatureMode?: 'UPLOAD_SIGN' | 'AADHAAR_ESIGN' | 'DSC_TOKEN' | null;
+  signatureMeta?: any;
   closeStatus?: string | null;
   exitPrice?: number | null;
   closeRemark?: string | null;
@@ -53,6 +55,12 @@ export const SignalSchema = new Schema<ISignal>(
     stoploss: { type: Number, required: true },
     description: { type: String, default: null },
     reportUrl: { type: String, default: null },
+    signatureMode: {
+      type: String,
+      enum: ['UPLOAD_SIGN', 'AADHAAR_ESIGN', 'DSC_TOKEN'],
+      default: 'UPLOAD_SIGN'
+    },
+    signatureMeta: { type: Schema.Types.Mixed, default: null },
     closeStatus: { type: String, default: null },
     exitPrice: { type: Number, default: null },
     closeRemark: { type: String, default: null },

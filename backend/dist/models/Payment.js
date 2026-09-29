@@ -56,7 +56,11 @@ exports.PaymentSchema = new mongoose_1.Schema({
     paymentGatewayId: { type: mongoose_1.Schema.Types.ObjectId, default: null },
     paymentDate: { type: Date, default: null },
     couponId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Coupon', default: null },
-    discountApplied: { type: Number, default: 0 }
+    discountApplied: { type: Number, default: 0 },
+    invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },
+    invoiceStatus: { type: String, enum: ['PENDING_AGREEMENT', 'GENERATED'], default: 'GENERATED' },
+    invoiceSentAt: { type: Date, default: null },
+    lastEmailedTo: { type: String, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Payment' });
 exports.PaymentSchema.virtual('tenant', {
     ref: 'Tenant',

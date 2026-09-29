@@ -153,6 +153,9 @@ export async function provisionAllTenantCollections(
     { code: 'ACCESS_RESEARCH', name: 'Access Signal & Research Management' },
     { code: 'ACCESS_PAYMENTS', name: 'Access Payment Approvals' },
     { code: 'ACCESS_COMPLIANCE', name: 'Access Compliance Desk' },
+    { code: 'ACCESS_CHECKLIST', name: 'Access SEBI Checklist' },
+    { code: 'ACCESS_PERSONAL_SETTINGS', name: 'Access Personal Settings' },
+    { code: 'ACCESS_RESOURCES', name: 'Access Resources & Documents' },
     { code: 'ACCESS_SETTINGS', name: 'Access Settings' },
     { code: 'ACCESS_ROLES', name: 'Access Roles Management' }
   ];
@@ -200,7 +203,7 @@ export async function provisionAllTenantCollections(
 
   const coId = roleMap['COMPLIANCE_OFFICER'];
   if (coId) {
-    const coPerms = ['CREATE', 'READ', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'PUBLISH', 'EXPORT', 'DOWNLOAD', 'ACCESS_DASHBOARD', 'ACCESS_COMPLIANCE'];
+    const coPerms = ['CREATE', 'READ', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'PUBLISH', 'EXPORT', 'DOWNLOAD', 'ACCESS_DASHBOARD', 'ACCESS_COMPLIANCE', 'ACCESS_CHECKLIST'];
     for (const permCode of coPerms) {
       const pId = permMap[permCode];
       if (pId) {

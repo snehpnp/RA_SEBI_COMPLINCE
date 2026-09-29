@@ -1,10 +1,22 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp } from 'lucide-react';
+import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp, Lock } from 'lucide-react';
 import api from '../../services/api';
 
-export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }: { profile: any, setActiveTab: (tab: string) => void, onTriggerOnboarding?: () => void }) {
+export default function Dashboard({ 
+  profile, 
+  setActiveTab, 
+  onTriggerOnboarding,
+  onUnlockTrade,
+  refreshTrigger
+}: { 
+  profile: any, 
+  setActiveTab: (tab: string, planId?: string | null, planName?: string | null) => void, 
+  onTriggerOnboarding?: () => void,
+  onUnlockTrade?: (signal?: any) => void,
+  refreshTrigger?: number
+}) {
   const userName = profile?.name?.split(' ')[0] || 'User';
   const [topSignals, setTopSignals] = useState<any[]>([]);
   const [topReports, setTopReports] = useState<any[]>([]);
@@ -16,38 +28,47 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const [sigRes, repRes, notifRes, subRes] = await Promise.all([
-          api.getSignals().catch(() => ({ success: false, data: [] })),
-          api.listResearch().catch(() => ({ success: false, data: [] })),
-          api.getClientNotifications().catch(() => ({ success: false, data: [] })),
-          api.getClientSubscriptions().catch(() => ({ success: false, data: [] }))
-        ]);
-        
-        if (sigRes.success && sigRes.data) {
-          setTopSignals(sigRes.data.filter((s: any) => s.status === 'OPEN' || s.status === 'open').slice(0, 3));
-        }
+  const fetchDashboardData = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    try {
+      const [sigRes, repRes, notifRes, subRes] = await Promise.all([
+        api.getSignals().catch(() => ({ success: false, data: [] })),
+        api.listResearch().catch(() => ({ success: false, data: [] })),
+        api.getClientNotifications().catch(() => ({ success: false, data: [] })),
+        api.getClientSubscriptions().catch(() => ({ success: false, data: [] }))
+      ]);
+      
+      if (sigRes.success && sigRes.data) {
+        setTopSignals(sigRes.data.filter((s: any) => s.status === 'OPEN' || s.status === 'open').slice(0, 3));
+      }
 
-        // Combine research from both standalone articles and signal reports
-        const signalReports = (sigRes?.success && Array.isArray(sigRes.data))
-          ? sigRes.data
-              .filter((s: any) => s.reportUrl)
-              .map((s: any) => ({
-                id: s.id || s._id,
-                title: `${s.stock?.symbol || s.symbol || s.stockName || 'Research Report'} ${s.callType ? `• ${s.callType}` : ''}`,
-                symbol: s.stock?.symbol || s.symbol || 'STOCK',
-                segment: s.segment || 'CASH',
-                callType: s.callType || 'BUY',
-                reportUrl: s.reportUrl,
-                createdAt: s.createdAt,
-                type: 'SIGNAL_REPORT'
-              }))
-          : [];
+      // Combine research reports strictly for active unlocked trades or published during active subscription
+      const signalReports = (sigRes?.success && Array.isArray(sigRes.data))
+        ? sigRes.data
+            .filter((s: any) => !s.isLocked && s.reportUrl)
+            .map((s: any) => ({
+              id: s.id || s._id,
+              title: `${s.stock?.symbol || s.symbol || s.stockName || 'Research Report'} ${s.callType ? `• ${s.callType}` : ''}`,
+              symbol: s.stock?.symbol || s.symbol || 'STOCK',
+              segment: s.segment || 'CASH',
+              callType: s.callType || 'BUY',
+              reportUrl: s.reportUrl,
+              createdAt: s.createdAt,
+              type: 'SIGNAL_REPORT'
+            }))
+        : [];
 
-        const standaloneReports = (repRes?.success && Array.isArray(repRes.data))
-          ? repRes.data.map((r: any) => ({
+      // Only show standalone reports published after the client's subscription start date
+      const standaloneReports = (repRes?.success && Array.isArray(repRes.data))
+        ? repRes.data
+            .filter((r: any) => {
+              if (subRes?.data?.length > 0) {
+                const earliestStart = Math.min(...subRes.data.map((s: any) => new Date(s.startDate || 0).getTime()));
+                return new Date(r.createdAt || 0).getTime() >= earliestStart;
+              }
+              return false;
+            })
+            .map((r: any) => ({
               id: r.id || r._id,
               title: r.title,
               symbol: r.symbol || r.category || 'RESEARCH',
@@ -56,28 +77,35 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
               createdAt: r.createdAt,
               type: 'ARTICLE'
             }))
-          : [];
+        : [];
 
-        const combinedReports = [...signalReports, ...standaloneReports].sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
+      const combinedReports = [...signalReports, ...standaloneReports].sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
 
-        setTopReports(combinedReports.slice(0, 3));
-        if (notifRes.success && notifRes.data) {
-          setTopActivity(notifRes.data.slice(0, 4));
-        }
-        if (subRes.success && subRes.data) {
-          const active = subRes.data.find((s: any) => s.status === 'ACTIVE');
-          setActiveSub(active || null);
-        }
-      } catch (err) {
-        console.error('Error fetching dashboard data', err);
-      } finally {
-        setLoading(false);
+      setTopReports(combinedReports.slice(0, 3));
+      if (notifRes.success && notifRes.data) {
+        setTopActivity(notifRes.data.slice(0, 4));
       }
-    };
-    fetchDashboardData();
-  }, []);
+      if (subRes.success && subRes.data) {
+        const active = subRes.data.find((s: any) => s.status === 'ACTIVE');
+        setActiveSub(active || null);
+      }
+    } catch (err) {
+      console.error('Error fetching dashboard data', err);
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData(true);
+    // Auto-poll dashboard data every 8 seconds so new signals/reports show up in real-time without reload
+    const interval = setInterval(() => {
+      fetchDashboardData(false);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [refreshTrigger]);
 
   const fetchNewsData = async (manual = false) => {
     if (manual) setIsRefreshing(true);
@@ -215,31 +243,81 @@ export default function Dashboard({ profile, setActiveTab, onTriggerOnboarding }
             ) : topSignals.length === 0 ? (
               <p className="text-sm text-premium-text/40">No active signals.</p>
             ) : (
-              topSignals.map((signal, i) => (
-                <div key={i} onClick={() => setActiveTab('signals')} className="p-4 bg-premium-bg border border-premium-border rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-premium-primary/50 transition-colors cursor-pointer">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className={`px-3 py-1 text-xs font-bold rounded-lg uppercase ${signal.recommendation === 'BUY' ? 'bg-premium-success/20 text-premium-success' : 'bg-premium-danger/20 text-premium-danger'}`}>
-                        {signal.recommendation}
-                      </span>
-                      <span className="font-bold text-lg">{signal.symbol}</span>
+              topSignals.map((signal, i) => {
+                const isLocked = Boolean(signal.isLocked);
+                const isBuy = (signal.callType || signal.recommendation) === 'BUY';
+                return (
+                  <div
+                    key={signal.id || i}
+                    onClick={() => {
+                      if (isLocked) {
+                        if (onUnlockTrade) onUnlockTrade(signal);
+                        else setActiveTab('subscriptions', signal.planId, signal.planName);
+                      } else {
+                        setActiveTab('signals');
+                      }
+                    }}
+                    className={`p-4 bg-premium-bg border ${
+                      isLocked 
+                        ? 'border-amber-500/40 hover:border-amber-500/80 shadow-sm shadow-amber-500/5' 
+                        : 'border-premium-border hover:border-premium-primary/50'
+                    } rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-colors cursor-pointer group`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className={`px-2.5 py-0.5 text-xs font-bold rounded-lg uppercase ${
+                          isBuy ? 'bg-premium-success/20 text-premium-success' : 'bg-premium-danger/20 text-premium-danger'
+                        }`}>
+                          {signal.callType || signal.recommendation || 'TRADE'}
+                        </span>
+                        {isLocked && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-amber-500/20 text-amber-500 flex items-center gap-1">
+                            <Lock className="w-3 h-3" /> Locked Trade
+                          </span>
+                        )}
+                        {isLocked && signal.planName && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-premium-primary/15 text-premium-primary">
+                            {signal.planName}
+                          </span>
+                        )}
+                        <span className="font-bold text-lg">{signal.symbol}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-4 text-sm text-premium-text/60">
+                        {signal.entryPrice && !isLocked && (
+                          <span className="flex items-center gap-1 font-medium text-premium-text/80">
+                            Entry: ₹{signal.entryPrice}
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                          <Target className="w-4 h-4 text-premium-primary" /> Target 1: {isLocked ? '₹••••' : (signal.target1 ? `₹${signal.target1}` : 'N/A')}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Target className="w-4 h-4 text-premium-primary" /> Target 2: {isLocked ? '₹••••' : (signal.target2 ? `₹${signal.target2}` : 'N/A')}
+                        </span>
+                        <span className="flex items-center gap-1 text-premium-danger font-semibold">
+                          SL: {isLocked ? '₹••••' : (signal.stoploss || signal.stopLoss ? `₹${signal.stoploss || signal.stopLoss}` : 'N/A')}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex gap-4 text-sm text-premium-text/60">
-                      <span className="flex items-center gap-1"><Target className="w-4 h-4 text-premium-primary" /> Target 1: {signal.target1}</span>
-                      <span className="flex items-center gap-1"><Target className="w-4 h-4 text-premium-primary" /> Target 2: {signal.target2}</span>
-                      <span className="flex items-center gap-1 text-premium-danger">SL: {signal.stopLoss}</span>
+                    <div className="text-right flex flex-col items-end shrink-0">
+                      {isLocked ? (
+                        <span className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 group-hover:from-amber-400 group-hover:to-orange-400 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/10">
+                          <Lock className="w-3.5 h-3.5" /> Unlock Signal
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-xs text-premium-text/60">Confidence</span>
+                          <div className="flex gap-1 mt-1">
+                            {[1, 2, 3, 4, 5].map(c => (
+                              <div key={c} className={`w-2 h-2 rounded-full ${c <= (signal.confidenceScore || 4) ? 'bg-premium-success' : 'bg-premium-bg'}`}></div>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="text-right flex flex-col items-end">
-                    <span className="text-xs text-premium-text/60">Confidence</span>
-                    <div className="flex gap-1 mt-1">
-                      {[1,2,3,4,5].map(c => (
-                        <div key={c} className={`w-2 h-2 rounded-full ${c <= (signal.confidenceScore || 4) ? 'bg-premium-success' : 'bg-premium-bg'}`}></div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

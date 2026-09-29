@@ -45,6 +45,7 @@ exports.sendWelcomeEmail = sendWelcomeEmail;
 exports.sendForgotPasswordEmail = sendForgotPasswordEmail;
 exports.sendTestEmail = sendTestEmail;
 exports.sendSignedAgreementEmail = sendSignedAgreementEmail;
+exports.sendTaxInvoiceEmail = sendTaxInvoiceEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const db_1 = __importStar(require("../config/db"));
 const pdfService_1 = require("./pdfService");
@@ -717,6 +718,112 @@ async function sendSignedAgreementEmail(opts) {
               </p>
               <p style="color: #94a3b8 !important; font-size: 11px; margin: 0;">
                 This is an automated system confirmation. Please do not reply directly to this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+    return sendEmail(tenantId, toEmail, subject, html, attachments);
+}
+/**
+ * Send Official Tax Invoice PDF to Client
+ */
+async function sendTaxInvoiceEmail(opts) {
+    const { tenantId, toEmail, clientName, companyName, planName, invoiceNumber, amount, pdfBuffer } = opts;
+    const displayCompany = companyName || 'Research Analyst Advisory';
+    const displayPlan = planName || 'Research Advisory Plan';
+    const displayInv = invoiceNumber || `INV-${Date.now()}`;
+    const displayAmt = amount !== undefined ? `₹${Number(amount).toLocaleString('en-IN')}` : '';
+    const subject = `Tax Invoice ${displayInv} for ${displayPlan} — ${displayCompany}`;
+    const attachments = [];
+    if (pdfBuffer && Buffer.isBuffer(pdfBuffer)) {
+        attachments.push({
+            filename: `Tax_Invoice_${displayInv.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+        });
+    }
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${subject}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f1f5f9; color: #1e293b;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 36px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0;">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%); padding: 32px 28px; text-align: center;">
+              <div style="font-size: 32px; margin-bottom: 8px;">🧾 💳</div>
+              <h1 style="color: #ffffff !important; margin: 0 0 6px; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">
+                Official Tax Invoice
+              </h1>
+              <p style="color: #bfdbfe !important; margin: 0; font-size: 13.5px; font-weight: 500;">
+                ${displayCompany} • SEBI Research Analyst
+              </p>
+            </td>
+          </tr>
+
+          <!-- Body Content -->
+          <tr>
+            <td style="padding: 32px 28px 24px;">
+              <p style="font-size: 15px; line-height: 1.6; margin: 0 0 16px;">
+                Dear <strong>${clientName}</strong>,
+              </p>
+              <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
+                Thank you for subscribing to our research advisory services. Your official Tax Invoice has been generated and is attached to this email.
+              </p>
+
+              <!-- Invoice Details Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 0 0 24px; padding: 16px 20px;">
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Invoice Number:</td>
+                  <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right; font-family: monospace;">${displayInv}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Subscribed Plan:</td>
+                  <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">${displayPlan}</td>
+                </tr>
+                ${displayAmt ? `
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Total Amount:</td>
+                  <td style="padding: 6px 0; font-size: 15px; font-weight: 800; color: #059669; text-align: right;">${displayAmt}</td>
+                </tr>` : ''}
+              </table>
+
+              <!-- Attachment Box -->
+              <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 16px 18px; margin: 0 0 24px;">
+                <div style="font-weight: 800; color: #1d4ed8 !important; font-size: 13.5px; margin-bottom: 4px;">
+                  📎 Tax Invoice Attached (PDF)
+                </div>
+                <div style="color: #1e40af !important; font-size: 12.5px; line-height: 1.5;">
+                  A detailed copy of your GST/Tax invoice is attached as a PDF. Please retain this for your financial records and tax filing.
+                </div>
+              </div>
+
+              <p style="color: #64748b !important; font-size: 12.5px; line-height: 1.5; margin: 0 0 6px;">
+                You can also download this invoice at any time directly from your client portal.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 20px 24px; text-align: center; background-color: #f8fafc; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b !important; font-size: 12px; line-height: 1.5; margin: 0 0 4px;">
+                Issued by <strong style="color: #334155 !important;">${displayCompany}</strong> in compliance with SEBI (Research Analysts) Regulations, 2014.
+              </p>
+              <p style="color: #94a3b8 !important; font-size: 11px; margin: 0;">
+                This is an automated system confirmation.
               </p>
             </td>
           </tr>

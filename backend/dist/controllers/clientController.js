@@ -401,12 +401,12 @@ const verifyKRA = async (req, res) => {
                 return res.status(400).json({ success: false, message: 'Verified Aadhaar number is already in use by another client.' });
             }
         }
-        if (pan !== client.pan) {
+        if (pan && pan !== client.pan) {
             await db_1.default.ClientIdentityHistory.create({
                 clientId: client._id || client.id,
                 fieldName: 'PAN',
-                oldValue: client.pan,
-                newValue: pan,
+                oldValue: client.pan || 'N/A',
+                newValue: pan || 'N/A',
                 changedBy: 'CLIENT',
                 remarks: 'Updated during DigiLocker eKYC verification'
             });
@@ -415,8 +415,8 @@ const verifyKRA = async (req, res) => {
             await db_1.default.ClientIdentityHistory.create({
                 clientId: client._id || client.id,
                 fieldName: 'AADHAAR',
-                oldValue: client.aadhaar,
-                newValue: aadhaar,
+                oldValue: client.aadhaar || 'N/A',
+                newValue: aadhaar || 'N/A',
                 changedBy: 'CLIENT',
                 remarks: 'Updated during DigiLocker eKYC verification'
             });
@@ -815,6 +815,49 @@ const signAgreement = async (req, res) => {
                 console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
             });
         }
+        // 5. Batch Release any Pending Invoices for this Client (Deferred Invoicing)
+        try {
+            const actualClientId = client._id || client.id;
+            const pendingPayments = await db_1.default.Payment.find({
+                clientId: actualClientId,
+                invoiceStatus: 'PENDING_AGREEMENT'
+            }).lean();
+            if (pendingPayments && pendingPayments.length > 0) {
+                console.log(`[Batch Invoice Release] Found ${pendingPayments.length} pending invoice(s) for client ${actualClientId}`);
+                for (const pay of pendingPayments) {
+                    await db_1.default.Payment.findByIdAndUpdate(pay._id || pay.id, {
+                        $set: { invoiceStatus: 'GENERATED' }
+                    });
+                    if (toEmail) {
+                        (0, invoiceGenerator_1.generateInvoicePdf)(String(pay._id || pay.id))
+                            .then(invBuffer => {
+                            const invNo = pay.transactionRef
+                                ? `INV/${new Date().getFullYear()}/${String(pay.transactionRef).slice(-6).toUpperCase()}`
+                                : `INV/${new Date().getFullYear()}/001`;
+                            return (0, emailService_1.sendTaxInvoiceEmail)({
+                                tenantId: client.tenantId || req.user?.tenantId,
+                                toEmail,
+                                clientName: signerName || client.name,
+                                companyName: tenant?.companyName,
+                                planName: pay.planName || pay.plan?.name || 'Research Advisory Plan',
+                                invoiceNumber: invNo,
+                                amount: pay.amount,
+                                pdfBuffer: invBuffer
+                            });
+                        })
+                            .then(() => {
+                            db_1.default.Payment.findByIdAndUpdate(pay._id || pay.id, {
+                                $set: { invoiceSentAt: new Date(), lastEmailedTo: toEmail }
+                            }).catch(() => { });
+                        })
+                            .catch(batchErr => console.warn(`[Batch Invoice Release] Failed for payment ${pay._id}:`, batchErr.message));
+                    }
+                }
+            }
+        }
+        catch (batchInvErr) {
+            console.warn('[Batch Invoice Release] Error releasing pending invoices:', batchInvErr.message);
+        }
         return res.status(200).json({
             success: true,
             message: 'Agreement signed successfully via Aadhaar eSign.',
@@ -1101,9 +1144,40 @@ const verifyManualPayment = async (req, res) => {
                     amountBase: parseFloat(amountBase.toFixed(2)),
                     amountGst: parseFloat(amountGst.toFixed(2))
                 });
+                const isKycDone = Boolean(client?.kraVerified === true || client?.kycStatus === 'VERIFIED' || client?.kycStatus === 'APPROVED');
+                const agreement = await db_1.default.Agreement.findOne({
+                    $or: [{ clientId: payment.clientId }, { clientId: client?.userId }]
+                }).lean();
+                const isAgreementDone = Boolean(client?.agreementSigned === true || (agreement && (agreement.status === 'SIGNED' || agreement.status === 'ACTIVE')));
+                const isCompliant = isKycDone && isAgreementDone;
+                const newClientStatus = isCompliant ? 'ACTIVE' : (isKycDone ? 'AGREEMENT_PENDING' : 'KYC_PENDING');
                 await db_1.default.Client.findByIdAndUpdate(payment.clientId, {
-                    $set: { status: 'ACTIVE' }
+                    $set: { status: newClientStatus }
                 });
+                // Send instant in-app alert notification to client
+                try {
+                    const recipientId = client?.userId?.toString() || client?.email || payment.clientId.toString();
+                    await db_1.default.NotificationLog.create({
+                        tenantId,
+                        recipient: recipientId,
+                        channel: 'INAPP',
+                        title: `✅ Payment Approved: ${plan.name}`,
+                        message: isCompliant
+                            ? `Your payment for "${plan.name}" has been approved and your subscription is active!`
+                            : `Your payment of ₹${payment.amount} for "${plan.name}" has been approved! Please complete your mandatory Identity KYC & Legal Agreement to activate trade recommendations.`,
+                        type: 'alert',
+                        isRead: false,
+                        status: 'SENT',
+                        data: {
+                            action: isCompliant ? 'SUBSCRIPTION_ACTIVE' : 'COMPLETE_KYC_AGREEMENT',
+                            planId: plan._id?.toString() || plan.id,
+                            paymentId: payment._id?.toString() || payment.id
+                        }
+                    });
+                }
+                catch (notifErr) {
+                    console.warn('[verifyManualPayment] Error creating client notification:', notifErr.message);
+                }
                 if (payment.couponId) {
                     await db_1.default.Coupon.findByIdAndUpdate(payment.couponId, {
                         $inc: { usedCount: 1 }
@@ -1459,6 +1533,19 @@ const downloadInvoice = async (req, res) => {
         if (!paymentId) {
             return res.status(400).json({ success: false, message: 'Payment ID is required' });
         }
+        let payment = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(paymentId)) {
+            payment = await db_1.default.Payment.findById(paymentId).lean();
+        }
+        if (!payment) {
+            payment = await db_1.default.Payment.findOne({ transactionRef: paymentId }).lean();
+        }
+        if (payment && payment.invoiceStatus === 'PENDING_AGREEMENT') {
+            return res.status(400).json({
+                success: false,
+                message: 'Tax Invoice will be generated automatically once your Service Agreement is completed and signed.'
+            });
+        }
         const pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(paymentId);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="Invoice_${paymentId}.pdf"`);
@@ -1515,7 +1602,8 @@ const initiateRazorpayPayment = async (req, res) => {
                 appliedCouponId = coupon._id || coupon.id;
             }
         }
-        if (tenantObj.gstCalculationType === 'EXCLUSIVE') {
+        const isGstActive = tenantObj?.gstEnabled !== false;
+        if (isGstActive && tenantObj.gstCalculationType === 'EXCLUSIVE') {
             finalPrice = finalPrice * 1.18;
         }
         const amountInPaise = Math.round(finalPrice * 100);

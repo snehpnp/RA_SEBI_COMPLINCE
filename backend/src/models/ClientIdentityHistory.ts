@@ -6,7 +6,7 @@ export interface IClientIdentityHistory extends Document {
   id: string;
   clientId: Types.ObjectId;
   fieldName: string;
-  oldValue: string;
+  oldValue?: string | null;
   newValue: string;
   changedAt: Date;
   changedBy: string;
@@ -17,7 +17,7 @@ export const ClientIdentityHistorySchema = new Schema<IClientIdentityHistory>(
   {
     clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true },
     fieldName: { type: String, required: true },
-    oldValue: { type: String, required: true },
+    oldValue: { type: String, default: 'N/A' },
     newValue: { type: String, required: true },
     changedAt: { type: Date, default: Date.now },
     changedBy: { type: String, required: true },

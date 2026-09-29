@@ -734,6 +734,12 @@ class ApiClient {
     });
   }
 
+  async sendPaymentInvoiceEmail(paymentId: string) {
+    return this.request(`/admin/payments/${paymentId}/send-email`, {
+      method: 'POST'
+    });
+  }
+
   async simulateRazorpayWebhook(payload: any) {
     return fetch(`${API_BASE_URL}/webhook/razorpay`, {
       method: 'POST',
@@ -901,6 +907,24 @@ class ApiClient {
 
   async getClientNotifications() {
     return this.request('/client/notifications');
+  }
+
+  async markClientNotificationsAsRead(notificationId?: string) {
+    return this.request('/client/notifications/read', {
+      method: 'PUT',
+      body: JSON.stringify({ notificationId })
+    });
+  }
+
+  async getAdminNotifications() {
+    return this.request('/admin/notifications');
+  }
+
+  async markAdminNotificationsAsRead(notificationId?: string) {
+    return this.request('/admin/notifications/read', {
+      method: 'PUT',
+      body: JSON.stringify({ notificationId })
+    });
   }
 
   async getMarketOverview() {
@@ -1141,6 +1165,57 @@ class ApiClient {
     return this.request('/admin/test-digio', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  // ── Researcher Signature & eSign & DSC ────────────────
+  async getResearcherSignatureSettings() {
+    return this.request('/researcher/signature-settings');
+  }
+
+  async updateResearcherSignatureSettings(data: {
+    signatureMode?: 'UPLOAD_SIGN' | 'AADHAAR_ESIGN' | 'DSC_TOKEN';
+    dscSettings?: { placement?: string; signScope?: string; registeredCertSerial?: string | null };
+    signatureUrl?: string | null;
+  }) {
+    return this.request('/researcher/signature-settings', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async uploadResearcherSignature(formData: FormData) {
+    return this.request('/researcher/signature/upload', {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async initiateReportAadhaarEsign(formData: FormData) {
+    return this.request('/researcher/esign/initiate', {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async completeReportAadhaarEsign(data: { documentId: string; signalId: string }) {
+    return this.request('/researcher/esign/complete', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async useDailyAadhaarSign(formData: FormData) {
+    return this.request('/researcher/esign/use-daily-stamp', {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async saveDscSignedReport(formData: FormData) {
+    return this.request('/researcher/dsc/save-signed-report', {
+      method: 'POST',
+      body: formData
     });
   }
 

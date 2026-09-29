@@ -131,39 +131,87 @@ const NAV_CONFIG: NavModule[] = [
     icon: 'Layers',
     accessKey: 'ACCESS_DASHBOARD',
     moduleLabel: 'Dashboard Overview',
-    moduleDesc: 'Access to main statistics',
+    moduleDesc: 'Access to main statistics and compliance alerts',
   },
   {
     tab: 'checklist',
     label: 'SEBI Checklist',
     icon: 'CheckSquare',
-    accessKey: 'ACCESS_COMPLIANCE_DESK',
-    moduleLabel: 'Checklist',
-    moduleDesc: 'SEBI Compliance Checklist',
+    accessKey: 'ACCESS_CHECKLIST',
+    moduleLabel: 'SEBI Checklist',
+    moduleDesc: 'View and manage SEBI compliance checklist',
   },
   {
     tab: 'compliance',
-    label: 'Telemetry',
+    label: 'Compliance Desk',
     icon: 'ShieldCheck',
-    accessKey: 'ACCESS_COMPLIANCE_DESK',
-    moduleLabel: 'Compliance Telemetry',
-    moduleDesc: 'Global sweeps and audits',
+    accessKey: 'ACCESS_COMPLIANCE',
+    moduleLabel: 'Compliance Desk',
+    moduleDesc: 'SEBI compliance monitoring, sweeps, checklist audits, and SCORES complaints',
+  },
+  {
+    tab: 'complaintReport',
+    label: 'Complaint Data',
+    icon: 'AlertTriangle',
+    accessKey: 'ACCESS_COMPLIANCE',
+    moduleLabel: 'Complaint Status Report',
+    moduleDesc: 'Manage monthly complaint status statistics',
   },
   {
     tab: 'clients',
     label: 'Client Management',
     icon: 'ClipboardList',
-    accessKey: 'ACCESS_COMPLIANCE_DESK',
+    accessKey: 'ACCESS_CLIENTS',
     moduleLabel: 'Client Management Module',
-    moduleDesc: 'Control access to client profiles',
+    moduleDesc: 'Control access to client profiles and registration details',
+  },
+  {
+    tab: 'research-reports',
+    label: 'Research Reports',
+    icon: 'FileText',
+    accessKey: 'ACCESS_RESEARCH',
+    moduleLabel: 'Research Reports Viewer',
+    moduleDesc: 'Allows viewing and downloading of all uploaded research reports',
+  },
+  {
+    tab: 'payments',
+    label: 'Payment History',
+    icon: 'FileText',
+    accessKey: 'ACCESS_PAYMENTS',
+    moduleLabel: 'Payment History Desk',
+    moduleDesc: 'View all successful client payments and subscriptions',
+  },
+  {
+    tab: 'tickets',
+    label: 'Support / Ticket System',
+    icon: 'LifeBuoy',
+    accessKey: 'ACCESS_TICKETS',
+    moduleLabel: 'Support & Helpdesk Desk',
+    moduleDesc: 'Manage customer support tickets',
+  },
+  {
+    tab: 'resources',
+    label: 'Resources',
+    icon: 'FileText',
+    accessKey: 'ACCESS_RESOURCES',
+    moduleLabel: 'Resources & Documents',
+    moduleDesc: 'Download templates, formats, and other resources',
+  },
+  {
+    tab: 'signature_settings',
+    label: 'Personal Settings',
+    icon: 'Settings',
+    accessKey: 'ACCESS_PERSONAL_SETTINGS',
+    moduleLabel: 'Personal Settings',
+    moduleDesc: 'Configure your signature and UI preferences',
   },
   {
     tab: 'settings',
-    label: 'Personal Setting',
+    label: 'Global Settings',
     icon: 'Settings',
-    accessKey: 'ACCESS_COMPLIANCE_DESK',
-    moduleLabel: 'Personal Setting',
-    moduleDesc: 'Manage personal settings',
+    accessKey: 'ACCESS_SETTINGS',
+    moduleLabel: 'Global Branding & Settings',
+    moduleDesc: 'Allows editing company details, invoice calculations, and logos',
   },
 ];
 
@@ -324,6 +372,9 @@ function AdminDashboardContent() {
 
   const hasPermission = (permCode: string) => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
+    if (permCode === 'ACCESS_CHECKLIST') {
+      return user?.permissions?.includes('ACCESS_CHECKLIST') || user?.permissions?.includes('ACCESS_COMPLIANCE') || false;
+    }
     return user?.permissions?.includes(permCode) || false;
   };
 
@@ -1331,17 +1382,26 @@ function AdminDashboardContent() {
 
           const isAllowed = (tab: string) => {
             if (syncedUser.role === 'SUPER_ADMIN' || syncedUser.role === 'ADMIN') return true;
+            if (tab === 'dashboard' || tab === 'profile' || tab === 'legalView') return true;
+            if (tab === 'checklist') {
+              return syncedUser.permissions?.includes('ACCESS_CHECKLIST') || syncedUser.permissions?.includes('ACCESS_COMPLIANCE') || false;
+            }
             const permMap: Record<string, string> = {
               dashboard: 'ACCESS_DASHBOARD',
+              checklist: 'ACCESS_CHECKLIST',
+              compliance: 'ACCESS_COMPLIANCE',
+              complaintReport: 'ACCESS_COMPLIANCE',
               staff: 'ACCESS_STAFF',
               clients: 'ACCESS_CLIENTS',
               plans: 'ACCESS_PLANS',
               research: 'ACCESS_RESEARCH',
+              'research-reports': 'ACCESS_RESEARCH',
               payments: 'ACCESS_PAYMENTS',
-              compliance: 'ACCESS_COMPLIANCE',
+              signature_settings: 'ACCESS_PERSONAL_SETTINGS',
               settings: 'ACCESS_SETTINGS',
               roles: 'ACCESS_ROLES',
-              tickets: 'ACCESS_TICKETS'
+              tickets: 'ACCESS_TICKETS',
+              resources: 'ACCESS_RESOURCES'
             };
             const perm = permMap[tab];
             if (!perm) return true;
@@ -1383,17 +1443,26 @@ function AdminDashboardContent() {
     if (user?.role) {
       const isAllowed = (tab: string) => {
         if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+        if (tab === 'dashboard' || tab === 'profile' || tab === 'legalView') return true;
+        if (tab === 'checklist') {
+          return user.permissions?.includes('ACCESS_CHECKLIST') || user.permissions?.includes('ACCESS_COMPLIANCE') || false;
+        }
         const permMap: Record<string, string> = {
           dashboard: 'ACCESS_DASHBOARD',
+          checklist: 'ACCESS_CHECKLIST',
+          compliance: 'ACCESS_COMPLIANCE',
+          complaintReport: 'ACCESS_COMPLIANCE',
           staff: 'ACCESS_STAFF',
           clients: 'ACCESS_CLIENTS',
           plans: 'ACCESS_PLANS',
           research: 'ACCESS_RESEARCH',
+          'research-reports': 'ACCESS_RESEARCH',
           payments: 'ACCESS_PAYMENTS',
-          compliance: 'ACCESS_COMPLIANCE',
+          signature_settings: 'ACCESS_PERSONAL_SETTINGS',
           settings: 'ACCESS_SETTINGS',
           roles: 'ACCESS_ROLES',
-          tickets: 'ACCESS_TICKETS'
+          tickets: 'ACCESS_TICKETS',
+          resources: 'ACCESS_RESOURCES'
         };
         const perm = permMap[tab];
         if (!perm) return true;
@@ -2492,6 +2561,10 @@ function AdminDashboardContent() {
   };
 
   const startEditClient = (cl: any) => {
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     setEditingClient(cl);
     setEditClientName(cl.name || '');
     setEditClientEmail(cl.email || '');
@@ -2596,6 +2669,10 @@ function AdminDashboardContent() {
 
   const handleUpdateClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     if (!editClientName.trim() || editClientName.trim().length < 2) {
       toast('Full name must be at least 2 characters.'); return;
     }
@@ -3441,7 +3518,7 @@ function AdminDashboardContent() {
                                       stroke="#64748b"
                                       fontSize={10}
                                       tickLine={false}
-                                      tickFormatter={(v) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
+                                      tickFormatter={(v: any) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
                                     />
                                     <Tooltip
                                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px' }}
@@ -7051,7 +7128,7 @@ function AdminDashboardContent() {
 
                             {/* Modal Footer */}
                             <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 flex justify-end space-x-3 text-xs">
-                              {selectedClient.user?.deletedAt === null && (
+                              {selectedClient.user?.deletedAt === null && (!isStaff || hasPermission('EDIT_CLIENTS')) && (
                                 <button
                                   onClick={() => {
                                     setIsViewClientModalOpen(false);
@@ -8980,6 +9057,7 @@ function AdminDashboardContent() {
                         <select required value={complaintSource} onChange={(e) => setComplaintSource(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500">
                           <option value="MANUAL">Manual</option>
                           <option value="SCORES">SCORES</option>
+                          <option value="ODR">ODR</option>
                           <option value="EMAIL">Email</option>
                           <option value="PORTAL">Portal</option>
                         </select>

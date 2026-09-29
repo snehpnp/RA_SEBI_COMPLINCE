@@ -6,12 +6,12 @@ import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTen
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
 import { createTicket, listTickets, getTicket, replyTicket, listAdminTickets, getAdminTicket, replyAdminTicket, closeAdminTicket } from '../controllers/ticketController';
-import { getSubscriptions, getPaymentHistory, updateProfile, getNotifications } from '../controllers/clientPortalController';
+import { getSubscriptions, getPaymentHistory, updateProfile, getNotifications, markNotificationsAsRead } from '../controllers/clientPortalController';
 import { getStocks, createSignal, listSignals, closeSignal, uploadReport, addSignalMessage } from '../controllers/signalController';
 import { getComplaints, createComplaint, resolveComplaint } from '../controllers/complaintController';
 import { getRoles, createRole, updateRolePermissions, updateRole, deleteRole } from '../controllers/roleController';
@@ -57,6 +57,15 @@ import {
   updateFaq,
   deleteFaq
 } from '../controllers/faqController';
+import {
+  getSignatureSettings,
+  updateSignatureSettings,
+  uploadResearcherSignature,
+  initiateReportAadhaarEsign,
+  completeReportAadhaarEsign,
+  useDailyAadhaarSign,
+  saveDscSignedReport
+} from '../controllers/researcherSignatureController';
 
 const router = Router();
 
@@ -642,6 +651,21 @@ router.get(
 );
 
 router.get(
+  '/admin/notifications',
+  authenticateJWT,
+  requireRoles(['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER']),
+  enforceTenantIsolation,
+  getAdminNotifications
+);
+router.put(
+  '/admin/notifications/read',
+  authenticateJWT,
+  requireRoles(['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER']),
+  enforceTenantIsolation,
+  markAdminNotificationsAsRead
+);
+
+router.get(
   '/admin/staff',
   authenticateJWT,
   requireAnyPermission(['ACCESS_STAFF', 'ACCESS_COMPLIANCE']),
@@ -735,28 +759,28 @@ router.put(
 router.put(
   '/admin/clients/:id',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('EDIT_CLIENTS'),
   enforceTenantIsolation,
   updateClient
 );
 router.delete(
   '/admin/clients/:id',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('DELETE_CLIENTS'),
   enforceTenantIsolation,
   deleteClient
 );
 router.post(
   '/admin/clients/:id/delete',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('DELETE_CLIENTS'),
   enforceTenantIsolation,
   deleteClient
 );
 router.post(
   '/admin/clients/:id/restore',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('DELETE_CLIENTS'),
   enforceTenantIsolation,
   restoreClient
 );
@@ -1146,6 +1170,13 @@ router.get(
   enforceTenantIsolation,
   getAdminPayments
 );
+router.post(
+  '/admin/payments/:id/send-email',
+  authenticateJWT,
+  requirePermission('ACCESS_PAYMENTS'),
+  enforceTenantIsolation,
+  sendPaymentInvoiceEmail
+);
 
 router.post(
   '/client/coupons/apply',
@@ -1295,21 +1326,21 @@ router.post(
 router.get(
   '/compliance/checklist',
   authenticateJWT,
-  requirePermission('ACCESS_COMPLIANCE'),
+  requireAnyPermission(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getChecklist
 );
 router.get(
   '/compliance/checklist/history',
   authenticateJWT,
-  requirePermission('ACCESS_COMPLIANCE'),
+  requireAnyPermission(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getChecklistHistory
 );
 router.post(
   '/compliance/checklist/:requirementId',
   authenticateJWT,
-  requirePermission('ACCESS_COMPLIANCE'),
+  requireAnyPermission(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   upload.single('proofDocumentUrl'),
   updateAuditStatus
@@ -1372,6 +1403,13 @@ router.get(
   requireRoles(['CLIENT']),
   enforceTenantIsolation,
   getNotifications
+);
+router.put(
+  '/client/notifications/read',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  enforceTenantIsolation,
+  markNotificationsAsRead
 );
 
 // TICKETS
@@ -1489,6 +1527,66 @@ router.post(
   requirePermission('ACCESS_RESEARCH'),
   enforceTenantIsolation,
   addSignalMessage
+);
+
+// ----------------------------------------------------
+// RESEARCHER SIGNATURE, AADHAAR ESIGN & DSC ROUTES
+// ----------------------------------------------------
+router.get(
+  '/researcher/signature-settings',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getSignatureSettings
+);
+
+router.put(
+  '/researcher/signature-settings',
+  authenticateJWT,
+  enforceTenantIsolation,
+  updateSignatureSettings
+);
+
+router.post(
+  '/researcher/signature/upload',
+  authenticateJWT,
+  enforceTenantIsolation,
+  upload.single('signature'),
+  uploadResearcherSignature
+);
+
+router.post(
+  '/researcher/esign/initiate',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  upload.single('report'),
+  initiateReportAadhaarEsign
+);
+
+router.post(
+  '/researcher/esign/complete',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  completeReportAadhaarEsign
+);
+
+router.post(
+  '/researcher/esign/use-daily-stamp',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  upload.single('report'),
+  useDailyAadhaarSign
+);
+
+router.post(
+  '/researcher/dsc/save-signed-report',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  upload.single('report'),
+  saveDscSignedReport
 );
 
 // ----------------------------------------------------

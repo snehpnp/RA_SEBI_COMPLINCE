@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getNotifications = exports.updateProfile = exports.getPaymentHistory = exports.getSubscriptions = void 0;
+exports.markNotificationsAsRead = exports.getNotifications = exports.updateProfile = exports.getPaymentHistory = exports.getSubscriptions = void 0;
 const db_1 = __importDefault(require("../config/db"));
 const auditService_1 = require("../services/auditService");
 // Fetch client subscriptions
@@ -147,19 +147,70 @@ exports.updateProfile = updateProfile;
 const getNotifications = async (req, res) => {
     const { tenantId, id: userId, email } = req.user;
     try {
-        const notifications = await db_1.default.NotificationLog.find({
-            tenantId,
-            $or: [
-                { recipient: email },
-                { recipient: userId }
-            ]
-        })
+        const client = await db_1.default.Client.findOne({ userId }).lean();
+        const clientId = client?._id?.toString() || client?.id;
+        const orConditions = [
+            { recipient: String(userId) },
+            { recipient: email }
+        ];
+        if (clientId) {
+            orConditions.push({ recipient: String(clientId) });
+            orConditions.push({ 'data.clientId': String(clientId) });
+        }
+        const query = {
+            $or: orConditions
+        };
+        if (tenantId) {
+            query.tenantId = tenantId;
+        }
+        const notifications = await db_1.default.NotificationLog.find(query)
             .sort({ createdAt: -1 })
+            .limit(100)
             .lean();
-        return res.status(200).json({ success: true, data: notifications });
+        const formatted = notifications.map((n) => ({
+            ...n,
+            id: String(n._id || n.id),
+            read: n.isRead || n.read || n.status === 'READ',
+            isRead: n.isRead || n.read || n.status === 'READ'
+        }));
+        return res.status(200).json({ success: true, data: formatted });
     }
     catch (error) {
         return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
     }
 };
 exports.getNotifications = getNotifications;
+// Mark client notifications as read
+const markNotificationsAsRead = async (req, res) => {
+    const { tenantId, id: userId, email } = req.user;
+    const { notificationId } = req.body;
+    try {
+        const client = await db_1.default.Client.findOne({ userId }).lean();
+        const clientId = client?._id?.toString() || client?.id;
+        const orConditions = [
+            { recipient: String(userId) },
+            { recipient: email }
+        ];
+        if (clientId) {
+            orConditions.push({ recipient: String(clientId) });
+            orConditions.push({ 'data.clientId': String(clientId) });
+        }
+        const filter = {
+            $or: orConditions
+        };
+        if (tenantId) {
+            filter.tenantId = tenantId;
+        }
+        if (notificationId) {
+            filter._id = notificationId;
+        }
+        await db_1.default.NotificationLog.updateMany(filter, {
+            $set: { isRead: true, status: 'READ' }
+        });
+        return res.status(200).json({ success: true, message: 'Notifications marked as read' });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
+    }
+};
+exports.markNotificationsAsRead = markNotificationsAsRead;

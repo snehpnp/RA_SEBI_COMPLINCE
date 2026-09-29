@@ -52,7 +52,34 @@ exports.UserSchema = new mongoose_1.Schema({
     sessionExpiresAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String, default: null },
-    tempPassword: { type: String, default: null }
+    tempPassword: { type: String, default: null },
+    signatureMode: {
+        type: String,
+        enum: ['UPLOAD_SIGN', 'AADHAAR_ESIGN', 'DSC_TOKEN'],
+        default: 'UPLOAD_SIGN'
+    },
+    signatureUrl: { type: String, default: null },
+    dailyAadhaarSignature: {
+        date: { type: String, default: null },
+        verifiedAt: { type: Date, default: null },
+        signerName: { type: String, default: null },
+        aadhaarLast4: { type: String, default: null },
+        stampImage: { type: String, default: null },
+        documentId: { type: String, default: null }
+    },
+    dscSettings: {
+        placement: {
+            type: String,
+            enum: ['BOTTOM_RIGHT', 'BOTTOM_CENTER', 'BOTTOM_LEFT'],
+            default: 'BOTTOM_RIGHT'
+        },
+        signScope: {
+            type: String,
+            enum: ['ALL_PAGES', 'LAST_PAGE'],
+            default: 'ALL_PAGES'
+        },
+        registeredCertSerial: { type: String, default: null }
+    }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'User' });
 // Virtual relations
 exports.UserSchema.virtual('role', {

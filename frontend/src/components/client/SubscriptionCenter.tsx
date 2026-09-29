@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { CreditCard, CheckCircle2, Star, Zap, Shield, ChevronRight, Loader2, QrCode, Copy, Upload, ArrowLeft, Check, AlertCircle, FileText, X, Clock, ExternalLink, Calendar, PlayCircle, Sparkles } from 'lucide-react';
+import { CreditCard, CheckCircle2, Star, Zap, Shield, ChevronRight, Loader2, QrCode, Copy, Upload, ArrowLeft, Check, AlertCircle, AlertTriangle, FileText, X, Clock, ExternalLink, Calendar, PlayCircle, Sparkles } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ContactAdminModal from './ContactAdminModal';
@@ -9,17 +9,30 @@ import ContactAdminModal from './ContactAdminModal';
 export default function SubscriptionCenter({ 
   profile, 
   onTriggerOnboarding, 
-  onNavigateToKyc 
+  onNavigateToKyc,
+  targetPlanId,
+  targetPlanName,
+  onClearTargetPlan
 }: { 
   profile?: any, 
   onTriggerOnboarding?: () => void,
-  onNavigateToKyc?: () => void 
+  onNavigateToKyc?: () => void,
+  targetPlanId?: string | null,
+  targetPlanName?: string | null,
+  onClearTargetPlan?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<'active' | 'browse'>('active');
   const [activeSubscriptions, setActiveSubscriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [gstType, setGstType] = useState<string>('INCLUSIVE');
+
+  // Auto-switch to Browse tab if directed from a locked signal
+  useEffect(() => {
+    if (targetPlanId || targetPlanName) {
+      setActiveTab('browse');
+    }
+  }, [targetPlanId, targetPlanName]);
 
   // Strict SEBI KYC check: kraVerified must be true or kycStatus verified
   const kycFirst = profile?.user?.tenant?.kycFirst !== false; // Default true
@@ -44,6 +57,8 @@ export default function SubscriptionCenter({
   const [gatewayConfig, setGatewayConfig] = useState<{
     gateway?: { enabled: boolean; activeGateway?: string; isConfigured?: boolean };
     paymentGatewayEnabled?: boolean;
+    isConfigured?: boolean;
+    activeGateway?: string;
     upiQr?: { enabled: boolean; upiId?: string; payeeName?: string; qrImageUrl?: string; instructions?: string };
     adminContact?: any;
     message?: string;
@@ -507,6 +522,25 @@ export default function SubscriptionCenter({
     fetchSub();
   }, [profile]);
 
+  // Smooth scroll to targeted plan card when directed from a locked signal
+  useEffect(() => {
+    if ((targetPlanId || targetPlanName) && availablePlans.length > 0 && activeTab === 'browse') {
+      const matched = availablePlans.find((p: any) =>
+        (targetPlanId && (String(p.id) === String(targetPlanId) || String(p._id) === String(targetPlanId))) ||
+        (targetPlanName && p.name && p.name.trim().toLowerCase() === targetPlanName.trim().toLowerCase())
+      );
+      if (matched) {
+        const timer = setTimeout(() => {
+          const el = document.getElementById(`plan-card-${matched.id || matched._id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 400);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [targetPlanId, targetPlanName, availablePlans, activeTab]);
+
   return (
     <div className="space-y-6 font-sans text-premium-text animate-in fade-in duration-500 h-full">
       <div className="flex justify-between items-center">
@@ -807,6 +841,41 @@ export default function SubscriptionCenter({
             </div>
           )}
 
+          {/* Signal Unlock Target Plan Notice Banner */}
+          {(targetPlanId || targetPlanName) && (
+            <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 border border-amber-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg shadow-amber-500/5 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-md">
+                      Signal Unlock Required
+                    </span>
+                    {targetPlanName && (
+                      <span className="text-xs font-bold text-premium-text">
+                        Required Plan: {targetPlanName}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-premium-text/80 mt-1">
+                    Please subscribe to the highlighted plan below to gain instant access and view this locked trade recommendation.
+                  </p>
+                </div>
+              </div>
+              {onClearTargetPlan && (
+                <button
+                  type="button"
+                  onClick={onClearTargetPlan}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-premium-bg border border-premium-border hover:bg-premium-border text-premium-text/70 hover:text-premium-text transition-colors flex items-center gap-1.5 shrink-0 self-end sm:self-center"
+                >
+                  <X className="w-3.5 h-3.5" /> View All Plans
+                </button>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="w-8 h-8 text-premium-primary animate-spin mb-4" />
@@ -820,18 +889,37 @@ export default function SubscriptionCenter({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {availablePlans.map((plan, index) => {
-                const isPopular = index === 1; // Highlight second plan mock
-                const Icon = index === 0 ? Star : index === 1 ? Zap : Shield;
-                const color = index === 0 ? 'text-premium-primary' : index === 1 ? 'text-premium-warning' : 'text-premium-success';
-                const bg = index === 0 ? 'bg-premium-primary/10' : index === 1 ? 'bg-premium-warning/10' : 'bg-premium-success/10';
+                const isMatched = Boolean(
+                  (targetPlanId && (String(plan.id) === String(targetPlanId) || String(plan._id) === String(targetPlanId))) ||
+                  (targetPlanName && plan.name && plan.name.trim().toLowerCase() === targetPlanName.trim().toLowerCase())
+                );
+                const isPopular = !isMatched && index === 1; // Highlight second plan mock only if not matched
+                const Icon = isMatched ? Sparkles : (index === 0 ? Star : index === 1 ? Zap : Shield);
+                const color = isMatched ? 'text-amber-500' : (index === 0 ? 'text-premium-primary' : index === 1 ? 'text-premium-warning' : 'text-premium-success');
+                const bg = isMatched ? 'bg-amber-500/20' : (index === 0 ? 'bg-premium-primary/10' : index === 1 ? 'bg-premium-warning/10' : 'bg-premium-success/10');
 
                 return (
-                  <div key={plan.id || plan._id} className={`relative bg-premium-cards border ${isPopular ? 'border-premium-warning shadow-lg shadow-premium-warning/10 scale-105 z-10' : 'border-premium-border'} rounded-3xl p-8 flex flex-col hover:border-premium-primary/50 transition-colors`}>
-                    {isPopular && (
+                  <div
+                    key={plan.id || plan._id}
+                    id={`plan-card-${plan.id || plan._id}`}
+                    className={`relative rounded-3xl p-8 flex flex-col transition-all duration-300 ${
+                      isMatched
+                        ? 'border-2 border-amber-500 ring-4 ring-amber-500/30 bg-gradient-to-b from-amber-500/10 via-premium-cards to-premium-cards shadow-2xl shadow-amber-500/25 scale-[1.03] z-20'
+                        : isPopular
+                        ? 'bg-premium-cards border border-premium-warning shadow-lg shadow-premium-warning/10 scale-105 z-10'
+                        : 'bg-premium-cards border border-premium-border hover:border-premium-primary/50'
+                    }`}
+                  >
+                    {isMatched ? (
+                      <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-xs font-black uppercase tracking-wider px-4 py-1.5 rounded-full shadow-lg shadow-amber-500/30 flex items-center gap-1.5 ring-2 ring-amber-300/60 animate-bounce whitespace-nowrap">
+                        <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                        <span>Required to Unlock Signal</span>
+                      </div>
+                    ) : isPopular ? (
                       <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-premium-warning text-premium-bg text-xs font-bold uppercase tracking-wider px-4 py-1 rounded-full">
                         Most Popular
                       </div>
-                    )}
+                    ) : null}
 
                     <div className="flex justify-between items-start mb-4">
                       <div className={`w-12 h-12 rounded-2xl ${bg} flex items-center justify-center`}>
@@ -895,11 +983,18 @@ export default function SubscriptionCenter({
                       setUpiProofFile(null);
                       setUpiProofPreview('');
                       fetchGatewayStatus();
-                    }} className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${isPopular
-                      ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90'
-                      : 'bg-premium-primary hover:bg-premium-primary/90 text-white'
+                    }} className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md ${
+                      isMatched
+                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black shadow-amber-500/25 ring-2 ring-amber-400/50'
+                        : isPopular
+                        ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90'
+                        : 'bg-premium-primary hover:bg-premium-primary/90 text-white'
                       }`}>
-                      {kycFirst && !isKycDone ? 'Complete KYC to Subscribe' : 'Select Plan'} <ChevronRight className="w-4 h-4" />
+                      {kycFirst && !isKycDone
+                        ? 'Complete KYC to Subscribe'
+                        : isMatched
+                        ? 'Unlock Trade • Subscribe Now'
+                        : 'Select Plan'} <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                 );
@@ -1034,14 +1129,27 @@ export default function SubscriptionCenter({
                           )}
                         </div>
 
-                        {/* Instruction Alert Banner */}
-                        <div className="bg-amber-500/15 border border-amber-500/30 rounded-2xl p-3 text-xs text-amber-700 dark:text-amber-300 space-y-1">
-                          <div className="font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-200">
-                            <span>⚠️ Payment hone ke baad payment ka screenshot upload karein</span>
+                        {/* Professional Instruction Notice Banner */}
+                        <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/35 rounded-2xl p-4 text-xs shadow-sm">
+                          <div className="flex items-start gap-3">
+                            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                              <AlertTriangle className="w-4 h-4" />
+                            </div>
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <h5 className="font-bold text-xs text-amber-900 dark:text-amber-100 flex items-center gap-1.5">
+                                Payment Verification Instructions
+                              </h5>
+                              <p className="text-[11px] text-amber-800/90 dark:text-amber-200/90 leading-relaxed font-medium">
+                                UPI app (Google Pay, PhonePe, Paytm, BHIM) se payment hone ke baad <strong>Payment Screenshot</strong> upload karein aur <strong>12-digit UTR Number</strong> enter karein taaki subscription turant verify ho sake.
+                              </p>
+                              {gatewayConfig?.upiQr?.instructions &&
+                               gatewayConfig.upiQr.instructions.trim().toLowerCase() !== 'payment hone ke baad payment ka screenshot upload karein' && (
+                                <p className="text-[10.5px] text-amber-700/80 dark:text-amber-300/70 pt-1 border-t border-amber-500/20 leading-relaxed">
+                                  {gatewayConfig.upiQr.instructions}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-[11px] leading-relaxed text-amber-900/80 dark:text-amber-300/80">
-                            {gatewayConfig?.upiQr?.instructions || 'Please complete payment using any UPI app (Google Pay, PhonePe, Paytm, BHIM). Once paid, enter your 12-digit UTR number and upload the screenshot below.'}
-                          </p>
                         </div>
 
                         {/* Form: UTR & Screenshot */}

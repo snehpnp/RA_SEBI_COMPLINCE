@@ -1,10 +1,10 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import dynamicDb, { centralModels } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
-import { sendWelcomeEmail, sendTestEmail } from '../services/emailService';
+import { sendWelcomeEmail, sendTestEmail, sendTaxInvoiceEmail } from '../services/emailService';
 import { checkComplianceForTenant } from './complianceController';
 import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 import archiver = require('archiver');
@@ -1567,6 +1567,25 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
   }
 
   try {
+    if (req.user && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
+      const role: any = await dynamicDb.Role.findOne({ name: req.user.role }).lean();
+      if (role) {
+        const editPerm: any = await dynamicDb.Permission.findOne({ code: 'EDIT_CLIENTS' }).lean();
+        if (editPerm) {
+          const hasEdit = await dynamicDb.RolePermission.findOne({
+            roleId: role._id,
+            permissionId: editPerm._id
+          }).lean();
+          if (!hasEdit) {
+            return res.status(403).json({
+              success: false,
+              message: 'Access Forbidden: You do not have permission to edit clients.'
+            });
+          }
+        }
+      }
+    }
+
     let client: any = await dynamicDb.Client.findById(id).lean();
     let clientUser: any = null;
     let actualClientId = id;
@@ -1663,23 +1682,23 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       }
     });
 
-    if (client && finalPan !== client.pan) {
+    if (client && finalPan && finalPan !== client.pan) {
       await dynamicDb.ClientIdentityHistory.create({
         clientId: actualClientId,
         fieldName: 'PAN',
-        oldValue: client.pan || '',
-        newValue: finalPan,
+        oldValue: client.pan || 'N/A',
+        newValue: finalPan || 'N/A',
         changedBy: 'ADMIN',
         remarks: 'Updated by Admin / Compliance Officer'
       });
     }
 
-    if (client && finalAadhaar !== client.aadhaar) {
+    if (client && finalAadhaar && finalAadhaar !== client.aadhaar) {
       await dynamicDb.ClientIdentityHistory.create({
         clientId: actualClientId,
         fieldName: 'AADHAAR',
-        oldValue: client.aadhaar || '',
-        newValue: finalAadhaar || '',
+        oldValue: client.aadhaar || 'N/A',
+        newValue: finalAadhaar || 'N/A',
         changedBy: 'ADMIN',
         remarks: 'Updated by Admin / Compliance Officer'
       });
@@ -2481,7 +2500,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   const {
-    themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort,
+    themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort,
     smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
     bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment,
     agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
@@ -2510,7 +2529,36 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     }
     if (!oldTenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
 
+    // Validate GSTIN when GST is enabled
+    if (gstEnabled !== undefined) {
+      const isGst = gstEnabled === 'true' || gstEnabled === true;
+      if (isGst) {
+        const gstinToCheck = gst !== undefined ? gst : oldTenant?.gst;
+        if (!gstinToCheck || typeof gstinToCheck !== 'string' || gstinToCheck.trim().length < 15) {
+          return res.status(400).json({
+            success: false,
+            message: 'GST is enabled. A valid 15-digit Company GSTIN is mandatory.'
+          });
+        }
+      }
+    } else if (oldTenant?.gstEnabled !== false && gst !== undefined && gst.trim() !== '') {
+      if (gst.trim().length < 15) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid 15-digit Company GSTIN number.'
+        });
+      }
+    }
+
     const dataToUpdate: any = {};
+    if (gstEnabled !== undefined) {
+      dataToUpdate.gstEnabled = gstEnabled === 'true' || gstEnabled === true;
+    }
+    if (invoiceDispatchPolicy !== undefined) {
+      dataToUpdate.invoiceDispatchPolicy = invoiceDispatchPolicy === 'IMMEDIATE_ON_PAYMENT'
+        ? 'IMMEDIATE_ON_PAYMENT'
+        : 'AFTER_KYC_AGREEMENT';
+    }
     if (passwordPolicy !== undefined) dataToUpdate.passwordPolicy = passwordPolicy === 'STRONG' ? 'STRONG' : 'NORMAL';
     if (client2FAEnabled !== undefined) dataToUpdate.client2FAEnabled = client2FAEnabled === 'true' || client2FAEnabled === true;
     if (twoFactorChannel !== undefined) dataToUpdate.twoFactorChannel = twoFactorChannel;
@@ -2530,7 +2578,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (companyName) dataToUpdate.companyName = companyName;
     if (companyEmail) dataToUpdate.email = companyEmail;
     if (gstCalculationType) dataToUpdate.gstCalculationType = gstCalculationType;
-    if (gst !== undefined) dataToUpdate.gst = gst;
+    if (gst !== undefined) dataToUpdate.gst = gst ? gst.trim().toUpperCase() : null;
     if (state !== undefined) dataToUpdate.state = state;
     if (address !== undefined) dataToUpdate.address = address;
     if (website !== undefined) dataToUpdate.website = website;
@@ -3103,20 +3151,23 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       appliedCouponId = coupon._id || coupon.id;
     }
 
+    const isGstActive = tenantObj?.gstEnabled !== false;
+    const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
+
     const discountedBasePrice = plan.price - discountAmount;
     let totalAmount = discountedBasePrice;
 
-    if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
+    if (isExclusive) {
       totalAmount = discountedBasePrice * 1.18;
     }
 
     let finalBasePrice = discountedBasePrice;
-    let finalGstAmount = totalAmount - discountedBasePrice;
+    let finalGstAmount = isExclusive ? (totalAmount - discountedBasePrice) : 0;
     let finalTotalAmount = totalAmount;
 
     if (customAmount !== undefined && customAmount !== null) {
       finalTotalAmount = customAmount;
-      if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
+      if (isExclusive) {
         finalBasePrice = finalTotalAmount / 1.18;
         finalGstAmount = finalTotalAmount - finalBasePrice;
       } else {
@@ -3163,10 +3214,17 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       amountBase: finalBasePrice,
       amountGst: finalGstAmount,
       amountTotal: parseFloat(finalTotalAmount.toFixed(2)),
-      isGstInclusive: tenantObj?.gstCalculationType !== 'EXCLUSIVE'
+      isGstInclusive: isGstActive && tenantObj?.gstCalculationType === 'INCLUSIVE'
     });
 
-    const payment = await dynamicDb.Payment.create({
+    const activePolicy = tenantObj?.invoiceDispatchPolicy || 'AFTER_KYC_AGREEMENT';
+    let initialInvoiceStatus = 'GENERATED';
+    if (activePolicy === 'AFTER_KYC_AGREEMENT') {
+      const isAgreementSigned = Boolean(client.agreementSigned);
+      initialInvoiceStatus = isAgreementSigned ? 'GENERATED' : 'PENDING_AGREEMENT';
+    }
+
+    const payment: any = await dynamicDb.Payment.create({
       tenantId: tenantId || client.tenantId,
       clientId: actualClientId,
       planId: plan._id || plan.id,
@@ -3175,6 +3233,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       transactionRef: paymentRefId,
       paymentDate: new Date(paymentDate),
       status: 'SUCCESS',
+      invoicePolicy: activePolicy as any,
+      invoiceStatus: initialInvoiceStatus as any,
       remarks: finalRemark,
       verifiedByStaffId: req.user!.id,
       assignedByAdminName: isAdmin ? assignerName : null,
@@ -3187,6 +3247,28 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       couponId: appliedCouponId,
       discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
     });
+
+    if (initialInvoiceStatus === 'GENERATED' && activePolicy === 'IMMEDIATE_ON_PAYMENT' && client.email) {
+      generateInvoicePdf(String(payment._id || payment.id))
+        .then(pdfBuffer => {
+          return sendTaxInvoiceEmail({
+            tenantId,
+            toEmail: client.email,
+            clientName: client.name || 'Client',
+            companyName: tenantObj?.companyName,
+            planName: plan.name,
+            invoiceNumber: `INV/${new Date().getFullYear()}/${String(paymentRefId).slice(-6).toUpperCase()}`,
+            amount: payment.amount,
+            pdfBuffer
+          });
+        })
+        .then(() => {
+          dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+            $set: { invoiceSentAt: new Date(), lastEmailedTo: client.email }
+          }).catch(() => {});
+        })
+        .catch(err => console.warn('[Auto Invoice Email] Failed to send on assignment:', err.message));
+    }
 
     await dynamicDb.Client.findByIdAndUpdate(actualClientId, {
       $set: { status: 'ACTIVE' }
@@ -4162,4 +4244,170 @@ export const testDigioConfig = async (req: AuthenticatedRequest, res: Response) 
     });
   }
 };
+
+/**
+ * Send or Resend Official Tax Invoice PDF via Email to Client
+ */
+export const sendPaymentInvoiceEmail = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  const { id } = req.params;
+
+  try {
+    let payment: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      payment = await dynamicDb.Payment.findById(id).lean();
+    }
+    if (!payment) {
+      payment = await dynamicDb.Payment.findOne({ transactionRef: id }).lean();
+    }
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment record not found' });
+    }
+
+    let client: any = null;
+    if (payment.clientId) {
+      if (mongoose.Types.ObjectId.isValid(payment.clientId)) {
+        client = await dynamicDb.Client.findById(payment.clientId).lean();
+      }
+      if (!client) {
+        client = await dynamicDb.Client.findOne({ userId: payment.clientId }).lean();
+      }
+    }
+
+    const clientEmail = client?.email || payment.clientEmail;
+    if (!clientEmail) {
+      return res.status(400).json({ success: false, message: 'Client does not have a registered email address to receive invoice.' });
+    }
+
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId || payment.tenantId).lean();
+    let plan: any = null;
+    if (payment.planId) {
+      plan = await dynamicDb.Plan.findById(payment.planId).lean();
+    }
+
+    const pdfBuffer = await generateInvoicePdf(String(payment._id || payment.id));
+    const invNumber = payment.transactionRef
+      ? `INV/${new Date().getFullYear()}/${String(payment.transactionRef).slice(-6).toUpperCase()}`
+      : `INV/${new Date().getFullYear()}/001`;
+
+    const sent = await sendTaxInvoiceEmail({
+      tenantId: tenantId || payment.tenantId,
+      toEmail: clientEmail,
+      clientName: client?.name || payment.clientName || 'Client',
+      companyName: tenantObj?.companyName,
+      planName: plan?.name || payment.planName || 'Advisory Plan',
+      invoiceNumber: invNumber,
+      amount: payment.amount,
+      pdfBuffer
+    });
+
+    if (!sent) {
+      return res.status(500).json({ success: false, message: 'Failed to send email. Please check your SMTP configuration in Settings.' });
+    }
+
+    await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+      $set: {
+        invoiceSentAt: new Date(),
+        lastEmailedTo: clientEmail,
+        invoiceStatus: 'GENERATED'
+      }
+    });
+
+    const targetClientId = client?._id || client?.id || payment.clientId;
+    if (targetClientId) {
+      logActivity({
+        tenantId: tenantId || payment.tenantId,
+        actorType: req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN' ? 'ADMIN' : 'STAFF',
+        actorId: req.user?.id,
+        actorName: (req.user as any)?.name || req.user?.email || 'Admin',
+        targetClientId,
+        category: 'PAYMENT',
+        action: 'INVOICE_SENT',
+        title: `Tax Invoice Dispatched (${invNumber})`,
+        description: `Official Tax Invoice (${invNumber}) for ${plan?.name || payment.planName || 'Plan'} (₹${Number(payment.amount || 0).toLocaleString('en-IN')}) emailed to ${clientEmail}`,
+        status: 'SUCCESS',
+        metadata: {
+          invoiceNumber: invNumber,
+          transactionRef: payment.transactionRef,
+          amount: `₹${Number(payment.amount || 0).toLocaleString('en-IN')}`,
+          planName: plan?.name || payment.planName,
+          emailedTo: clientEmail,
+          sentAt: new Date().toISOString()
+        },
+        req
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Tax Invoice successfully emailed to ${clientEmail}`,
+      invoiceSentAt: new Date()
+    });
+  } catch (error: any) {
+    console.error('Error in sendPaymentInvoiceEmail:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Error generating or sending invoice email' });
+  }
+};
+
+export const getAdminNotifications = async (req: AuthenticatedRequest, res: Response) => {
+  const { tenantId, id: userId } = (req as any).user;
+  try {
+    const query: any = {
+      $or: [
+        { recipient: 'ADMIN' },
+        { channel: 'ADMIN' },
+        { recipient: String(userId) }
+      ]
+    };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const notifications = await dynamicDb.NotificationLog.find(query)
+      .sort({ createdAt: -1 })
+      .limit(60)
+      .lean();
+
+    const formatted = notifications.map((n: any) => ({
+      ...n,
+      id: String(n._id || n.id),
+      read: n.isRead || n.read || n.status === 'READ',
+      isRead: n.isRead || n.read || n.status === 'READ'
+    }));
+
+    return res.status(200).json({ success: true, data: formatted });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
+  }
+};
+
+export const markAdminNotificationsAsRead = async (req: AuthenticatedRequest, res: Response) => {
+  const { tenantId, id: userId } = (req as any).user;
+  const { notificationId } = req.body;
+  try {
+    const query: any = {
+      $or: [
+        { recipient: 'ADMIN' },
+        { channel: 'ADMIN' },
+        { recipient: String(userId) }
+      ]
+    };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    if (notificationId) {
+      query._id = notificationId;
+    }
+
+    await dynamicDb.NotificationLog.updateMany(query, {
+      $set: { isRead: true, status: 'READ' }
+    });
+
+    return res.status(200).json({ success: true, message: 'Admin notifications marked as read' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
+  }
+};
+
+
 

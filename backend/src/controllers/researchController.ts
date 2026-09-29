@@ -227,12 +227,12 @@ export const listResearch = async (req: AuthenticatedRequest, res: Response) => 
 
       const clientId = client._id || client.id;
       // Filter only published reports matching the segment access from the active plan
-      const activeSub: any = await dynamicDb.Subscription.findOne({
+      const activeSubs = await dynamicDb.Subscription.find({
         $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user!.id }],
-        status: 'ACTIVE'
+        status: { $in: ['ACTIVE', 'active'] }
       }).populate('plan').populate('planId').lean();
 
-      if (!activeSub) {
+      if (!activeSubs || activeSubs.length === 0) {
         return res.status(200).json({
           success: true,
           data: [],
@@ -241,14 +241,27 @@ export const listResearch = async (req: AuthenticatedRequest, res: Response) => 
         });
       }
 
-      const plan = (activeSub.planId || activeSub.plan) as any;
-      const allowedSegments = plan?.researchSegments ? plan.researchSegments.split(',').map((s: string) => s.trim()) : [];
+      // Collect allowed segments and subscription date ranges (Strict SEBI: Only reports published during active subscription)
+      const subConditions = activeSubs.map((sub: any) => {
+        const plan = (sub.planId || sub.plan) as any;
+        const allowedSegments = plan?.researchSegments
+          ? plan.researchSegments.split(',').map((s: string) => s.trim())
+          : [];
+        const cond: any = {
+          segment: { $in: allowedSegments },
+          createdAt: { $gte: sub.startDate }
+        };
+        if (sub.endDate) {
+          cond.createdAt.$lte = sub.endDate;
+        }
+        return cond;
+      });
 
       filter = {
         tenantId,
         status: 'PUBLISHED',
-        segment: { $in: allowedSegments },
-        deletedAt: null
+        deletedAt: null,
+        $or: subConditions
       };
     }
 

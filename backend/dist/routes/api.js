@@ -38,6 +38,7 @@ const occupationController_1 = require("../controllers/occupationController");
 const clientTimelineController_1 = require("../controllers/clientTimelineController");
 const clientVaultController_1 = require("../controllers/clientVaultController");
 const faqController_1 = require("../controllers/faqController");
+const researcherSignatureController_1 = require("../controllers/researcherSignatureController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -284,6 +285,8 @@ router.post('/admin/profile-wizard', auth_1.authenticateJWT, (0, auth_1.requireP
 router.post('/admin/staff', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, upload.single('nismUpload'), adminController_1.createStaff);
 // --- Dashboard Stats ---
 router.get('/admin/dashboard-stats', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, adminController_1.getDashboardStats);
+router.get('/admin/notifications', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER']), tenant_1.enforceTenantIsolation, adminController_1.getAdminNotifications);
+router.put('/admin/notifications/read', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER']), tenant_1.enforceTenantIsolation, adminController_1.markAdminNotificationsAsRead);
 router.get('/admin/staff', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, adminController_1.getStaff);
 router.put('/admin/staff/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, upload.single('nismUpload'), adminController_1.updateStaff);
 router.post('/admin/staff/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.toggleStaffStatus);
@@ -298,10 +301,10 @@ router.get('/admin/clients/deleted', auth_1.authenticateJWT, (0, auth_1.requireP
 router.post('/admin/clients/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.toggleClientStatus);
 router.get('/admin/clients/:id/communications', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getClientCommunications);
 router.put('/admin/clients/:id/approve', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.approveClient);
-router.put('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.updateClient);
-router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
-router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
-router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
+router.put('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('EDIT_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.updateClient);
+router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
+router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
+router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
 router.get('/admin/clients/:clientId/timeline', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientTimelineController_1.getClientTimeline);
 // Admin Client Digital Vaults & File Explorer (Role-Permission controlled)
@@ -371,6 +374,7 @@ router.get('/client/plans', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['C
 router.post('/client/payments/manual', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.fields([{ name: 'receipt', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), clientController_1.submitManualPayment);
 router.post('/admin/payments/verify', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, clientController_1.verifyManualPayment);
 router.get('/admin/payments', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminPayments);
+router.post('/admin/payments/:id/send-email', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, adminController_1.sendPaymentInvoiceEmail);
 router.post('/client/coupons/apply', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, couponController_1.applyCoupon);
 router.get('/client/payments/:id/invoice', auth_1.authenticateJWT, clientController_1.downloadInvoice);
 // ----------------------------------------------------
@@ -430,6 +434,7 @@ router.get('/client/subscriptions', auth_1.authenticateJWT, (0, auth_1.requireRo
 router.get('/client/payments', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.getPaymentHistory);
 router.put('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.updateProfile);
 router.get('/client/notifications', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.getNotifications);
+router.put('/client/notifications/read', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientPortalController_1.markNotificationsAsRead);
 // TICKETS
 router.post('/client/tickets', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, upload.single('attachment'), ticketController_1.createTicket);
 router.get('/client/tickets', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, ticketController_1.listTickets);
@@ -451,6 +456,16 @@ router.post('/signals', auth_1.authenticateJWT, (0, auth_1.requirePermission)('A
 router.patch('/signals/:id/close', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, signalController_1.closeSignal);
 router.post('/signals/:id/report', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), signalController_1.uploadReport);
 router.post('/signals/:id/messages', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, signalController_1.addSignalMessage);
+// ----------------------------------------------------
+// RESEARCHER SIGNATURE, AADHAAR ESIGN & DSC ROUTES
+// ----------------------------------------------------
+router.get('/researcher/signature-settings', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, researcherSignatureController_1.getSignatureSettings);
+router.put('/researcher/signature-settings', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, researcherSignatureController_1.updateSignatureSettings);
+router.post('/researcher/signature/upload', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, upload.single('signature'), researcherSignatureController_1.uploadResearcherSignature);
+router.post('/researcher/esign/initiate', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), researcherSignatureController_1.initiateReportAadhaarEsign);
+router.post('/researcher/esign/complete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researcherSignatureController_1.completeReportAadhaarEsign);
+router.post('/researcher/esign/use-daily-stamp', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), researcherSignatureController_1.useDailyAadhaarSign);
+router.post('/researcher/dsc/save-signed-report', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), researcherSignatureController_1.saveDscSignedReport);
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES
 // ----------------------------------------------------

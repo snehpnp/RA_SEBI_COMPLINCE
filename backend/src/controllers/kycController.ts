@@ -12,7 +12,8 @@ import {
   extractAadhaarDetailsFromDigio
 } from '../services/digioService';
 import { generateAgreementPdf } from '../services/pdfService';
-import { sendSignedAgreementEmail } from '../services/emailService';
+import { sendSignedAgreementEmail, sendTaxInvoiceEmail } from '../services/emailService';
+import { generateInvoicePdf } from '../services/invoiceGenerator';
 
 export const initiateKyc = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -510,6 +511,50 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
         }).catch((mailErr) => {
           console.warn('[Agreement Email] Failed to dispatch signed agreement email:', mailErr.message);
         });
+      }
+
+      // Batch Release any Pending Invoices for this Client (Deferred Invoicing)
+      try {
+        const pendingPayments = await dynamicDb.Payment.find({
+          clientId,
+          invoiceStatus: 'PENDING_AGREEMENT'
+        }).lean();
+
+        if (pendingPayments && pendingPayments.length > 0) {
+          console.log(`[Batch Invoice Release] Found ${pendingPayments.length} pending invoice(s) for client ${clientId}`);
+          for (const pay of pendingPayments) {
+            await dynamicDb.Payment.findByIdAndUpdate(pay._id || pay.id, {
+              $set: { invoiceStatus: 'GENERATED' }
+            });
+
+            if (toEmail) {
+              generateInvoicePdf(String(pay._id || pay.id))
+                .then(invBuffer => {
+                  const invNo = pay.transactionRef
+                    ? `INV/${new Date().getFullYear()}/${String(pay.transactionRef).slice(-6).toUpperCase()}`
+                    : `INV/${new Date().getFullYear()}/001`;
+                  return sendTaxInvoiceEmail({
+                    tenantId: client.tenantId || req.user?.tenantId,
+                    toEmail,
+                    clientName: signerName || client.name,
+                    companyName: tenant?.companyName,
+                    planName: (pay as any).planName || (pay as any).plan?.name || 'Research Advisory Plan',
+                    invoiceNumber: invNo,
+                    amount: pay.amount,
+                    pdfBuffer: invBuffer
+                  });
+                })
+                .then(() => {
+                  dynamicDb.Payment.findByIdAndUpdate(pay._id || pay.id, {
+                    $set: { invoiceSentAt: new Date(), lastEmailedTo: toEmail }
+                  }).catch(() => {});
+                })
+                .catch(batchErr => console.warn(`[Batch Invoice Release] Failed for payment ${pay._id}:`, batchErr.message));
+            }
+          }
+        }
+      } catch (batchInvErr: any) {
+        console.warn('[Batch Invoice Release] Error releasing pending invoices:', batchInvErr.message);
       }
     }
 

@@ -27,7 +27,9 @@ export interface ITenant extends Document {
   internalPolicyUrl?: string | null;
   logoUrl?: string | null;
   faviconUrl?: string | null;
+  gstEnabled?: boolean;
   gstCalculationType: string;
+  invoiceDispatchPolicy?: 'IMMEDIATE_ON_PAYMENT' | 'AFTER_KYC_AGREEMENT';
   state?: string | null;
   smtpHost?: string | null;
   smtpPort?: number | null;
@@ -117,7 +119,9 @@ export const TenantSchema = new Schema<ITenant>(
     internalPolicyUrl: { type: String, default: null },
     logoUrl: { type: String, default: null },
     faviconUrl: { type: String, default: null },
+    gstEnabled: { type: Boolean, default: true },
     gstCalculationType: { type: String, default: 'EXCLUSIVE' },
+    invoiceDispatchPolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },
     state: { type: String, default: null },
     smtpHost: { type: String, default: null },
     smtpPort: { type: Number, default: null },

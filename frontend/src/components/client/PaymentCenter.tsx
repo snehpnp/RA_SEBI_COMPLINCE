@@ -207,24 +207,39 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
     },
     {
       name: 'Invoice',
-      cell: (txn: any) => (
-        txn.status === 'successful' || txn.status === 'SUCCESS' ? (
+      cell: (txn: any) => {
+        if (txn.status !== 'successful' && txn.status !== 'SUCCESS') {
+          return (
+            <button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
+              N/A
+            </button>
+          );
+        }
+
+        if (txn.invoiceStatus === 'PENDING_AGREEMENT') {
+          return (
+            <span 
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg text-xs font-medium"
+              title="Invoice will be generated and available once your KYC Agreement is completed"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-500" /> Agreement Pending
+            </span>
+          );
+        }
+
+        return (
           <button 
             onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
             disabled={downloadingId === (txn.id || txn._id)}
             className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-primary/10 hover:bg-premium-primary/20 text-premium-primary rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
           >
             {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 
-            {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'GST Invoice'}
+            {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
           </button>
-        ) : (
-          <button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
-            N/A
-          </button>
-        )
-      ),
+        );
+      },
       right: true,
-      minWidth: '140px',
+      minWidth: '150px',
     },
   ];
 
@@ -347,14 +362,21 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
                 </div>
                 
                 {txn.status === 'successful' || txn.status === 'SUCCESS' ? (
-                  <button 
-                    onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
-                    disabled={downloadingId === (txn.id || txn._id)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-premium-primary/10 text-premium-primary hover:bg-premium-primary/20 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 mt-1"
-                  >
-                    {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} 
-                    {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
-                  </button>
+                  txn.invoiceStatus === 'PENDING_AGREEMENT' ? (
+                    <div className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl text-xs font-semibold mt-1">
+                      <Clock className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Invoice available after KYC Agreement</span>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
+                      disabled={downloadingId === (txn.id || txn._id)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-premium-primary/10 text-premium-primary hover:bg-premium-primary/20 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 mt-1"
+                    >
+                      {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} 
+                      {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
+                    </button>
+                  )
                 ) : null}
               </div>
             ))

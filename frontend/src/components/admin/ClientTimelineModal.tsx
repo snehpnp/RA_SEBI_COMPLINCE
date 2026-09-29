@@ -465,6 +465,9 @@ export default function ClientTimelineModal({
       esignMode: 'eSign Method',
       agreementUrl: 'Agreement Document',
       receiptUrl: 'Receipt Document',
+      invoiceNumber: 'Invoice Number',
+      emailedTo: 'Emailed To',
+      sentAt: 'Dispatched At',
       pan: 'PAN Number',
       aadhaar: 'Aadhaar (Last 4)',
       verificationSource: 'Verification Provider'

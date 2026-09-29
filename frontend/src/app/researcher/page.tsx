@@ -2447,6 +2447,10 @@ function AdminDashboardContent() {
   };
 
   const startEditClient = (cl: any) => {
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     setEditingClient(cl);
     setEditClientName(cl.name || '');
     setEditClientEmail(cl.email || '');
@@ -2551,6 +2555,10 @@ function AdminDashboardContent() {
 
   const handleUpdateClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     if (!editClientName.trim() || editClientName.trim().length < 2) {
       toast('Full name must be at least 2 characters.'); return;
     }
@@ -3397,7 +3405,7 @@ function AdminDashboardContent() {
                                       stroke="#64748b"
                                       fontSize={10}
                                       tickLine={false}
-                                      tickFormatter={(v) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
+                                      tickFormatter={(v: any) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
                                     />
                                     <Tooltip
                                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px' }}
@@ -7011,7 +7019,7 @@ function AdminDashboardContent() {
 
                             {/* Modal Footer */}
                             <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 flex justify-end space-x-3 text-xs">
-                              {selectedClient.user?.deletedAt === null && (
+                              {selectedClient.user?.deletedAt === null && (!isStaff || hasPermission('EDIT_CLIENTS')) && (
                                 <button
                                   onClick={() => {
                                     setIsViewClientModalOpen(false);
@@ -8940,6 +8948,7 @@ function AdminDashboardContent() {
                         <select required value={complaintSource} onChange={(e) => setComplaintSource(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500">
                           <option value="MANUAL">Manual</option>
                           <option value="SCORES">SCORES</option>
+                          <option value="ODR">ODR</option>
                           <option value="EMAIL">Email</option>
                           <option value="PORTAL">Portal</option>
                         </select>

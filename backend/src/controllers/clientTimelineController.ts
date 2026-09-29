@@ -302,6 +302,35 @@ export const getClientTimeline = async (req: AuthenticatedRequest, res: Response
           receiptUrl: pay.receiptUrl
         }
       });
+
+      if (pay.invoiceSentAt) {
+        const invTime = new Date(pay.invoiceSentAt);
+        const safeInvTime = invTime > now ? now : invTime;
+        const invNum = pay.transactionRef
+          ? `INV/${invTime.getFullYear()}/${String(pay.transactionRef).slice(-6).toUpperCase()}`
+          : 'Tax Invoice';
+
+        historicalEvents.push({
+          id: `hist_inv_${pay._id}`,
+          source: 'HISTORICAL',
+          category: 'PAYMENT',
+          action: 'INVOICE_SENT',
+          title: `Tax Invoice Dispatched (${invNum})`,
+          description: `Official Tax Invoice (${invNum}) for ${planName} (₹${(pay.amount || 0).toLocaleString('en-IN')}) emailed to ${pay.lastEmailedTo || client.email}`,
+          status: 'SUCCESS',
+          timestamp: safeInvTime,
+          actorName: 'Admin / Billing System',
+          actorType: 'STAFF',
+          metadata: {
+            invoiceNumber: invNum,
+            transactionRef: pay.transactionRef,
+            amount: `₹${(pay.amount || 0).toLocaleString('en-IN')}`,
+            plan: planName,
+            emailedTo: pay.lastEmailedTo || client.email,
+            sentAt: pay.invoiceSentAt
+          }
+        });
+      }
     }
 
     // 3F. Standalone Subscriptions (only those not already attached to a payment card above)

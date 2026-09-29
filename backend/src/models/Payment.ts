@@ -24,6 +24,10 @@ export interface IPayment extends Document {
   paymentDate?: Date | null;
   couponId?: Types.ObjectId | null;
   discountApplied?: number | null;
+  invoicePolicy?: 'IMMEDIATE_ON_PAYMENT' | 'AFTER_KYC_AGREEMENT';
+  invoiceStatus?: 'PENDING_AGREEMENT' | 'GENERATED';
+  invoiceSentAt?: Date | null;
+  lastEmailedTo?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,7 +53,11 @@ export const PaymentSchema = new Schema<IPayment>(
     paymentGatewayId: { type: Schema.Types.ObjectId, default: null },
     paymentDate: { type: Date, default: null },
     couponId: { type: Schema.Types.ObjectId, ref: 'Coupon', default: null },
-    discountApplied: { type: Number, default: 0 }
+    discountApplied: { type: Number, default: 0 },
+    invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },
+    invoiceStatus: { type: String, enum: ['PENDING_AGREEMENT', 'GENERATED'], default: 'GENERATED' },
+    invoiceSentAt: { type: Date, default: null },
+    lastEmailedTo: { type: String, default: null }
   },
   { ...baseSchemaOptions, collection: 'Payment' }
 );
