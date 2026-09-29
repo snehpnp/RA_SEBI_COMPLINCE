@@ -436,9 +436,9 @@ router.get('/compliance/dashboard-metrics', auth_1.authenticateJWT, (0, auth_1.r
 router.get('/compliance/periodic-report-data', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, complianceController_1.getPeriodicReportData);
 router.get('/compliance/periodic-report-meta', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, complianceController_1.getPeriodicReportMeta);
 router.post('/compliance/alerts/:id/close', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, upload.single('proof'), complianceController_1.closeAlert);
-router.get('/compliance/checklist', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, complianceController_1.getChecklist);
-router.get('/compliance/checklist/history', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, complianceController_1.getChecklistHistory);
-router.post('/compliance/checklist/:requirementId', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, upload.single('proofDocumentUrl'), complianceController_1.updateAuditStatus);
+router.get('/compliance/checklist', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, complianceController_1.getChecklist);
+router.get('/compliance/checklist/history', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, complianceController_1.getChecklistHistory);
+router.post('/compliance/checklist/:requirementId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, upload.single('proofDocumentUrl'), complianceController_1.updateAuditStatus);
 router.get('/compliance/penalties', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, complianceController_1.getPenalties);
 router.post('/compliance/penalties/:id/resolve', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, upload.single('proof'), complianceController_1.resolvePenalty);
 // ----------------------------------------------------
