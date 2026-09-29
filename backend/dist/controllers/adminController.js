@@ -37,7 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = void 0;
+exports.permanentDeleteClient = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -3607,42 +3607,225 @@ const previewPolicyPdf = async (req, res) => {
 exports.previewPolicyPdf = previewPolicyPdf;
 const resetClientKyc = async (req, res) => {
     try {
-        const { username } = req.body;
-        if (!username) {
-            return res.status(400).json({ success: false, message: 'Username (email, mobile, or pan) is required' });
+        const searchParam = req.body?.name ||
+            req.query?.name ||
+            req.body?.clientName ||
+            req.query?.clientName ||
+            req.body?.username ||
+            req.query?.username ||
+            req.body?.email ||
+            req.query?.email ||
+            req.body?.mobile ||
+            req.query?.mobile ||
+            req.body?.phone ||
+            req.query?.phone ||
+            req.body?.pan ||
+            req.query?.pan ||
+            req.body?.aadhaar ||
+            req.query?.aadhaar ||
+            req.body?.clientId ||
+            req.query?.clientId ||
+            req.body?.userId ||
+            req.query?.userId ||
+            req.body?.id ||
+            req.query?.id ||
+            req.body?.search ||
+            req.query?.search ||
+            req.body?.query ||
+            req.query?.query ||
+            req.body?.identifier ||
+            req.query?.identifier;
+        if (!searchParam || String(searchParam).trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'User / Client identifier is required. Please provide name, username, email, mobile, or pan.',
+                examples: {
+                    json_body: { name: 'Pavan Kumar' },
+                    query_param: '/api/v1/admin/clients/reset-kyc?name=Pavan'
+                }
+            });
         }
-        let user = await db_1.default.User.findOne({
-            $or: [{ email: username }, { mobile: username }]
-        });
+        const queryStr = String(searchParam).trim();
+        const escapeRegex = (text) => text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+        const safeRegex = new RegExp(escapeRegex(queryStr), 'i');
+        const exactRegex = new RegExp(`^${escapeRegex(queryStr)}$`, 'i');
         let client = null;
-        if (user) {
-            client = await db_1.default.Client.findOne({ userId: user._id || user.id });
-        }
-        else {
-            client = await db_1.default.Client.findOne({ pan: username });
+        let targetDb = db_1.default;
+        // Helper to find client in a specific database model container
+        const findClientInDb = async (db) => {
+            if (!db || !db.Client)
+                return null;
+            // 1. Direct match by ObjectId (Client ID or User ID)
+            if (mongoose_1.default.Types.ObjectId.isValid(queryStr)) {
+                const directClient = await db.Client.findById(queryStr);
+                if (directClient)
+                    return directClient;
+                const byUserId = await db.Client.findOne({ userId: queryStr });
+                if (byUserId)
+                    return byUserId;
+            }
+            // 2. Match by exact PAN (e.g. ABCDE1234F)
+            const byPan = await db.Client.findOne({ pan: exactRegex });
+            if (byPan)
+                return byPan;
+            // 3. Match by exact Email
+            const byEmail = await db.Client.findOne({ email: exactRegex });
+            if (byEmail)
+                return byEmail;
+            // 4. Match by Mobile
+            const cleanDigits = queryStr.replace(/\D/g, '');
+            if (cleanDigits.length >= 10) {
+                const byMobile = await db.Client.findOne({
+                    mobile: { $regex: escapeRegex(cleanDigits.slice(-10)) }
+                });
+                if (byMobile)
+                    return byMobile;
+            }
+            else {
+                const byMobile = await db.Client.findOne({ mobile: exactRegex });
+                if (byMobile)
+                    return byMobile;
+            }
+            // 5. Match by exact Name (Client name, panName, aadhaarName)
+            const byExactName = await db.Client.findOne({
+                $or: [
+                    { name: exactRegex },
+                    { panName: exactRegex },
+                    { aadhaarName: exactRegex }
+                ]
+            });
+            if (byExactName)
+                return byExactName;
+            // 6. Match by partial Name in Client
+            const byPartialName = await db.Client.findOne({
+                $or: [
+                    { name: safeRegex },
+                    { panName: safeRegex },
+                    { aadhaarName: safeRegex }
+                ]
+            });
+            if (byPartialName)
+                return byPartialName;
+            // 7. Match via User collection (Email, Mobile, Username, firstName, lastName, Name)
+            if (db.User) {
+                const matchedUsers = await db.User.find({
+                    $or: [
+                        { email: exactRegex },
+                        { mobile: exactRegex },
+                        { username: exactRegex },
+                        { name: safeRegex },
+                        { firstName: safeRegex },
+                        { lastName: safeRegex }
+                    ]
+                }).limit(10).lean();
+                if (matchedUsers.length > 0) {
+                    const userIds = matchedUsers.map((u) => u._id || u.id);
+                    const clientByUser = await db.Client.findOne({ userId: { $in: userIds } });
+                    if (clientByUser)
+                        return clientByUser;
+                }
+            }
+            return null;
+        };
+        // Try finding in dynamicDb (tenant / active context)
+        client = await findClientInDb(db_1.default);
+        // If not found in dynamicDb, try fallback in centralModels
+        if (!client && db_1.centralModels && db_1.centralModels !== db_1.default) {
+            client = await findClientInDb(db_1.centralModels);
             if (client) {
-                user = await db_1.default.User.findById(client.userId);
+                targetDb = db_1.centralModels;
             }
         }
         if (!client) {
-            return res.status(404).json({ success: false, message: 'Client not found' });
+            return res.status(404).json({
+                success: false,
+                message: `User / Client not found matching '${queryStr}' (searched by name, email, mobile, PAN, username, and ID)`
+            });
         }
-        client.kraVerified = false;
-        client.status = 'ACTIVE';
-        // We should use findByIdAndUpdate or save. If it's a lean doc, we can't save. 
-        // Wait, findOne doesn't return lean by default unless we chain .lean().
-        // But since dynamicDb might return plain models, save is fine, or findByIdAndUpdate is safer.
-        await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
-            $set: { kraVerified: false, agreementSigned: false, status: 'ACTIVE' }
+        const clientId = client._id || client.id;
+        const userId = client.userId;
+        // Reset Client status & KYC verification flags
+        await targetDb.Client.findByIdAndUpdate(clientId, {
+            $set: {
+                kycStatus: 'PENDING',
+                kraVerified: false,
+                agreementSigned: false,
+                status: 'PENDING',
+                digilockerData: null,
+                signatureUrl: null,
+                signedAt: null
+            }
         });
-        if (db_1.default.Agreement) {
-            await db_1.default.Agreement.deleteMany({ clientId: client._id || client.id });
+        // Reset ClientProfile if it exists
+        if (targetDb.ClientProfile) {
+            await targetDb.ClientProfile.findOneAndUpdate({ clientId }, {
+                $set: {
+                    kraVerified: false,
+                    isDigiLockerLocked: false,
+                    digilockerData: null
+                }
+            });
         }
-        res.json({ success: true, message: 'KYC successfully reset for user' });
+        // Delete agreements so client can re-sign
+        if (targetDb.Agreement) {
+            await targetDb.Agreement.deleteMany({ clientId });
+        }
+        // Delete consents so client can re-consent
+        if (targetDb.Consent) {
+            await targetDb.Consent.deleteMany({ clientId });
+        }
+        // Fetch updated client record
+        const updatedClient = await targetDb.Client.findById(clientId).lean();
+        // Log Activity
+        try {
+            (0, activityService_1.logActivity)({
+                tenantId: client.tenantId || req.user?.tenantId,
+                actorType: 'ADMIN',
+                actorId: req.user?.id || 'SYSTEM_ADMIN',
+                actorName: req.user?.name || 'Admin',
+                actorEmail: req.user?.email || 'admin@sebi-compliance.local',
+                targetClientId: clientId,
+                category: 'KYC_COMPLIANCE',
+                action: 'KYC_RESET',
+                title: 'KYC Reset to Pending',
+                description: `KYC status for client ${client.name} (${client.email || client.mobile || 'N/A'}) has been reset to PENDING.`,
+                status: 'SUCCESS',
+                metadata: {
+                    searchQuery: queryStr,
+                    clientId: clientId.toString(),
+                    clientName: client.name,
+                    clientEmail: client.email,
+                    clientPan: client.pan
+                },
+                req
+            });
+        }
+        catch (actErr) {
+            console.warn('[RESET-KYC] Activity log warning:', actErr?.message);
+        }
+        return res.status(200).json({
+            success: true,
+            message: `KYC successfully reset to PENDING for user: ${client.name}`,
+            client: {
+                id: updatedClient?._id || clientId,
+                userId: updatedClient?.userId || userId,
+                name: updatedClient?.name,
+                email: updatedClient?.email,
+                mobile: updatedClient?.mobile,
+                pan: updatedClient?.pan,
+                kycStatus: updatedClient?.kycStatus || 'PENDING',
+                kraVerified: updatedClient?.kraVerified || false,
+                agreementSigned: updatedClient?.agreementSigned || false,
+                status: updatedClient?.status || 'PENDING'
+            }
+        });
     }
     catch (error) {
         console.error('Reset KYC error:', error);
-        res.status(500).json({ success: false, message: error.message || 'Server Error' });
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Server Error while resetting KYC'
+        });
     }
 };
 exports.resetClientKyc = resetClientKyc;
@@ -3889,3 +4072,376 @@ const testDigioConfig = async (req, res) => {
     }
 };
 exports.testDigioConfig = testDigioConfig;
+/**
+ * POST /admin/clients/permanent-delete
+ * Permanently deletes a user/client and all associated details (PAN, Profile, KYC, Agreements, Documents, Subscriptions, Payments, etc.) from the DB.
+ */
+const permanentDeleteClient = async (req, res) => {
+    try {
+        const searchParam = req.body?.name ||
+            req.query?.name ||
+            req.body?.clientName ||
+            req.query?.clientName ||
+            req.body?.username ||
+            req.query?.username ||
+            req.body?.email ||
+            req.query?.email ||
+            req.body?.mobile ||
+            req.query?.mobile ||
+            req.body?.phone ||
+            req.query?.phone ||
+            req.body?.pan ||
+            req.query?.pan ||
+            req.body?.aadhaar ||
+            req.query?.aadhaar ||
+            req.body?.clientId ||
+            req.query?.clientId ||
+            req.body?.userId ||
+            req.query?.userId ||
+            req.body?.id ||
+            req.query?.id ||
+            req.params?.id ||
+            req.body?.search ||
+            req.query?.search ||
+            req.body?.query ||
+            req.query?.query ||
+            req.body?.identifier ||
+            req.query?.identifier;
+        if (!searchParam || String(searchParam).trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'User / Client identifier is required. Please provide name, username, email, mobile, or pan.',
+                examples: {
+                    json_body: { name: 'Pavan Kumar' },
+                    query_param: '/api/v1/admin/clients/permanent-delete?name=Pavan'
+                }
+            });
+        }
+        const queryStr = String(searchParam).trim();
+        const escapeRegex = (text) => text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+        const safeRegex = new RegExp(escapeRegex(queryStr), 'i');
+        const exactRegex = new RegExp(`^${escapeRegex(queryStr)}$`, 'i');
+        let client = null;
+        let user = null;
+        let targetDb = db_1.default;
+        // Helper to find client / user in a specific database model container
+        const findClientInDb = async (db) => {
+            if (!db)
+                return null;
+            // 1. Direct match by ObjectId (Client ID or User ID)
+            if (mongoose_1.default.Types.ObjectId.isValid(queryStr)) {
+                if (db.Client) {
+                    const directClient = await db.Client.findById(queryStr);
+                    if (directClient)
+                        return { client: directClient, user: db.User ? await db.User.findById(directClient.userId) : null };
+                    const byUserId = await db.Client.findOne({ userId: queryStr });
+                    if (byUserId)
+                        return { client: byUserId, user: db.User ? await db.User.findById(queryStr) : null };
+                }
+                if (db.User) {
+                    const directUser = await db.User.findById(queryStr);
+                    if (directUser) {
+                        const clientDoc = db.Client ? await db.Client.findOne({ userId: directUser._id }) : null;
+                        return { client: clientDoc, user: directUser };
+                    }
+                }
+            }
+            // 2. Match by exact PAN (e.g. ABCDE1234F) in Client
+            if (db.Client) {
+                const byPan = await db.Client.findOne({ pan: exactRegex });
+                if (byPan) {
+                    const uDoc = db.User ? await db.User.findById(byPan.userId) : null;
+                    return { client: byPan, user: uDoc };
+                }
+            }
+            // 3. Match by exact Email in Client or User
+            if (db.Client) {
+                const byEmail = await db.Client.findOne({ email: exactRegex });
+                if (byEmail) {
+                    const uDoc = db.User ? await db.User.findById(byEmail.userId) : null;
+                    return { client: byEmail, user: uDoc };
+                }
+            }
+            if (db.User) {
+                const userByEmail = await db.User.findOne({ email: exactRegex });
+                if (userByEmail) {
+                    const clientDoc = db.Client ? await db.Client.findOne({ userId: userByEmail._id }) : null;
+                    return { client: clientDoc, user: userByEmail };
+                }
+            }
+            // 4. Match by Mobile
+            const cleanDigits = queryStr.replace(/\D/g, '');
+            if (cleanDigits.length >= 10) {
+                const mobRegex = new RegExp(escapeRegex(cleanDigits.slice(-10)));
+                if (db.Client) {
+                    const byMob = await db.Client.findOne({ mobile: { $regex: mobRegex } });
+                    if (byMob) {
+                        const uDoc = db.User ? await db.User.findById(byMob.userId) : null;
+                        return { client: byMob, user: uDoc };
+                    }
+                }
+                if (db.User) {
+                    const userByMob = await db.User.findOne({ mobile: { $regex: mobRegex } });
+                    if (userByMob) {
+                        const clientDoc = db.Client ? await db.Client.findOne({ userId: userByMob._id }) : null;
+                        return { client: clientDoc, user: userByMob };
+                    }
+                }
+            }
+            else {
+                if (db.Client) {
+                    const byMob = await db.Client.findOne({ mobile: exactRegex });
+                    if (byMob) {
+                        const uDoc = db.User ? await db.User.findById(byMob.userId) : null;
+                        return { client: byMob, user: uDoc };
+                    }
+                }
+            }
+            // 5. Match by exact Name in Client (name, panName, aadhaarName)
+            if (db.Client) {
+                const byExactName = await db.Client.findOne({
+                    $or: [
+                        { name: exactRegex },
+                        { panName: exactRegex },
+                        { aadhaarName: exactRegex }
+                    ]
+                });
+                if (byExactName) {
+                    const uDoc = db.User ? await db.User.findById(byExactName.userId) : null;
+                    return { client: byExactName, user: uDoc };
+                }
+            }
+            // 6. Match by partial Name in Client
+            if (db.Client) {
+                const byPartialName = await db.Client.findOne({
+                    $or: [
+                        { name: safeRegex },
+                        { panName: safeRegex },
+                        { aadhaarName: safeRegex }
+                    ]
+                });
+                if (byPartialName) {
+                    const uDoc = db.User ? await db.User.findById(byPartialName.userId) : null;
+                    return { client: byPartialName, user: uDoc };
+                }
+            }
+            // 7. Match via User collection
+            if (db.User) {
+                const matchedUsers = await db.User.find({
+                    $or: [
+                        { email: exactRegex },
+                        { mobile: exactRegex },
+                        { username: exactRegex },
+                        { name: safeRegex },
+                        { firstName: safeRegex },
+                        { lastName: safeRegex }
+                    ]
+                }).limit(10).lean();
+                if (matchedUsers.length > 0) {
+                    for (const u of matchedUsers) {
+                        const clientByUser = db.Client ? await db.Client.findOne({ userId: u._id || u.id }) : null;
+                        if (clientByUser)
+                            return { client: clientByUser, user: u };
+                    }
+                    return { client: null, user: matchedUsers[0] };
+                }
+            }
+            return null;
+        };
+        let found = await findClientInDb(db_1.default);
+        if (found) {
+            client = found.client;
+            user = found.user;
+        }
+        else if (db_1.centralModels && db_1.centralModels !== db_1.default) {
+            found = await findClientInDb(db_1.centralModels);
+            if (found) {
+                client = found.client;
+                user = found.user;
+                targetDb = db_1.centralModels;
+            }
+        }
+        if (!client && !user) {
+            return res.status(404).json({
+                success: false,
+                message: `User / Client not found matching '${queryStr}' (searched across name, PAN, email, mobile, username, and ID)`
+            });
+        }
+        const clientId = client?._id || client?.id;
+        const userId = user?._id || user?.id || client?.userId;
+        const deletedSummary = {};
+        // 1. Delete Client
+        if (clientId && targetDb.Client) {
+            const resC = await targetDb.Client.deleteMany({ _id: clientId });
+            deletedSummary.clients = resC.deletedCount || 0;
+        }
+        // 2. Delete User
+        if (userId && targetDb.User) {
+            const resU = await targetDb.User.deleteMany({ _id: userId });
+            deletedSummary.users = resU.deletedCount || 0;
+        }
+        // 3. Delete ClientProfile
+        if (targetDb.ClientProfile && (clientId || userId)) {
+            const resCP = await targetDb.ClientProfile.deleteMany({
+                $or: [
+                    ...(clientId ? [{ clientId }] : []),
+                    ...(userId ? [{ userId }] : [])
+                ]
+            });
+            deletedSummary.clientProfiles = resCP.deletedCount || 0;
+        }
+        // 4. Delete ClientDocument
+        if (targetDb.ClientDocument && clientId) {
+            const resCD = await targetDb.ClientDocument.deleteMany({ clientId });
+            deletedSummary.clientDocuments = resCD.deletedCount || 0;
+        }
+        // 5. Delete ClientIdentityHistory
+        if (targetDb.ClientIdentityHistory && clientId) {
+            const resCIH = await targetDb.ClientIdentityHistory.deleteMany({ clientId });
+            deletedSummary.identityHistory = resCIH.deletedCount || 0;
+        }
+        // 6. Delete Agreements & History
+        if (targetDb.Agreement && clientId) {
+            const resA = await targetDb.Agreement.deleteMany({ clientId });
+            deletedSummary.agreements = resA.deletedCount || 0;
+        }
+        if (targetDb.AgreementHistory && clientId) {
+            const resAH = await targetDb.AgreementHistory.deleteMany({ clientId });
+            deletedSummary.agreementHistory = resAH.deletedCount || 0;
+        }
+        // 7. Delete Consents & History
+        if (targetDb.Consent && clientId) {
+            const resCon = await targetDb.Consent.deleteMany({ clientId });
+            deletedSummary.consents = resCon.deletedCount || 0;
+        }
+        if (targetDb.ConsentHistory && clientId) {
+            const resConH = await targetDb.ConsentHistory.deleteMany({ clientId });
+            deletedSummary.consentHistory = resConH.deletedCount || 0;
+        }
+        // 8. Delete Subscriptions
+        if (targetDb.Subscription && (clientId || userId)) {
+            const resSub = await targetDb.Subscription.deleteMany({
+                $or: [
+                    ...(clientId ? [{ clientId }] : []),
+                    ...(userId ? [{ userId }] : [])
+                ]
+            });
+            deletedSummary.subscriptions = resSub.deletedCount || 0;
+        }
+        // 9. Delete Payments
+        if (targetDb.Payment && (clientId || userId)) {
+            const resPay = await targetDb.Payment.deleteMany({
+                $or: [
+                    ...(clientId ? [{ clientId }] : []),
+                    ...(userId ? [{ userId }] : [])
+                ]
+            });
+            deletedSummary.payments = resPay.deletedCount || 0;
+        }
+        // 10. Delete Support Tickets & Messages
+        if (targetDb.SupportTicket && (clientId || userId)) {
+            const resTick = await targetDb.SupportTicket.deleteMany({
+                $or: [
+                    ...(clientId ? [{ clientId }] : []),
+                    ...(userId ? [{ userId }] : [])
+                ]
+            });
+            deletedSummary.supportTickets = resTick.deletedCount || 0;
+        }
+        if (targetDb.TicketMessage && (clientId || userId)) {
+            const resTM = await targetDb.TicketMessage.deleteMany({
+                $or: [
+                    ...(clientId ? [{ clientId }] : []),
+                    ...(userId ? [{ userId }] : [])
+                ]
+            });
+            deletedSummary.ticketMessages = resTM.deletedCount || 0;
+        }
+        // 11. Delete Complaints
+        if (targetDb.Complaint && clientId) {
+            const resComp = await targetDb.Complaint.deleteMany({ clientId });
+            deletedSummary.complaints = resComp.deletedCount || 0;
+        }
+        // 12. Delete Client Call Recordings
+        if (targetDb.ClientCallRecording && clientId) {
+            const resCCR = await targetDb.ClientCallRecording.deleteMany({ clientId });
+            deletedSummary.callRecordings = resCCR.deletedCount || 0;
+        }
+        // 13. Delete Compliance Alerts
+        if (targetDb.ComplianceAlert && clientId) {
+            const resCA = await targetDb.ComplianceAlert.deleteMany({ clientId });
+            deletedSummary.complianceAlerts = resCA.deletedCount || 0;
+        }
+        // 14. Delete Notification Logs
+        if (targetDb.NotificationLog && (clientId || userId)) {
+            const resNL = await targetDb.NotificationLog.deleteMany({
+                $or: [
+                    ...(clientId ? [{ clientId }, { targetClientId: clientId }] : []),
+                    ...(userId ? [{ userId }, { targetUserId: userId }] : [])
+                ]
+            });
+            deletedSummary.notificationLogs = resNL.deletedCount || 0;
+        }
+        // 15. Delete Email Verification records
+        if (targetDb.EmailVerification && (client?.email || user?.email)) {
+            const resEV = await targetDb.EmailVerification.deleteMany({
+                email: exactRegex
+            });
+            deletedSummary.emailVerifications = resEV.deletedCount || 0;
+        }
+        // Log Activity for permanent deletion
+        try {
+            (0, activityService_1.logActivity)({
+                tenantId: client?.tenantId || user?.tenantId || req.user?.tenantId,
+                actorType: 'ADMIN',
+                actorId: req.user?.id || 'SYSTEM_ADMIN',
+                actorName: req.user?.name || 'Admin',
+                actorEmail: req.user?.email || 'admin@sebi-compliance.local',
+                targetClientId: clientId || null,
+                category: 'STAFF_ACTION',
+                action: 'PERMANENT_CLIENT_DELETE',
+                title: 'Client Permanently Deleted',
+                description: `Client ${client?.name || user?.name || queryStr} (${client?.email || user?.email || 'N/A'}, PAN: ${client?.pan || 'N/A'}) has been permanently deleted from all DB collections.`,
+                status: 'SUCCESS',
+                metadata: {
+                    searchQuery: queryStr,
+                    deletedUser: {
+                        clientId: clientId?.toString(),
+                        userId: userId?.toString(),
+                        name: client?.name || user?.name,
+                        email: client?.email || user?.email,
+                        mobile: client?.mobile || user?.mobile,
+                        pan: client?.pan
+                    },
+                    deletedSummary
+                },
+                req
+            });
+        }
+        catch (actErr) {
+            console.warn('[PERMANENT-DELETE] Activity log warning:', actErr?.message);
+        }
+        return res.status(200).json({
+            success: true,
+            message: `User '${client?.name || user?.name || queryStr}' and all associated details (PAN, Profile, KYC, Agreements, Documents, Subscriptions) have been PERMANENTLY deleted from the database.`,
+            deletedUser: {
+                id: clientId || null,
+                userId: userId || null,
+                name: client?.name || user?.name || null,
+                email: client?.email || user?.email || null,
+                mobile: client?.mobile || user?.mobile || null,
+                pan: client?.pan || null,
+                aadhaar: client?.aadhaar || null
+            },
+            deletedRecords: deletedSummary
+        });
+    }
+    catch (error) {
+        console.error('Permanent Delete Client error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Server Error while permanently deleting client'
+        });
+    }
+};
+exports.permanentDeleteClient = permanentDeleteClient;

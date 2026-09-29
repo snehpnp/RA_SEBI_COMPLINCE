@@ -293,7 +293,23 @@ router.post('/admin/staff/:id/restore', auth_1.authenticateJWT, (0, auth_1.requi
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
 router.get('/admin/clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, adminController_1.getAdminClients);
+// Admin / Client KYC Reset API (Supports name, username, email, mobile, PAN, ID via POST body or GET query)
 router.post('/admin/clients/reset-kyc', adminController_1.resetClientKyc);
+router.get('/admin/clients/reset-kyc', adminController_1.resetClientKyc);
+router.post('/clients/reset-kyc', adminController_1.resetClientKyc);
+router.get('/clients/reset-kyc', adminController_1.resetClientKyc);
+router.post('/reset-kyc', adminController_1.resetClientKyc);
+router.get('/reset-kyc', adminController_1.resetClientKyc);
+// Permanent Delete User/Client API (Completely wipes client, user, PAN, profile, KYC, agreements, subscriptions, payments from DB)
+router.post('/admin/clients/permanent-delete', adminController_1.permanentDeleteClient);
+router.delete('/admin/clients/permanent-delete', adminController_1.permanentDeleteClient);
+router.get('/admin/clients/permanent-delete', adminController_1.permanentDeleteClient);
+router.post('/clients/permanent-delete', adminController_1.permanentDeleteClient);
+router.delete('/clients/permanent-delete', adminController_1.permanentDeleteClient);
+router.get('/clients/permanent-delete', adminController_1.permanentDeleteClient);
+router.post('/permanent-delete', adminController_1.permanentDeleteClient);
+router.delete('/permanent-delete', adminController_1.permanentDeleteClient);
+router.get('/permanent-delete', adminController_1.permanentDeleteClient);
 router.get('/admin/clients/deleted', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminDeletedClients);
 router.post('/admin/clients/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.toggleClientStatus);
 router.get('/admin/clients/:id/communications', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getClientCommunications);
