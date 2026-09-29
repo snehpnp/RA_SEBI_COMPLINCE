@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Layers, Target, FileText, CreditCard, Receipt,
   ShieldCheck, ShieldAlert, MessageSquare, Bell, User, Settings,
-  Scale, LogOut, Menu, X, Loader2, ChevronRight, BarChart
+  Scale, LogOut, Menu, X, Loader2, ChevronRight, BarChart, Sparkles, Check, Lock
 } from 'lucide-react';
 import api from '../../services/api';
 import { toast } from 'react-hot-toast';
@@ -61,6 +61,91 @@ function ClientPortalContent() {
   const [policiesExpanded, setPoliciesExpanded] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
+  // Targeted Plan State for Locked Signals -> Subscription Highlighting
+  const [targetPlanId, setTargetPlanId] = useState<string | null>(null);
+  const [targetPlanName, setTargetPlanName] = useState<string | null>(null);
+
+  // Real-time Notification & Live Trade Alert System
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
+  const [activeRealtimeAlert, setActiveRealtimeAlert] = useState<any | null>(null);
+  const [dataRefreshCounter, setDataRefreshCounter] = useState(0);
+  const lastSeenNotifIdRef = useRef<string | null>(null);
+  const initialLoadDoneRef = useRef(false);
+  const realtimeAlertRef = useRef<HTMLDivElement>(null);
+
+  // Play audio chime for new live trade / report alert
+  const playNotificationChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const now = ctx.currentTime;
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(880, now + 0.12); // A5
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.35);
+    } catch (e) {
+      // Audio might not play if user hasn't interacted yet
+    }
+  };
+
+  const fetchNotifications = async (silent = false) => {
+    try {
+      const res = await api.getClientNotifications();
+      if (res.success && Array.isArray(res.data)) {
+        const notifs = res.data;
+        setNotifications(notifs);
+
+        const unread = notifs.filter((n: any) => !n.isRead && !n.read && n.status !== 'READ');
+        setUnreadNotifCount(unread.length);
+
+        if (notifs.length > 0) {
+          const newest = notifs[0];
+          const newestId = String(newest.id || newest._id);
+
+          // If this is a new notification after initial page load and it's unread
+          const isNewNotif = !lastSeenNotifIdRef.current || newestId !== lastSeenNotifIdRef.current;
+          if (initialLoadDoneRef.current && isNewNotif) {
+            const isUnread = !newest.isRead && !newest.read && newest.status !== 'READ';
+            if (isUnread) {
+              setActiveRealtimeAlert(newest);
+              playNotificationChime();
+              setDataRefreshCounter(prev => prev + 1);
+            }
+          }
+
+          lastSeenNotifIdRef.current = newestId;
+        }
+
+        if (!initialLoadDoneRef.current) {
+          initialLoadDoneRef.current = true;
+        }
+      }
+    } catch (err) {
+      // Background poll silently fails
+    }
+  };
+
+  const handleMarkAllNotifsRead = async () => {
+    try {
+      await api.markClientNotificationsAsRead();
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true, read: true })));
+      setUnreadNotifCount(0);
+      toast.success('All notifications marked as read');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchData = async () => {
     try {
       const [profileRes, subRes, pagesRes] = await Promise.all([
@@ -89,9 +174,10 @@ function ClientPortalContent() {
         const isAgreementDone = Boolean(p.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') || p.agreementSigned);
         const isFully = isKycDone && isAgreementDone;
 
-        // User requirement: Modal only shows if plan is assigned AND KYC/Agreement is pending
+        // Strict compliance check: If plan is assigned AND KYC/Agreement is pending, lock access & open onboarding
         if (hasPlan && !isFully) {
           setShowOnboarding(true);
+          setActiveTab('kyc');
         } else {
           setShowOnboarding(false);
         }
@@ -105,7 +191,37 @@ function ClientPortalContent() {
 
   useEffect(() => {
     fetchData();
+    fetchNotifications();
+    const notifInterval = setInterval(() => {
+      fetchNotifications(true);
+    }, 4000);
+    return () => clearInterval(notifInterval);
   }, []);
+
+  // Auto-close realtime alert on outside click or after 15 seconds
+  useEffect(() => {
+    if (!activeRealtimeAlert) return;
+
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (realtimeAlertRef.current && !realtimeAlertRef.current.contains(e.target as Node)) {
+        setActiveRealtimeAlert(null);
+      }
+    };
+
+    const attachTimer = setTimeout(() => {
+      document.addEventListener('click', handleOutsideClick);
+    }, 100);
+
+    const autoDismissTimer = setTimeout(() => {
+      setActiveRealtimeAlert(null);
+    }, 15000);
+
+    return () => {
+      clearTimeout(attachTimer);
+      clearTimeout(autoDismissTimer);
+      document.removeEventListener('click', handleOutsideClick);
+    };
+  }, [activeRealtimeAlert]);
 
   // Check if client has an active assigned plan
   const hasAssignedPlan = Boolean(
@@ -118,7 +234,19 @@ function ClientPortalContent() {
   const isAgreementDone = Boolean(profile?.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') || profile?.agreementSigned);
   const isFullyOnboarded = isKycDone && isAgreementDone;
 
-  const handleTabChange = (newTab: string) => {
+  const handleTabChange = (newTab: string, planId?: string | null, planName?: string | null) => {
+    // Immediately close any open alert popups or notification dropdowns on tab switch
+    setActiveRealtimeAlert(null);
+    setIsNotifDropdownOpen(false);
+
+    if (planId !== undefined) {
+      setTargetPlanId(planId);
+      setTargetPlanName(planName !== undefined ? planName : null);
+    } else if (newTab !== 'subscriptions') {
+      setTargetPlanId(null);
+      setTargetPlanName(null);
+    }
+
     // Strict Compliance Guard: If plan is assigned but KYC / Agreement incomplete, block other tabs and redirect to KYC
     if (hasAssignedPlan && !isFullyOnboarded) {
       if (newTab !== 'kyc' && newTab !== 'support' && newTab !== 'legal') {
@@ -164,26 +292,52 @@ function ClientPortalContent() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <Dashboard profile={profile} setActiveTab={handleTabChange} onTriggerOnboarding={() => setShowOnboarding(true)} />;
-      case 'signals': return (
-        <MarketSignals
-          onUnlockTrade={() => {
+      case 'dashboard': return (
+        <Dashboard
+          profile={profile}
+          setActiveTab={handleTabChange}
+          onTriggerOnboarding={() => setShowOnboarding(true)}
+          onUnlockTrade={(signal) => {
             if (!isFullyOnboarded) {
               handleTabChange('kyc');
             } else {
-              handleTabChange('subscriptions');
+              handleTabChange('subscriptions', signal?.planId || null, signal?.planName || null);
+            }
+          }}
+          refreshTrigger={dataRefreshCounter}
+        />
+      );
+      case 'signals': return (
+        <MarketSignals
+          onUnlockTrade={(signal) => {
+            if (!isFullyOnboarded) {
+              handleTabChange('kyc');
+            } else {
+              handleTabChange('subscriptions', signal?.planId || null, signal?.planName || null);
             }
           }}
         />
       );
       case 'research': return <ResearchReports />;
-      case 'subscriptions': return <SubscriptionCenter profile={profile} onNavigateToKyc={() => handleTabChange('kyc')} onTriggerOnboarding={() => setShowOnboarding(true)} />;
+      case 'subscriptions': return (
+        <SubscriptionCenter
+          profile={profile}
+          onNavigateToKyc={() => handleTabChange('kyc')}
+          onTriggerOnboarding={() => setShowOnboarding(true)}
+          targetPlanId={targetPlanId}
+          targetPlanName={targetPlanName}
+          onClearTargetPlan={() => {
+            setTargetPlanId(null);
+            setTargetPlanName(null);
+          }}
+        />
+      );
       case 'payments': return <PaymentCenter profile={profile} />;
       case 'kyc': return <KYCCenter onTriggerOnboarding={() => setShowOnboarding(true)} />;
       case 'complaints': return <ComplaintsCenter profile={profile} />;
       case 'complaint-status': return <CustomPageView page={{ slug: 'complaint-status', title: 'Complaint Data' }} />;
       case 'support': return <SupportCenter />;
-      case 'notifications': return <Notifications />;
+      case 'notifications': return <Notifications onNavigateToTab={handleTabChange} onRefreshUnreadCount={fetchNotifications} />;
       case 'profile': return <ProfileSettings onNavigateToKyc={() => handleTabChange('kyc')} />;
       case 'legal':
         const legalPages = [...pages];
@@ -252,6 +406,63 @@ function ClientPortalContent() {
         onStart={() => setShowOnboarding(true)}
       />
 
+      {/* Floating On-Screen Real-Time Alert Banner / Popup */}
+      {activeRealtimeAlert && (
+        <div
+          ref={realtimeAlertRef}
+          className="fixed top-5 right-5 z-[100] max-w-sm w-full bg-white dark:bg-slate-900 border-2 border-primary-500 shadow-2xl rounded-2xl p-4 animate-in slide-in-from-top-4 duration-300"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary-500/20 text-primary-600 dark:text-primary-400 flex items-center justify-center shrink-0">
+              <Bell className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <span className="text-[10px] uppercase font-black tracking-wider px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
+                  Live Alert
+                </span>
+                <button
+                  onClick={() => setActiveRealtimeAlert(null)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5"
+                  title="Close alert"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <h4 className="font-bold text-sm text-slate-900 dark:text-white leading-tight">
+                {activeRealtimeAlert.title}
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 line-clamp-2 leading-relaxed">
+                {activeRealtimeAlert.message}
+              </p>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const type = (activeRealtimeAlert.type || '').toLowerCase();
+                    if (type === 'report') {
+                      handleTabChange('research');
+                    } else {
+                      handleTabChange('signals');
+                    }
+                    setActiveRealtimeAlert(null);
+                  }}
+                  className="flex-1 py-1.5 px-3 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm"
+                >
+                  <span>View Now</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setActiveRealtimeAlert(null)}
+                  className="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Premium Sidebar */}
       <aside className={`fixed md:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col ${mobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
@@ -295,6 +506,8 @@ function ClientPortalContent() {
         <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 hide-scrollbar">
           {NAV_ITEMS.map((item) => {
             const isActive = activeTab === item.id;
+            const isNotif = item.id === 'notifications';
+            const isLockedByCompliance = hasAssignedPlan && !isFullyOnboarded && (item.id === 'dashboard' || item.id === 'signals' || item.id === 'research' || item.id === 'subscriptions' || item.id === 'payments');
             return (
               <button
                 key={item.id}
@@ -303,10 +516,32 @@ function ClientPortalContent() {
                   ? 'bg-white/15 text-white font-bold shadow-md shadow-black/10'
                   : 'text-white/70 hover:bg-white/5 hover:text-white'
                   } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
-                title={isSidebarCollapsed ? item.label : undefined}
+                title={isSidebarCollapsed ? (isLockedByCompliance ? `${item.label} (KYC Pending)` : item.label) : undefined}
               >
-                <item.icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`} />
-                {!isSidebarCollapsed && <span>{item.label}</span>}
+                <div className="relative shrink-0">
+                  <item.icon className={`w-5 h-5 transition-colors ${isActive ? 'text-white' : 'text-white/50 group-hover:text-white/80'}`} />
+                  {isNotif && unreadNotifCount > 0 && isSidebarCollapsed && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full" />
+                  )}
+                  {isLockedByCompliance && isSidebarCollapsed && (
+                    <span className="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full flex items-center justify-center text-[7px] text-black font-bold">🔒</span>
+                  )}
+                </div>
+                {!isSidebarCollapsed && (
+                  <div className="flex-1 flex items-center justify-between min-w-0">
+                    <span className="truncate text-left">{item.label}</span>
+                    {isLockedByCompliance && (
+                      <span className="flex items-center gap-1 text-[9px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0 ml-1">
+                        <Lock className="w-2.5 h-2.5" /> Locked
+                      </span>
+                    )}
+                  </div>
+                )}
+                {!isSidebarCollapsed && isNotif && unreadNotifCount > 0 && (
+                  <span className="px-2 py-0.5 text-[10px] font-black bg-rose-500 text-white rounded-full">
+                    {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                  </span>
+                )}
                 {!isSidebarCollapsed && isActive && (
                   <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_white]" />
                 )}
@@ -364,6 +599,115 @@ function ClientPortalContent() {
           </div>
 
           <div className="flex items-center gap-3 md:gap-4">
+            {/* Real-time Notification Bell with Badge & Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifDropdownOpen(!isNotifDropdownOpen)}
+                className="relative p-2.5 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-center"
+                title="Notifications & Trade Alerts"
+              >
+                <Bell className={`w-5 h-5 ${unreadNotifCount > 0 ? 'text-primary-600 dark:text-primary-400' : ''}`} />
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-rose-600 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-md shadow-rose-600/30 animate-pulse">
+                    {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Popover Dropdown */}
+              {isNotifDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setIsNotifDropdownOpen(false)} />
+                  <div className="absolute right-0 mt-3 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                    <div className="p-3.5 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white">Live Alerts</span>
+                        {unreadNotifCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-primary-100 text-primary-800 dark:bg-primary-950 dark:text-primary-300 text-[10px] font-bold">
+                            {unreadNotifCount} new
+                          </span>
+                        )}
+                      </div>
+                      {unreadNotifCount > 0 && (
+                        <button
+                          onClick={handleMarkAllNotifsRead}
+                          className="text-[11px] font-bold text-primary-600 dark:text-primary-400 hover:underline"
+                        >
+                          Mark all as read
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5">
+                      {notifications.length === 0 ? (
+                        <div className="py-8 px-4 text-center">
+                          <Bell className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2 opacity-60" />
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">No notifications yet</p>
+                        </div>
+                      ) : (
+                        notifications.slice(0, 5).map((n: any) => {
+                          const isUnread = !n.isRead && !n.read && n.status !== 'READ';
+                          const type = (n.type || '').toLowerCase();
+                          return (
+                            <div
+                              key={n.id || n._id}
+                              onClick={() => {
+                                setIsNotifDropdownOpen(false);
+                                if (type === 'report') {
+                                  handleTabChange('research');
+                                } else {
+                                  handleTabChange('signals');
+                                }
+                              }}
+                              className={`p-3 cursor-pointer transition-colors flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${
+                                isUnread ? 'bg-primary-50/30 dark:bg-primary-950/20' : ''
+                              }`}
+                            >
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs mt-0.5 ${
+                                type === 'signal' || type === 'alert' || type === 'update'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : type === 'report'
+                                  ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                                  : 'bg-slate-500/15 text-slate-600 dark:text-slate-400'
+                              }`}>
+                                {type === 'signal' ? <Target className="w-4 h-4" /> : type === 'report' ? <FileText className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-1 mb-0.5">
+                                  <h5 className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                    {n.title}
+                                  </h5>
+                                  {isUnread && (
+                                    <span className="w-2 h-2 rounded-full bg-primary-600 shrink-0" />
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                  {n.message}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-white/10 text-center">
+                      <button
+                        onClick={() => {
+                          setIsNotifDropdownOpen(false);
+                          handleTabChange('notifications');
+                        }}
+                        className="text-xs font-bold text-primary-600 dark:text-primary-400 hover:text-primary-500 flex items-center justify-center gap-1 mx-auto"
+                      >
+                        <span>View All Notifications</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
             {/* Theme Toggle */}
             <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
               <ThemeToggle />

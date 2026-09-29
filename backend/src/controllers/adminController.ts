@@ -1,10 +1,10 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import dynamicDb, { centralModels } from '../config/db';
 import * as bcrypt from 'bcryptjs';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
-import { sendWelcomeEmail, sendTestEmail } from '../services/emailService';
+import { sendWelcomeEmail, sendTestEmail, sendTaxInvoiceEmail } from '../services/emailService';
 import { checkComplianceForTenant } from './complianceController';
 import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 import archiver = require('archiver');
@@ -1567,6 +1567,25 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
   }
 
   try {
+    if (req.user && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'ADMIN') {
+      const role: any = await dynamicDb.Role.findOne({ name: req.user.role }).lean();
+      if (role) {
+        const editPerm: any = await dynamicDb.Permission.findOne({ code: 'EDIT_CLIENTS' }).lean();
+        if (editPerm) {
+          const hasEdit = await dynamicDb.RolePermission.findOne({
+            roleId: role._id,
+            permissionId: editPerm._id
+          }).lean();
+          if (!hasEdit) {
+            return res.status(403).json({
+              success: false,
+              message: 'Access Forbidden: You do not have permission to edit clients.'
+            });
+          }
+        }
+      }
+    }
+
     let client: any = await dynamicDb.Client.findById(id).lean();
     let clientUser: any = null;
     let actualClientId = id;
@@ -1663,23 +1682,23 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       }
     });
 
-    if (client && finalPan !== client.pan) {
+    if (client && finalPan && finalPan !== client.pan) {
       await dynamicDb.ClientIdentityHistory.create({
         clientId: actualClientId,
         fieldName: 'PAN',
-        oldValue: client.pan || '',
-        newValue: finalPan,
+        oldValue: client.pan || 'N/A',
+        newValue: finalPan || 'N/A',
         changedBy: 'ADMIN',
         remarks: 'Updated by Admin / Compliance Officer'
       });
     }
 
-    if (client && finalAadhaar !== client.aadhaar) {
+    if (client && finalAadhaar && finalAadhaar !== client.aadhaar) {
       await dynamicDb.ClientIdentityHistory.create({
         clientId: actualClientId,
         fieldName: 'AADHAAR',
-        oldValue: client.aadhaar || '',
-        newValue: finalAadhaar || '',
+        oldValue: client.aadhaar || 'N/A',
+        newValue: finalAadhaar || 'N/A',
         changedBy: 'ADMIN',
         remarks: 'Updated by Admin / Compliance Officer'
       });
@@ -2481,7 +2500,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   const {
-    themeColor, companyName, companyEmail, gstCalculationType, state, gst, smtpHost, smtpPort,
+    themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort,
     smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
     bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment,
     agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
@@ -2510,7 +2529,36 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     }
     if (!oldTenant) return res.status(404).json({ success: false, message: 'Tenant not found' });
 
+    // Validate GSTIN when GST is enabled
+    if (gstEnabled !== undefined) {
+      const isGst = gstEnabled === 'true' || gstEnabled === true;
+      if (isGst) {
+        const gstinToCheck = gst !== undefined ? gst : oldTenant?.gst;
+        if (!gstinToCheck || typeof gstinToCheck !== 'string' || gstinToCheck.trim().length < 15) {
+          return res.status(400).json({
+            success: false,
+            message: 'GST is enabled. A valid 15-digit Company GSTIN is mandatory.'
+          });
+        }
+      }
+    } else if (oldTenant?.gstEnabled !== false && gst !== undefined && gst.trim() !== '') {
+      if (gst.trim().length < 15) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please enter a valid 15-digit Company GSTIN number.'
+        });
+      }
+    }
+
     const dataToUpdate: any = {};
+    if (gstEnabled !== undefined) {
+      dataToUpdate.gstEnabled = gstEnabled === 'true' || gstEnabled === true;
+    }
+    if (invoiceDispatchPolicy !== undefined) {
+      dataToUpdate.invoiceDispatchPolicy = invoiceDispatchPolicy === 'IMMEDIATE_ON_PAYMENT'
+        ? 'IMMEDIATE_ON_PAYMENT'
+        : 'AFTER_KYC_AGREEMENT';
+    }
     if (passwordPolicy !== undefined) dataToUpdate.passwordPolicy = passwordPolicy === 'STRONG' ? 'STRONG' : 'NORMAL';
     if (client2FAEnabled !== undefined) dataToUpdate.client2FAEnabled = client2FAEnabled === 'true' || client2FAEnabled === true;
     if (twoFactorChannel !== undefined) dataToUpdate.twoFactorChannel = twoFactorChannel;
@@ -2530,7 +2578,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (companyName) dataToUpdate.companyName = companyName;
     if (companyEmail) dataToUpdate.email = companyEmail;
     if (gstCalculationType) dataToUpdate.gstCalculationType = gstCalculationType;
-    if (gst !== undefined) dataToUpdate.gst = gst;
+    if (gst !== undefined) dataToUpdate.gst = gst ? gst.trim().toUpperCase() : null;
     if (state !== undefined) dataToUpdate.state = state;
     if (address !== undefined) dataToUpdate.address = address;
     if (website !== undefined) dataToUpdate.website = website;
@@ -3103,20 +3151,23 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       appliedCouponId = coupon._id || coupon.id;
     }
 
+    const isGstActive = tenantObj?.gstEnabled !== false;
+    const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
+
     const discountedBasePrice = plan.price - discountAmount;
     let totalAmount = discountedBasePrice;
 
-    if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
+    if (isExclusive) {
       totalAmount = discountedBasePrice * 1.18;
     }
 
     let finalBasePrice = discountedBasePrice;
-    let finalGstAmount = totalAmount - discountedBasePrice;
+    let finalGstAmount = isExclusive ? (totalAmount - discountedBasePrice) : 0;
     let finalTotalAmount = totalAmount;
 
     if (customAmount !== undefined && customAmount !== null) {
       finalTotalAmount = customAmount;
-      if (tenantObj?.gstCalculationType === 'EXCLUSIVE') {
+      if (isExclusive) {
         finalBasePrice = finalTotalAmount / 1.18;
         finalGstAmount = finalTotalAmount - finalBasePrice;
       } else {
@@ -3163,10 +3214,17 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       amountBase: finalBasePrice,
       amountGst: finalGstAmount,
       amountTotal: parseFloat(finalTotalAmount.toFixed(2)),
-      isGstInclusive: tenantObj?.gstCalculationType !== 'EXCLUSIVE'
+      isGstInclusive: isGstActive && tenantObj?.gstCalculationType === 'INCLUSIVE'
     });
 
-    const payment = await dynamicDb.Payment.create({
+    const activePolicy = tenantObj?.invoiceDispatchPolicy || 'AFTER_KYC_AGREEMENT';
+    let initialInvoiceStatus = 'GENERATED';
+    if (activePolicy === 'AFTER_KYC_AGREEMENT') {
+      const isAgreementSigned = Boolean(client.agreementSigned);
+      initialInvoiceStatus = isAgreementSigned ? 'GENERATED' : 'PENDING_AGREEMENT';
+    }
+
+    const payment: any = await dynamicDb.Payment.create({
       tenantId: tenantId || client.tenantId,
       clientId: actualClientId,
       planId: plan._id || plan.id,
@@ -3175,6 +3233,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       transactionRef: paymentRefId,
       paymentDate: new Date(paymentDate),
       status: 'SUCCESS',
+      invoicePolicy: activePolicy as any,
+      invoiceStatus: initialInvoiceStatus as any,
       remarks: finalRemark,
       verifiedByStaffId: req.user!.id,
       assignedByAdminName: isAdmin ? assignerName : null,
@@ -3187,6 +3247,28 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       couponId: appliedCouponId,
       discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
     });
+
+    if (initialInvoiceStatus === 'GENERATED' && activePolicy === 'IMMEDIATE_ON_PAYMENT' && client.email) {
+      generateInvoicePdf(String(payment._id || payment.id))
+        .then(pdfBuffer => {
+          return sendTaxInvoiceEmail({
+            tenantId,
+            toEmail: client.email,
+            clientName: client.name || 'Client',
+            companyName: tenantObj?.companyName,
+            planName: plan.name,
+            invoiceNumber: `INV/${new Date().getFullYear()}/${String(paymentRefId).slice(-6).toUpperCase()}`,
+            amount: payment.amount,
+            pdfBuffer
+          });
+        })
+        .then(() => {
+          dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+            $set: { invoiceSentAt: new Date(), lastEmailedTo: client.email }
+          }).catch(() => {});
+        })
+        .catch(err => console.warn('[Auto Invoice Email] Failed to send on assignment:', err.message));
+    }
 
     await dynamicDb.Client.findByIdAndUpdate(actualClientId, {
       $set: { status: 'ACTIVE' }
@@ -4357,403 +4439,168 @@ export const testDigioConfig = async (req: AuthenticatedRequest, res: Response) 
 };
 
 /**
- * POST /admin/clients/permanent-delete
- * Permanently deletes a user/client and all associated details (PAN, Profile, KYC, Agreements, Documents, Subscriptions, Payments, etc.) from the DB.
+ * Send or Resend Official Tax Invoice PDF via Email to Client
  */
-export const permanentDeleteClient = async (req: any, res: any) => {
+export const sendPaymentInvoiceEmail = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  const { id } = req.params;
+
   try {
-    const searchParam =
-      req.body?.name ||
-      req.query?.name ||
-      req.body?.clientName ||
-      req.query?.clientName ||
-      req.body?.username ||
-      req.query?.username ||
-      req.body?.email ||
-      req.query?.email ||
-      req.body?.mobile ||
-      req.query?.mobile ||
-      req.body?.phone ||
-      req.query?.phone ||
-      req.body?.pan ||
-      req.query?.pan ||
-      req.body?.aadhaar ||
-      req.query?.aadhaar ||
-      req.body?.clientId ||
-      req.query?.clientId ||
-      req.body?.userId ||
-      req.query?.userId ||
-      req.body?.id ||
-      req.query?.id ||
-      req.params?.id ||
-      req.body?.search ||
-      req.query?.search ||
-      req.body?.query ||
-      req.query?.query ||
-      req.body?.identifier ||
-      req.query?.identifier;
-
-    if (!searchParam || String(searchParam).trim() === '') {
-      return res.status(400).json({
-        success: false,
-        message: 'User / Client identifier is required. Please provide name, username, email, mobile, or pan.',
-        examples: {
-          json_body: { name: 'Pavan Kumar' },
-          query_param: '/api/v1/admin/clients/permanent-delete?name=Pavan'
-        }
-      });
+    let payment: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      payment = await dynamicDb.Payment.findById(id).lean();
     }
-
-    const queryStr = String(searchParam).trim();
-    const escapeRegex = (text: string) => text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
-    const safeRegex = new RegExp(escapeRegex(queryStr), 'i');
-    const exactRegex = new RegExp(`^${escapeRegex(queryStr)}$`, 'i');
+    if (!payment) {
+      payment = await dynamicDb.Payment.findOne({ transactionRef: id }).lean();
+    }
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment record not found' });
+    }
 
     let client: any = null;
-    let user: any = null;
-    let targetDb: any = dynamicDb;
-
-    // Helper to find client / user in a specific database model container
-    const findClientInDb = async (db: any) => {
-      if (!db) return null;
-
-      // 1. Direct match by ObjectId (Client ID or User ID)
-      if (mongoose.Types.ObjectId.isValid(queryStr)) {
-        if (db.Client) {
-          const directClient = await db.Client.findById(queryStr);
-          if (directClient) return { client: directClient, user: db.User ? await db.User.findById(directClient.userId) : null };
-
-          const byUserId = await db.Client.findOne({ userId: queryStr });
-          if (byUserId) return { client: byUserId, user: db.User ? await db.User.findById(queryStr) : null };
-        }
-        if (db.User) {
-          const directUser = await db.User.findById(queryStr);
-          if (directUser) {
-            const clientDoc = db.Client ? await db.Client.findOne({ userId: directUser._id }) : null;
-            return { client: clientDoc, user: directUser };
-          }
-        }
+    if (payment.clientId) {
+      if (mongoose.Types.ObjectId.isValid(payment.clientId)) {
+        client = await dynamicDb.Client.findById(payment.clientId).lean();
       }
-
-      // 2. Match by exact PAN (e.g. ABCDE1234F) in Client
-      if (db.Client) {
-        const byPan = await db.Client.findOne({ pan: exactRegex });
-        if (byPan) {
-          const uDoc = db.User ? await db.User.findById(byPan.userId) : null;
-          return { client: byPan, user: uDoc };
-        }
-      }
-
-      // 3. Match by exact Email in Client or User
-      if (db.Client) {
-        const byEmail = await db.Client.findOne({ email: exactRegex });
-        if (byEmail) {
-          const uDoc = db.User ? await db.User.findById(byEmail.userId) : null;
-          return { client: byEmail, user: uDoc };
-        }
-      }
-      if (db.User) {
-        const userByEmail = await db.User.findOne({ email: exactRegex });
-        if (userByEmail) {
-          const clientDoc = db.Client ? await db.Client.findOne({ userId: userByEmail._id }) : null;
-          return { client: clientDoc, user: userByEmail };
-        }
-      }
-
-      // 4. Match by Mobile
-      const cleanDigits = queryStr.replace(/\D/g, '');
-      if (cleanDigits.length >= 10) {
-        const mobRegex = new RegExp(escapeRegex(cleanDigits.slice(-10)));
-        if (db.Client) {
-          const byMob = await db.Client.findOne({ mobile: { $regex: mobRegex } });
-          if (byMob) {
-            const uDoc = db.User ? await db.User.findById(byMob.userId) : null;
-            return { client: byMob, user: uDoc };
-          }
-        }
-        if (db.User) {
-          const userByMob = await db.User.findOne({ mobile: { $regex: mobRegex } });
-          if (userByMob) {
-            const clientDoc = db.Client ? await db.Client.findOne({ userId: userByMob._id }) : null;
-            return { client: clientDoc, user: userByMob };
-          }
-        }
-      } else {
-        if (db.Client) {
-          const byMob = await db.Client.findOne({ mobile: exactRegex });
-          if (byMob) {
-            const uDoc = db.User ? await db.User.findById(byMob.userId) : null;
-            return { client: byMob, user: uDoc };
-          }
-        }
-      }
-
-      // 5. Match by exact Name in Client (name, panName, aadhaarName)
-      if (db.Client) {
-        const byExactName = await db.Client.findOne({
-          $or: [
-            { name: exactRegex },
-            { panName: exactRegex },
-            { aadhaarName: exactRegex }
-          ]
-        });
-        if (byExactName) {
-          const uDoc = db.User ? await db.User.findById(byExactName.userId) : null;
-          return { client: byExactName, user: uDoc };
-        }
-      }
-
-      // 6. Match by partial Name in Client
-      if (db.Client) {
-        const byPartialName = await db.Client.findOne({
-          $or: [
-            { name: safeRegex },
-            { panName: safeRegex },
-            { aadhaarName: safeRegex }
-          ]
-        });
-        if (byPartialName) {
-          const uDoc = db.User ? await db.User.findById(byPartialName.userId) : null;
-          return { client: byPartialName, user: uDoc };
-        }
-      }
-
-      // 7. Match via User collection
-      if (db.User) {
-        const matchedUsers = await db.User.find({
-          $or: [
-            { email: exactRegex },
-            { mobile: exactRegex },
-            { username: exactRegex },
-            { name: safeRegex },
-            { firstName: safeRegex },
-            { lastName: safeRegex }
-          ]
-        }).limit(10).lean();
-
-        if (matchedUsers.length > 0) {
-          for (const u of matchedUsers) {
-            const clientByUser = db.Client ? await db.Client.findOne({ userId: u._id || u.id }) : null;
-            if (clientByUser) return { client: clientByUser, user: u };
-          }
-          return { client: null, user: matchedUsers[0] };
-        }
-      }
-
-      return null;
-    };
-
-    let found = await findClientInDb(dynamicDb);
-    if (found) {
-      client = found.client;
-      user = found.user;
-    } else if (centralModels && centralModels !== dynamicDb) {
-      found = await findClientInDb(centralModels);
-      if (found) {
-        client = found.client;
-        user = found.user;
-        targetDb = centralModels;
+      if (!client) {
+        client = await dynamicDb.Client.findOne({ userId: payment.clientId }).lean();
       }
     }
 
-    if (!client && !user) {
-      return res.status(404).json({
-        success: false,
-        message: `User / Client not found matching '${queryStr}' (searched across name, PAN, email, mobile, username, and ID)`
-      });
+    const clientEmail = client?.email || payment.clientEmail;
+    if (!clientEmail) {
+      return res.status(400).json({ success: false, message: 'Client does not have a registered email address to receive invoice.' });
     }
 
-    const clientId = client?._id || client?.id;
-    const userId = user?._id || user?.id || client?.userId;
-
-    const deletedSummary: Record<string, number> = {};
-
-    // 1. Delete Client
-    if (clientId && targetDb.Client) {
-      const resC = await targetDb.Client.deleteMany({ _id: clientId });
-      deletedSummary.clients = resC.deletedCount || 0;
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId || payment.tenantId).lean();
+    let plan: any = null;
+    if (payment.planId) {
+      plan = await dynamicDb.Plan.findById(payment.planId).lean();
     }
 
-    // 2. Delete User
-    if (userId && targetDb.User) {
-      const resU = await targetDb.User.deleteMany({ _id: userId });
-      deletedSummary.users = resU.deletedCount || 0;
+    const pdfBuffer = await generateInvoicePdf(String(payment._id || payment.id));
+    const invNumber = payment.transactionRef
+      ? `INV/${new Date().getFullYear()}/${String(payment.transactionRef).slice(-6).toUpperCase()}`
+      : `INV/${new Date().getFullYear()}/001`;
+
+    const sent = await sendTaxInvoiceEmail({
+      tenantId: tenantId || payment.tenantId,
+      toEmail: clientEmail,
+      clientName: client?.name || payment.clientName || 'Client',
+      companyName: tenantObj?.companyName,
+      planName: plan?.name || payment.planName || 'Advisory Plan',
+      invoiceNumber: invNumber,
+      amount: payment.amount,
+      pdfBuffer
+    });
+
+    if (!sent) {
+      return res.status(500).json({ success: false, message: 'Failed to send email. Please check your SMTP configuration in Settings.' });
     }
 
-    // 3. Delete ClientProfile
-    if (targetDb.ClientProfile && (clientId || userId)) {
-      const resCP = await targetDb.ClientProfile.deleteMany({
-        $or: [
-          ...(clientId ? [{ clientId }] : []),
-          ...(userId ? [{ userId }] : [])
-        ]
-      });
-      deletedSummary.clientProfiles = resCP.deletedCount || 0;
-    }
+    await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+      $set: {
+        invoiceSentAt: new Date(),
+        lastEmailedTo: clientEmail,
+        invoiceStatus: 'GENERATED'
+      }
+    });
 
-    // 4. Delete ClientDocument
-    if (targetDb.ClientDocument && clientId) {
-      const resCD = await targetDb.ClientDocument.deleteMany({ clientId });
-      deletedSummary.clientDocuments = resCD.deletedCount || 0;
-    }
-
-    // 5. Delete ClientIdentityHistory
-    if (targetDb.ClientIdentityHistory && clientId) {
-      const resCIH = await targetDb.ClientIdentityHistory.deleteMany({ clientId });
-      deletedSummary.identityHistory = resCIH.deletedCount || 0;
-    }
-
-    // 6. Delete Agreements & History
-    if (targetDb.Agreement && clientId) {
-      const resA = await targetDb.Agreement.deleteMany({ clientId });
-      deletedSummary.agreements = resA.deletedCount || 0;
-    }
-    if (targetDb.AgreementHistory && clientId) {
-      const resAH = await targetDb.AgreementHistory.deleteMany({ clientId });
-      deletedSummary.agreementHistory = resAH.deletedCount || 0;
-    }
-
-    // 7. Delete Consents & History
-    if (targetDb.Consent && clientId) {
-      const resCon = await targetDb.Consent.deleteMany({ clientId });
-      deletedSummary.consents = resCon.deletedCount || 0;
-    }
-    if (targetDb.ConsentHistory && clientId) {
-      const resConH = await targetDb.ConsentHistory.deleteMany({ clientId });
-      deletedSummary.consentHistory = resConH.deletedCount || 0;
-    }
-
-    // 8. Delete Subscriptions
-    if (targetDb.Subscription && (clientId || userId)) {
-      const resSub = await targetDb.Subscription.deleteMany({
-        $or: [
-          ...(clientId ? [{ clientId }] : []),
-          ...(userId ? [{ userId }] : [])
-        ]
-      });
-      deletedSummary.subscriptions = resSub.deletedCount || 0;
-    }
-
-    // 9. Delete Payments
-    if (targetDb.Payment && (clientId || userId)) {
-      const resPay = await targetDb.Payment.deleteMany({
-        $or: [
-          ...(clientId ? [{ clientId }] : []),
-          ...(userId ? [{ userId }] : [])
-        ]
-      });
-      deletedSummary.payments = resPay.deletedCount || 0;
-    }
-
-    // 10. Delete Support Tickets & Messages
-    if (targetDb.SupportTicket && (clientId || userId)) {
-      const resTick = await targetDb.SupportTicket.deleteMany({
-        $or: [
-          ...(clientId ? [{ clientId }] : []),
-          ...(userId ? [{ userId }] : [])
-        ]
-      });
-      deletedSummary.supportTickets = resTick.deletedCount || 0;
-    }
-    if (targetDb.TicketMessage && (clientId || userId)) {
-      const resTM = await targetDb.TicketMessage.deleteMany({
-        $or: [
-          ...(clientId ? [{ clientId }] : []),
-          ...(userId ? [{ userId }] : [])
-        ]
-      });
-      deletedSummary.ticketMessages = resTM.deletedCount || 0;
-    }
-
-    // 11. Delete Complaints
-    if (targetDb.Complaint && clientId) {
-      const resComp = await targetDb.Complaint.deleteMany({ clientId });
-      deletedSummary.complaints = resComp.deletedCount || 0;
-    }
-
-    // 12. Delete Client Call Recordings
-    if (targetDb.ClientCallRecording && clientId) {
-      const resCCR = await targetDb.ClientCallRecording.deleteMany({ clientId });
-      deletedSummary.callRecordings = resCCR.deletedCount || 0;
-    }
-
-    // 13. Delete Compliance Alerts
-    if (targetDb.ComplianceAlert && clientId) {
-      const resCA = await targetDb.ComplianceAlert.deleteMany({ clientId });
-      deletedSummary.complianceAlerts = resCA.deletedCount || 0;
-    }
-
-    // 14. Delete Notification Logs
-    if (targetDb.NotificationLog && (clientId || userId)) {
-      const resNL = await targetDb.NotificationLog.deleteMany({
-        $or: [
-          ...(clientId ? [{ clientId }, { targetClientId: clientId }] : []),
-          ...(userId ? [{ userId }, { targetUserId: userId }] : [])
-        ]
-      });
-      deletedSummary.notificationLogs = resNL.deletedCount || 0;
-    }
-
-    // 15. Delete Email Verification records
-    if (targetDb.EmailVerification && (client?.email || user?.email)) {
-      const resEV = await targetDb.EmailVerification.deleteMany({
-        email: exactRegex
-      });
-      deletedSummary.emailVerifications = resEV.deletedCount || 0;
-    }
-
-    // Log Activity for permanent deletion
-    try {
+    const targetClientId = client?._id || client?.id || payment.clientId;
+    if (targetClientId) {
       logActivity({
-        tenantId: client?.tenantId || user?.tenantId || req.user?.tenantId,
-        actorType: 'ADMIN',
-        actorId: req.user?.id || 'SYSTEM_ADMIN',
-        actorName: req.user?.name || 'Admin',
-        actorEmail: req.user?.email || 'admin@sebi-compliance.local',
-        targetClientId: clientId || null,
-        category: 'STAFF_ACTION',
-        action: 'PERMANENT_CLIENT_DELETE',
-        title: 'Client Permanently Deleted',
-        description: `Client ${client?.name || user?.name || queryStr} (${client?.email || user?.email || 'N/A'}, PAN: ${client?.pan || 'N/A'}) has been permanently deleted from all DB collections.`,
+        tenantId: tenantId || payment.tenantId,
+        actorType: req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN' ? 'ADMIN' : 'STAFF',
+        actorId: req.user?.id,
+        actorName: (req.user as any)?.name || req.user?.email || 'Admin',
+        targetClientId,
+        category: 'PAYMENT',
+        action: 'INVOICE_SENT',
+        title: `Tax Invoice Dispatched (${invNumber})`,
+        description: `Official Tax Invoice (${invNumber}) for ${plan?.name || payment.planName || 'Plan'} (₹${Number(payment.amount || 0).toLocaleString('en-IN')}) emailed to ${clientEmail}`,
         status: 'SUCCESS',
         metadata: {
-          searchQuery: queryStr,
-          deletedUser: {
-            clientId: clientId?.toString(),
-            userId: userId?.toString(),
-            name: client?.name || user?.name,
-            email: client?.email || user?.email,
-            mobile: client?.mobile || user?.mobile,
-            pan: client?.pan
-          },
-          deletedSummary
+          invoiceNumber: invNumber,
+          transactionRef: payment.transactionRef,
+          amount: `₹${Number(payment.amount || 0).toLocaleString('en-IN')}`,
+          planName: plan?.name || payment.planName,
+          emailedTo: clientEmail,
+          sentAt: new Date().toISOString()
         },
         req
       });
-    } catch (actErr: any) {
-      console.warn('[PERMANENT-DELETE] Activity log warning:', actErr?.message);
     }
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      message: `User '${client?.name || user?.name || queryStr}' and all associated details (PAN, Profile, KYC, Agreements, Documents, Subscriptions) have been PERMANENTLY deleted from the database.`,
-      deletedUser: {
-        id: clientId || null,
-        userId: userId || null,
-        name: client?.name || user?.name || null,
-        email: client?.email || user?.email || null,
-        mobile: client?.mobile || user?.mobile || null,
-        pan: client?.pan || null,
-        aadhaar: client?.aadhaar || null
-      },
-      deletedRecords: deletedSummary
+      message: `Tax Invoice successfully emailed to ${clientEmail}`,
+      invoiceSentAt: new Date()
     });
   } catch (error: any) {
-    console.error('Permanent Delete Client error:', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message || 'Server Error while permanently deleting client'
-    });
+    console.error('Error in sendPaymentInvoiceEmail:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Error generating or sending invoice email' });
   }
 };
+
+export const getAdminNotifications = async (req: AuthenticatedRequest, res: Response) => {
+  const { tenantId, id: userId } = (req as any).user;
+  try {
+    const query: any = {
+      $or: [
+        { recipient: 'ADMIN' },
+        { channel: 'ADMIN' },
+        { recipient: String(userId) }
+      ]
+    };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const notifications = await dynamicDb.NotificationLog.find(query)
+      .sort({ createdAt: -1 })
+      .limit(60)
+      .lean();
+
+    const formatted = notifications.map((n: any) => ({
+      ...n,
+      id: String(n._id || n.id),
+      read: n.isRead || n.read || n.status === 'READ',
+      isRead: n.isRead || n.read || n.status === 'READ'
+    }));
+
+    return res.status(200).json({ success: true, data: formatted });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
+  }
+};
+
+export const markAdminNotificationsAsRead = async (req: AuthenticatedRequest, res: Response) => {
+  const { tenantId, id: userId } = (req as any).user;
+  const { notificationId } = req.body;
+  try {
+    const query: any = {
+      $or: [
+        { recipient: 'ADMIN' },
+        { channel: 'ADMIN' },
+        { recipient: String(userId) }
+      ]
+    };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    if (notificationId) {
+      query._id = notificationId;
+    }
+
+    await dynamicDb.NotificationLog.updateMany(query, {
+      $set: { isRead: true, status: 'READ' }
+    });
+
+    return res.status(200).json({ success: true, message: 'Admin notifications marked as read' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
+  }
+};
+
+
 

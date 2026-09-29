@@ -52,6 +52,7 @@ import api from '../services/api';
 
 import MobilePreview from './MobilePreview';
 import ReportPreviewModal from './ReportPreviewModal';
+import UploadSignConfirmModal from './UploadSignConfirmModal';
 import toast from 'react-hot-toast';
 
 export default function SignalManagement({
@@ -126,6 +127,7 @@ export default function SignalManagement({
   const [reportPreviewModal, setReportPreviewModal] = useState<any>(null);
   const [reportOptionsModal, setReportOptionsModal] = useState<any>(null);
   const [uploadingReportFor, setUploadingReportFor] = useState<any>(null);
+  const [uploadSignModalData, setUploadSignModalData] = useState<{ file: File; signal: any } | null>(null);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [alertTrade, setAlertTrade] = useState<any>(null);
   const [alertMessage, setAlertMessage] = useState('');
@@ -282,36 +284,12 @@ export default function SignalManagement({
 
   }, [callType, entryPrice, stoploss, target1, target2, target3, view]);
 
-  const handleUploadReportFile = async (e: React.ChangeEvent<HTMLInputElement>, signal: any) => {
+  const handleUploadReportFile = (e: React.ChangeEvent<HTMLInputElement>, signal: any) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
-
-    setUploadingReportFor(signal.id);
-    try {
-      const formData = new FormData();
-      formData.append('report', file);
-      const res = await fetch(`${base_api_url}/signals/${signal.id}/report`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-          'x-tenant-id': localStorage.getItem('tenantId') || ''
-        },
-        body: formData
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success('Report uploaded successfully');
-        fetchSignals();
-        setReportOptionsModal(null);
-      } else {
-        toast.error(data.message || 'Failed to upload report');
-      }
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setUploadingReportFor(null);
-      e.target.value = '';
-    }
+    e.target.value = '';
+    setReportOptionsModal(null);
+    setUploadSignModalData({ file, signal });
   };
 
   const handleSendAlert = async () => {
@@ -1361,6 +1339,17 @@ export default function SignalManagement({
             signal={reportPreviewModal}
             user={user}
             onClose={() => setReportPreviewModal(null)}
+            onSuccess={() => fetchSignals()}
+          />
+        )}
+
+        {/* UPLOAD REPORT SIGNATURE CONFIRMATION MODAL */}
+        {uploadSignModalData && (
+          <UploadSignConfirmModal
+            file={uploadSignModalData.file}
+            signal={uploadSignModalData.signal}
+            user={user}
+            onClose={() => setUploadSignModalData(null)}
             onSuccess={() => fetchSignals()}
           />
         )}

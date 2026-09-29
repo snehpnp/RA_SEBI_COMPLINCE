@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
+import fs from 'fs';
+import path from 'path';
+import { PDFDocument } from 'pdf-lib';
 import dynamicDb, { centralModels } from '../config/db';
+import { broadcastSignalNotification } from '../services/notificationService';
 
 export const getStocks = async (req: Request, res: Response) => {
   try {
@@ -106,6 +110,39 @@ export const createSignal = async (req: Request, res: Response) => {
       });
     }
 
+    // Broadcast real-time alerts to all clients subscribed to these plans, and to Admin
+    try {
+      const stockDoc = await dynamicDb.Stock.findById(stockId).lean();
+      const stockSymbol = stockDoc?.symbol || 'Trade Signal';
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+
+      await broadcastSignalNotification({
+        tenantId,
+        planIds: parsedPlanIds,
+        title: `🚀 New Trade Alert: ${stockSymbol} (${segment})`,
+        message: `New ${callType} recommendation for ${stockSymbol} at ₹${entryPrice}. Target: ${target1}${target2 ? `/${target2}` : ''}, SL: ₹${stoploss}. View: ${tradeDuration || 'INTRADAY'}.`,
+        type: 'signal',
+        data: {
+          signalId: createdSignals[0]?.id,
+          stockSymbol,
+          callType,
+          entryPrice,
+          target1,
+          target2,
+          target3,
+          stoploss,
+          segment,
+          tradeDuration,
+          action: 'NEW_TRADE'
+        },
+        adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
+        adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`
+      });
+    } catch (notifErr) {
+      console.warn('[Notification] Failed to broadcast new signal notification:', notifErr);
+    }
+
     return res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
@@ -167,7 +204,11 @@ export const listSignals = async (req: Request, res: Response) => {
 
       // Check KYC and Agreement compliance
       const isKycDone = Boolean((client as any).kraVerified === true || (client as any).kycStatus === 'VERIFIED' || (client as any).kycStatus === 'APPROVED');
-      const isAgreementDone = Boolean((client as any).agreementSigned === true);
+      const hasAgreementDoc = await dynamicDb.Agreement.findOne({
+        $or: [{ clientId: client._id }, { clientId: (client as any).userId }],
+        status: { $in: ['SIGNED', 'ACTIVE'] }
+      }).lean();
+      const isAgreementDone = Boolean((client as any).agreementSigned === true || hasAgreementDoc);
       const isCompliant = isKycDone && isAgreementDone;
 
       // Find all subscriptions for this client
@@ -234,13 +275,34 @@ export const listSignals = async (req: Request, res: Response) => {
 
       // Collect plan IDs and stock IDs for mapping
       const allSignalsToMap = [...unlockedSignals, ...lockedSignals];
-      const planIds = allSignalsToMap.map((s: any) => s.planId).filter(Boolean);
-      const plans = await dynamicDb.Plan.find({ _id: { $in: planIds } }).lean();
-      const categories = await dynamicDb.PlanCategory.find({ _id: { $in: planIds } }).lean();
+      const rawPlanIds = allSignalsToMap.map((s: any) => s.planId?.toString?.() || s.planId).filter(Boolean);
+      const validPlanObjectIds = rawPlanIds
+        .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
+        .map((id: string) => new mongoose.Types.ObjectId(id));
+
+      const plans = await dynamicDb.Plan.find({
+        $or: [
+          ...(validPlanObjectIds.length > 0 ? [{ _id: { $in: validPlanObjectIds } }] : []),
+          { id: { $in: rawPlanIds } }
+        ]
+      }).lean();
+
+      const categories = await dynamicDb.PlanCategory.find({
+        $or: [
+          ...(validPlanObjectIds.length > 0 ? [{ _id: { $in: validPlanObjectIds } }] : []),
+          { id: { $in: rawPlanIds } }
+        ]
+      }).lean();
 
       const planMap = new Map<string, string>();
-      plans.forEach((p: any) => planMap.set(p._id.toString(), p.name));
-      categories.forEach((c: any) => planMap.set(c._id.toString(), c.name));
+      plans.forEach((p: any) => {
+        planMap.set(p._id.toString(), p.name);
+        if (p.id) planMap.set(p.id.toString(), p.name);
+      });
+      categories.forEach((c: any) => {
+        planMap.set(c._id.toString(), c.name);
+        if (c.id) planMap.set(c.id.toString(), c.name);
+      });
 
       const userIds = [...new Set(allSignalsToMap.map((s: any) => s.createdById).filter(Boolean))];
       const users = await dynamicDb.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
@@ -286,6 +348,7 @@ export const listSignals = async (req: Request, res: Response) => {
           stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
           symbol: matchedStock?.symbol || s.symbol || '',
           stockName: matchedStock?.name || s.stockName || '',
+          planId: pIdStr || (s.planId ? s.planId.toString() : ''),
           planName: (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
           createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
           ...potential
@@ -312,7 +375,7 @@ export const listSignals = async (req: Request, res: Response) => {
           segment: s.segment || 'CASH',
           callType: s.callType || 'BUY',
           tradeDuration: s.tradeDuration || 'INTRADAY',
-          planId: s.planId,
+          planId: pIdStr || (s.planId ? s.planId.toString() : ''),
           planName: (pIdStr && planMap.get(pIdStr)) || 'Premium Advisory Plan',
           entryPrice: null,
           target1: null,
@@ -454,38 +517,36 @@ export const closeSignal = async (req: Request, res: Response) => {
       { returnDocument: 'after', lean: true }
     );
 
-    // Notify clients who were subscribed to this plan AT THE TIME the signal was created
-    const allSubs = await dynamicDb.Subscription.find({
-      planId: signal.planId,
-      startDate: { $lte: signal.createdAt }
-    })
-      .populate({
-        path: 'clientId',
-        populate: { path: 'userId', select: '_id id firstName lastName' }
-      })
-      .lean();
+    // Notify eligible subscribers and Admin
+    try {
+      const sig: any = signal;
+      const stock = sig.stockId || sig.stock || {};
+      const stockSymbol = stock.symbol || 'Stock';
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
 
-    const sig: any = signal;
-    const eligibleSubs = allSubs.filter((sub: any) => !sub.endDate || new Date(sub.endDate) >= new Date(signal.createdAt));
-    const stock = sig.stockId || sig.stock || {};
-    const stockSymbol = stock.symbol || 'Stock';
-
-    const notificationPromises = eligibleSubs.map((sub: any) => {
-      const client = sub.clientId || sub.client;
-      const user = client?.userId || client?.user;
-      const recipientId = user?._id || client?.userId;
-      if (!recipientId) return null;
-
-      return dynamicDb.NotificationLog.create({
+      await broadcastSignalNotification({
         tenantId,
-        recipient: recipientId,
-        channel: 'INAPP',
-        title: `Signal Update: ${stockSymbol}`,
-        message: `The signal for ${stockSymbol} has been closed/updated. Status: ${closeStatus}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`
+        planIds: [signal.planId],
+        title: `🎯 Trade Update: ${stockSymbol}`,
+        message: `Trade ${stockSymbol} status: ${closeStatus}.${exitPrice ? ` Exit Price: ₹${exitPrice}.` : ''} ${closeRemark ? `Remark: ${closeRemark}` : ''}`,
+        type: 'update',
+        data: {
+          signalId: id,
+          stockSymbol,
+          closeStatus,
+          exitPrice,
+          closeRemark,
+          isFinalClose,
+          action: 'TRADE_UPDATE'
+        },
+        signalCreatedAt: signal.createdAt,
+        adminTitle: `🎯 Trade Status Updated: ${stockSymbol}`,
+        adminMessage: `${researcherName} updated trade ${stockSymbol} to status: ${closeStatus}.${closeRemark ? ` (${closeRemark})` : ''}`
       });
-    }).filter(Boolean);
-
-    await Promise.all(notificationPromises);
+    } catch (notifErr) {
+      console.warn('[Notification] Failed to broadcast closeSignal notification:', notifErr);
+    }
 
     return res.json({
       success: true,
@@ -514,11 +575,100 @@ export const uploadReport = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Signal not found' });
     }
 
+    const applySignature = req.body.applySignature === 'true';
+    const signatureMode = applySignature ? (req.body.signatureMode || 'UPLOAD_SIGN') : 'NONE';
+
+    // If researcher requested signature stamp on uploaded PDF
+    if (applySignature && signatureMode === 'UPLOAD_SIGN' && req.file.path) {
+      try {
+        const userId = (req as any).user.id || (req as any).user._id;
+        const userDoc = await dynamicDb.User.findById(userId).lean();
+        const tenantDoc = await dynamicDb.Tenant.findById(tenantId).lean();
+        const sigUrl = userDoc?.signatureUrl || tenantDoc?.coSignatureUrl;
+
+        if (sigUrl) {
+          const filePath = req.file.path;
+          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfDoc = await PDFDocument.load(pdfBuffer);
+          const pages = pdfDoc.getPages();
+          const lastPage = pages[pages.length - 1];
+          const { width } = lastPage.getSize();
+
+          const cleanSigPath = sigUrl.replace(/^\/uploads\//, '');
+          const diskPath = path.join(process.cwd(), 'uploads', cleanSigPath);
+
+          if (fs.existsSync(diskPath)) {
+            const imgBytes = fs.readFileSync(diskPath);
+            let embeddedImg;
+            if (sigUrl.toLowerCase().endsWith('.png')) {
+              embeddedImg = await pdfDoc.embedPng(imgBytes);
+            } else {
+              embeddedImg = await pdfDoc.embedJpg(imgBytes);
+            }
+            const imgDims = embeddedImg.scale(0.25);
+            const boxWidth = Math.min(imgDims.width, 140);
+            const boxHeight = Math.min(imgDims.height, 40);
+            const x = width - boxWidth - 30;
+            const y = 30;
+
+            lastPage.drawImage(embeddedImg, {
+              x,
+              y,
+              width: boxWidth,
+              height: boxHeight,
+            });
+
+            const modifiedBytes = await pdfDoc.save();
+            fs.writeFileSync(filePath, Buffer.from(modifiedBytes));
+          }
+        }
+      } catch (stampErr) {
+        console.warn('[uploadReport] Warning: Could not stamp signature image on uploaded PDF:', stampErr);
+      }
+    }
+
     const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(
       id,
-      { $set: { reportUrl } },
+      {
+        $set: {
+          reportUrl,
+          signatureMode,
+          signatureMeta: {
+            method: applySignature ? 'UPLOADED_SIGN' : 'NONE',
+            uploadedAt: new Date(),
+            isDigitallySigned: applySignature
+          }
+        }
+      },
       { returnDocument: 'after', lean: true }
     );
+
+    // Broadcast report notification to subscribers and Admin
+    try {
+      const sig: any = await dynamicDb.Signal.findById(id).populate('stockId').lean() || signal;
+      const stockSymbol = sig?.stockId?.symbol || sig?.stock?.symbol || 'Trade Signal';
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+
+      await broadcastSignalNotification({
+        tenantId,
+        planIds: [signal.planId],
+        title: `📄 Research Report: ${stockSymbol}`,
+        message: `New official research report uploaded for ${stockSymbol}. Available in Research Reports.`,
+        type: 'report',
+        data: {
+          signalId: id,
+          stockSymbol,
+          reportUrl,
+          action: 'REPORT_UPLOADED'
+        },
+        signalCreatedAt: signal.createdAt,
+        adminTitle: `📄 Research Report Uploaded: ${stockSymbol}`,
+        adminMessage: `${researcherName} uploaded a research report for ${stockSymbol}.`
+      });
+    } catch (notifErr) {
+      console.warn('[Notification] Failed to broadcast uploadReport notification:', notifErr);
+    }
 
     return res.json({
       success: true,
@@ -550,38 +700,32 @@ export const addSignalMessage = async (req: Request, res: Response) => {
 
     if (signal) {
       const tenantId = (req as any).user.tenantId || signal.tenantId;
-
-      const allSubs = await dynamicDb.Subscription.find({
-        planId: signal.planId,
-        startDate: { $lte: signal.createdAt }
-      })
-        .populate({
-          path: 'clientId',
-          populate: { path: 'userId', select: '_id id' }
-        })
-        .lean();
-
-      const eligibleSubs = allSubs.filter((sub: any) => !sub.endDate || new Date(sub.endDate) >= new Date(signal.createdAt));
       const sig: any = signal;
       const stock = sig.stockId || sig.stock || {};
-      const stockSymbol = stock.symbol || 'Stock';
+      const stockSymbol = stock.symbol || 'Trade Signal';
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
 
-      const notificationPromises = eligibleSubs.map((sub: any) => {
-        const client = sub.clientId || sub.client;
-        const user = client?.userId || client?.user;
-        const recipientId = user?._id || client?.userId;
-        if (!recipientId) return null;
-
-        return dynamicDb.NotificationLog.create({
+      try {
+        await broadcastSignalNotification({
           tenantId,
-          recipient: recipientId,
-          channel: 'INAPP',
-          title: `Trade Update: ${stockSymbol}`,
-          message: `New update on trade ${stockSymbol}: ${message}`
+          planIds: [signal.planId],
+          title: `🚨 Trade Alert: ${stockSymbol}`,
+          message: `${message}`,
+          type: 'alert',
+          data: {
+            signalId: id,
+            stockSymbol,
+            alertMessage: message,
+            action: 'TRADE_ALERT'
+          },
+          signalCreatedAt: signal.createdAt,
+          adminTitle: `🚨 Trade Alert Sent: ${stockSymbol}`,
+          adminMessage: `${researcherName} sent alert for ${stockSymbol}: ${message}`
         });
-      }).filter(Boolean);
-
-      await Promise.all(notificationPromises);
+      } catch (notifErr) {
+        console.warn('[Notification] Failed to broadcast alert message:', notifErr);
+      }
     }
 
     res.status(201).json({

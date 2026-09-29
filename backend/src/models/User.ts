@@ -20,6 +20,21 @@ export interface IUser extends Document {
   deletedAt?: Date | null;
   deletedBy?: string | null;
   tempPassword?: string | null;
+  signatureMode?: 'UPLOAD_SIGN' | 'AADHAAR_ESIGN' | 'DSC_TOKEN';
+  signatureUrl?: string | null;
+  dailyAadhaarSignature?: {
+    date?: string | null;
+    verifiedAt?: Date | null;
+    signerName?: string | null;
+    aadhaarLast4?: string | null;
+    stampImage?: string | null;
+    documentId?: string | null;
+  };
+  dscSettings?: {
+    placement?: 'BOTTOM_RIGHT' | 'BOTTOM_CENTER' | 'BOTTOM_LEFT';
+    signScope?: 'ALL_PAGES' | 'LAST_PAGE';
+    registeredCertSerial?: string | null;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,7 +56,34 @@ export const UserSchema = new Schema<IUser>(
     sessionExpiresAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String, default: null },
-    tempPassword: { type: String, default: null }
+    tempPassword: { type: String, default: null },
+    signatureMode: {
+      type: String,
+      enum: ['UPLOAD_SIGN', 'AADHAAR_ESIGN', 'DSC_TOKEN'],
+      default: 'UPLOAD_SIGN'
+    },
+    signatureUrl: { type: String, default: null },
+    dailyAadhaarSignature: {
+      date: { type: String, default: null },
+      verifiedAt: { type: Date, default: null },
+      signerName: { type: String, default: null },
+      aadhaarLast4: { type: String, default: null },
+      stampImage: { type: String, default: null },
+      documentId: { type: String, default: null }
+    },
+    dscSettings: {
+      placement: {
+        type: String,
+        enum: ['BOTTOM_RIGHT', 'BOTTOM_CENTER', 'BOTTOM_LEFT'],
+        default: 'BOTTOM_RIGHT'
+      },
+      signScope: {
+        type: String,
+        enum: ['ALL_PAGES', 'LAST_PAGE'],
+        default: 'ALL_PAGES'
+      },
+      registeredCertSerial: { type: String, default: null }
+    }
   },
   { ...baseSchemaOptions, collection: 'User' }
 );

@@ -39,7 +39,7 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.ClientIdentityHistorySchema = new mongoose_1.Schema({
     clientId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Client', required: true },
     fieldName: { type: String, required: true },
-    oldValue: { type: String, required: true },
+    oldValue: { type: String, default: 'N/A' },
     newValue: { type: String, required: true },
     changedAt: { type: Date, default: Date.now },
     changedBy: { type: String, required: true },

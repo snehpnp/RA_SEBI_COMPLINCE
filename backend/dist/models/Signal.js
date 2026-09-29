@@ -55,6 +55,12 @@ exports.SignalSchema = new mongoose_1.Schema({
     stoploss: { type: Number, required: true },
     description: { type: String, default: null },
     reportUrl: { type: String, default: null },
+    signatureMode: {
+        type: String,
+        enum: ['UPLOAD_SIGN', 'AADHAAR_ESIGN', 'DSC_TOKEN'],
+        default: 'UPLOAD_SIGN'
+    },
+    signatureMeta: { type: mongoose_1.Schema.Types.Mixed, default: null },
     closeStatus: { type: String, default: null },
     exitPrice: { type: Number, default: null },
     closeRemark: { type: String, default: null },

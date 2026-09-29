@@ -201,11 +201,11 @@ const listResearch = async (req, res) => {
             }
             const clientId = client._id || client.id;
             // Filter only published reports matching the segment access from the active plan
-            const activeSub = await db_1.default.Subscription.findOne({
+            const activeSubs = await db_1.default.Subscription.find({
                 $or: [{ clientId }, { clientId: client.userId }, { clientId: req.user.id }],
-                status: 'ACTIVE'
+                status: { $in: ['ACTIVE', 'active'] }
             }).populate('plan').populate('planId').lean();
-            if (!activeSub) {
+            if (!activeSubs || activeSubs.length === 0) {
                 return res.status(200).json({
                     success: true,
                     data: [],
@@ -213,13 +213,26 @@ const listResearch = async (req, res) => {
                     message: 'You must have an active subscription to access research recommendations.'
                 });
             }
-            const plan = (activeSub.planId || activeSub.plan);
-            const allowedSegments = plan?.researchSegments ? plan.researchSegments.split(',').map((s) => s.trim()) : [];
+            // Collect allowed segments and subscription date ranges (Strict SEBI: Only reports published during active subscription)
+            const subConditions = activeSubs.map((sub) => {
+                const plan = (sub.planId || sub.plan);
+                const allowedSegments = plan?.researchSegments
+                    ? plan.researchSegments.split(',').map((s) => s.trim())
+                    : [];
+                const cond = {
+                    segment: { $in: allowedSegments },
+                    createdAt: { $gte: sub.startDate }
+                };
+                if (sub.endDate) {
+                    cond.createdAt.$lte = sub.endDate;
+                }
+                return cond;
+            });
             filter = {
                 tenantId,
                 status: 'PUBLISHED',
-                segment: { $in: allowedSegments },
-                deletedAt: null
+                deletedAt: null,
+                $or: subConditions
             };
         }
         const reports = await db_1.default.ResearchReport.find(filter)

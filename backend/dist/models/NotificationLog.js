@@ -43,7 +43,10 @@ exports.NotificationLogSchema = new mongoose_1.Schema({
     title: { type: String, required: true },
     message: { type: String, required: true },
     status: { type: String, default: 'PENDING' },
-    retryCount: { type: Number, default: 0 }
+    retryCount: { type: Number, default: 0 },
+    isRead: { type: Boolean, default: false },
+    type: { type: String, default: 'signal' },
+    data: { type: mongoose_1.Schema.Types.Mixed, default: {} }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'NotificationLog' });
 exports.NotificationLogSchema.virtual('tenant', {
     ref: 'Tenant',

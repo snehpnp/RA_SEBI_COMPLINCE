@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -182,7 +182,7 @@ const NAV_CONFIG: NavModule[] = [
     tab: 'checklist',
     label: 'SEBI Checklist',
     icon: 'CheckSquare',
-    accessKey: 'ACCESS_COMPLIANCE',
+    accessKey: 'ACCESS_CHECKLIST',
     moduleLabel: 'SEBI Checklist',
     moduleDesc: 'View and manage SEBI compliance checklist',
   },
@@ -251,7 +251,7 @@ const NAV_CONFIG: NavModule[] = [
     tab: 'signature_settings',
     label: 'Personal Settings',
     icon: 'Settings',
-    accessKey: 'ACCESS_DASHBOARD',
+    accessKey: 'ACCESS_PERSONAL_SETTINGS',
     moduleLabel: 'Personal Settings',
     moduleDesc: 'Configure your signature and UI preferences',
   },
@@ -259,7 +259,7 @@ const NAV_CONFIG: NavModule[] = [
     tab: 'resources',
     label: 'Resources',
     icon: 'FileText',
-    accessKey: 'ACCESS_DASHBOARD',
+    accessKey: 'ACCESS_RESOURCES',
     moduleLabel: 'Resources & Documents',
     moduleDesc: 'Download templates, formats, and other resources',
   },
@@ -451,6 +451,41 @@ function AdminDashboardContent() {
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
 
+  // Admin Live Notifications for Researcher Actions
+  const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
+  const [adminUnreadCount, setAdminUnreadCount] = useState(0);
+  const [isAdminNotifOpen, setIsAdminNotifOpen] = useState(false);
+
+  const fetchAdminNotifications = async () => {
+    try {
+      const res = await api.getAdminNotifications();
+      if (res.success && Array.isArray(res.data)) {
+        setAdminNotifications(res.data);
+        const unread = res.data.filter((n: any) => !n.isRead && !n.read && n.status !== 'READ');
+        setAdminUnreadCount(unread.length);
+      }
+    } catch (e) {
+      // background fetch
+    }
+  };
+
+  useEffect(() => {
+    fetchAdminNotifications();
+    const interval = setInterval(fetchAdminNotifications, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleMarkAdminNotifsRead = async () => {
+    try {
+      await api.markAdminNotificationsAsRead();
+      setAdminNotifications(prev => prev.map((n: any) => ({ ...n, isRead: true, read: true })));
+      setAdminUnreadCount(0);
+      toast.success('All admin notifications marked as read');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     if (activeTab && activeTab.startsWith('customPages')) {
       setIsPagesExpanded(true);
@@ -477,6 +512,9 @@ function AdminDashboardContent() {
       return user?.permissions?.includes('ACCESS_VAULTS') || 
              user?.permissions?.includes('ACCESS_VAULTS_VIEW') || 
              user?.permissions?.includes('ACCESS_VAULTS_FULL') || false;
+    }
+    if (permCode === 'ACCESS_CHECKLIST') {
+      return user?.permissions?.includes('ACCESS_CHECKLIST') || user?.permissions?.includes('ACCESS_COMPLIANCE') || false;
     }
     return user?.permissions?.includes(permCode) || false;
   };
@@ -969,7 +1007,10 @@ function AdminDashboardContent() {
   const [coNism, setCoNism] = useState('');
 
   const [policyUrl, setPolicyUrl] = useState('');
+  const [gstEnabled, setGstEnabled] = useState(true);
   const [gstCalculationType, setGstCalculationType] = useState('EXCLUSIVE');
+  const [invoiceDispatchPolicy, setInvoiceDispatchPolicy] = useState('AFTER_KYC_AGREEMENT');
+  const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
   const [tenantState, setTenantState] = useState('');
   const [kycFirst, setKycFirst] = useState(true);
   const [welcomeEmailText, setWelcomeEmailText] = useState('');
@@ -989,6 +1030,15 @@ function AdminDashboardContent() {
     downloadFilename?: string;
   } | null>(null);
   const [copiedVariable, setCopiedVariable] = useState<string | null>(null);
+
+  // Confirmation Modals for Settings Toggles (GST & KYC Flow)
+  const [isGstConfirmModalOpen, setIsGstConfirmModalOpen] = useState(false);
+  const [pendingGstTargetState, setPendingGstTargetState] = useState<boolean | null>(null);
+  const [isSavingGstToggle, setIsSavingGstToggle] = useState(false);
+
+  const [isKycFlowConfirmModalOpen, setIsKycFlowConfirmModalOpen] = useState(false);
+  const [pendingKycFirstState, setPendingKycFirstState] = useState<boolean | null>(null);
+  const [isSavingKycFlowToggle, setIsSavingKycFlowToggle] = useState(false);
 
   // SMTP Settings
   const [smtpHost, setSmtpHost] = useState('');
@@ -1312,6 +1362,8 @@ function AdminDashboardContent() {
               if (t.termsPdfUrl) setTermsPdfUrl(t.termsPdfUrl);
               if (t.privacyPdfUrl) setPrivacyPdfUrl(t.privacyPdfUrl);
               if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
+              if (t.gstEnabled !== undefined) setGstEnabled(t.gstEnabled !== false);
+              if (t.invoiceDispatchPolicy) setInvoiceDispatchPolicy(t.invoiceDispatchPolicy);
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
               if (t.smtpPort) setSmtpPort(t.smtpPort.toString());
@@ -1555,8 +1607,12 @@ function AdminDashboardContent() {
 
           const isAllowed = (tab: string) => {
             if (syncedUser.role === 'SUPER_ADMIN' || syncedUser.role === 'ADMIN') return true;
+            if (tab === 'checklist') {
+              return syncedUser.permissions?.includes('ACCESS_CHECKLIST') || syncedUser.permissions?.includes('ACCESS_COMPLIANCE') || false;
+            }
             const permMap: Record<string, string> = {
               dashboard: 'ACCESS_DASHBOARD',
+              checklist: 'ACCESS_CHECKLIST',
               staff: 'ACCESS_STAFF',
               clients: 'ACCESS_CLIENTS',
               plans: 'ACCESS_PLANS',
@@ -1565,7 +1621,9 @@ function AdminDashboardContent() {
               compliance: 'ACCESS_COMPLIANCE',
               settings: 'ACCESS_SETTINGS',
               roles: 'ACCESS_ROLES',
-              tickets: 'ACCESS_TICKETS'
+              tickets: 'ACCESS_TICKETS',
+              signature_settings: 'ACCESS_PERSONAL_SETTINGS',
+              resources: 'ACCESS_RESOURCES'
             };
             const perm = permMap[tab];
             if (!perm) return true;
@@ -1607,8 +1665,12 @@ function AdminDashboardContent() {
     if (user?.role) {
       const isAllowed = (tab: string) => {
         if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+        if (tab === 'checklist') {
+          return user.permissions?.includes('ACCESS_CHECKLIST') || user.permissions?.includes('ACCESS_COMPLIANCE') || false;
+        }
         const permMap: Record<string, string> = {
           dashboard: 'ACCESS_DASHBOARD',
+          checklist: 'ACCESS_CHECKLIST',
           staff: 'ACCESS_STAFF',
           clients: 'ACCESS_CLIENTS',
           plans: 'ACCESS_PLANS',
@@ -1617,7 +1679,9 @@ function AdminDashboardContent() {
           compliance: 'ACCESS_COMPLIANCE',
           settings: 'ACCESS_SETTINGS',
           roles: 'ACCESS_ROLES',
-          tickets: 'ACCESS_TICKETS'
+          tickets: 'ACCESS_TICKETS',
+          signature_settings: 'ACCESS_PERSONAL_SETTINGS',
+          resources: 'ACCESS_RESOURCES'
         };
         const perm = permMap[tab];
         if (!perm) return true;
@@ -1807,8 +1871,15 @@ function AdminDashboardContent() {
 
   const handleSaveSettings = async () => {
     try {
+      if (gstEnabled && (!orgGst || orgGst.trim().length < 15)) {
+        toast.error('GST is enabled. A valid 15-digit Company GSTIN is mandatory.');
+        return;
+      }
+
       const formData = new FormData();
+      formData.append('gstEnabled', String(gstEnabled));
       formData.append('gstCalculationType', gstCalculationType);
+      formData.append('invoiceDispatchPolicy', invoiceDispatchPolicy);
       formData.append('gst', orgGst);
       formData.append('state', tenantState);
       formData.append('address', orgAddress);
@@ -1889,6 +1960,110 @@ function AdminDashboardContent() {
       }
       else { toast.error(data.message || 'Failed to save settings'); }
     } catch (err: any) { toast.error(err.message || 'Failed to save settings'); }
+  };
+
+  // ── GST TOGGLE FLOW WITH CONFIRMATION & DIRECT PERSISTENCE ──
+  const handleTriggerGstToggle = (targetState: boolean) => {
+    if (targetState === gstEnabled) return;
+    if (targetState === true && (!orgGst || orgGst.trim().length < 15)) {
+      toast.error('Please enter a valid 15-character Company GSTIN before enabling GST.');
+      return;
+    }
+    setPendingGstTargetState(targetState);
+    setIsGstConfirmModalOpen(true);
+  };
+
+  const handleConfirmGstToggle = async () => {
+    if (pendingGstTargetState === null) return;
+    setIsSavingGstToggle(true);
+    try {
+      const formData = new FormData();
+      formData.append('gstEnabled', String(pendingGstTargetState));
+      formData.append('gstCalculationType', gstCalculationType);
+      formData.append('invoiceDispatchPolicy', invoiceDispatchPolicy);
+      formData.append('gst', (orgGst || '').trim());
+      formData.append('state', tenantState || '');
+      formData.append('address', orgAddress || '');
+      formData.append('mobile', orgMobile || '');
+      formData.append('website', orgWebsite || '');
+      formData.append('kycFirst', String(kycFirst));
+      formData.append('welcomeEmailText', welcomeEmailText || '');
+      formData.append('reportDisclaimer', reportDisclaimer || '');
+      formData.append('paymentGatewayEnabled', String(paymentGatewayEnabled));
+      formData.append('upiQrEnabled', String(upiQrEnabled));
+      formData.append('upiId', (upiId || '').trim());
+      formData.append('upiPayeeName', (upiPayeeName || '').trim());
+      formData.append('upiInstructions', (upiInstructions || '').trim());
+
+      const data = await api.updateTenantSettings(formData);
+      if (data && data.success) {
+        setGstEnabled(pendingGstTargetState);
+        toast.success(
+          pendingGstTargetState
+            ? 'GST calculation enabled (18% tax mode).'
+            : 'GST calculation disabled (0% tax Non-GST Advisor mode).'
+        );
+        setIsGstConfirmModalOpen(false);
+        setPendingGstTargetState(null);
+        await loadData(true);
+      } else {
+        throw new Error(data?.message || 'Failed to update GST settings');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update GST settings');
+    } finally {
+      setIsSavingGstToggle(false);
+    }
+  };
+
+  // ── KYC ONBOARDING FLOW TOGGLE WITH CONFIRMATION & DIRECT PERSISTENCE ──
+  const handleTriggerKycFlowToggle = (targetState: boolean) => {
+    if (targetState === kycFirst) return;
+    setPendingKycFirstState(targetState);
+    setIsKycFlowConfirmModalOpen(true);
+  };
+
+  const handleConfirmKycFlowToggle = async () => {
+    if (pendingKycFirstState === null) return;
+    setIsSavingKycFlowToggle(true);
+    try {
+      const formData = new FormData();
+      formData.append('kycFirst', String(pendingKycFirstState));
+      formData.append('gstEnabled', String(gstEnabled));
+      formData.append('gstCalculationType', gstCalculationType);
+      formData.append('invoiceDispatchPolicy', invoiceDispatchPolicy);
+      formData.append('gst', (orgGst || '').trim());
+      formData.append('state', tenantState || '');
+      formData.append('address', orgAddress || '');
+      formData.append('mobile', orgMobile || '');
+      formData.append('website', orgWebsite || '');
+      formData.append('welcomeEmailText', welcomeEmailText || '');
+      formData.append('reportDisclaimer', reportDisclaimer || '');
+      formData.append('paymentGatewayEnabled', String(paymentGatewayEnabled));
+      formData.append('upiQrEnabled', String(upiQrEnabled));
+      formData.append('upiId', (upiId || '').trim());
+      formData.append('upiPayeeName', (upiPayeeName || '').trim());
+      formData.append('upiInstructions', (upiInstructions || '').trim());
+
+      const data = await api.updateTenantSettings(formData);
+      if (data && data.success) {
+        setKycFirst(pendingKycFirstState);
+        toast.success(
+          pendingKycFirstState
+            ? 'Client onboarding flow set to: KYC Before Payment.'
+            : 'Client onboarding flow set to: KYC After Payment.'
+        );
+        setIsKycFlowConfirmModalOpen(false);
+        setPendingKycFirstState(null);
+        await loadData(true);
+      } else {
+        throw new Error(data?.message || 'Failed to update onboarding flow');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update onboarding flow');
+    } finally {
+      setIsSavingKycFlowToggle(false);
+    }
   };
 
   const handleVerifyPaymentGateway = async () => {
@@ -2710,6 +2885,10 @@ function AdminDashboardContent() {
   };
 
   const startEditClient = (cl: any) => {
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     setEditingClient(cl);
     setEditClientName(cl.name || '');
     setEditClientEmail(cl.email || '');
@@ -2814,6 +2993,10 @@ function AdminDashboardContent() {
 
   const handleUpdateClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     if (!editClientName.trim() || editClientName.trim().length < 2) {
       toast('Full name must be at least 2 characters.'); return;
     }
@@ -3201,20 +3384,88 @@ function AdminDashboardContent() {
       ),
     },
     {
-      name: 'Receipt',
-      width: '140px',
+      name: 'Receipt & Invoice',
+      width: '180px',
       cell: (row: any) => (
-        <div className="text-slate-600 dark:text-slate-400 space-y-1">
+        <div className="text-slate-600 dark:text-slate-400 space-y-1.5 py-1">
           {row.status === 'SUCCESS' ? (
-            <div>
-              <button
-                onClick={() => {
-                  import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id, `Invoice_${row.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
-                }}
-                className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
-              >
-                Download Invoice
-              </button>
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={() => {
+                    import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id || row._id, `Invoice_${row.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
+                  }}
+                  className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
+                  title="Download Official Tax Invoice PDF"
+                >
+                  <FileText className="w-3 h-3" />
+                  Invoice PDF
+                </button>
+                <button
+                  onClick={async () => {
+                    const pId = row.id || row._id;
+                    const clientEmail = row.client?.email || row.clientEmail || 'Client';
+                    setSendingInvoiceId(pId);
+                    const toastId = toast.loading(`Generating Tax Invoice & emailing to ${clientEmail}...`);
+                    try {
+                      const res: any = await api.sendPaymentInvoiceEmail(pId);
+                      if (res.success) {
+                        toast.success(res.message || `Tax Invoice sent to ${clientEmail} successfully!`, {
+                          id: toastId,
+                          duration: 5000
+                        });
+                        api.getAdminPayments().then(pRes => {
+                          if (pRes.success) setAllPayments(pRes.data);
+                        }).catch(() => {});
+                      } else {
+                        toast.error(res.message || 'Failed to send invoice email', {
+                          id: toastId,
+                          duration: 6000
+                        });
+                      }
+                    } catch (err: any) {
+                      toast.error(err.message || 'Error sending invoice email', {
+                        id: toastId,
+                        duration: 6000
+                      });
+                    } finally {
+                      setSendingInvoiceId(null);
+                    }
+                  }}
+                  disabled={sendingInvoiceId === (row.id || row._id)}
+                  className={`text-[10px] px-2.5 py-1 rounded font-bold transition inline-flex items-center gap-1.5 border shadow-sm ${
+                    sendingInvoiceId === (row.id || row._id)
+                      ? 'bg-blue-100 text-blue-800 border-blue-400 dark:bg-blue-950 dark:text-blue-200 animate-pulse cursor-wait'
+                      : 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                  }`}
+                  title="Email official Tax Invoice PDF directly to client"
+                >
+                  {sendingInvoiceId === (row.id || row._id) ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-blue-600 dark:text-blue-400" />
+                      <span>Sending PDF...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-3 h-3" />
+                      <span>{row.invoiceSentAt ? 'Resend Invoice' : 'Send to Client'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              {row.invoiceSentAt && (
+                <div className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1 pt-0.5">
+                  <CheckCircle2 className="w-2.5 h-2.5 shrink-0" />
+                  <span>Sent: {new Date(row.invoiceSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              )}
+              {row.invoiceStatus === 'PENDING_AGREEMENT' && (
+                <div className="pt-0.5">
+                  <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800 inline-block">
+                    ⏳ Agreement Pending
+                  </span>
+                </div>
+              )}
             </div>
           ) : row.status === 'PENDING' ? (
             <span className="text-[10px] text-amber-500 font-medium italic">Pending Verification</span>
@@ -4166,6 +4417,111 @@ function AdminDashboardContent() {
                   <span className="hidden sm:inline">Back to Super Admin</span>
                 </button>
               )}
+
+              {/* Admin Real-time Notification Bell for Researcher Actions */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsAdminNotifOpen(!isAdminNotifOpen)}
+                  className="relative p-2.5 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors flex items-center justify-center"
+                  title="Researcher Activity & Live Signals"
+                >
+                  <Bell className={`w-5 h-5 ${adminUnreadCount > 0 ? 'text-rose-600 dark:text-rose-400' : ''}`} />
+                  {adminUnreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-rose-600 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-md shadow-rose-600/30 animate-pulse">
+                      {adminUnreadCount > 9 ? '9+' : adminUnreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* Admin Notification Dropdown */}
+                {isAdminNotifOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setIsAdminNotifOpen(false)} />
+                    <div className="absolute right-0 mt-3 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                      <div className="p-3.5 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white">Researcher Activity</span>
+                          {adminUnreadCount > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 text-[10px] font-bold">
+                              {adminUnreadCount} new
+                            </span>
+                          )}
+                        </div>
+                        {adminUnreadCount > 0 && (
+                          <button
+                            onClick={handleMarkAdminNotifsRead}
+                            className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline"
+                          >
+                            Mark all as read
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5">
+                        {adminNotifications.length === 0 ? (
+                          <div className="py-8 px-4 text-center">
+                            <Bell className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2 opacity-60" />
+                            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">No activity notifications</p>
+                          </div>
+                        ) : (
+                          adminNotifications.slice(0, 8).map((n: any) => {
+                            const isUnread = !n.isRead && !n.read && n.status !== 'READ';
+                            const type = (n.type || '').toLowerCase();
+                            return (
+                              <div
+                                key={n.id || n._id}
+                                onClick={() => {
+                                  setIsAdminNotifOpen(false);
+                                  setActiveTab('research');
+                                }}
+                                className={`p-3 cursor-pointer transition-colors flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${
+                                  isUnread ? 'bg-rose-50/30 dark:bg-rose-950/20' : ''
+                                }`}
+                              >
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs mt-0.5 ${
+                                  type === 'signal' || type === 'alert' || type === 'update'
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                    : type === 'report'
+                                    ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                                    : 'bg-slate-500/15 text-slate-600'
+                                }`}>
+                                  {type === 'signal' ? <Target className="w-4 h-4" /> : type === 'report' ? <FileText className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1 mb-0.5">
+                                    <h5 className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                      {n.title}
+                                    </h5>
+                                    {isUnread && (
+                                      <span className="w-2 h-2 rounded-full bg-rose-600 shrink-0" />
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                    {n.message}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-white/10 text-center">
+                        <button
+                          onClick={() => {
+                            setIsAdminNotifOpen(false);
+                            setActiveTab('research');
+                          }}
+                          className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-500 flex items-center justify-center gap-1 mx-auto"
+                        >
+                          <span>Manage Signals &amp; Reports</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Theme Toggle */}
               <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
@@ -7917,7 +8273,7 @@ function AdminDashboardContent() {
 
                             {/* Modal Footer */}
                             <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 flex justify-end space-x-3 text-xs">
-                              {selectedClient.user?.deletedAt === null && (
+                              {selectedClient.user?.deletedAt === null && (!isStaff || hasPermission('EDIT_CLIENTS')) && (
                                 <button
                                   onClick={() => {
                                     setIsViewClientModalOpen(false);
@@ -8257,12 +8613,107 @@ function AdminDashboardContent() {
                             <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">📄 Documents, Policies & Onboarding</h3>
                             <p className="text-xs text-slate-500 mb-6">Manage mandatory compliance files and customer flow preferences.</p>
 
-                            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-white/5 mb-6">
-                              <label className="flex items-center space-x-3">
-                                <input type="checkbox" checked={kycFirst} onChange={e => setKycFirst(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-primary-600 focus:ring-primary-500" />
-                                <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Require KYC before Payment</span>
-                              </label>
-                              <p className="text-xs text-slate-500 ml-8 mt-1">If unchecked, users will pay first and then do KYC.</p>
+                            {/* Client Onboarding Sequence Control (KYC First vs Payment First) */}
+                            <div className="bg-slate-50/80 dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200 dark:border-white/10 mb-6 space-y-4">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div>
+                                  <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <ShieldCheck className="w-4 h-4 text-primary-500" />
+                                    <span>Client Onboarding Sequence</span>
+                                    <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                                      kycFirst
+                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-300'
+                                        : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-300'
+                                    }`}>
+                                      {kycFirst ? '● KYC BEFORE PAYMENT' : '● KYC AFTER PAYMENT'}
+                                    </span>
+                                  </h4>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                                    Select the mandatory verification flow for new clients. Click either card to switch sequence (with confirmation).
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Toggle Options (2-Way Segmented Control Cards) */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                {/* Option 1: KYC Before Payment */}
+                                <div
+                                  onClick={() => handleTriggerKycFlowToggle(true)}
+                                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all relative ${
+                                    kycFirst
+                                      ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-600 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/30'
+                                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 opacity-75 hover:opacity-100'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                        kycFirst ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                      }`}>
+                                        <ShieldCheck className="w-4 h-4" />
+                                      </div>
+                                      <div>
+                                        <span className="text-xs font-bold text-slate-900 dark:text-white block">KYC Before Payment</span>
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Strict Compliance Flow</span>
+                                      </div>
+                                    </div>
+                                    {kycFirst ? (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1 shadow-sm">
+                                        <Check className="w-3 h-3" /> Active Flow
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                                        Click to switch
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mb-2.5">
+                                    Client must verify PAN/KRA and sign Advisory Agreement <strong>first</strong>. Pricing &amp; payments unlock only after agreement.
+                                  </p>
+                                  <div className="pt-2 border-t border-slate-200/60 dark:border-white/5 flex items-center gap-1.5 text-[10px] font-mono text-blue-700 dark:text-blue-300 font-semibold">
+                                    <span>Welcome</span> ➔ <span>KYC</span> ➔ <span>Agreement</span> ➔ <span>Payment</span>
+                                  </div>
+                                </div>
+
+                                {/* Option 2: KYC After Payment */}
+                                <div
+                                  onClick={() => handleTriggerKycFlowToggle(false)}
+                                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all relative ${
+                                    !kycFirst
+                                      ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-600 shadow-md shadow-indigo-500/10 ring-1 ring-indigo-500/30'
+                                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 opacity-75 hover:opacity-100'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                                        !kycFirst ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                      }`}>
+                                        <CreditCard className="w-4 h-4" />
+                                      </div>
+                                      <div>
+                                        <span className="text-xs font-bold text-slate-900 dark:text-white block">KYC After Payment</span>
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Payment First Flow</span>
+                                      </div>
+                                    </div>
+                                    {!kycFirst ? (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-600 text-white flex items-center gap-1 shadow-sm">
+                                        <Check className="w-3 h-3" /> Active Flow
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                                        Click to switch
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mb-2.5">
+                                    Client selects plan and pays <strong>first</strong>. After payment (or admin plan assignment), client completes KYC &amp; Agreement.
+                                  </p>
+                                  <div className="pt-2 border-t border-slate-200/60 dark:border-white/5 flex items-center gap-1.5 text-[10px] font-mono text-indigo-700 dark:text-indigo-300 font-semibold">
+                                    <span>Welcome</span> ➔ <span>Payment</span> ➔ <span>KYC</span> ➔ <span>Agreement</span>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -8531,22 +8982,113 @@ function AdminDashboardContent() {
 
                       {settingsTab === 'billing' && (
                         <div className="space-y-6 animate-fade-in">
+                          {/* 1. GST & Tax Calculation Card */}
                           <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
-                            <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-2">💳 GST & Tax Calculation</h3>
-                            <p className="text-xs text-slate-500 mb-6">Manage how taxes apply to your clients.</p>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                                  <span>💳 GST & Tax Settings</span>
+                                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                                    gstEnabled
+                                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300'
+                                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300'
+                                  }`}>
+                                    {gstEnabled ? '● GST ENABLED (18% TAX)' : '○ GST DISABLED (0% NON-GST)'}
+                                  </span>
+                                </h3>
+                                <p className="text-xs text-slate-500">
+                                  {gstEnabled
+                                    ? 'Tax invoices are generated with 18% GST (CGST/SGST or IGST). Company GSTIN is mandatory.'
+                                    : 'Invoices will be generated without GST (0% tax). No GSTIN number will appear on invoices.'}
+                                </p>
+                              </div>
+
+                              {/* Toggle GST Switch with Confirmation */}
+                              <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-white/10 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleTriggerGstToggle(false)}
+                                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                                    !gstEnabled
+                                      ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 ring-1 ring-rose-500'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
+                                  }`}
+                                >
+                                  <span>Disable GST</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTriggerGstToggle(true)}
+                                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                                    gstEnabled
+                                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 ring-1 ring-emerald-500'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
+                                  }`}
+                                >
+                                  <span>Enable GST</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {!gstEnabled && (
+                              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                                <span>
+                                  <strong>Non-GST Advisor Mode:</strong> GST calculation is disabled. Invoices will be generated with 0% tax, and company GSTIN will NOT be printed on generated invoices.
+                                </span>
+                              </div>
+                            )}
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                               <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">GST Calculation Method</label>
-                                <select value={gstCalculationType} onChange={e => setGstCalculationType(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition">
-                                  <option value="EXCLUSIVE">Amount + GST (Exclusive)</option>
-                                  <option value="INCLUSIVE">Amount Including GST (Inclusive)</option>
+                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                                  GST Calculation Method {gstEnabled && <span className="text-rose-500">*</span>}
+                                </label>
+                                <select
+                                  disabled={!gstEnabled}
+                                  value={gstCalculationType}
+                                  onChange={e => setGstCalculationType(e.target.value)}
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <option value="EXCLUSIVE">Amount + GST (Exclusive - 18% added on top)</option>
+                                  <option value="INCLUSIVE">Amount Including GST (Inclusive - 18% extracted)</option>
                                 </select>
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  {gstEnabled ? 'Applies 18% GST (CGST/SGST or IGST)' : 'Disabled (0% tax applies)'}
+                                </p>
                               </div>
                               <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Company GSTIN Number</label>
-                                <input type="text" value={orgGst} onChange={e => setOrgGst(e.target.value)} placeholder="e.g. 22AAAAA1111A1Z1" className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition uppercase" />
-                                <p className="text-[10px] text-slate-500 mt-1">Leave empty if not applicable.</p>
+                                <div className="flex items-center justify-between mb-2">
+                                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">
+                                    Company GSTIN Number
+                                  </label>
+                                  {gstEnabled ? (
+                                    <span className="text-[10px] font-extrabold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-800">
+                                      * Mandatory (15 Chars)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-medium text-slate-400">
+                                      Optional / Hidden
+                                    </span>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  value={orgGst}
+                                  onChange={e => setOrgGst(e.target.value)}
+                                  placeholder={gstEnabled ? 'e.g. 22AAAAA1111A1Z1 (Mandatory)' : 'GST disabled (won\'t be printed)'}
+                                  disabled={!gstEnabled}
+                                  className={`w-full bg-white dark:bg-slate-900 border rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition uppercase ${
+                                    gstEnabled && (!orgGst || orgGst.trim().length < 15)
+                                      ? 'border-amber-400 dark:border-amber-600'
+                                      : 'border-slate-400 dark:border-white/10'
+                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  {gstEnabled
+                                    ? 'Must be exactly 15 alphanumeric characters.'
+                                    : 'When GST is disabled, GSTIN will NOT be printed on invoice PDFs.'}
+                                </p>
                               </div>
                               <div className="md:col-span-2">
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Company State (For CGST/SGST vs IGST)</label>
@@ -8620,6 +9162,75 @@ function AdminDashboardContent() {
                               <div>
                                 <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">IFSC Code</label>
                                 <input type="text" value={bankIfsc} onChange={e => setBankIfsc(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm" />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. Tax Invoice Dispatch & Generation Policy Card */}
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-4">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                                <span>🧾 Tax Invoice Dispatch & Generation Policy</span>
+                              </h3>
+                              <p className="text-xs text-slate-500">
+                                Choose when and how Tax Invoices are generated and dispatched to clients. Only 1 option can be active at a time.
+                              </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                              {/* Option 1: Immediate */}
+                              <div
+                                onClick={() => setInvoiceDispatchPolicy('IMMEDIATE_ON_PAYMENT')}
+                                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                  invoiceDispatchPolicy === 'IMMEDIATE_ON_PAYMENT'
+                                    ? 'border-primary-600 bg-primary-50/50 dark:bg-primary-950/20 shadow-md ring-2 ring-primary-500/20'
+                                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                                    <span className="text-base">⚡</span>
+                                    <span>Immediate on Payment</span>
+                                  </span>
+                                  <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                    invoiceDispatchPolicy === 'IMMEDIATE_ON_PAYMENT' ? 'border-primary-600 bg-primary-600' : 'border-slate-400'
+                                  }`}>
+                                    {invoiceDispatchPolicy === 'IMMEDIATE_ON_PAYMENT' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-500 leading-relaxed">
+                                  Invoice is generated and emailed to client immediately upon payment or admin assignment. (Uses Admin-edited or current profile details).
+                                </p>
+                              </div>
+
+                              {/* Option 2: After Agreement */}
+                              <div
+                                onClick={() => setInvoiceDispatchPolicy('AFTER_KYC_AGREEMENT')}
+                                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                  invoiceDispatchPolicy === 'AFTER_KYC_AGREEMENT'
+                                    ? 'border-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20 shadow-md ring-2 ring-emerald-500/20'
+                                    : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                                    <span className="text-base">✍️</span>
+                                    <span>After KYC & Agreement</span>
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+                                      RECOMMENDED
+                                    </span>
+                                    <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                                      invoiceDispatchPolicy === 'AFTER_KYC_AGREEMENT' ? 'border-emerald-600 bg-emerald-600' : 'border-slate-400'
+                                    }`}>
+                                      {invoiceDispatchPolicy === 'AFTER_KYC_AGREEMENT' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                    </span>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-slate-500 leading-relaxed">
+                                  Plan starts immediately. Invoices remain pending until the client completes KYC & signs the agreement. Once signed, all pending invoices are batch-released with verified details.
+                                </p>
                               </div>
                             </div>
                           </div>
@@ -10294,6 +10905,7 @@ function AdminDashboardContent() {
                         <select required value={complaintSource} onChange={(e) => setComplaintSource(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500">
                           <option value="MANUAL">Manual</option>
                           <option value="SCORES">SCORES</option>
+                          <option value="ODR">ODR</option>
                           <option value="EMAIL">Email</option>
                           <option value="PORTAL">Portal</option>
                         </select>
@@ -10392,6 +11004,193 @@ function AdminDashboardContent() {
                   className="w-full h-full rounded-2xl border border-slate-300 dark:border-slate-800 shadow-inner bg-white"
                   title={pdfPreviewModal.title}
                 />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* GST Toggle Confirmation Modal */}
+        {isGstConfirmModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-white/10 animate-fade-in-up">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                  pendingGstTargetState
+                    ? 'bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                    : 'bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                }`}>
+                  {pendingGstTargetState ? (
+                    <CheckCircle2 className="w-6 h-6" />
+                  ) : (
+                    <AlertTriangle className="w-6 h-6" />
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGstConfirmModalOpen(false);
+                    setPendingGstTargetState(null);
+                  }}
+                  className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">
+                {pendingGstTargetState ? 'Enable 18% GST Invoicing?' : 'Disable GST (Non-GST Mode)?'}
+              </h3>
+
+              <div className="text-xs text-slate-600 dark:text-slate-300 space-y-2 mb-6 leading-relaxed">
+                {pendingGstTargetState ? (
+                  <>
+                    <p>
+                      Are you sure you want to enable GST calculation?
+                    </p>
+                    <div className="bg-emerald-50 dark:bg-emerald-950/30 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 space-y-1">
+                      <p className="font-semibold">● 18% GST (CGST/SGST or IGST) will apply to all subscription purchases.</p>
+                      <p>● Company GSTIN: <strong className="font-mono">{orgGst || 'Not Entered'}</strong> will appear on all generated invoices.</p>
+                      <p>● Calculation Method: <strong>{gstCalculationType === 'EXCLUSIVE' ? 'Amount + 18% GST (Exclusive)' : 'Amount includes 18% GST (Inclusive)'}</strong></p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      Are you sure you want to disable GST calculation?
+                    </p>
+                    <div className="bg-amber-50 dark:bg-amber-950/30 p-3 rounded-xl border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 space-y-1">
+                      <p className="font-semibold">● Non-GST Advisor Mode: Invoices will be generated with 0% tax.</p>
+                      <p>● Company GSTIN will NOT be printed on invoice PDFs.</p>
+                      <p>● Use this if your annual turnover is below the GST registration threshold or you operate as an unregistered entity.</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isSavingGstToggle}
+                  onClick={() => {
+                    setIsGstConfirmModalOpen(false);
+                    setPendingGstTargetState(null);
+                  }}
+                  className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold rounded-xl transition text-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingGstToggle}
+                  onClick={handleConfirmGstToggle}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition text-white shadow-lg flex items-center justify-center gap-2 ${
+                    pendingGstTargetState
+                      ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20'
+                      : 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/20'
+                  }`}
+                >
+                  {isSavingGstToggle ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : pendingGstTargetState ? (
+                    'Yes, Enable GST'
+                  ) : (
+                    'Yes, Disable GST'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* KYC Onboarding Flow Confirmation Modal */}
+        {isKycFlowConfirmModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-white/10 animate-fade-in-up">
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 flex items-center justify-center">
+                  <ArrowRightLeft className="w-6 h-6" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsKycFlowConfirmModalOpen(false);
+                    setPendingKycFirstState(null);
+                  }}
+                  className="p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">
+                Switch Onboarding Flow to {pendingKycFirstState ? 'KYC Before Payment' : 'KYC After Payment'}?
+              </h3>
+
+              <div className="text-xs text-slate-600 dark:text-slate-300 space-y-3 mb-6 leading-relaxed">
+                <p>
+                  You are changing the sequence in which new clients complete verification and purchase plans:
+                </p>
+
+                {pendingKycFirstState ? (
+                  <div className="bg-blue-50 dark:bg-blue-950/30 p-3.5 rounded-xl border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200 space-y-2">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-blue-600" /> Strict Compliance Flow (KYC First):
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      1. Clients will verify Identity KYC (PAN / KRA) and sign Advisory Agreement <strong>before</strong> accessing plan selection or payments.
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      2. Recommended for adherence to strict SEBI advisory guidelines.
+                    </p>
+                    <div className="pt-2 border-t border-blue-200 dark:border-blue-800/60 font-mono text-[10px] text-blue-700 dark:text-blue-300 font-semibold">
+                      Sequence: Welcome ➔ Identity KYC ➔ Legal Agreement ➔ Subscription
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-indigo-50 dark:bg-indigo-950/30 p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-800 text-indigo-900 dark:text-indigo-200 space-y-2">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <CreditCard className="w-4 h-4 text-indigo-600" /> Payment First Flow (KYC After Payment):
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      1. Clients will select their plan and complete payment <strong>first</strong>.
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      2. After payment confirmation, the client must complete Identity KYC and sign the Advisory Agreement before market recommendations unlock.
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      3. <em>If Admin assigns a plan directly to a client, payment is bypassed and the client is prompted to do KYC &amp; Agreement directly upon login.</em>
+                    </p>
+                    <div className="pt-2 border-t border-indigo-200 dark:border-indigo-800/60 font-mono text-[10px] text-indigo-700 dark:text-indigo-300 font-semibold">
+                      Sequence: Welcome ➔ Subscription/Payment ➔ Identity KYC ➔ Legal Agreement
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isSavingKycFlowToggle}
+                  onClick={() => {
+                    setIsKycFlowConfirmModalOpen(false);
+                    setPendingKycFirstState(null);
+                  }}
+                  className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold rounded-xl transition text-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingKycFlowToggle}
+                  onClick={handleConfirmKycFlowToggle}
+                  className="flex-1 py-2.5 bg-primary-600 hover:bg-primary-500 text-xs font-bold rounded-xl transition text-white shadow-lg shadow-primary-500/20 flex items-center justify-center gap-2"
+                >
+                  {isSavingKycFlowToggle ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    'Yes, Switch Flow'
+                  )}
+                </button>
               </div>
             </div>
           </div>

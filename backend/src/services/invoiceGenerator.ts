@@ -287,9 +287,9 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       // Determine raw discount
       let rawDiscount = Number(payment.discountApplied || payment.discount || 0);
 
-      // Determine if GST is INCLUSIVE or EXCLUSIVE
-      // 1. Check tenant setting: 'INCLUSIVE' vs 'EXCLUSIVE'
-      // 2. Also check if the transaction amount was charged inclusive (i.e. amount equals plan price minus discount)
+      // Determine if GST is ENABLED, and whether it is INCLUSIVE or EXCLUSIVE
+      const isGstEnabled = tenant.gstEnabled !== false;
+
       let isGstInclusive = tenant.gstCalculationType === 'INCLUSIVE';
       if (!isGstInclusive && fullPlanPrice > 0 && totalAmount > 0) {
         if (Math.abs(totalAmount - (fullPlanPrice - rawDiscount)) < 2) {
@@ -303,7 +303,24 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       let totalGst = 0;
       let netInvoiceTotal = 0;
 
-      if (isGstInclusive) {
+      if (!isGstEnabled) {
+        // GST DISABLED: Direct Plan Price without tax
+        grossBase = fullPlanPrice > 0 ? fullPlanPrice : totalAmount;
+        baseDiscount = rawDiscount;
+        if (couponObj?.discountValue && !baseDiscount) {
+          if (couponObj.discountType === 'PERCENTAGE') {
+            baseDiscount = ((fullPlanPrice || totalAmount) * couponObj.discountValue) / 100;
+            if (couponObj.percentageType === 'CAPPED' && couponObj.maxDiscountValue && baseDiscount > couponObj.maxDiscountValue) {
+              baseDiscount = couponObj.maxDiscountValue;
+            }
+          } else {
+            baseDiscount = Number(couponObj.discountValue);
+          }
+        }
+        taxableValue = Math.max(0, grossBase - baseDiscount);
+        totalGst = 0;
+        netInvoiceTotal = totalAmount > 0 ? totalAmount : taxableValue;
+      } else if (isGstInclusive) {
         // INCLUSIVE:
         // 1. Discount is applied directly on the plan price:
         //    Net Payable = Plan Price (e.g. 1500) - Discount (e.g. 500) = 1000 (Inc. GST)
@@ -320,7 +337,6 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         totalGst = Number((netInvoiceTotal - taxableValue).toFixed(2));
       } else {
         // EXCLUSIVE: Plan price is Base, 18% GST is added on top
-        // Example: Plan = ₹15000 (Base), Coupon = ₹500, Taxable = ₹14500, GST = ₹2610, Total = ₹17110
         if (couponObj?.discountValue) {
           if (couponObj.discountType === 'PERCENTAGE') {
             baseDiscount = ((fullPlanPrice || totalAmount) * couponObj.discountValue) / 100;
@@ -435,11 +451,28 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       }
 
       // Right Side: Company Details
-      const tenantGst = tenant.gst || tenant.gstin || '';
+      const tenantGst = isGstEnabled ? (tenant.gst || tenant.gstin || '') : '';
+      let tenantFullAddress = tenant.address || '';
+      if (tenant.city && !tenantFullAddress.includes(tenant.city)) {
+        tenantFullAddress = tenantFullAddress ? `${tenantFullAddress}, ${tenant.city}` : tenant.city;
+      }
+      if (tenant.state && !tenantFullAddress.includes(tenant.state)) {
+        tenantFullAddress = tenantFullAddress ? `${tenantFullAddress}, ${tenant.state}` : tenant.state;
+      }
+      if (tenant.pincode && !tenantFullAddress.includes(tenant.pincode)) {
+        tenantFullAddress = tenantFullAddress ? `${tenantFullAddress} - ${tenant.pincode}` : tenant.pincode;
+      }
+      if (!tenantFullAddress || tenantFullAddress.trim().length <= 2) {
+        tenantFullAddress = `${displayTenantState}, India`;
+      }
       doc.font(boldFont).fontSize(9).fillColor('#0F172A').text(tenant.companyName, 250, 36, { width: 310, align: 'right' });
-      doc.font(regularFont).fontSize(7.5).fillColor('#475569').text(tenant.address || 'India', 250, 48, { width: 310, align: 'right' });
+      doc.font(regularFont).fontSize(7.5).fillColor('#475569').text(tenantFullAddress, 250, 48, { width: 310, align: 'right' });
       doc.text(`Email: ${tenant.email || 'support@advisory.com'}  |  Mobile: ${tenant.mobile || 'N/A'}`, 250, 60, { width: 310, align: 'right' });
-      doc.text(`SEBI Regn: ${tenant.sebiRegistration || 'INH000001234'}  |  PAN: ${tenant.pan || 'N/A'}  |  GSTIN: ${tenantGst || 'N/A'}`, 250, 72, { width: 310, align: 'right' });
+      if (isGstEnabled && tenantGst) {
+        doc.text(`SEBI Regn: ${tenant.sebiRegistration || 'INH000001234'}  |  PAN: ${tenant.pan || 'N/A'}  |  GSTIN: ${tenantGst}`, 250, 72, { width: 310, align: 'right' });
+      } else {
+        doc.text(`SEBI Regn: ${tenant.sebiRegistration || 'INH000001234'}  |  PAN: ${tenant.pan || 'N/A'}`, 250, 72, { width: 310, align: 'right' });
+      }
 
       // Separator Line
       doc.moveTo(26, 92).lineTo(569, 92).strokeColor('#E2E8F0').lineWidth(0.75).stroke();
@@ -447,28 +480,40 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       // ==========================================
       // 3. TAX INVOICE RIBBON (Y: 98 to 122)
       // ==========================================
+      const ribbonTitle = isGstEnabled ? 'TAX INVOICE' : 'INVOICE / BILL OF SUPPLY';
       doc.roundedRect(34, 98, 527, 24, 3).fillColor('#0F2444').fill();
-      doc.font(boldFont).fontSize(10.5).fillColor('#FFFFFF').text('TAX INVOICE', 34, 105, { width: 527, align: 'center' });
+      doc.font(boldFont).fontSize(10.5).fillColor('#FFFFFF').text(ribbonTitle, 34, 105, { width: 527, align: 'center' });
       doc.font(boldFont).fontSize(7.5).fillColor('#93C5FD').text('ORIGINAL FOR RECIPIENT', 34, 106, { width: 517, align: 'right' });
       doc.font(regularFont).fontSize(7.5).fillColor('#94A3B8').text('(Under Rule 46 of CGST Rules, 2017)', 44, 106, { width: 220, align: 'left' });
 
       // ==========================================
-      // 4. TWO-COLUMN METADATA CARDS (Y: 128 to 230)
+      // 4. TWO-COLUMN METADATA CARDS (Y: 128 to 235)
       // ==========================================
+      const cardY = 128;
+      const cardW = 260;
+
+      // Calculate dynamic address height so lines never overlap
+      doc.font(regularFont).fontSize(7);
+      const measuredAddrH = doc.heightOfString(clientAddressDisplay, { width: 153, lineGap: 1 });
+      const addrH = Math.min(26, measuredAddrH);
+
+      const contentH = 18 + 14 + 14 + addrH + 4 + 14 + 14 + 8;
+      const metaCardH = Math.max(102, contentH);
+
       // Left Card: Invoice Details
-      doc.rect(34, 128, 260, 18).fillColor('#F1F5F9').fill();
-      doc.font(boldFont).fontSize(8).fillColor('#0F2444').text('INVOICE INFORMATION', 42, 133);
-      doc.roundedRect(34, 128, 260, 96, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
-      doc.moveTo(34, 146).lineTo(294, 146).strokeColor('#CBD5E1').stroke();
+      doc.rect(34, cardY, cardW, 18).fillColor('#F1F5F9').fill();
+      doc.font(boldFont).fontSize(8).fillColor('#0F2444').text('INVOICE INFORMATION', 42, cardY + 5);
+      doc.roundedRect(34, cardY, cardW, metaCardH, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.moveTo(34, cardY + 18).lineTo(34 + cardW, cardY + 18).strokeColor('#CBD5E1').stroke();
 
       const invLabels = [
         ['Invoice No:', invoiceNo, true],
         ['Invoice Date:', invoiceDate, false],
-        ['Place of Supply:', `${displayTenantState} (State Code: ${tenantStateCode})`, false],
+        ['Place of Supply:', `${displayClientState} (State Code: ${clientStateCode || 'N/A'})`, false],
         ['SAC Code:', '997156 (Financial Advisory Services)', false],
         ['Reverse Charge (Y/N):', 'No (N)', false]
       ];
-      let invY = 151;
+      let invY = cardY + 24;
       for (const [lbl, val, isBold] of invLabels) {
         doc.font(boldFont).fontSize(7.5).fillColor('#475569').text(lbl as string, 42, invY, { width: 100 });
         doc.font(isBold ? boldFont : regularFont).fontSize(7.5).fillColor('#0F172A').text(val as string, 142, invY, { width: 148 });
@@ -476,29 +521,41 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       }
 
       // Right Card: Client Details
-      doc.rect(301, 128, 260, 18).fillColor('#F1F5F9').fill();
-      doc.font(boldFont).fontSize(8).fillColor('#0F2444').text('BILL TO (CLIENT DETAILS)', 309, 133);
-      doc.roundedRect(301, 128, 260, 96, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
-      doc.moveTo(301, 146).lineTo(561, 146).strokeColor('#CBD5E1').stroke();
+      doc.rect(301, cardY, cardW, 18).fillColor('#F1F5F9').fill();
+      doc.font(boldFont).fontSize(8).fillColor('#0F2444').text('BILL TO (CLIENT DETAILS)', 309, cardY + 5);
+      doc.roundedRect(301, cardY, cardW, metaCardH, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.moveTo(301, cardY + 18).lineTo(301 + cardW, cardY + 18).strokeColor('#CBD5E1').stroke();
 
-      const clientLabels = [
-        ['Client Name:', clientFullName, true],
-        ['Mobile No:', clientMobile, false],
-        ['Address:', clientAddressDisplay, false],
-        ['State / State Code:', `${displayClientState} (Code: ${clientStateCode || 'N/A'})`, false],
-        ['Client PAN / Tax ID:', clientPan, false]
-      ];
-      let clY = 151;
-      for (const [lbl, val, isBold] of clientLabels) {
-        doc.font(boldFont).fontSize(7.5).fillColor('#475569').text(lbl as string, 309, clY, { width: 95 });
-        doc.font(isBold ? boldFont : regularFont).fontSize(7.5).fillColor('#0F172A').text(val as string, 404, clY, { width: 153 });
-        clY += 14;
-      }
+      let clY = cardY + 24;
+
+      // 1. Client Name
+      doc.font(boldFont).fontSize(7.5).fillColor('#475569').text('Client Name:', 309, clY, { width: 92 });
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F172A').text(clientFullName, 404, clY, { width: 153 });
+      clY += 14;
+
+      // 2. Mobile No
+      doc.font(boldFont).fontSize(7.5).fillColor('#475569').text('Mobile No:', 309, clY, { width: 92 });
+      doc.font(regularFont).fontSize(7.5).fillColor('#0F172A').text(clientMobile, 404, clY, { width: 153 });
+      clY += 14;
+
+      // 3. Address (Calculated dynamic offset prevents overlap with State & PAN!)
+      doc.font(boldFont).fontSize(7.5).fillColor('#475569').text('Address:', 309, clY, { width: 92 });
+      doc.font(regularFont).fontSize(7).fillColor('#0F172A').text(clientAddressDisplay, 404, clY, { width: 153, height: addrH, ellipsis: true, lineGap: 1 });
+      clY += addrH + 4;
+
+      // 4. State / State Code
+      doc.font(boldFont).fontSize(7.5).fillColor('#475569').text('State / State Code:', 309, clY, { width: 92 });
+      doc.font(regularFont).fontSize(7.5).fillColor('#0F172A').text(`${displayClientState} (Code: ${clientStateCode || 'N/A'})`, 404, clY, { width: 153 });
+      clY += 14;
+
+      // 5. Client PAN / Tax ID
+      doc.font(boldFont).fontSize(7.5).fillColor('#475569').text('Client PAN / Tax ID:', 309, clY, { width: 92 });
+      doc.font(regularFont).fontSize(7.5).fillColor('#0F172A').text(clientPan, 404, clY, { width: 153 });
 
       // ==========================================
-      // 5. SERVICES TABLE (Y: 232 to 308)
+      // 5. SERVICES TABLE (Y: 242 to 318)
       // ==========================================
-      const tableY = 232;
+      const tableY = cardY + metaCardH + 8;
       // Header row
       doc.rect(34, tableY, 527, 22).fillColor('#F1F5F9').fill();
       doc.roundedRect(34, tableY, 527, 22, 2).strokeColor('#94A3B8').lineWidth(0.5).stroke();
@@ -552,90 +609,87 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(formatInr(taxableValue), 500, bodyY + 17, { width: 55, align: 'right' });
 
       // ==========================================
-      // 6. SUMMARY & SETTLEMENT SECTION (Y: 310 to 475)
+      // 6. SUMMARY SECTION
+      // (PAYMENT & SETTLEMENT DETAILS HAS BEEN REMOVED)
       // ==========================================
-      const sumY = 310;
-
-      // Left Box: Amount in words + Settlement Details
-      // Card 1: Words
-      doc.roundedRect(34, sumY, 310, 38, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
-      doc.rect(34, sumY, 310, 15).fillColor('#F8FAFC').fill();
-      doc.font(boldFont).fontSize(7).fillColor('#64748B').text('TOTAL INVOICE AMOUNT (IN WORDS)', 42, sumY + 4);
-      doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(numberToWords(Math.round(netInvoiceTotal)), 42, sumY + 21, { width: 295 });
-
-      // Card 2: Settlement Info
-      const setY = sumY + 44;
-      doc.roundedRect(34, setY, 310, 114, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
-      doc.rect(34, setY, 310, 16).fillColor('#F1F5F9').fill();
-      doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('PAYMENT & SETTLEMENT DETAILS', 42, setY + 4);
-
-      const pModeText = payment.paymentMode === 'UPI_QR' ? 'UPI / QR CODE' : (payment.paymentMode || 'ONLINE / GATEWAY');
-      const pDetails: any[] = [
-        ['Payment Status:', 'COMPLETED (PAID)', '#047857', true],
-        ['Payment Mode:', pModeText, '#0F172A', false],
-        ['Txn / UTR Reference:', payment.transactionRef || 'N/A', '#0F172A', false]
-      ];
-      if (couponCodeText) {
-        pDetails.push(['Coupon Redeemed:', `${couponCodeText} (Discount: ${formatInr(baseDiscount)})`, '#047857', false]);
-      }
-      if (tenant.bankName || tenant.bankAccountNo) {
-        pDetails.push(['Bank Account Ref:', `${tenant.bankName || 'N/A'} | A/C: ${tenant.bankAccountNo || 'N/A'} | IFSC: ${tenant.bankIfsc || 'N/A'}`, '#475569', false]);
-      }
-      pDetails.push(['GST on Reverse Charge:', 'No', '#475569', false]);
-
-      let py = setY + 21;
-      for (const [lbl, val, col, isB] of pDetails) {
-        doc.font(boldFont).fontSize(7.2).fillColor('#475569').text(lbl, 42, py, { width: 100 });
-        doc.font(isB ? boldFont : regularFont).fontSize(7.2).fillColor(col).text(val, 145, py, { width: 195 });
-        py += 14.5;
-      }
+      const sumY = bodyY + bodyH + 10;
 
       // Right Box: Tax Breakdown Rows
       const rightX = 352;
       const rightW = 209;
-      doc.roundedRect(rightX, sumY, rightW, 158, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
 
       const taxRows: [string, string, string, boolean][] = [];
-      if (baseDiscount > 0) {
-        taxRows.push(['Gross Plan Value', formatInr(grossBase), '#0F172A', false]);
-        taxRows.push([`Less: Discount (${couponCodeText || 'Coupon'})`, '- ' + formatInr(baseDiscount), '#047857', true]);
-        taxRows.push(['Net Taxable Value', formatInr(taxableValue), '#0F172A', true]);
+      if (!isGstEnabled) {
+        if (baseDiscount > 0) {
+          taxRows.push(['Gross Plan Value', formatInr(grossBase), '#0F172A', false]);
+          taxRows.push([`Less: Discount (${couponCodeText || 'Coupon'})`, '- ' + formatInr(baseDiscount), '#047857', true]);
+          taxRows.push(['Net Payable Amount', formatInr(taxableValue), '#0F172A', true]);
+        } else {
+          taxRows.push(['Plan Amount', formatInr(taxableValue), '#0F172A', true]);
+        }
+        taxRows.push(['GST (Non-GST / Exempt)', '₹ 0.00', '#64748B', false]);
       } else {
-        taxRows.push(['Taxable Value', formatInr(taxableValue), '#0F172A', true]);
+        if (baseDiscount > 0) {
+          taxRows.push(['Gross Plan Value', formatInr(grossBase), '#0F172A', false]);
+          taxRows.push([`Less: Discount (${couponCodeText || 'Coupon'})`, '- ' + formatInr(baseDiscount), '#047857', true]);
+          taxRows.push(['Net Taxable Value', formatInr(taxableValue), '#0F172A', true]);
+        } else {
+          taxRows.push(['Taxable Value', formatInr(taxableValue), '#0F172A', true]);
+        }
+
+        if (isIntraState) {
+          taxRows.push(['Add: CGST (9%)', formatInr(cgst), '#0F172A', false]);
+          taxRows.push(['Add: SGST (9%)', formatInr(sgst), '#0F172A', false]);
+        } else {
+          taxRows.push(['Add: IGST (18%)', formatInr(igst), '#0F172A', false]);
+          taxRows.push(['Add: CGST / SGST', '₹ 0.00', '#64748B', false]);
+        }
+        taxRows.push(['Total Tax Amount (GST)', formatInr(totalGst), '#0F172A', true]);
       }
 
-      if (isIntraState) {
-        taxRows.push(['Add: CGST (9%)', formatInr(cgst), '#0F172A', false]);
-        taxRows.push(['Add: SGST (9%)', formatInr(sgst), '#0F172A', false]);
-      } else {
-        taxRows.push(['Add: IGST (18%)', formatInr(igst), '#0F172A', false]);
-        taxRows.push(['Add: CGST / SGST', '₹ 0.00', '#64748B', false]);
-      }
-      taxRows.push(['Total Tax Amount (GST)', formatInr(totalGst), '#0F172A', true]);
+      const rowH = baseDiscount > 0 ? 19 : 22;
+      const totalBarHeight = 28;
+      const totalTableHeight = (taxRows.length * rowH) + totalBarHeight;
+
+      doc.roundedRect(rightX, sumY, rightW, totalTableHeight, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
 
       let rY = sumY;
-      const rowH = baseDiscount > 0 ? 21 : 25;
       for (const [lbl, val, col, isB] of taxRows) {
-        doc.font(isB ? boldFont : regularFont).fontSize(7.5).fillColor('#475569').text(lbl, rightX + 8, rY + 6, { width: 115 });
-        doc.font(isB ? boldFont : regularFont).fontSize(7.5).fillColor(col).text(val, rightX + 115, rY + 6, { width: 86, align: 'right' });
+        doc.font(isB ? boldFont : regularFont).fontSize(7.5).fillColor('#475569').text(lbl, rightX + 8, rY + 5, { width: 115 });
+        doc.font(isB ? boldFont : regularFont).fontSize(7.5).fillColor(col).text(val, rightX + 115, rY + 5, { width: 86, align: 'right' });
         rY += rowH;
         doc.moveTo(rightX, rY).lineTo(rightX + rightW, rY).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
       }
 
       // Final Total Row Highlighted
-      const totalBarHeight = baseDiscount > 0 ? 32 : 33;
       doc.rect(rightX, rY, rightW, totalBarHeight).fillColor('#0F2444').fill();
-      doc.font(boldFont).fontSize(8.5).fillColor('#FFFFFF').text('Total Amount (INR)', rightX + 8, rY + 9, { width: 110 });
-      doc.font(boldFont).fontSize(10).fillColor('#FFFFFF').text(formatInr(netInvoiceTotal), rightX + 110, rY + 8, { width: 91, align: 'right' });
+      doc.font(boldFont).fontSize(8.5).fillColor('#FFFFFF').text('Total Amount (INR)', rightX + 8, rY + 8, { width: 110 });
+      doc.font(boldFont).fontSize(10).fillColor('#FFFFFF').text(formatInr(netInvoiceTotal), rightX + 110, rY + 7, { width: 91, align: 'right' });
+
+      // Left Box: Amount in words Card (Matching height, clean & balanced!)
+      doc.roundedRect(34, sumY, 310, totalTableHeight, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.rect(34, sumY, 310, 18).fillColor('#F8FAFC').fill();
+      doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('TOTAL INVOICE AMOUNT (IN WORDS)', 42, sumY + 5);
+      doc.moveTo(34, sumY + 18).lineTo(344, sumY + 18).strokeColor('#CBD5E1').stroke();
+
+      doc.font(boldFont).fontSize(9.5).fillColor('#0F172A').text(numberToWords(Math.round(netInvoiceTotal)), 44, sumY + 30, { width: 290, lineGap: 2 });
+
+      if (couponCodeText) {
+        doc.font(boldFont).fontSize(7.2).fillColor('#047857').text(`✓ Coupon Applied: ${couponCodeText} (Discount: ${formatInr(baseDiscount)})`, 44, sumY + 56);
+      }
 
       // ==========================================
-      // 7. STATUTORY DISCLAIMERS & SIGNATORY (Y: 476 to 738)
+      // 7. STATUTORY DISCLAIMERS (FULL WIDTH)
+      // (AUTHORIZED SIGNATORY HAS BEEN REMOVED)
       // ==========================================
-      const discY = 476;
-      // Left: Disclaimers
-      doc.roundedRect(34, discY, 335, 256, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
-      doc.rect(34, discY, 335, 18).fillColor('#F8FAFC').fill();
+      const discY = sumY + totalTableHeight + 12;
+      const fullWidth = 527;
+      const discH = 740 - discY;
+
+      doc.roundedRect(34, discY, fullWidth, discH, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
+      doc.rect(34, discY, fullWidth, 18).fillColor('#F8FAFC').fill();
       doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('REGULATORY DISCLAIMERS & INVESTOR CHARTER', 42, discY + 5);
+      doc.moveTo(34, discY + 18).lineTo(34 + fullWidth, discY + 18).strokeColor('#CBD5E1').stroke();
 
       const discPoints = [
         '• 1. Securities Market Risk: Investments in securities market are subject to market risks. Read all the related documents carefully before investing.',
@@ -646,28 +700,12 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         `• 6. Grievance Redressal: For any service queries or unresolved grievances, please reach out to our Compliance Officer at ${tenant.email || 'support@advisory.com'} or phone ${tenant.mobile || 'N/A'}.`,
         '• 7. SEBI Redressal Portals: Investors may also lodge grievances directly on SEBI SCORES portal (https://scores.sebi.gov.in) or access the SMART ODR platform (https://smartodr.in) for online conciliation.'
       ];
-      let dy = discY + 26;
+      let dy = discY + 24;
       for (const p of discPoints) {
-        doc.font(regularFont).fontSize(6.5).fillColor('#475569').text(p, 42, dy, { width: 318, lineGap: 2.5 });
-        dy += (p.length > 130 ? 30 : 22);
+        doc.font(regularFont).fontSize(6.8).fillColor('#475569').text(p, 42, dy, { width: 511, lineGap: 2 });
+        const pH = doc.heightOfString(p, { width: 511, lineGap: 2 });
+        dy += pH + 5;
       }
-
-      // Right: Signatory Card
-      doc.roundedRect(378, discY, 183, 256, 3).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
-      doc.rect(378, discY, 183, 18).fillColor('#F8FAFC').fill();
-      doc.font(boldFont).fontSize(7.5).fillColor('#0F2444').text('AUTHORIZED SIGNATORY', 386, discY + 5);
-
-      doc.font(boldFont).fontSize(8.5).fillColor('#0F172A').text(`For ${tenant.companyName}`, 386, discY + 45, { width: 167, align: 'center' });
-
-      // Seal badge box
-      doc.roundedRect(405, discY + 80, 130, 52, 4).strokeColor('#93C5FD').lineWidth(0.75).stroke();
-      doc.rect(406, discY + 81, 128, 50).fillColor('#EFF6FF').fill();
-      doc.font(boldFont).fontSize(8).fillColor('#1D4ED8').text('DIGITALLY SIGNED', 405, discY + 92, { width: 130, align: 'center' });
-      doc.font(regularFont).fontSize(6.8).fillColor('#2563EB').text('Verified Electronic Invoice', 405, discY + 107, { width: 130, align: 'center' });
-
-      doc.font(boldFont).fontSize(8).fillColor('#334155').text('Authorized Signatory', 386, discY + 155, { width: 167, align: 'center' });
-      doc.font(italicFont).fontSize(6.5).fillColor('#64748B').text('(Computer generated document)', 386, discY + 172, { width: 167, align: 'center' });
-      doc.font(italicFont).fontSize(6.5).fillColor('#64748B').text('No physical signature required', 386, discY + 184, { width: 167, align: 'center' });
 
       // ==========================================
       // 8. BOTTOM FOOTER (Y: 746)

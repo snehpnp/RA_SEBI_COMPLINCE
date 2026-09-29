@@ -40,6 +40,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   const [gatewayConfig, setGatewayConfig] = useState<{
     gateway?: { enabled: boolean; activeGateway?: string; isConfigured?: boolean };
     paymentGatewayEnabled?: boolean;
+    isConfigured?: boolean;
+    activeGateway?: string;
     upiQr?: { enabled: boolean; upiId?: string; payeeName?: string; qrImageUrl?: string; instructions?: string };
     adminContact?: any;
     message?: string;
@@ -148,7 +150,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       case 'welcome':
         return welcomeVisited || currentIdx > stepIdx;
       case 'subscription':
-        return hasActiveSubscription;
+        return hasActiveSubscription || proofSuccess;
       case 'kyc':
         return isKycDone;
       case 'agreement':
@@ -1019,10 +1021,18 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 </p>
               </div>
               <button
-                onClick={onClose || onComplete}
+                onClick={() => {
+                  if (!isKycDone) {
+                    setCurrentStepId('kyc');
+                  } else if (!isAgreementDone) {
+                    setCurrentStepId('agreement');
+                  } else {
+                    (onClose || onComplete)();
+                  }
+                }}
                 className="w-full max-w-sm bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm py-2.5 shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
               >
-                Complete Onboarding &amp; Access Dashboard <ChevronRight className="w-4 h-4" />
+                {!isKycDone ? 'Proceed to Identity KYC' : !isAgreementDone ? 'Proceed to Legal Agreement' : 'Complete Onboarding & Access Dashboard'} <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           );
@@ -1113,7 +1123,8 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 </p>
               </div>
 
-              {gatewayConfig?.upiQr?.instructions && (
+              {gatewayConfig?.upiQr?.instructions &&
+               gatewayConfig.upiQr.instructions.trim().toLowerCase() !== 'payment hone ke baad payment ka screenshot upload karein' && (
                 <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-500/30 rounded-xl p-2.5 mb-3">
                   <p className="text-[11px] text-blue-800 dark:text-blue-200 leading-relaxed">
                     {gatewayConfig.upiQr.instructions}

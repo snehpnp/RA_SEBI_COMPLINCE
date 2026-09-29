@@ -156,18 +156,78 @@ export const getNotifications = async (req: Request, res: Response) => {
   const { tenantId, id: userId, email } = (req as any).user;
 
   try {
-    const notifications = await dynamicDb.NotificationLog.find({
-      tenantId,
-      $or: [
-        { recipient: email },
-        { recipient: userId }
-      ]
-    })
+    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
+    const clientId = client?._id?.toString() || client?.id;
+
+    const orConditions: any[] = [
+      { recipient: String(userId) },
+      { recipient: email }
+    ];
+    if (clientId) {
+      orConditions.push({ recipient: String(clientId) });
+      orConditions.push({ 'data.clientId': String(clientId) });
+    }
+
+    const query: any = {
+      $or: orConditions
+    };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const notifications = await dynamicDb.NotificationLog.find(query)
       .sort({ createdAt: -1 })
+      .limit(100)
       .lean();
 
-    return res.status(200).json({ success: true, data: notifications });
+    const formatted = notifications.map((n: any) => ({
+      ...n,
+      id: String(n._id || n.id),
+      read: n.isRead || n.read || n.status === 'READ',
+      isRead: n.isRead || n.read || n.status === 'READ'
+    }));
+
+    return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }
 };
+
+// Mark client notifications as read
+export const markNotificationsAsRead = async (req: Request, res: Response) => {
+  const { tenantId, id: userId, email } = (req as any).user;
+  const { notificationId } = req.body;
+
+  try {
+    const client: any = await dynamicDb.Client.findOne({ userId }).lean();
+    const clientId = client?._id?.toString() || client?.id;
+
+    const orConditions: any[] = [
+      { recipient: String(userId) },
+      { recipient: email }
+    ];
+    if (clientId) {
+      orConditions.push({ recipient: String(clientId) });
+      orConditions.push({ 'data.clientId': String(clientId) });
+    }
+
+    const filter: any = {
+      $or: orConditions
+    };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    if (notificationId) {
+      filter._id = notificationId;
+    }
+
+    await dynamicDb.NotificationLog.updateMany(filter, {
+      $set: { isRead: true, status: 'READ' }
+    });
+
+    return res.status(200).json({ success: true, message: 'Notifications marked as read' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
+  }
+};
+

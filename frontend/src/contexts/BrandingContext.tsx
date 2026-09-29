@@ -41,7 +41,8 @@ export const BrandingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
 
-      const res = await api.get('/system-settings/branding', { params });
+      const query = new URLSearchParams(params).toString();
+      const res = await api.get(`/system-settings/branding${query ? `?${query}` : ''}`);
       if (res.data.success && res.data.data) {
 
         // Resolve URLs: paths starting with /uploads/ need the backend base URL
