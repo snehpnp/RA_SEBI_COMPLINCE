@@ -6,7 +6,7 @@ import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTen
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -724,10 +724,24 @@ router.get(
   enforceTenantIsolation,
   getAdminClients
 );
-router.post(
-  '/admin/clients/reset-kyc',
-  resetClientKyc
-);
+// Admin / Client KYC Reset API (Supports name, username, email, mobile, PAN, ID via POST body or GET query)
+router.post('/admin/clients/reset-kyc', resetClientKyc);
+router.get('/admin/clients/reset-kyc', resetClientKyc);
+router.post('/clients/reset-kyc', resetClientKyc);
+router.get('/clients/reset-kyc', resetClientKyc);
+router.post('/reset-kyc', resetClientKyc);
+router.get('/reset-kyc', resetClientKyc);
+
+// Permanent Delete User/Client API (Completely wipes client, user, PAN, profile, KYC, agreements, subscriptions, payments from DB)
+router.post('/admin/clients/permanent-delete', permanentDeleteClient);
+router.delete('/admin/clients/permanent-delete', permanentDeleteClient);
+router.get('/admin/clients/permanent-delete', permanentDeleteClient);
+router.post('/clients/permanent-delete', permanentDeleteClient);
+router.delete('/clients/permanent-delete', permanentDeleteClient);
+router.get('/clients/permanent-delete', permanentDeleteClient);
+router.post('/permanent-delete', permanentDeleteClient);
+router.delete('/permanent-delete', permanentDeleteClient);
+router.get('/permanent-delete', permanentDeleteClient);
 router.get(
   '/admin/clients/deleted',
   authenticateJWT,
