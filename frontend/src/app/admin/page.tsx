@@ -887,18 +887,18 @@ function AdminDashboardContent() {
     if (!selectedPlan) return;
 
     let basePrice = selectedPlan.price;
-    let finalPrice = gstCalculationType === 'EXCLUSIVE' ? Math.round(basePrice * 1.18) : basePrice;
+    let finalPrice = (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
 
     if (assignCustomAmount.trim()) {
       finalPrice = Number(assignCustomAmount);
-      if (gstCalculationType === 'EXCLUSIVE') {
+      if (gstEnabled && gstCalculationType === 'EXCLUSIVE') {
         basePrice = Math.round(finalPrice / 1.18);
       } else {
         basePrice = finalPrice;
       }
     }
 
-    const gstAmount = finalPrice - basePrice;
+    const gstAmount = gstEnabled ? (finalPrice - basePrice) : 0;
 
     const messageNode = (
       <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
@@ -907,13 +907,15 @@ function AdminDashboardContent() {
         </p>
         <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-1.5 font-mono text-[11px]">
           <div className="flex justify-between"><span>Base Amount:</span> <span className="text-slate-800 dark:text-slate-200">₹{basePrice.toLocaleString()}</span></div>
-          {gstCalculationType === 'EXCLUSIVE' ? (
+          {gstEnabled && gstCalculationType === 'EXCLUSIVE' ? (
             <>
               <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>GST (18%):</span> <span className="text-slate-700 dark:text-slate-300">₹{gstAmount.toLocaleString()}</span></div>
               <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString()}</span></div>
             </>
-          ) : (
+          ) : gstEnabled ? (
             <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total (GST Incl.):</span> <span>₹{finalPrice.toLocaleString()}</span></div>
+          ) : (
+            <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString()}</span></div>
           )}
           <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentRefId}</span></div>
           <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentDate}</span></div>
@@ -1065,6 +1067,12 @@ function AdminDashboardContent() {
   const [digioEnvironment, setDigioEnvironment] = useState('SANDBOX');
   const [testingDigio, setTestingDigio] = useState(false);
   const [digioTestResult, setDigioTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Fetch by Digio ID states (admin client KYC panel)
+  const [fetchDigioIdInput, setFetchDigioIdInput] = useState('');
+  const [fetchDigioLoading, setFetchDigioLoading] = useState(false);
+  const [fetchDigioResult, setFetchDigioResult] = useState<any>(null);
+  const [fetchDigioError, setFetchDigioError] = useState('');
+  const [fetchDigioSaveMode, setFetchDigioSaveMode] = useState(false);
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -1601,6 +1609,12 @@ function AdminDashboardContent() {
           const syncedUser = res.data.user;
           if (u?.isImpersonated) {
             syncedUser.isImpersonated = true;
+          }
+          if (!syncedUser.tenantLogo && syncedUser.tenant?.logoUrl) {
+            syncedUser.tenantLogo = syncedUser.tenant.logoUrl;
+          }
+          if (!syncedUser.tenantName && syncedUser.tenant?.companyName) {
+            syncedUser.tenantName = syncedUser.tenant.companyName;
           }
           setUser(syncedUser);
           localStorage.setItem('user', JSON.stringify(syncedUser));
@@ -4252,16 +4266,27 @@ function AdminDashboardContent() {
           {/* Brand */}
           <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-              {user?.tenantLogo ? (
-                <img src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${api.getBaseUrl()}${user.tenantLogo}`} alt={user?.tenantName || appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
-              ) : appLogo ? (
-                <img src={appLogo.startsWith('http') ? appLogo : `${api.getBaseUrl()}${appLogo}`} alt={appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
-              ) : (
-                <>
-                  <img src="/logo-light.png" alt={appName} className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-                  <img src="/logo-dark.png" alt={appName} className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-                </>
-              )}
+              {(() => {
+                const rawLogo = user?.tenantLogo || user?.tenant?.logoUrl || appLogo;
+                const logoSrc = rawLogo ? (rawLogo.startsWith('http') ? rawLogo : `${api.getBaseUrl()}${rawLogo}`) : null;
+                const displayName = user?.tenantName || user?.tenant?.companyName || appName || 'Logo';
+
+                if (logoSrc) {
+                  return (
+                    <img
+                      src={logoSrc}
+                      alt={displayName}
+                      className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`}
+                    />
+                  );
+                }
+                return (
+                  <>
+                    <img src="/logo-light.png" alt={appName} className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                    <img src="/logo-dark.png" alt={appName} className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                  </>
+                );
+              })()}
             </div>
             {!isSidebarCollapsed && (
               <button
@@ -7252,7 +7277,12 @@ function AdminDashboardContent() {
                                                   <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
                                                 </div>
                                                 <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
-                                                  {gstCalculationType === 'EXCLUSIVE' ? (
+                                                  {!gstEnabled ? (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold"><span>Price:</span> <span>₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2"><span>GST:</span> <span className="text-slate-500 dark:text-slate-500">Exempt</span></div>
+                                                    </div>
+                                                  ) : gstCalculationType === 'EXCLUSIVE' ? (
                                                     <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
                                                       <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
                                                       <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
@@ -7982,6 +8012,165 @@ function AdminDashboardContent() {
 
                               {clientDetailsTab === 'kyc' && (
                                 <div className="space-y-6">
+
+                                  {/* ── Fetch by Digio ID ─────────────────────────────── */}
+                                  <div className="glassmorphism p-5 rounded-xl border border-violet-400/30 dark:border-violet-500/20 space-y-4 bg-violet-50/50 dark:bg-violet-900/5">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
+                                        <svg className="w-4 h-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4.879-4.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242z" /></svg>
+                                      </div>
+                                      <div>
+                                        <h4 className="text-xs font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">⭐ Fetch by Digio ID</h4>
+                                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Client ne Digio portal se KYC/eSign kar liya hai? Uska Digio ID yahan enter karo — details automatically fetch ho jayenge.</p>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                      <input
+                                        type="text"
+                                        placeholder="Digio ID daalo (e.g. KYC2024... ya DID2024...)"
+                                        value={fetchDigioIdInput}
+                                        onChange={e => { setFetchDigioIdInput(e.target.value); setFetchDigioResult(null); setFetchDigioError(''); }}
+                                        className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter' && fetchDigioIdInput.trim() && !fetchDigioLoading) {
+                                            (async () => {
+                                              setFetchDigioLoading(true);
+                                              setFetchDigioResult(null);
+                                              setFetchDigioError('');
+                                              try {
+                                                const res: any = await api.fetchDigioRecord({ digioId: fetchDigioIdInput.trim() });
+                                                if (res?.success) { setFetchDigioResult(res); }
+                                                else { setFetchDigioError(res?.message || 'Fetch failed'); }
+                                              } catch (err: any) { setFetchDigioError(err.message || 'Failed'); }
+                                              finally { setFetchDigioLoading(false); }
+                                            })();
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        disabled={fetchDigioLoading || !fetchDigioIdInput.trim()}
+                                        onClick={async () => {
+                                          setFetchDigioLoading(true);
+                                          setFetchDigioResult(null);
+                                          setFetchDigioError('');
+                                          try {
+                                            const res: any = await api.fetchDigioRecord({ digioId: fetchDigioIdInput.trim() });
+                                            if (res?.success) { setFetchDigioResult(res); }
+                                            else { setFetchDigioError(res?.message || 'Fetch failed'); }
+                                          } catch (err: any) { setFetchDigioError(err.message || 'Failed'); }
+                                          finally { setFetchDigioLoading(false); }
+                                        }}
+                                        className="px-3 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition whitespace-nowrap"
+                                      >
+                                        {fetchDigioLoading ? (
+                                          <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span>Fetching...</span></>
+                                        ) : (
+                                          <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg><span>Fetch</span></>
+                                        )}
+                                      </button>
+                                    </div>
+
+                                    {/* Error */}
+                                    {fetchDigioError && (
+                                      <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20 rounded-lg text-xs text-red-700 dark:text-red-400">
+                                        <svg className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+                                        <span>{fetchDigioError}</span>
+                                      </div>
+                                    )}
+
+                                    {/* Result Preview */}
+                                    {fetchDigioResult && (
+                                      <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                                              Record Found — {fetchDigioResult.fetchType} &nbsp;|&nbsp; Status: {fetchDigioResult.digioStatus}
+                                            </span>
+                                          </div>
+                                          <button onClick={() => { setFetchDigioResult(null); setFetchDigioIdInput(''); }} className="text-[9px] text-slate-400 hover:text-red-500 transition">✕ Clear</button>
+                                        </div>
+
+                                        {/* Extracted fields grid */}
+                                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                          {[
+                                            ['Aadhaar Name', fetchDigioResult.extracted?.aadhaarName],
+                                            ['PAN Name', fetchDigioResult.extracted?.panName],
+                                            ['PAN Number', fetchDigioResult.extracted?.panNumber],
+                                            ['Masked Aadhaar', fetchDigioResult.extracted?.maskedAadhaar],
+                                            ['Date of Birth', fetchDigioResult.extracted?.dob],
+                                            ['Gender', fetchDigioResult.extracted?.gender],
+                                            ['Father Name', fetchDigioResult.extracted?.fatherName],
+                                            ['City', fetchDigioResult.extracted?.city],
+                                            ['State', fetchDigioResult.extracted?.state],
+                                            ['ZIP Code', fetchDigioResult.extracted?.zipCode],
+                                          ].filter(([, v]) => v).map(([label, value]) => (
+                                            <div key={label as string} className="flex flex-col gap-0.5 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5">
+                                              <span className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</span>
+                                              <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{value}</strong>
+                                            </div>
+                                          ))}
+                                          {fetchDigioResult.extracted?.address && (
+                                            <div className="col-span-2 flex flex-col gap-0.5 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5">
+                                              <span className="text-[9px] text-slate-500 uppercase tracking-wider">Full Address</span>
+                                              <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{fetchDigioResult.extracted.address}</strong>
+                                            </div>
+                                          )}
+                                        </div>
+
+                                        {/* Save to client button */}
+                                        {fetchDigioResult.savedToClient ? (
+                                          <div className="flex items-center gap-2 p-2.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                                            Client profile successfully updated with Digio data!
+                                          </div>
+                                        ) : (
+                                          <button
+                                            disabled={fetchDigioSaveMode}
+                                            onClick={async () => {
+                                              setFetchDigioSaveMode(true);
+                                              try {
+                                                const res: any = await api.fetchDigioRecord({
+                                                  digioId: fetchDigioResult.digioId,
+                                                  clientId: selectedClient._id || selectedClient.id,
+                                                  saveToClient: true
+                                                });
+                                                if (res?.success) {
+                                                  setFetchDigioResult({ ...res });
+                                                  toast.success('KYC details saved to client profile successfully!');
+                                                  // Refresh client data
+                                                  if (selectedClient._id || selectedClient.id) {
+                                                    try {
+                                                      const updated: any = await api.getAdminClients();
+                                                      const found = (updated?.clients || updated?.data || []).find((c: any) =>
+                                                        String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
+                                                      );
+                                                      if (found) setSelectedClient(found);
+                                                    } catch { }
+                                                  }
+                                                } else {
+                                                  toast.error(res?.message || 'Failed to save');
+                                                }
+                                              } catch (err: any) {
+                                                toast.error(err.message || 'Failed to save');
+                                              } finally {
+                                                setFetchDigioSaveMode(false);
+                                              }
+                                            }}
+                                            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition"
+                                          >
+                                            {fetchDigioSaveMode ? (
+                                              <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</>
+                                            ) : (
+                                              <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>Client Profile Mein Save Karo</>
+                                            )}
+                                          </button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
                                   {/* Verification status and files */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
                                     <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">KYC Verification Status</h4>
@@ -8098,7 +8287,8 @@ function AdminDashboardContent() {
                                     {selectedClient.subscriptions && selectedClient.subscriptions.filter((s: any) => s.status === 'ACTIVE' && new Date(s.endDate) > new Date()).length > 0 ? (
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {selectedClient.subscriptions.filter((s: any) => s.status === 'ACTIVE' && new Date(s.endDate) > new Date()).map((sub: any) => {
-                                          const isCustomAmount = sub.amountTotal != null && (gstCalculationType === 'EXCLUSIVE' ? Math.abs(sub.amountTotal - Math.round((sub.plan?.price || 0) * 1.18)) > 2 : Math.abs(sub.amountTotal - (sub.plan?.price || 0)) > 2);
+                                          const planStdPrice = !gstEnabled ? (sub.plan?.price || 0) : (gstCalculationType === 'EXCLUSIVE' ? Math.round((sub.plan?.price || 0) * 1.18) : (sub.plan?.price || 0));
+                                          const isCustomAmount = sub.amountTotal != null && Math.abs(sub.amountTotal - planStdPrice) > 2;
                                           const defaultDays = (sub.plan?.durationMonths || 1) * 30;
                                           const actualDays = Math.round((new Date(sub.endDate).getTime() - new Date(sub.startDate).getTime()) / (1000 * 60 * 60 * 24));
                                           const isCustomDays = Math.abs(actualDays - defaultDays) > 4;
@@ -8117,7 +8307,7 @@ function AdminDashboardContent() {
                                                 <div className="flex justify-between">
                                                   <span>Purchase Price:</span>
                                                   <span className="font-bold text-slate-800 dark:text-slate-200">
-                                                    ₹{(sub.amountTotal ?? (gstCalculationType === 'EXCLUSIVE' ? Math.round(sub.plan?.price * 1.18) : sub.plan?.price)).toLocaleString()}
+                                                    ₹{(sub.amountTotal ?? (!gstEnabled ? sub.plan?.price : (gstCalculationType === 'EXCLUSIVE' ? Math.round(sub.plan?.price * 1.18) : sub.plan?.price))).toLocaleString()}
                                                   </span>
                                                 </div>
                                                 <div className="flex justify-between"><span>Start Date:</span> <span className="font-mono text-slate-700 dark:text-slate-300">{new Date(sub.startDate).toLocaleDateString('en-IN')}</span></div>
@@ -8147,7 +8337,8 @@ function AdminDashboardContent() {
                                         {
                                           name: 'Plan Name',
                                           cell: (sub: any) => {
-                                            const isCustomAmount = sub.amountTotal != null && (gstCalculationType === 'EXCLUSIVE' ? Math.abs(sub.amountTotal - Math.round((sub.plan?.price || 0) * 1.18)) > 2 : Math.abs(sub.amountTotal - (sub.plan?.price || 0)) > 2);
+                                            const planStdPrice = !gstEnabled ? (sub.plan?.price || 0) : (gstCalculationType === 'EXCLUSIVE' ? Math.round((sub.plan?.price || 0) * 1.18) : (sub.plan?.price || 0));
+                                          const isCustomAmount = sub.amountTotal != null && Math.abs(sub.amountTotal - planStdPrice) > 2;
                                             const defaultDays = (sub.plan?.durationMonths || 1) * 30;
                                             const actualDays = Math.round((new Date(sub.endDate).getTime() - new Date(sub.startDate).getTime()) / (1000 * 60 * 60 * 24));
                                             const isCustomDays = Math.abs(actualDays - defaultDays) > 4;
@@ -8164,7 +8355,12 @@ function AdminDashboardContent() {
                                           name: 'Amount',
                                           cell: (sub: any) => (
                                             <>
-                                              {gstCalculationType === 'EXCLUSIVE' ? (
+                                              {!gstEnabled ? (
+                                                <div className="text-xs">
+                                                  <span className="font-semibold text-slate-800 dark:text-slate-200">₹{(sub.amountTotal ?? sub.plan?.price)?.toLocaleString()}</span>
+                                                  <span className="text-[8px] text-slate-500 dark:text-slate-500 block mt-0.5">(Non-GST)</span>
+                                                </div>
+                                              ) : gstCalculationType === 'EXCLUSIVE' ? (
                                                 <div className="text-[10px] space-y-0.5 text-slate-600 dark:text-slate-400 leading-tight py-2">
                                                   <div>Base: ₹{(sub.amountBase ?? sub.plan?.price)?.toLocaleString()}</div>
                                                   <div>GST: ₹{(sub.amountGst ?? Math.round((sub.plan?.price || 0) * 0.18))?.toLocaleString()}</div>
@@ -8369,7 +8565,7 @@ function AdminDashboardContent() {
                                 <Trash2 className="h-4 w-4" /> <span>{showDeletedPlans ? 'View Active Plans' : 'View Deleted Plans'}</span>
                               </button>
                               {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
+                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(categories[0]?.id || categories[0]?._id || ''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
                                   <Plus className="h-4 w-4" /> <span>Create New Plan</span>
                                 </button>
                               )}
@@ -8417,9 +8613,11 @@ function AdminDashboardContent() {
                                     </div>
                                     <div className="text-right shrink-0">
                                       <div className="text-2xl font-black text-slate-900 dark:text-white">₹{plan.price.toLocaleString()}</div>
-                                      <span className="text-[9px] text-slate-500 dark:text-slate-400 font-medium block mt-0.5">
-                                        {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exc)' : '18% GST (Inc)'}
-                                      </span>
+                                      {gstEnabled && (
+                                        <span className="text-[9px] text-slate-500 dark:text-slate-400 font-medium block mt-0.5">
+                                          {gstCalculationType === 'EXCLUSIVE' ? '+ 18% GST (Exc)' : '18% GST (Inc)'}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
 
@@ -10157,7 +10355,20 @@ function AdminDashboardContent() {
                       <form id="planForm" onSubmit={async (e) => {
                         e.preventDefault();
                         try {
-                          const payload = { categoryId: planCategoryId, name: planName, description: planDesc, price: planPrice, durationMonths: planDuration };
+                          const selectedCat = categories.find(c => String(c.id || c._id) === String(planCategoryId));
+                          const getDurationLabel = (m: string | number) => {
+                            const num = parseInt(String(m)) || 1;
+                            switch (num) {
+                              case 1: return 'Monthly';
+                              case 2: return '2 Months';
+                              case 3: return 'Quarterly';
+                              case 6: return 'Half-Yearly';
+                              case 12: return 'Yearly';
+                              default: return `${num} Months`;
+                            }
+                          };
+                          const autoName = selectedCat ? `${selectedCat.name} - ${getDurationLabel(planDuration)}` : (editingPlan?.name || 'PLAN');
+                          const payload = { categoryId: planCategoryId, name: autoName, description: planDesc, price: planPrice, durationMonths: planDuration };
                           const res = editingPlan ? await api.updatePlan(editingPlan.id, payload) : await api.createPlan(payload);
                           if (res.success) { setIsPlanModalOpen(false); loadData(); }
                           else { toast(res.message); }
@@ -10166,7 +10377,7 @@ function AdminDashboardContent() {
 
                         <div>
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Category</label>
-                          <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
+                          <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm font-semibold">
                             <option value="">Select Category</option>
                             {categories.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name} ({c.segments})</option>)}
                           </select>
@@ -10174,21 +10385,46 @@ function AdminDashboardContent() {
 
                         <div className="grid grid-cols-2 gap-5">
                           <div>
-                            <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Name</label>
-                            <input type="text" value={planName} onChange={e => setPlanName(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm" placeholder="e.g. VIP EQUITY" />
+                            <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Duration / Validity</label>
+                            <select value={planDuration} onChange={e => setPlanDuration(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm font-semibold">
+                              <option value="1">Monthly (1 Month)</option>
+                              <option value="2">2 Months</option>
+                              <option value="3">Quarterly (3 Months)</option>
+                              <option value="6">Half-Yearly (6 Months)</option>
+                              <option value="12">Yearly (12 Months)</option>
+                            </select>
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Price (₹)</label>
-                            <input type="number" value={planPrice} onChange={e => setPlanPrice(e.target.value)} required min="1" className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm" placeholder="e.g. 15000" />
+                            <input type="number" value={planPrice} onChange={e => setPlanPrice(e.target.value)} required min="1" className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm font-semibold" placeholder="e.g. 15000" />
                           </div>
                         </div>
 
-                        <div>
-                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Duration / Validity</label>
-                          <select value={planDuration} onChange={e => setPlanDuration(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
-                            {[1, 2, 3, 6, 12].map(m => <option key={m} value={m}>{m} Month{m > 1 ? 's' : ''}</option>)}
-                          </select>
-                        </div>
+                        {(() => {
+                          const selectedCat = categories.find(c => String(c.id || c._id) === String(planCategoryId));
+                          const getDurationLabel = (m: string | number) => {
+                            const num = parseInt(String(m)) || 1;
+                            switch (num) {
+                              case 1: return 'Monthly';
+                              case 2: return '2 Months';
+                              case 3: return 'Quarterly';
+                              case 6: return 'Half-Yearly';
+                              case 12: return 'Yearly';
+                              default: return `${num} Months`;
+                            }
+                          };
+                          const computedName = selectedCat ? `${selectedCat.name} - ${getDurationLabel(planDuration)}` : (editingPlan?.name || '');
+                          if (!computedName) return null;
+                          return (
+                            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-white/10 rounded-xl flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-0.5">Plan Name (Auto-Generated)</span>
+                                <span className="text-sm font-extrabold text-slate-900 dark:text-white">{computedName}</span>
+                              </div>
+                              <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-md bg-[#E1F13D] text-slate-950 shadow-sm">Auto-Derived</span>
+                            </div>
+                          );
+                        })()}
 
                         <div>
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Description</label>

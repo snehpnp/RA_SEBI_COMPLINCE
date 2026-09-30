@@ -19,7 +19,7 @@ import { getActiveClientSummary, getActiveClientsByDate, getActiveClientsByMonth
 import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCouponVisibility, applyCoupon, getClientCoupons } from '../controllers/couponController';
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
-import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus } from '../controllers/kycController';
+import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord } from '../controllers/kycController';
 import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
@@ -583,6 +583,13 @@ router.post(
   requirePermission('ACCESS_SETTINGS'),
   enforceTenantIsolation,
   testDigioConfig
+);
+router.post(
+  '/admin/digio/fetch-by-id',
+  authenticateJWT,
+  requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  fetchDigioRecord
 );
 
 // ==========================================

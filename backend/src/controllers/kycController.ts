@@ -593,3 +593,181 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
     res.status(500).json({ success: false, message: error.message || 'Server error', errors: [error.message] });
   }
 };
+
+// =====================================================
+// Admin: Fetch Client KYC Details by Digio ID
+// POST /api/v1/admin/digio/fetch-by-id
+// Body: { digioId, clientId?, saveToClient? }
+// =====================================================
+export const fetchDigioRecord = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { digioId, clientId, saveToClient } = req.body;
+
+    if (!digioId || !digioId.trim()) {
+      return res.status(400).json({ success: false, message: 'Digio ID is required' });
+    }
+
+    const tenantId = req.user!.tenantId;
+    const tenant: any = tenantId ? await dynamicDb.Tenant.findById(tenantId).lean() : null;
+
+    if (!tenant?.digioClientId || !tenant?.digioClientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'Digio API credentials are not configured. Please configure them in Settings > Integrations > Digio KYC.'
+      });
+    }
+
+    const cleanDigioId = digioId.trim();
+    const digioClientId = tenant.digioClientId as string;
+    const digioClientSecret = tenant.digioClientSecret as string;
+    const digioEnvironment = tenant.digioEnvironment as string | undefined;
+
+    let rawData: any = null;
+    let fetchType = 'unknown';
+
+    // Auto-detect: KYC IDs usually start with "KYC" prefix; Document IDs start with "DID"
+    // But we try both to be safe
+    const looksLikeKyc = /^KYC/i.test(cleanDigioId);
+    const looksLikeDoc = /^DID/i.test(cleanDigioId);
+
+    if (looksLikeKyc || (!looksLikeDoc)) {
+      // Try KYC fetch first
+      try {
+        rawData = await getKycStatus(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
+        if (rawData?.id || rawData?.status) fetchType = 'KYC';
+      } catch { }
+    }
+
+    if (!rawData && (looksLikeDoc || !looksLikeKyc)) {
+      // Try Document (eSign) fetch
+      try {
+        rawData = await getDocumentStatus(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
+        if (rawData?.id || rawData?.status) fetchType = 'ESIGN_DOCUMENT';
+      } catch { }
+    }
+
+    // Fallback: try the other type
+    if (!rawData) {
+      if (!looksLikeKyc) {
+        try {
+          rawData = await getKycStatus(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
+          if (rawData?.id || rawData?.status) fetchType = 'KYC';
+        } catch { }
+      }
+      if (!rawData && !looksLikeDoc) {
+        try {
+          rawData = await getDocumentStatus(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
+          if (rawData?.id || rawData?.status) fetchType = 'ESIGN_DOCUMENT';
+        } catch { }
+      }
+    }
+
+    if (!rawData) {
+      return res.status(404).json({
+        success: false,
+        message: `No record found on Digio for ID: ${cleanDigioId}. Please verify the ID is correct and belongs to your Digio account.`
+      });
+    }
+
+    // Extract KYC details
+    const extracted = extractAadhaarDetailsFromDigio(rawData);
+
+    console.log(`\n🔍 [Admin Fetch Digio] ID=${cleanDigioId} | Type=${fetchType} | Client=${clientId || 'N/A'}`);
+    console.log('   Extracted Name:', extracted?.aadhaarName || extracted?.panName || '—');
+    console.log('   PAN:', extracted?.panNumber || '—');
+    console.log('   Masked Aadhaar:', extracted?.maskedAadhaar || '—');
+
+    // If saveToClient is true and clientId is provided, save the details
+    let savedToClient = false;
+    if (saveToClient && clientId) {
+      try {
+        const isGeneric = (n?: string | null) => {
+          if (!n || typeof n !== 'string') return true;
+          const l = n.toLowerCase().trim();
+          return l === '' || l === 'digio' || l === 'client' || l === 'test' || l === 'user' || l.includes('@') || l.length < 2;
+        };
+
+        const primaryName = (extracted?.panName && !isGeneric(extracted.panName))
+          ? extracted.panName
+          : (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName) ? extracted.aadhaarName : null);
+
+        const clientUpdateFields: Record<string, any> = {
+          digilockerData: rawData,
+          kraVerified: true,
+          kycStatus: 'VERIFIED'
+        };
+        if (primaryName) clientUpdateFields.name = primaryName;
+        if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) clientUpdateFields.aadhaarName = extracted.aadhaarName;
+        if (extracted?.panName && !isGeneric(extracted.panName)) clientUpdateFields.panName = extracted.panName;
+        if (extracted?.maskedAadhaar) clientUpdateFields.aadhaar = extracted.maskedAadhaar;
+        if (extracted?.panNumber) clientUpdateFields.pan = extracted.panNumber;
+        if (extracted?.dob) clientUpdateFields.dob = extracted.dob;
+        if (extracted?.gender) clientUpdateFields.gender = extracted.gender;
+        if (extracted?.fatherName) clientUpdateFields.fatherName = extracted.fatherName;
+        if (extracted?.address) clientUpdateFields.address = extracted.address;
+        if (extracted?.city) clientUpdateFields.city = extracted.city;
+        if (extracted?.state) clientUpdateFields.state = extracted.state;
+        if (extracted?.zipCode) clientUpdateFields.zipCode = extracted.zipCode;
+
+        await dynamicDb.Client.findByIdAndUpdate(clientId, { $set: clientUpdateFields });
+
+        const profileUpdateFields: Record<string, any> = { kraVerified: true, isDigiLockerLocked: true };
+        if (extracted?.panName && !isGeneric(extracted.panName)) profileUpdateFields.panName = extracted.panName;
+        if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName)) profileUpdateFields.aadhaarName = extracted.aadhaarName;
+        if (extracted?.dob) profileUpdateFields.dob = extracted.dob;
+        if (extracted?.gender) profileUpdateFields.gender = extracted.gender;
+        if (extracted?.fatherName) profileUpdateFields.fatherName = extracted.fatherName;
+        if (extracted?.address) profileUpdateFields.addressLine1 = extracted.address;
+        if (extracted?.city) profileUpdateFields.city = extracted.city;
+        if (extracted?.state) profileUpdateFields.state = extracted.state;
+        if (extracted?.zipCode) profileUpdateFields.zipCode = extracted.zipCode;
+        if (rawData) profileUpdateFields.digilockerData = rawData;
+
+        await dynamicDb.ClientProfile.findOneAndUpdate(
+          { clientId },
+          { $set: profileUpdateFields },
+          { upsert: true }
+        );
+
+        if (primaryName) {
+          const nameParts = primaryName.split(' ');
+          await dynamicDb.User.findOneAndUpdate(
+            { _id: (await dynamicDb.Client.findById(clientId).lean())?.userId },
+            { $set: { firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '' } }
+          );
+        }
+
+        savedToClient = true;
+        console.log(`✅ [Admin Fetch Digio] KYC details saved to client ${clientId}`);
+      } catch (saveErr: any) {
+        console.warn('[Admin Fetch Digio] Failed to save to client:', saveErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      fetchType,
+      digioId: cleanDigioId,
+      digioStatus: rawData?.status || rawData?.kyc_status || 'UNKNOWN',
+      extracted: {
+        aadhaarName: extracted?.aadhaarName || null,
+        panName: extracted?.panName || null,
+        panNumber: extracted?.panNumber || null,
+        maskedAadhaar: extracted?.maskedAadhaar || null,
+        dob: extracted?.dob || null,
+        gender: extracted?.gender || null,
+        fatherName: extracted?.fatherName || null,
+        address: extracted?.address || null,
+        city: extracted?.city || null,
+        state: extracted?.state || null,
+        zipCode: extracted?.zipCode || null
+      },
+      savedToClient,
+      rawData
+    });
+
+  } catch (error: any) {
+    console.error('[Admin Fetch Digio] Error:', error.message);
+    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+  }
+};

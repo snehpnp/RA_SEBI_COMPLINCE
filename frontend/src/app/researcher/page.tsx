@@ -5,6 +5,7 @@ import StaffProfilePage from '../admin/staff-profile/page';
 import PAProfilePage from '../admin/pa-profile/page';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import AdminResourcesTab from '@/components/AdminResourcesTab';
+import { useBranding } from '@/contexts/BrandingContext';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
@@ -223,6 +224,7 @@ function AdminDashboardContent() {
   const [showPassword, setShowPassword] = useState(false);
 
   const router = useRouter();
+  const { appName, logoUrl: appLogo } = useBranding();
 
   // Dashboard & Auth states
   const [user, setUser] = useState<any>({ firstName: '', email: '', role: '' });
@@ -1279,6 +1281,12 @@ function AdminDashboardContent() {
           const syncedUser = res.data.user;
           if (u?.isImpersonated) {
             syncedUser.isImpersonated = true;
+          }
+          if (!syncedUser.tenantLogo && syncedUser.tenant?.logoUrl) {
+            syncedUser.tenantLogo = syncedUser.tenant.logoUrl;
+          }
+          if (!syncedUser.tenantName && syncedUser.tenant?.companyName) {
+            syncedUser.tenantName = syncedUser.tenant.companyName;
           }
           setUser(syncedUser);
           localStorage.setItem('user', JSON.stringify(syncedUser));
@@ -2734,11 +2742,24 @@ function AdminDashboardContent() {
           {/* Brand */}
           <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-              {user?.tenantLogo ? (
-                <img src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${api.getBaseUrl()}${user.tenantLogo}`} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
-              ) : (
-                <img src="/logo-dark.png" alt="RAGCP Logo" className={`object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-              )}
+              {(() => {
+                const rawLogo = user?.tenantLogo || user?.tenant?.logoUrl || appLogo;
+                const logoSrc = rawLogo ? (rawLogo.startsWith('http') ? rawLogo : `${api.getBaseUrl()}${rawLogo}`) : null;
+                const displayName = user?.tenantName || user?.tenant?.companyName || appName || 'Logo';
+
+                if (logoSrc) {
+                  return (
+                    <img
+                      src={logoSrc}
+                      alt={displayName}
+                      className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`}
+                    />
+                  );
+                }
+                return (
+                  <img src="/logo-dark.png" alt="RAGCP Logo" className={`object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                );
+              })()}
             </div>
             {!isSidebarCollapsed && (
               <button

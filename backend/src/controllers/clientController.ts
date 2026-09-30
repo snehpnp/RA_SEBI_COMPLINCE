@@ -1419,7 +1419,8 @@ export const getPlans = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(200).json({
       success: true,
       data: formatted,
-      gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE'
+      gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE',
+      gstEnabled: tenantObj?.gstEnabled !== false
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });

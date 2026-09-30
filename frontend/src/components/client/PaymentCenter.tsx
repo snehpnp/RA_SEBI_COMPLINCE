@@ -46,6 +46,7 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [gstEnabled, setGstEnabled] = useState<boolean>(profile?.user?.tenant?.gstEnabled !== false);
 
   const handleDownloadInvoice = async (paymentId: string, transactionRef: string) => {
     try {
@@ -148,21 +149,43 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
       name: 'Amount',
       cell: (txn: any) => {
         const totalAmount = Number(txn.amount || txn.amountPaid || 0);
-        const planPrice = Number(txn.plan?.amount || txn.plan?.price || 0);
         const discount = Number(txn.discountApplied || txn.discountAmount || txn.discount || 0);
         const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
 
-        const basePrice = planPrice > 0 ? planPrice : (totalAmount / 1.18);
-        const baseDiscount = discount > (basePrice * 0.18) && planPrice > 0 ? Math.round(discount / 1.18) : discount;
-        const taxableAmount = Math.max(0, basePrice - baseDiscount);
-        const gst = taxableAmount * 0.18;
+        // Check if GST is active for this tenant or transaction
+        const txnGstActive = txn.gstEnabled !== undefined ? Boolean(txn.gstEnabled) : gstEnabled;
+
+        if (!txnGstActive) {
+          // GST DISABLED (0% Non-GST Mode)
+          return (
+            <div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
+              {discount > 0 && (
+                <>
+                  <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                    <span>Plan Price:</span> <span className="font-mono">₹{(totalAmount + discount).toFixed(2)}</span>
+                  </div>
+                  <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
+                    <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
+              <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
+                <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
+              </div>
+            </div>
+          );
+        }
+
+        // GST ENABLED
+        const basePrice = totalAmount > 0 ? Number((totalAmount / 1.18).toFixed(2)) : 0;
+        const gst = Number((totalAmount - basePrice).toFixed(2));
 
         return (
           <div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
             {discount > 0 ? (
               <>
                 <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
-                  <span>Gross Base:</span> <span className="font-mono">₹{basePrice.toFixed(2)}</span>
+                  <span>Gross Base:</span> <span className="font-mono">₹{(basePrice + discount).toFixed(2)}</span>
                 </div>
                 <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
                   <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
@@ -171,16 +194,16 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
                   <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
                 </div>
               </>
-            ) : totalAmount !== basePrice && basePrice > 0 ? (
+            ) : (
               <>
                 <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
                   <span>Base:</span> <span className="font-mono">₹{basePrice.toFixed(2)}</span>
                 </div>
                 <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
-                  <span>GST (18%):</span> <span className="font-mono">₹{(totalAmount - basePrice).toFixed(2)}</span>
+                  <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
                 </div>
               </>
-            ) : null}
+            )}
             <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
               <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
             </div>
@@ -249,6 +272,9 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
         const res = await api.getClientPayments();
         if (res.success) {
           setTransactions(res.data?.docs || res.data || []);
+          if (res.gstEnabled !== undefined) {
+            setGstEnabled(Boolean(res.gstEnabled));
+          }
         }
       } catch (err) {
         console.error('Failed to fetch payments', err);
@@ -264,7 +290,7 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Payment History</h1>
-          <p className="text-sm text-premium-text/60 mt-1">View your past transactions and download GST invoices.</p>
+          <p className="text-sm text-premium-text/60 mt-1">View your past transactions and download {gstEnabled ? 'GST ' : ''}invoices.</p>
         </div>
       </div>
 

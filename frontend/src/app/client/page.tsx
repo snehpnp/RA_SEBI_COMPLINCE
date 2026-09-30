@@ -471,16 +471,23 @@ function ClientPortalContent() {
         {/* Brand */}
         <div className={`h-20 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-            {logoUrl && logoUrl !== '/logo-light.png' ? (
-              <img src={logoUrl} alt={appName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
-            ) : currentUser?.tenantLogo ? (
-              <img src={currentUser.tenantLogo} alt={currentUser.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
-            ) : (
-              <>
-                <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-                <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-              </>
-            )}
+            {(() => {
+              const rawLogo = (logoUrl && logoUrl !== '/logo-light.png') ? logoUrl : (currentUser?.tenantLogo || currentUser?.tenant?.logoUrl);
+              const logoSrc = rawLogo ? (rawLogo.startsWith('http') ? rawLogo : `${api.getBaseUrl()}${rawLogo}`) : null;
+              const displayName = appName || currentUser?.tenantName || currentUser?.tenant?.companyName || 'Logo';
+
+              if (logoSrc) {
+                return (
+                  <img src={logoSrc} alt={displayName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
+                );
+              }
+              return (
+                <>
+                  <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                  <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                </>
+              );
+            })()}
           </div>
           {!isSidebarCollapsed && (
             <button
