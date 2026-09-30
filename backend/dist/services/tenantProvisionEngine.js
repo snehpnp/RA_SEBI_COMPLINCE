@@ -137,6 +137,7 @@ class TenantProvisionEngine {
         try {
             // Step 2: Register in Central DB `all_companies` collection
             await tenantConnectionManager_1.centralModels.AllCompany.findOneAndUpdate({ email: tenantPayload.email }, {
+                tenantId,
                 companyName,
                 companyType: tenantPayload.companyType || 'INDIVIDUAL',
                 raType: tenantPayload.raType || 'FULL_TIME',
@@ -182,10 +183,13 @@ class TenantProvisionEngine {
             // Provision tenant and admin in central database
             const result = await (0, tenantProvisionService_1.provisionAllTenantCollections)(tenantConnectionManager_1.centralModels, fullTenantData, fullAdminData);
             const createdAdmin = result.adminUser;
+            const effectiveTenantId = result.tenant?._id?.toString() || result.tenant?.id || tenantId;
+            // Ensure AllCompany has the synced tenantId
+            await tenantConnectionManager_1.centralModels.AllCompany.findOneAndUpdate({ email: tenantPayload.email }, { $set: { tenantId: effectiveTenantId } }).catch(() => { });
             return {
                 success: true,
                 message: `Company '${companyName}' successfully created. Profile registered and Admin account initialized.`,
-                tenantId,
+                tenantId: effectiveTenantId,
                 companyName,
                 domainUrl: tenantPayload.domainUrl || null,
                 dbName,

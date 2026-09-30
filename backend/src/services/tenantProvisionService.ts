@@ -378,6 +378,29 @@ export async function provisionAllTenantCollections(
     createdAdminUser = await targetModels.User.create(userPayload);
   }
 
+  // Auto-create Staff record for Admin user so Admin shows up in Staff directory
+  if (createdAdminUser && targetModels.Staff) {
+    const adminUserId = createdAdminUser._id || createdAdminUser.id;
+    const adminFullName = `${createdAdminUser.firstName || ''} ${createdAdminUser.lastName || ''}`.trim() || targetTenant.companyName || 'Admin';
+    await targetModels.Staff.findOneAndUpdate(
+      { userId: adminUserId },
+      {
+        $set: {
+          tenantId,
+          userId: adminUserId,
+          name: adminFullName,
+          email: adminEmail,
+          mobile: createdAdminUser.mobile || targetTenant.mobile || 'N/A',
+          roleName: 'ADMIN',
+          status: 'ACTIVE',
+          joiningDate: new Date(),
+          employeeId: `EMP-${adminUserId.toString().slice(-4).toUpperCase()}`
+        }
+      },
+      { upsert: true, returnDocument: 'after' }
+    ).catch(() => {});
+  }
+
   // 6. Admin Permissions (10 Modules)
   const defaultModules = [
     'CLIENTS',

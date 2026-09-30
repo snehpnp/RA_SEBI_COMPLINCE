@@ -298,10 +298,82 @@ const getTenants = async (req, res) => {
         const companies = await db_1.centralModels.AllCompany.find({ deletedAt: null, status: { $ne: 'DELETED' } })
             .sort({ createdAt: -1 })
             .lean();
-        const mapped = companies.map((c) => ({
-            ...c,
-            id: c._id ? c._id.toString() : c.id,
-            _id: c._id ? c._id.toString() : c.id
+        const adminRole = await db_1.centralModels.Role.findOne({ name: 'ADMIN' }).lean();
+        const mapped = await Promise.all(companies.map(async (c) => {
+            const cId = c._id ? c._id.toString() : c.id;
+            const tenantId = c.tenantId || cId;
+            // Auto-fix tenantId on AllCompany if missing
+            if (!c.tenantId) {
+                await db_1.centralModels.AllCompany.findByIdAndUpdate(cId, { $set: { tenantId: cId } }).catch(() => { });
+            }
+            // Find Admin user
+            let adminUser = await db_1.centralModels.User.findOne({
+                $or: [
+                    { tenantId: tenantId },
+                    { tenantId: cId },
+                    { email: c.email }
+                ],
+                ...(adminRole ? { roleId: adminRole._id || adminRole.id } : {})
+            }).lean();
+            if (!adminUser) {
+                adminUser = await db_1.centralModels.User.findOne({
+                    $or: [
+                        { tenantId: tenantId },
+                        { tenantId: cId },
+                        { email: c.email }
+                    ]
+                }).lean();
+            }
+            // If admin user is missing, auto-create it so company is never without an admin
+            if (!adminUser) {
+                const rawPass = 'Admin@' + Math.floor(1000 + Math.random() * 9000);
+                const hash = await bcrypt.hash(rawPass, 10);
+                const nameParts = (c.ownerName || `${c.companyName} Admin`).trim().split(' ');
+                adminUser = await db_1.centralModels.User.create({
+                    tenantId: tenantId,
+                    roleId: adminRole ? (adminRole._id || adminRole.id) : undefined,
+                    firstName: nameParts[0] || c.companyName,
+                    lastName: nameParts.slice(1).join(' ') || 'Admin',
+                    email: c.email,
+                    mobile: c.mobile,
+                    passwordHash: hash,
+                    tempPassword: rawPass,
+                    status: 'ACTIVE'
+                }).catch(() => null);
+            }
+            // Auto-create/upsert Staff record for Admin user
+            if (adminUser) {
+                const uId = adminUser._id || adminUser.id;
+                await db_1.centralModels.Staff.findOneAndUpdate({ userId: uId }, {
+                    $set: {
+                        tenantId: tenantId,
+                        userId: uId,
+                        name: `${adminUser.firstName || ''} ${adminUser.lastName || ''}`.trim() || c.ownerName || 'Admin',
+                        email: adminUser.email || c.email,
+                        mobile: adminUser.mobile || c.mobile || 'N/A',
+                        roleName: 'ADMIN',
+                        status: 'ACTIVE',
+                        joiningDate: new Date(),
+                        employeeId: `EMP-${uId.toString().slice(-4).toUpperCase()}`
+                    }
+                }, { upsert: true }).catch(() => { });
+            }
+            return {
+                ...c,
+                id: cId,
+                _id: cId,
+                tenantId: tenantId,
+                admin: adminUser ? {
+                    id: (adminUser._id || adminUser.id).toString(),
+                    email: adminUser.email,
+                    firstName: adminUser.firstName,
+                    lastName: adminUser.lastName,
+                    name: `${adminUser.firstName || ''} ${adminUser.lastName || ''}`.trim(),
+                    mobile: adminUser.mobile,
+                    tempPassword: adminUser.tempPassword,
+                    status: adminUser.status
+                } : null
+            };
         }));
         return res.status(200).json({ success: true, data: mapped });
     }
