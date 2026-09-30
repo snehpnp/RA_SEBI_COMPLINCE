@@ -25,12 +25,55 @@ export default function SubscriptionCenter({
   const [activeSubscriptions, setActiveSubscriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
   const [gstType, setGstType] = useState<string>('INCLUSIVE');
+
+  // Extract unique categories from available plans
+  const categories = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    availablePlans.forEach(plan => {
+      const cat = plan.category;
+      let catId = '';
+      let catName = '';
+
+      if (cat && typeof cat === 'object') {
+        catId = String(cat.id || cat._id || '');
+        catName = String(cat.name || '').trim();
+      }
+      if (!catId && plan.categoryId) {
+        if (typeof plan.categoryId === 'object') {
+          catId = String(plan.categoryId.id || plan.categoryId._id || '');
+          catName = String(plan.categoryId.name || '').trim();
+        } else {
+          catId = String(plan.categoryId);
+        }
+      }
+      if (!catName && plan.categoryName) {
+        catName = String(plan.categoryName).trim();
+      }
+
+      if (catId && catName && !map.has(catId)) {
+        map.set(catId, { id: catId, name: catName });
+      }
+    });
+    return Array.from(map.values());
+  }, [availablePlans]);
+
+  const filteredPlans = useMemo(() => {
+    if (selectedCategoryFilter === 'ALL') return availablePlans;
+    return availablePlans.filter(p => {
+      const cId = p.categoryId 
+        ? (typeof p.categoryId === 'object' ? String(p.categoryId._id || p.categoryId.id || '') : String(p.categoryId))
+        : (p.category ? String(p.category._id || p.category.id || '') : '');
+      return cId === selectedCategoryFilter;
+    });
+  }, [availablePlans, selectedCategoryFilter]);
 
   // Auto-switch to Browse tab if directed from a locked signal
   useEffect(() => {
     if (targetPlanId || targetPlanName) {
       setActiveTab('browse');
+      setSelectedCategoryFilter('ALL');
     }
   }, [targetPlanId, targetPlanName]);
 
@@ -887,8 +930,54 @@ export default function SubscriptionCenter({
               <p className="text-sm">No plans are currently available.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {availablePlans.map((plan, index) => {
+            <div>
+              {/* Category Filter Pills */}
+              {categories.length > 0 && (
+                <div className="flex items-center space-x-3 mb-8 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategoryFilter('ALL')}
+                    className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                      selectedCategoryFilter === 'ALL'
+                        ? 'bg-[#E1F13D] text-slate-950 shadow-md shadow-[#E1F13D]/20 font-extrabold'
+                        : 'bg-premium-cards border border-premium-border text-premium-text/70 hover:text-premium-text hover:border-premium-border/80'
+                    }`}
+                  >
+                    All Plans
+                  </button>
+                  {categories.map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setSelectedCategoryFilter(cat.id)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                        selectedCategoryFilter === cat.id
+                          ? 'bg-[#E1F13D] text-slate-950 shadow-md shadow-[#E1F13D]/20 font-extrabold'
+                          : 'bg-premium-cards border border-premium-border text-premium-text/70 hover:text-premium-text hover:border-premium-border/80'
+                      }`}
+                    >
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {filteredPlans.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center text-premium-text/60 bg-premium-cards border border-premium-border rounded-3xl">
+                  <Shield className="w-12 h-12 mb-3 text-premium-border" />
+                  <h4 className="text-base font-bold text-premium-text mb-1">No plans in this category</h4>
+                  <p className="text-xs text-premium-text/60 mb-4">There are currently no active plans under this category.</p>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategoryFilter('ALL')}
+                    className="px-4 py-2 bg-premium-primary text-white rounded-xl text-xs font-bold hover:bg-premium-primary/90 transition-colors"
+                  >
+                    Show All Plans
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  {filteredPlans.map((plan, index) => {
                 const isMatched = Boolean(
                   (targetPlanId && (String(plan.id) === String(targetPlanId) || String(plan._id) === String(targetPlanId))) ||
                   (targetPlanName && plan.name && plan.name.trim().toLowerCase() === targetPlanName.trim().toLowerCase())
@@ -999,6 +1088,8 @@ export default function SubscriptionCenter({
                   </div>
                 );
               })}
+                </div>
+              )}
             </div>
           )}
 

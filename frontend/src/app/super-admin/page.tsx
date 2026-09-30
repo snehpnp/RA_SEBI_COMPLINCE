@@ -1062,16 +1062,23 @@ function SuperAdminDashboardContent() {
         {/* Brand */}
         <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
           <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-            {user?.tenantLogo ? (
-              <img src={user.tenantLogo} alt={user?.tenantName || appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
-            ) : appLogo ? (
-              <img src={appLogo} alt={appName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
-            ) : (
-              <>
-                <img src="/logo-light.png" alt={appName} className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-                <img src="/logo-dark.png" alt={appName} className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-              </>
-            )}
+            {(() => {
+              const rawLogo = user?.tenantLogo || user?.tenant?.logoUrl || appLogo;
+              const logoSrc = rawLogo ? (rawLogo.startsWith('http') ? rawLogo : `${api.getBaseUrl()}${rawLogo}`) : null;
+              const displayName = user?.tenantName || user?.tenant?.companyName || appName || 'Logo';
+
+              if (logoSrc) {
+                return (
+                  <img src={logoSrc} alt={displayName} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
+                );
+              }
+              return (
+                <>
+                  <img src="/logo-light.png" alt={appName} className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                  <img src="/logo-dark.png" alt={appName} className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                </>
+              );
+            })()}
           </div>
           {!isSidebarCollapsed && (
             <button

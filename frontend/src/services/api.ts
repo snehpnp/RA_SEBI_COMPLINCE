@@ -1168,6 +1168,13 @@ class ApiClient {
     });
   }
 
+  async fetchDigioRecord(data: { digioId: string; clientId?: string; saveToClient?: boolean }) {
+    return this.request('/admin/digio/fetch-by-id', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // ── Researcher Signature & eSign & DSC ────────────────
   async getResearcherSignatureSettings() {
     return this.request('/researcher/signature-settings');

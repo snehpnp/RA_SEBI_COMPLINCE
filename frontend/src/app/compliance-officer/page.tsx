@@ -51,6 +51,7 @@ const tableCustomStyles = {
   },
 };
 import AdminResourcesTab from '@/components/AdminResourcesTab';
+import { useBranding } from '@/contexts/BrandingContext';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
@@ -317,6 +318,7 @@ function AdminDashboardContent() {
   const [showPassword, setShowPassword] = useState(false);
 
   const router = useRouter();
+  const { appName, logoUrl: appLogo } = useBranding();
 
   // Dashboard & Auth states
   const [user, setUser] = useState<any>({ firstName: '', email: '', role: '' });
@@ -1376,6 +1378,12 @@ function AdminDashboardContent() {
           const syncedUser = res.data.user;
           if (u?.isImpersonated) {
             syncedUser.isImpersonated = true;
+          }
+          if (!syncedUser.tenantLogo && syncedUser.tenant?.logoUrl) {
+            syncedUser.tenantLogo = syncedUser.tenant.logoUrl;
+          }
+          if (!syncedUser.tenantName && syncedUser.tenant?.companyName) {
+            syncedUser.tenantName = syncedUser.tenant.companyName;
           }
           setUser(syncedUser);
           localStorage.setItem('user', JSON.stringify(syncedUser));
@@ -2848,14 +2856,27 @@ function AdminDashboardContent() {
           {/* Brand */}
           <div className={`h-24 flex items-center border-b border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-              {user?.tenantLogo ? (
-                <img src={user.tenantLogo} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`} />
-              ) : (
-                <>
-                  <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-                  <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-                </>
-              )}
+              {(() => {
+                const rawLogo = user?.tenantLogo || user?.tenant?.logoUrl || appLogo;
+                const logoSrc = rawLogo ? (rawLogo.startsWith('http') ? rawLogo : `${api.getBaseUrl()}${rawLogo}`) : null;
+                const displayName = user?.tenantName || user?.tenant?.companyName || appName || 'Logo';
+
+                if (logoSrc) {
+                  return (
+                    <img
+                      src={logoSrc}
+                      alt={displayName}
+                      className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[32px]' : 'max-w-[180px]'}`}
+                    />
+                  );
+                }
+                return (
+                  <>
+                    <img src="/logo-light.png" alt="RAGCP Logo" className={`dark:hidden object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                    <img src="/logo-dark.png" alt="RAGCP Logo" className={`hidden dark:block object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                  </>
+                );
+              })()}
             </div>
             {!isSidebarCollapsed && (
               <button

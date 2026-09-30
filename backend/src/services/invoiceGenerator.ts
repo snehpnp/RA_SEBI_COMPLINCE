@@ -1,7 +1,7 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
-import { Payment, Client, Tenant, Plan, SystemSetting, dynamicDb } from '../config/db';
+import { Payment, Client, Tenant, Plan, PlanCategory, Subscription, SystemSetting, dynamicDb } from '../config/db';
 
 // Helper to convert number to words (simple version for INR)
 function numberToWords(num: number): string {
@@ -198,14 +198,91 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         } catch {}
       }
 
-      let planName = 'Advisory Plan';
+      let categoryName = '';
+      let segments = '';
+      let planObj: any = null;
+
       if (payment.planId) {
         try {
-          const plan: any = await Plan.findById(payment.planId).lean() || (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).lean() : null);
-          if (plan) planName = plan.name;
+          planObj = await Plan.findById(payment.planId).populate('categoryId').lean() || 
+            (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).populate('categoryId').lean() : null);
         } catch {}
       }
-      if (!planName && payment.planName) planName = payment.planName;
+
+      if (planObj) {
+        if (planObj.categoryId && typeof planObj.categoryId === 'object') {
+          categoryName = planObj.categoryId.name || '';
+          segments = planObj.researchSegments || planObj.categoryId.segments || '';
+        } else if (planObj.categoryId) {
+          try {
+            const cat: any = await PlanCategory.findById(planObj.categoryId).lean() || 
+              (dynamicDb?.PlanCategory ? await dynamicDb.PlanCategory.findById(planObj.categoryId).lean() : null);
+            if (cat) {
+              categoryName = cat.name || '';
+              segments = planObj.researchSegments || cat.segments || '';
+            }
+          } catch {}
+        }
+        if (!segments && planObj.researchSegments) {
+          segments = planObj.researchSegments;
+        }
+      }
+
+      if (!categoryName && payment.planCategory) categoryName = payment.planCategory;
+      if (!categoryName && payment.categoryName) categoryName = payment.categoryName;
+      if (!segments && payment.segments) segments = payment.segments;
+      if (!segments && payment.researchSegments) segments = payment.researchSegments;
+
+      // Graceful fallback: If categoryName not yet found, extract from planName or use generic
+      if (!categoryName) {
+        if (payment.planName || planObj?.name) {
+          const raw = (payment.planName || planObj?.name || '').trim();
+          categoryName = raw.split(' - ')[0] || raw;
+        } else {
+          categoryName = 'Research Advisory Services';
+        }
+      }
+      if (!segments) {
+        segments = 'EQUITY, DERIVATIVE';
+      }
+
+      // Resolve Start Date and End Date from Subscription record or payment
+      let subStartDate: Date | null = null;
+      let subEndDate: Date | null = null;
+
+      if (payment.subscriptionId) {
+        try {
+          const sub: any = await Subscription.findById(payment.subscriptionId).lean() || 
+            (dynamicDb?.Subscription ? await dynamicDb.Subscription.findById(payment.subscriptionId).lean() : null);
+          if (sub) {
+            if (sub.startDate) subStartDate = new Date(sub.startDate);
+            if (sub.endDate) subEndDate = new Date(sub.endDate);
+          }
+        } catch {}
+      }
+
+      if (!subStartDate && payment.clientId && payment.planId) {
+        try {
+          const sub: any = await Subscription.findOne({
+            clientId: payment.clientId,
+            planId: payment.planId
+          }).sort({ createdAt: -1 }).lean() || 
+            (dynamicDb?.Subscription ? await dynamicDb.Subscription.findOne({
+              clientId: payment.clientId,
+              planId: payment.planId
+            }).sort({ createdAt: -1 }).lean() : null);
+          if (sub) {
+            if (sub.startDate) subStartDate = new Date(sub.startDate);
+            if (sub.endDate) subEndDate = new Date(sub.endDate);
+          }
+        } catch {}
+      }
+
+      const paymentBaseDate = payment.paymentDate ? new Date(payment.paymentDate) : new Date(payment.createdAt || Date.now());
+      const startDateFormatted = subStartDate ? subStartDate.toLocaleDateString('en-GB') : paymentBaseDate.toLocaleDateString('en-GB');
+
+      const validityDays = payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30);
+      const endDateFormatted = subEndDate ? subEndDate.toLocaleDateString('en-GB') : new Date(paymentBaseDate.getTime() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
 
       const doc = new PDFDocument({ margin: 30, size: 'A4', compress: false });
       const buffers: Buffer[] = [];
@@ -275,8 +352,7 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
 
       const couponCodeText = couponObj?.code || payment.coupon?.code || payment.couponCode || '';
 
-      let planObj: any = null;
-      if (payment.planId) {
+      if (!planObj && payment.planId) {
         try {
           planObj = await Plan.findById(payment.planId).lean() || (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).lean() : null);
         } catch {}
@@ -301,59 +377,39 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       let baseDiscount = 0;
       let taxableValue = 0;
       let totalGst = 0;
-      let netInvoiceTotal = 0;
+      let netInvoiceTotal = totalAmount;
+
+      if (rawDiscount > 0) {
+        baseDiscount = rawDiscount;
+      } else if (couponObj?.discountValue) {
+        if (couponObj.discountType === 'PERCENTAGE') {
+          baseDiscount = Number((((fullPlanPrice || totalAmount) * couponObj.discountValue) / 100).toFixed(2));
+          if (couponObj.percentageType === 'CAPPED' && couponObj.maxDiscountValue && baseDiscount > couponObj.maxDiscountValue) {
+            baseDiscount = couponObj.maxDiscountValue;
+          }
+        } else {
+          baseDiscount = Number(couponObj.discountValue);
+        }
+      }
 
       if (!isGstEnabled) {
-        // GST DISABLED: Direct Plan Price without tax
-        grossBase = fullPlanPrice > 0 ? fullPlanPrice : totalAmount;
-        baseDiscount = rawDiscount;
-        if (couponObj?.discountValue && !baseDiscount) {
-          if (couponObj.discountType === 'PERCENTAGE') {
-            baseDiscount = ((fullPlanPrice || totalAmount) * couponObj.discountValue) / 100;
-            if (couponObj.percentageType === 'CAPPED' && couponObj.maxDiscountValue && baseDiscount > couponObj.maxDiscountValue) {
-              baseDiscount = couponObj.maxDiscountValue;
-            }
-          } else {
-            baseDiscount = Number(couponObj.discountValue);
-          }
-        }
-        taxableValue = Math.max(0, grossBase - baseDiscount);
+        // GST DISABLED: Direct Plan Price without tax (0% Non-GST)
+        netInvoiceTotal = totalAmount;
+        taxableValue = totalAmount;
         totalGst = 0;
-        netInvoiceTotal = totalAmount > 0 ? totalAmount : taxableValue;
+        grossBase = Number((totalAmount + baseDiscount).toFixed(2));
       } else if (isGstInclusive) {
-        // INCLUSIVE:
-        // 1. Discount is applied directly on the plan price:
-        //    Net Payable = Plan Price (e.g. 1500) - Discount (e.g. 500) = 1000 (Inc. GST)
-        netInvoiceTotal = totalAmount > 0 ? totalAmount : Math.max(0, fullPlanPrice - rawDiscount);
-
-        // 2. Gross Plan Value is the full direct plan price
-        grossBase = fullPlanPrice > 0 ? fullPlanPrice : Number((netInvoiceTotal + rawDiscount).toFixed(2));
-
-        // 3. Discount is the direct coupon discount (no GST on discount amount)
-        baseDiscount = rawDiscount;
-
-        // 4. Taxable value & GST are calculated from the remaining payable amount:
+        // INCLUSIVE: Total payable includes 18% GST
+        netInvoiceTotal = totalAmount;
         taxableValue = Number((netInvoiceTotal / 1.18).toFixed(2));
         totalGst = Number((netInvoiceTotal - taxableValue).toFixed(2));
+        grossBase = Number((taxableValue + baseDiscount).toFixed(2));
       } else {
-        // EXCLUSIVE: Plan price is Base, 18% GST is added on top
-        if (couponObj?.discountValue) {
-          if (couponObj.discountType === 'PERCENTAGE') {
-            baseDiscount = ((fullPlanPrice || totalAmount) * couponObj.discountValue) / 100;
-            if (couponObj.percentageType === 'CAPPED' && couponObj.maxDiscountValue && baseDiscount > couponObj.maxDiscountValue) {
-              baseDiscount = couponObj.maxDiscountValue;
-            }
-          } else {
-            baseDiscount = Number(couponObj.discountValue);
-          }
-        } else if (rawDiscount > 0) {
-          baseDiscount = rawDiscount;
-        }
-
-        grossBase = fullPlanPrice > 0 ? fullPlanPrice : (totalAmount > 0 ? Number((totalAmount / 1.18).toFixed(2)) : 0);
-        taxableValue = Math.max(0, grossBase - baseDiscount);
-        totalGst = Number((taxableValue * 0.18).toFixed(2));
-        netInvoiceTotal = totalAmount > 0 ? totalAmount : Number((taxableValue + totalGst).toFixed(2));
+        // EXCLUSIVE: 18% GST on top
+        netInvoiceTotal = totalAmount;
+        taxableValue = Number((netInvoiceTotal / 1.18).toFixed(2));
+        totalGst = Number((netInvoiceTotal - taxableValue).toFixed(2));
+        grossBase = Number((taxableValue + baseDiscount).toFixed(2));
       }
 
       const stateCodes: Record<string, string> = {
@@ -569,44 +625,63 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       doc.text('Discount (-)', 440, tableY + 7, { width: 55, align: 'right' });
       doc.text('Taxable Value', 500, tableY + 7, { width: 55, align: 'right' });
 
-      // Table Body Row
+      // Table Body Row — compute dynamic height to prevent overlap
+      // Description column: x=68, max width=151 (up to divider at x=223, with 4px padding)
       const bodyY = tableY + 22;
-      const bodyH = 48;
+      const descColW = 151;
+      const descX = 68;
+
+      // Truncate segments to max 55 chars to avoid overflow
+      const segmentsDisplay = segments.length > 55 ? segments.substring(0, 52) + '...' : segments;
+
+      // Measure heights of each text element in description column
+      const catNameH = doc.font(boldFont).fontSize(8).heightOfString(categoryName.toUpperCase(), { width: descColW });
+      const segH = doc.font(boldFont).fontSize(7).heightOfString(`Segments: ${segmentsDisplay}`, { width: descColW });
+      const subLabelH = 10; // "Research Analyst..." or Coupon label
+      const descPadding = 8; // top+bottom padding
+
+      const descTotalH = catNameH + segH + subLabelH + descPadding + 14;
+      const bodyH = Math.max(descTotalH, 52); // minimum 52px
+
       doc.rect(34, bodyY, 527, bodyH).fillColor('#FFFFFF').fill();
       doc.roundedRect(34, bodyY, 527, bodyH, 2).strokeColor('#CBD5E1').lineWidth(0.5).stroke();
 
-      // Vertical grid dividers
+      // Vertical grid dividers (drawn AFTER rect so they appear on top)
       const divXs = [64, 223, 278, 378, 438, 498];
       for (const x of divXs) {
         doc.moveTo(x, tableY).lineTo(x, bodyY + bodyH).strokeColor('#E2E8F0').lineWidth(0.5).stroke();
       }
 
-      // Sr. No
-      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('1', 36, bodyY + 17, { width: 26, align: 'center' });
+      // Sr. No — vertically centred
+      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('1', 36, bodyY + Math.round(bodyH / 2) - 5, { width: 26, align: 'center' });
 
-      // Description & Coupon Badge
-      doc.font(boldFont).fontSize(8.5).fillColor('#0F172A').text(planName, 68, bodyY + 11, { width: 150 });
+      // Description: Category Name & Segments — stacked, all within descColW
+      let descCurY = bodyY + 7;
+      doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(categoryName.toUpperCase(), descX, descCurY, { width: descColW, lineGap: 1 });
+      descCurY += catNameH + 2;
+      doc.font(boldFont).fontSize(7).fillColor('#2563EB').text(`Segments: ${segmentsDisplay}`, descX, descCurY, { width: descColW, lineGap: 1 });
+      descCurY += segH + 2;
       if (couponCodeText) {
-        doc.roundedRect(68, bodyY + 26, 125, 14, 2).fillColor('#ECFDF5').strokeColor('#A7F3D0').lineWidth(0.5).fillAndStroke('#ECFDF5', '#A7F3D0');
-        doc.font(boldFont).fontSize(7).fillColor('#047857').text(`Coupon Applied: ${couponCodeText}`, 74, bodyY + 29);
+        doc.roundedRect(descX, descCurY, Math.min(125, descColW - 4), 12, 2).fillColor('#ECFDF5').strokeColor('#A7F3D0').lineWidth(0.5).fillAndStroke('#ECFDF5', '#A7F3D0');
+        doc.font(boldFont).fontSize(6.5).fillColor('#047857').text(`Coupon: ${couponCodeText}`, descX + 4, descCurY + 2, { width: descColW - 8 });
       } else {
-        doc.font(regularFont).fontSize(7).fillColor('#64748B').text('Research Analyst Advisory Subscription', 68, bodyY + 28, { width: 150 });
+        doc.font(regularFont).fontSize(6.5).fillColor('#64748B').text('Research Analyst Advisory Subscription', descX, descCurY, { width: descColW });
       }
 
-      // SAC Code
-      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('997156', 225, bodyY + 17, { width: 50, align: 'center' });
+      // SAC Code — vertically centred
+      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('997156', 225, bodyY + Math.round(bodyH / 2) - 5, { width: 50, align: 'center' });
 
-      // Validity Period
-      const startDate = invoiceDate;
-      const validityDays = payment.planValidityDays || 30;
-      const endDate = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
-      doc.font(boldFont).fontSize(7.5).fillColor('#0F172A').text(`${startDate} - ${endDate}`, 280, bodyY + 13, { width: 95, align: 'center' });
-      doc.font(regularFont).fontSize(6.8).fillColor('#64748B').text(`${validityDays} Days Active Access`, 280, bodyY + 26, { width: 95, align: 'center' });
+      // Validity Period — split date range into two lines to avoid overflow
+      const vpMidY = bodyY + Math.round(bodyH / 2) - 10;
+      doc.font(boldFont).fontSize(7).fillColor('#0F172A').text(`${startDateFormatted}`, 280, vpMidY, { width: 95, align: 'center' });
+      doc.font(boldFont).fontSize(7).fillColor('#0F172A').text(`${endDateFormatted}`, 280, vpMidY + 10, { width: 95, align: 'center' });
+      doc.font(regularFont).fontSize(6.5).fillColor('#64748B').text(`${validityDays} Days Access`, 280, vpMidY + 21, { width: 95, align: 'center' });
 
-      // Amounts (Right aligned!)
-      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text(formatInr(grossBase), 380, bodyY + 17, { width: 55, align: 'right' });
-      doc.font(boldFont).fontSize(8).fillColor('#047857').text(baseDiscount > 0 ? ('- ' + formatInr(baseDiscount)) : '-', 440, bodyY + 17, { width: 55, align: 'right' });
-      doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(formatInr(taxableValue), 500, bodyY + 17, { width: 55, align: 'right' });
+      // Amounts — vertically centred
+      const amtY = bodyY + Math.round(bodyH / 2) - 5;
+      doc.font(regularFont).fontSize(8).fillColor('#0F172A').text(formatInr(grossBase), 380, amtY, { width: 55, align: 'right' });
+      doc.font(boldFont).fontSize(8).fillColor('#047857').text(baseDiscount > 0 ? ('- ' + formatInr(baseDiscount)) : '-', 440, amtY, { width: 55, align: 'right' });
+      doc.font(boldFont).fontSize(8).fillColor('#0F172A').text(formatInr(taxableValue), 500, amtY, { width: 55, align: 'right' });
 
       // ==========================================
       // 6. SUMMARY SECTION

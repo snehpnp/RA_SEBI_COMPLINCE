@@ -165,6 +165,11 @@ export const login = async (req: Request, res: Response) => {
 
     let activeTenantId = user?.tenantId ? user?.tenantId.toString() : null;
     let tenantInfo = user?.tenant;
+    if (!tenantInfo && activeTenantId) {
+      try {
+        tenantInfo = await dynamicDb.Tenant.findById(activeTenantId).lean().catch(() => null) || await centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
+      } catch {}
+    }
     if (!activeTenantId && user?.role?.name !== 'SUPER_ADMIN') {
       try {
         const defaultTenant: any = await centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await centralModels.Tenant.findOne().lean();
@@ -612,6 +617,18 @@ export const getMe = async (req: AuthenticatedRequest, res: Response) => {
 
     const userId = (user._id || user.id).toString();
 
+    let tenantInfo = user.tenant;
+    if (!tenantInfo && user.tenantId) {
+      try {
+        tenantInfo = await dynamicDb.Tenant.findById(user.tenantId).lean().catch(() => null) || await centralModels.Tenant.findById(user.tenantId).lean().catch(() => null);
+      } catch {}
+    }
+    if (!tenantInfo && user.role?.name !== 'SUPER_ADMIN') {
+      try {
+        tenantInfo = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await centralModels.Tenant.findOne().lean().catch(() => null);
+      } catch {}
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -624,11 +641,13 @@ export const getMe = async (req: AuthenticatedRequest, res: Response) => {
           role: user.role?.name,
           allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
           permissions,
-          tenantId: user.tenantId ? user.tenantId.toString() : null,
-          tenantStatus: user.tenant?.status || null,
+          tenantId: user.tenantId ? user.tenantId.toString() : (tenantInfo?._id || tenantInfo?.id ? String(tenantInfo._id || tenantInfo.id) : null),
+          tenantStatus: tenantInfo?.status || user.tenant?.status || null,
+          tenantName: tenantInfo?.companyName || user.tenant?.companyName || 'RAGCP',
+          tenantLogo: tenantInfo?.logoUrl || user.tenant?.logoUrl || null,
           staff: user.staff,
           client: user.client,
-          tenant: user.tenant
+          tenant: tenantInfo || user.tenant
         }
       }
     });
@@ -1020,6 +1039,18 @@ export const verify2FALogin = async (req: Request, res: Response) => {
       ipAddress: req.ip
     });
 
+    let tenantInfo = user.tenant;
+    if (!tenantInfo && activeTenantId) {
+      try {
+        tenantInfo = await dynamicDb.Tenant.findById(activeTenantId).lean().catch(() => null) || await centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
+      } catch {}
+    }
+    if (!tenantInfo && user?.role?.name !== 'SUPER_ADMIN') {
+      try {
+        tenantInfo = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await centralModels.Tenant.findOne().lean().catch(() => null);
+      } catch {}
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Login verified successfully',
@@ -1035,9 +1066,9 @@ export const verify2FALogin = async (req: Request, res: Response) => {
           allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
           permissions,
           tenantId: activeTenantId,
-          tenantStatus: user.tenant?.status || null,
-          tenantName: user.tenant?.companyName || 'RAGCP',
-          tenantLogo: user.tenant?.logoUrl || null
+          tenantStatus: tenantInfo?.status || user.tenant?.status || null,
+          tenantName: tenantInfo?.companyName || user.tenant?.companyName || 'RAGCP',
+          tenantLogo: tenantInfo?.logoUrl || user.tenant?.logoUrl || null
         }
       }
     });

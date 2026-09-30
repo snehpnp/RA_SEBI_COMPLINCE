@@ -84,6 +84,10 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
     const coupons = await dynamicDb.Coupon.find({ _id: { $in: couponIds } }).lean();
     const couponMap = new Map(coupons.map((c: any) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
 
+    const tenantObj: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const isGstEnabled = tenantObj?.gstEnabled !== false;
+    const gstCalculationType = tenantObj?.gstCalculationType || 'INCLUSIVE';
+
     const formatted = payments.map((p: any) => {
       const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
       const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
@@ -92,11 +96,13 @@ export const getPaymentHistory = async (req: Request, res: Response) => {
         id: String(p._id || p.id),
         coupon: couponObj || null,
         couponCode: couponObj?.code || null,
-        plan: p.planId || null
+        plan: p.planId || null,
+        gstEnabled: isGstEnabled,
+        gstCalculationType
       };
     });
 
-    return res.status(200).json({ success: true, data: formatted });
+    return res.status(200).json({ success: true, data: formatted, gstEnabled: isGstEnabled, gstCalculationType });
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
   }

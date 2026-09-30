@@ -71,6 +71,9 @@ async function seedInitial() {
         { code: 'ACCESS_RESEARCH', name: 'Access Signal & Research Management' },
         { code: 'ACCESS_PAYMENTS', name: 'Access Payment Approvals' },
         { code: 'ACCESS_COMPLIANCE', name: 'Access Compliance Desk' },
+        { code: 'ACCESS_CHECKLIST', name: 'Access SEBI Checklist' },
+        { code: 'ACCESS_PERSONAL_SETTINGS', name: 'Access Personal Settings' },
+        { code: 'ACCESS_RESOURCES', name: 'Access Resources & Documents' },
         { code: 'ACCESS_SETTINGS', name: 'Access Settings' },
         { code: 'ACCESS_ROLES', name: 'Access Roles Management' },
         { code: 'CREATE_PLANS', name: 'Create Plans' },
@@ -119,7 +122,7 @@ async function seedInitial() {
     }
     // Bind specific permissions to COMPLIANCE_OFFICER
     const coId = roleMap['COMPLIANCE_OFFICER'];
-    const coPerms = ['CREATE', 'READ', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'PUBLISH', 'EXPORT', 'DOWNLOAD', 'ACCESS_DASHBOARD', 'ACCESS_COMPLIANCE'];
+    const coPerms = ['CREATE', 'READ', 'UPDATE', 'DELETE', 'APPROVE', 'REJECT', 'PUBLISH', 'EXPORT', 'DOWNLOAD', 'ACCESS_DASHBOARD', 'ACCESS_COMPLIANCE', 'ACCESS_CHECKLIST'];
     for (const permCode of coPerms) {
         const pId = permMap[permCode];
         await tenantConnectionManager_1.centralModels.RolePermission.findOneAndUpdate({ roleId: coId, permissionId: pId }, { $setOnInsert: { roleId: coId, permissionId: pId } }, { upsert: true, returnDocument: 'after' });
