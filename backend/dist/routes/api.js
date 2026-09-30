@@ -274,6 +274,7 @@ router.patch('/admin/sms-templates/:id/status', auth_1.authenticateJWT, (0, auth
 router.delete('/admin/sms-templates/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.deleteSmsTemplate);
 router.post('/admin/sms/test', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testSmsGateway);
 router.post('/admin/test-digio', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testDigioConfig);
+router.post('/admin/digio/fetch-by-id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchDigioRecord);
 // ==========================================
 router.get('/admin/profile-completeness', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, adminController_1.getProfileCompleteness);
 // Active Client History endpoints

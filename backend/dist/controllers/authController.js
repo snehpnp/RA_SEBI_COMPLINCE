@@ -184,6 +184,12 @@ const login = async (req, res) => {
         const userId = (user?._id || user?.id).toString();
         let activeTenantId = user?.tenantId ? user?.tenantId.toString() : null;
         let tenantInfo = user?.tenant;
+        if (!tenantInfo && activeTenantId) {
+            try {
+                tenantInfo = await dynamicDb.Tenant.findById(activeTenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
+            }
+            catch { }
+        }
         if (!activeTenantId && user?.role?.name !== 'SUPER_ADMIN') {
             try {
                 const defaultTenant = await tenantConnectionManager_1.centralModels.Tenant.findOne({ status: { $ne: 'DELETED' } }).lean() || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean();
@@ -568,6 +574,19 @@ const getMe = async (req, res) => {
         }
         const permissions = user.role?.permissions?.map((rp) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
         const userId = (user._id || user.id).toString();
+        let tenantInfo = user.tenant;
+        if (!tenantInfo && user.tenantId) {
+            try {
+                tenantInfo = await dynamicDb.Tenant.findById(user.tenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(user.tenantId).lean().catch(() => null);
+            }
+            catch { }
+        }
+        if (!tenantInfo && user.role?.name !== 'SUPER_ADMIN') {
+            try {
+                tenantInfo = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean().catch(() => null);
+            }
+            catch { }
+        }
         return res.status(200).json({
             success: true,
             data: {
@@ -580,11 +599,13 @@ const getMe = async (req, res) => {
                     role: user.role?.name,
                     allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
                     permissions,
-                    tenantId: user.tenantId ? user.tenantId.toString() : null,
-                    tenantStatus: user.tenant?.status || null,
+                    tenantId: user.tenantId ? user.tenantId.toString() : (tenantInfo?._id || tenantInfo?.id ? String(tenantInfo._id || tenantInfo.id) : null),
+                    tenantStatus: tenantInfo?.status || user.tenant?.status || null,
+                    tenantName: tenantInfo?.companyName || user.tenant?.companyName || 'RAGCP',
+                    tenantLogo: tenantInfo?.logoUrl || user.tenant?.logoUrl || null,
                     staff: user.staff,
                     client: user.client,
-                    tenant: user.tenant
+                    tenant: tenantInfo || user.tenant
                 }
             }
         });
@@ -928,6 +949,19 @@ const verify2FALogin = async (req, res) => {
             module: 'USERS',
             ipAddress: req.ip
         });
+        let tenantInfo = user.tenant;
+        if (!tenantInfo && activeTenantId) {
+            try {
+                tenantInfo = await dynamicDb.Tenant.findById(activeTenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
+            }
+            catch { }
+        }
+        if (!tenantInfo && user?.role?.name !== 'SUPER_ADMIN') {
+            try {
+                tenantInfo = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean().catch(() => null);
+            }
+            catch { }
+        }
         return res.status(200).json({
             success: true,
             message: 'Login verified successfully',
@@ -943,9 +977,9 @@ const verify2FALogin = async (req, res) => {
                     allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
                     permissions,
                     tenantId: activeTenantId,
-                    tenantStatus: user.tenant?.status || null,
-                    tenantName: user.tenant?.companyName || 'RAGCP',
-                    tenantLogo: user.tenant?.logoUrl || null
+                    tenantStatus: tenantInfo?.status || user.tenant?.status || null,
+                    tenantName: tenantInfo?.companyName || user.tenant?.companyName || 'RAGCP',
+                    tenantLogo: tenantInfo?.logoUrl || user.tenant?.logoUrl || null
                 }
             }
         });

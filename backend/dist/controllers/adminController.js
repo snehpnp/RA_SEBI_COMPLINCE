@@ -2121,8 +2121,6 @@ const createPlan = async (req, res) => {
     const { categoryId, name, description, price, durationMonths, researchSegments, notificationsAllowed, clientLimit } = req.body;
     if (!categoryId)
         return res.status(400).json({ success: false, message: 'Category is required.' });
-    if (!name || !name.trim())
-        return res.status(400).json({ success: false, message: 'Plan name is required.' });
     if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
         return res.status(400).json({ success: false, message: 'Plan price must be a positive number.' });
     }
@@ -2162,13 +2160,27 @@ const createPlan = async (req, res) => {
                 });
             }
         }
+        const months = parseInt(durationMonths) || 1;
+        const getDurationLabel = (m) => {
+            switch (m) {
+                case 1: return 'Monthly';
+                case 2: return '2 Months';
+                case 3: return 'Quarterly';
+                case 6: return 'Half-Yearly';
+                case 12: return 'Yearly';
+                default: return `${m} Months`;
+            }
+        };
+        const finalPlanName = (name && name.trim())
+            ? name.trim().toUpperCase()
+            : `${category.name || 'PLAN'} - ${getDurationLabel(months)}`.toUpperCase();
         const plan = await db_1.default.Plan.create({
             tenantId,
             categoryId: category._id || category.id,
-            name: name.trim().toUpperCase(),
+            name: finalPlanName,
             description: description || '',
             price: parseFloat(price),
-            durationMonths: parseInt(durationMonths),
+            durationMonths: months,
             researchSegments: researchSegments || category.segments || 'EQUITY',
             notificationsAllowed: notificationsAllowed || 'EMAIL,INAPP',
             clientLimit: parseInt(clientLimit) || 100,
@@ -2190,8 +2202,6 @@ const updatePlan = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     const { categoryId, name, description, price, durationMonths, notificationsAllowed, clientLimit } = req.body;
-    if (!name || !name.trim())
-        return res.status(400).json({ success: false, message: 'Plan name is required.' });
     if (!price || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
         return res.status(400).json({ success: false, message: 'Plan price must be a positive number.' });
     }
@@ -2201,10 +2211,10 @@ const updatePlan = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Plan not found.' });
         let newCategoryId = existing.categoryId;
         let newSegments = existing.researchSegments;
+        let category = null;
         if (categoryId) {
             const catIdStr = String(categoryId).trim();
             const isCatObjectId = mongoose_1.default.Types.ObjectId.isValid(catIdStr);
-            let category = null;
             if (isCatObjectId) {
                 category = await db_1.default.PlanCategory.findOne({
                     _id: catIdStr,
@@ -2226,13 +2236,30 @@ const updatePlan = async (req, res) => {
                 newSegments = category.segments;
             }
         }
+        if (!category && newCategoryId) {
+            category = await db_1.default.PlanCategory.findById(newCategoryId).lean();
+        }
+        const months = parseInt(durationMonths) || existing.durationMonths || 1;
+        const getDurationLabel = (m) => {
+            switch (m) {
+                case 1: return 'Monthly';
+                case 2: return '2 Months';
+                case 3: return 'Quarterly';
+                case 6: return 'Half-Yearly';
+                case 12: return 'Yearly';
+                default: return `${m} Months`;
+            }
+        };
+        const finalPlanName = (name && name.trim())
+            ? name.trim().toUpperCase()
+            : (category ? `${category.name} - ${getDurationLabel(months)}`.toUpperCase() : existing.name);
         const updated = await db_1.default.Plan.findByIdAndUpdate(id, {
             $set: {
                 categoryId: newCategoryId,
-                name: name.trim().toUpperCase(),
+                name: finalPlanName,
                 description: description || '',
                 price: parseFloat(price),
-                durationMonths: parseInt(durationMonths) || existing.durationMonths,
+                durationMonths: months,
                 researchSegments: newSegments,
                 notificationsAllowed: notificationsAllowed || existing.notificationsAllowed,
                 clientLimit: parseInt(clientLimit) || existing.clientLimit

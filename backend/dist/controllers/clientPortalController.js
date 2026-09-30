@@ -82,6 +82,9 @@ const getPaymentHistory = async (req, res) => {
         const couponIds = [...new Set(payments.map((p) => p.couponId ? (typeof p.couponId === 'object' ? p.couponId._id || p.couponId.id : p.couponId) : null).filter(Boolean))];
         const coupons = await db_1.default.Coupon.find({ _id: { $in: couponIds } }).lean();
         const couponMap = new Map(coupons.map((c) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
+        const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        const isGstEnabled = tenantObj?.gstEnabled !== false;
+        const gstCalculationType = tenantObj?.gstCalculationType || 'INCLUSIVE';
         const formatted = payments.map((p) => {
             const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
             const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
@@ -90,10 +93,12 @@ const getPaymentHistory = async (req, res) => {
                 id: String(p._id || p.id),
                 coupon: couponObj || null,
                 couponCode: couponObj?.code || null,
-                plan: p.planId || null
+                plan: p.planId || null,
+                gstEnabled: isGstEnabled,
+                gstCalculationType
             };
         });
-        return res.status(200).json({ success: true, data: formatted });
+        return res.status(200).json({ success: true, data: formatted, gstEnabled: isGstEnabled, gstCalculationType });
     }
     catch (error) {
         return res.status(500).json({ success: false, message: 'Server error', errors: [error.message] });
