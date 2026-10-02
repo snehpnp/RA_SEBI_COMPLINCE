@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
+const activityService_1 = require("../services/activityService");
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const checkComplianceForTenant = async (tenantId) => {
     try {
@@ -1351,6 +1352,35 @@ const updateAuditStatus = async (req, res) => {
                 }
             });
         }
+        (0, auditService_1.logAudit)({
+            tenantId,
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'COMPLIANCE',
+            oldValue: { status: previousStatus },
+            newValue: { status, requirement: requirement.requirement, remarks: officerRemarks },
+            ipAddress: req.ip
+        }).catch(() => { });
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: 'STAFF',
+            actorId: req.user?.id,
+            actorName: updatedByName,
+            actorEmail: req.user?.email || null,
+            category: 'KYC_COMPLIANCE',
+            action: 'COMPLIANCE_STATUS_UPDATE',
+            title: `SEBI Checklist Marked as ${status}`,
+            description: `Rule: "${requirement.requirement}". Remarks: ${officerRemarks || 'No remarks'}`,
+            status: status === 'COMPLIANT' ? 'SUCCESS' : (status === 'NON_COMPLIANT' ? 'FAILED' : 'INFO'),
+            metadata: {
+                requirementId,
+                auditId: audit._id?.toString() || audit.id,
+                previousStatus,
+                newStatus: status,
+                periodLabel: period.label
+            },
+            req
+        }).catch(() => { });
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => { });
         return res.status(200).json({
             success: true,
@@ -1499,6 +1529,34 @@ const resolvePenalty = async (req, res) => {
                 proofUrl
             }
         });
+        (0, auditService_1.logAudit)({
+            tenantId: penalty.tenantId.toString(),
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'COMPLIANCE',
+            oldValue: { status: 'PENDING_PAYMENT' },
+            newValue: { status: 'RESOLVED', resolutionType, paymentRef, remarks },
+            ipAddress: req.ip
+        }).catch(() => { });
+        (0, activityService_1.logActivity)({
+            tenantId: penalty.tenantId,
+            actorType: 'STAFF',
+            actorId: req.user?.id,
+            actorName: updatedByName,
+            actorEmail: req.user?.email || null,
+            category: 'KYC_COMPLIANCE',
+            action: 'PENALTY_RESOLVED',
+            title: `SEBI Penalty Resolved (${resolutionType})`,
+            description: `Amount: Rs.${penalty.amount}. Ref: ${paymentRef}. Remarks: ${remarks || ''}`,
+            status: 'SUCCESS',
+            metadata: {
+                penaltyId: penalty._id?.toString() || penalty.id,
+                resolutionType,
+                paymentRef,
+                amount: penalty.amount
+            },
+            req
+        }).catch(() => { });
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(penalty.tenantId.toString(), { reason: 'PENALTY_RESOLVED' }).catch(() => { });
         return res.status(200).json({
             success: true,

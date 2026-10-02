@@ -449,6 +449,12 @@ function AdminDashboardContent() {
   const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc'>('payments');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState<boolean>(false);
+  const [auditSearchQuery, setAuditSearchQuery] = useState<string>('');
+  const [auditCategoryFilter, setAuditCategoryFilter] = useState<string>('ALL');
+  const [auditRoleFilter, setAuditRoleFilter] = useState<string>('ALL');
+  const [selectedAuditLog, setSelectedAuditLog] = useState<any>(null);
+  const [auditCurrentPage, setAuditCurrentPage] = useState<number>(1);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
 
@@ -1602,6 +1608,21 @@ function AdminDashboardContent() {
         api.listAdminTickets().then(res => {
           if (res.success) setAdminTickets(res.data);
         }).catch(() => { });
+        api.getComplianceChecklist().then(res => {
+          if (res.success && Array.isArray(res.data)) setChecklist(res.data);
+        }).catch(() => { });
+        api.getComplianceAlerts().then(res => {
+          if (res.success && Array.isArray(res.data)) setAlerts(res.data);
+        }).catch(() => { });
+        api.getPenalties().then(res => {
+          if (res.success && Array.isArray(res.data)) setPenalties(res.data);
+        }).catch(() => { });
+        api.getAdminClients().then(res => {
+          if (res.success && Array.isArray(res.data)) setClients(res.data);
+        }).catch(() => { });
+        api.getComplianceChecklistHistory().then(res => {
+          if (res.success && Array.isArray(res.data)) setChecklistHistory(res.data);
+        }).catch(() => { });
       }
 
       if (tab === 'tickets') {
@@ -1644,6 +1665,15 @@ function AdminDashboardContent() {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
       }
 
+      if (initStep || tab === 'auditLogs' || tab === 'dashboard') {
+        setLoadingAuditLogs(true);
+        api.getTenantAuditLogs().then(res => {
+          if (res.success && Array.isArray(res.data)) setActivityLogs(res.data);
+        }).catch(() => { }).finally(() => {
+          setLoadingAuditLogs(false);
+        });
+      }
+
     } catch (err: any) {
       console.error('Failed to load dashboard data:', err);
     } finally {
@@ -1660,6 +1690,7 @@ function AdminDashboardContent() {
   const salesAndClientChartData = useMemo(() => {
     const formatPeriod = (dateStr: string, timeframe: 'monthly' | 'yearly') => {
       const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return timeframe === 'yearly' ? new Date().getFullYear().toString() : 'Oct 26';
       if (timeframe === 'yearly') {
         return d.getFullYear().toString();
       } else {
@@ -1670,26 +1701,35 @@ function AdminDashboardContent() {
     const timeframe = dashboardTimeframe;
     const metric = dashboardMetric;
 
-
-
     const dataMap = new Map<string, number>();
 
     if (metric === 'sales') {
       allPayments.forEach((p: any) => {
         if (p.status === 'SUCCESS' || p.paymentMode === 'ADMIN_ASSIGNED') {
           const key = formatPeriod(p.createdAt, timeframe);
-          dataMap.set(key, (dataMap.get(key) || 0) + p.amount);
+          dataMap.set(key, (dataMap.get(key) || 0) + Number(p.amount || 0));
         }
       });
     } else {
       clients.forEach((c: any) => {
-        const key = formatPeriod(c.user?.createdAt || c.createdAt || new Date(), timeframe);
+        const rawDate = c.createdAt || c.user?.createdAt || new Date();
+        const key = formatPeriod(rawDate, timeframe);
         dataMap.set(key, (dataMap.get(key) || 0) + 1);
       });
     }
 
     const sortedKeys = Array.from(dataMap.keys()).sort((a, b) => {
-      return new Date('01 ' + a).getTime() - new Date('01 ' + b).getTime();
+      if (timeframe === 'yearly') {
+        return (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0);
+      }
+      const parseMonthKey = (s: string) => {
+        const parts = s.split(' ');
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthIndex = months.indexOf(parts[0]);
+        const year = 2000 + (parseInt(parts[1], 10) || 0);
+        return year * 12 + (monthIndex >= 0 ? monthIndex : 0);
+      };
+      return parseMonthKey(a) - parseMonthKey(b);
     });
 
     return sortedKeys.map(key => ({
@@ -1730,21 +1770,34 @@ function AdminDashboardContent() {
   const historyPagination = usePagination(topLevelFilteredHistory, 10);
 
   useEffect(() => {
+    // Safety fallback so the dashboard never gets stuck on the loading spinner
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 6000);
+
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
-        return;
+        setLoading(false);
+        router.replace('/admin/login?error=expired');
+        return () => clearTimeout(safetyTimer);
       }
-      const u = JSON.parse(userStr);
-      setUser(u);
+      try {
+        const u = JSON.parse(userStr);
+        setUser(u);
 
-      if (u?.role === 'COMPLIANCE_OFFICER') setActiveTab('compliance'); else if (u?.role === 'RESEARCHER' || u?.role === 'PRINCIPAL_OFFICER') setActiveTab('research');
+        if (u?.role === 'COMPLIANCE_OFFICER') setActiveTab('compliance');
+        else if (u?.role === 'RESEARCHER' || u?.role === 'PRINCIPAL_OFFICER') setActiveTab('research');
+      } catch (e) {
+        console.error('Invalid user in localStorage:', e);
+      }
 
       api.getCurrentUser().then(res => {
         if (res.success) {
           const syncedUser = res.data.user;
-          if (u?.isImpersonated) {
+          const currentUserStr = localStorage.getItem('user');
+          const currentU = currentUserStr ? JSON.parse(currentUserStr) : null;
+          if (currentU?.isImpersonated) {
             syncedUser.isImpersonated = true;
           }
           if (!syncedUser.tenantLogo && syncedUser.tenant?.logoUrl) {
@@ -1795,6 +1848,8 @@ function AdminDashboardContent() {
       }).catch(err => console.error('Failed to sync user details:', err));
     }
     loadData(true);
+
+    return () => clearTimeout(safetyTimer);
   }, []);
 
   useEffect(() => {
@@ -1983,7 +2038,7 @@ function AdminDashboardContent() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('showMobilePreview');
-      if (saved !== null) setShowMobilePreview(saved !== 'false');
+      if (saved !== null) setShowMobilePreview(saved === 'true');
     }
   }, []);
 
@@ -2944,6 +2999,12 @@ function AdminDashboardContent() {
       return;
     }
 
+    const planAmount = Number(selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
+    if (planAmount > 0 && verifyReceivedAmount > planAmount) {
+      toast.error(`Received amount cannot exceed the plan standard price of ₹${planAmount.toLocaleString('en-IN')}.`);
+      return;
+    }
+
     setIsSubmittingVerify(true);
     try {
       const payload: any = {
@@ -3274,27 +3335,80 @@ function AdminDashboardContent() {
     );
   };
 
-  const upcomingAlerts = checklist.filter((item: any) => {
-    if (item.audit && item.audit.status !== 'PENDING') return false;
-    const dueDateMs = item.currentPeriod?.dueDate ? new Date(item.currentPeriod.dueDate).getTime() : null;
-    if (!dueDateMs) return false;
-    const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
-    return daysLeft >= 0 && daysLeft <= 7;
-  }).map((item: any) => ({
-    id: item.id,
-    title: `Checklist Task #${item.serialNo}`,
-    description: item.requirement,
-    deadlineAt: item.currentPeriod.dueDate
-  })).sort((a: any, b: any) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
+  const upcomingAlerts = useMemo(() => {
+    const list: any[] = [];
 
-  const overdueAlerts = checklist.filter((item: any) => {
-    if (item.audit?.status === 'OVERDUE') return true;
-    if (item.audit && item.audit.status !== 'PENDING') return false;
-    const dueDateMs = item.currentPeriod?.dueDate ? new Date(item.currentPeriod.dueDate).getTime() : null;
-    if (!dueDateMs) return false;
-    const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
-    return daysLeft < 0;
-  });
+    checklist.forEach((item: any) => {
+      const auditStatus = item.audit?.status || 'PENDING';
+      if (auditStatus !== 'PENDING') return;
+      const dueDateVal = item.currentPeriod?.dueDate || item.audit?.dueDate;
+      const dueDateMs = dueDateVal ? new Date(dueDateVal).getTime() : null;
+      if (!dueDateMs) return;
+      const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
+      if (daysLeft >= 0 && daysLeft <= 7) {
+        list.push({
+          id: item.id || item._id,
+          title: `Checklist Task #${item.serialNo}`,
+          description: item.requirement,
+          deadlineAt: dueDateVal,
+          daysLeft,
+          type: 'CHECKLIST'
+        });
+      }
+    });
+
+    alerts.forEach((alert: any) => {
+      if (alert.status !== 'OPEN') return;
+      const deadlineVal = alert.deadlineAt || alert.createdAt;
+      const dMs = deadlineVal ? new Date(deadlineVal).getTime() : null;
+      if (dMs) {
+        const daysLeft = Math.ceil((dMs - Date.now()) / (1000 * 3600 * 24));
+        if (daysLeft >= 0 && daysLeft <= 7) {
+          list.push({
+            id: alert.id || alert._id,
+            title: alert.title || `Compliance Alert (${alert.severity || 'HIGH'})`,
+            description: alert.description || alert.message || 'Action required',
+            deadlineAt: deadlineVal,
+            daysLeft,
+            type: 'ALERT'
+          });
+        }
+      }
+    });
+
+    return list.sort((a: any, b: any) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
+  }, [checklist, alerts]);
+
+  const overdueAlerts = useMemo(() => {
+    const list: any[] = [];
+
+    checklist.forEach((item: any) => {
+      if (item.audit?.status === 'OVERDUE') {
+        list.push(item);
+        return;
+      }
+      const auditStatus = item.audit?.status || 'PENDING';
+      if (auditStatus !== 'PENDING') return;
+      const dueDateVal = item.currentPeriod?.dueDate || item.audit?.dueDate;
+      const dueDateMs = dueDateVal ? new Date(dueDateVal).getTime() : null;
+      if (!dueDateMs) return;
+      const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
+      if (daysLeft < 0) {
+        list.push(item);
+      }
+    });
+
+    alerts.forEach((alert: any) => {
+      if (alert.status === 'OPEN' && alert.deadlineAt) {
+        const dMs = new Date(alert.deadlineAt).getTime();
+        if (dMs < Date.now()) {
+          list.push(alert);
+        }
+      }
+    });
+
+    return list;
+  }, [checklist, alerts]);
 
   const handleBulkExport = async (type: string, isZip: boolean) => {
     try {
@@ -4443,9 +4557,16 @@ function AdminDashboardContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-center items-center">
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-center items-center p-4">
         <Loader2 className="h-10 w-10 animate-spin text-primary-600 dark:text-primary-500 mb-4" />
-        <span>Loading Advisor Dashboard...</span>
+        <span className="font-semibold text-sm">Loading Advisor Dashboard...</span>
+        <button
+          type="button"
+          onClick={() => setLoading(false)}
+          className="mt-6 px-4 py-1.5 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white underline transition-colors cursor-pointer"
+        >
+          Taking longer than usual? Click to load immediately
+        </button>
       </div>
     );
   }
@@ -4454,13 +4575,13 @@ function AdminDashboardContent() {
     <div className={isDarkMode ? 'dark' : ''}>
 
       <div className="h-screen h-dvh overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex relative">
-        {/* Mobile Menu Toggle */}
-        <button
-          className="lg:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        >
-          {isMobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
-        </button>
+        {/* Mobile Sidebar Backdrop */}
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-40 lg:hidden animate-fade-in"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
 
         {/* Premium Sidebar (Blue in Light Mode) */}
         <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
@@ -4634,7 +4755,7 @@ function AdminDashboardContent() {
               {/* Mobile menu toggle */}
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                className="lg:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
                 title="Open Navigation"
               >
                 {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -5185,7 +5306,11 @@ function AdminDashboardContent() {
                                       itemStyle={{ color: '#fff', fontSize: '11px' }}
                                       labelStyle={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold' }}
                                     />
-                                    <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={36} />
+                                    <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={36}>
+                                      {complianceChartData.map((entry, index) => (
+                                        <Cell key={`compliance-cell-${index}`} fill={entry.fill} />
+                                      ))}
+                                    </Bar>
                                   </BarChart>
                                 </ResponsiveContainer>
                               </div>
@@ -5301,7 +5426,7 @@ function AdminDashboardContent() {
                                   <strong className="text-slate-900 dark:text-white">
                                     {dashboardMetric === 'sales'
                                       ? `₹${salesAndClientChartData.reduce((acc, curr) => acc + curr.value, 0).toLocaleString()}`
-                                      : `${salesAndClientChartData.reduce((acc, curr) => acc + curr.value, 0)}`}
+                                      : `${clients.length > 0 ? clients.length : salesAndClientChartData.reduce((acc, curr) => acc + curr.value, 0)}`}
                                   </strong>
                                 </span>
                                 <span>
@@ -5311,7 +5436,7 @@ function AdminDashboardContent() {
                                       ? dashboardMetric === 'sales'
                                         ? `₹${salesAndClientChartData[salesAndClientChartData.length - 1].value.toLocaleString()}`
                                         : `${salesAndClientChartData[salesAndClientChartData.length - 1].value} Onboarded`
-                                      : '—'}
+                                      : (dashboardMetric === 'clients' && clients.length > 0 ? `${clients.length} Onboarded` : '—')}
                                   </strong>
                                 </span>
                               </div>
@@ -6189,7 +6314,8 @@ function AdminDashboardContent() {
                           const planDays = (selectedVerifyPayment.plan?.durationMonths ? selectedVerifyPayment.plan.durationMonths * 30 : 30);
                           const difference = Math.max(0, planAmount - verifyReceivedAmount);
                           const isShortPayment = verifyReceivedAmount > 0 && verifyReceivedAmount < planAmount;
-                          const isFullMatch = verifyReceivedAmount >= planAmount && planAmount > 0;
+                          const isFullMatch = verifyReceivedAmount === planAmount && planAmount > 0;
+                          const isOverAmount = verifyReceivedAmount > planAmount && planAmount > 0;
                           const clientName = selectedVerifyPayment.client?.name || selectedVerifyPayment.client?.user?.name || selectedVerifyPayment.clientName || 'Client';
                           const planName = selectedVerifyPayment.plan?.name || selectedVerifyPayment.planName || 'Plan';
                           const proofUrl = selectedVerifyPayment.screenshotUrl || selectedVerifyPayment.receiptUrl;
@@ -6246,14 +6372,30 @@ function AdminDashboardContent() {
                                 {/* Actual Received Amount & UTR Inputs */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                                      Actual Amount Received in Bank (₹) *
-                                    </label>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                                        Actual Amount Received in Bank (₹) *
+                                      </label>
+                                      <span className="text-[10px] font-bold text-slate-400">
+                                        Max: ₹{planAmount.toLocaleString('en-IN')}
+                                      </span>
+                                    </div>
                                     <input
                                       type="number"
+                                      min={1}
+                                      max={planAmount}
                                       value={verifyReceivedAmount || ''}
                                       onChange={(e) => {
-                                        const val = parseFloat(e.target.value) || 0;
+                                        const raw = e.target.value;
+                                        if (raw === '') {
+                                          setVerifyReceivedAmount(0);
+                                          return;
+                                        }
+                                        let val = parseFloat(raw);
+                                        if (isNaN(val)) val = 0;
+                                        if (planAmount > 0 && val > planAmount) {
+                                          val = planAmount;
+                                        }
                                         setVerifyReceivedAmount(val);
                                         const diff = planAmount - val;
                                         if (diff > 0) {
@@ -6269,10 +6411,17 @@ function AdminDashboardContent() {
                                           setVerifyCustomDiscount(0);
                                         }
                                       }}
-                                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                      placeholder="e.g. 15000"
+                                      className={`w-full bg-white dark:bg-slate-800 border rounded-xl py-2 px-3 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${
+                                        isOverAmount
+                                          ? 'border-rose-500 focus:ring-rose-500 text-rose-600'
+                                          : 'border-slate-300 dark:border-white/10 focus:ring-primary-500'
+                                      }`}
+                                      placeholder={`Max: ₹${planAmount.toLocaleString('en-IN')}`}
                                       required
                                     />
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                      Maximum allowed: <strong>₹{planAmount.toLocaleString('en-IN')}</strong> (Plan Standard Price)
+                                    </p>
                                   </div>
 
                                   <div>
@@ -6296,6 +6445,16 @@ function AdminDashboardContent() {
                                     Approval Decision &amp; Service Assignment:
                                   </label>
 
+                                  {/* Over Amount Alert */}
+                                  {isOverAmount && (
+                                    <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-2.5 text-xs text-rose-700 dark:text-rose-300">
+                                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                                      <span>
+                                        <strong>Amount Exceeded:</strong> Received amount (₹{verifyReceivedAmount.toLocaleString('en-IN')}) cannot exceed the plan price of ₹{planAmount.toLocaleString('en-IN')}.
+                                      </span>
+                                    </div>
+                                  )}
+
                                   {/* Case 1: Full Payment Matched */}
                                   {isFullMatch && (
                                     <div
@@ -6312,10 +6471,10 @@ function AdminDashboardContent() {
                                       <div className="space-y-1">
                                         <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
                                           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                                          Case 1: Full Payment Matched (₹{verifyReceivedAmount.toLocaleString('en-IN')})
+                                          Case 1: Full Payment Matched (₹{planAmount.toLocaleString('en-IN')})
                                         </span>
                                         <p className="text-[11px] text-emerald-700/90 dark:text-emerald-400/90 leading-relaxed">
-                                          Full service of <strong>{planDays} Days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be activated. Standard invoice of ₹{verifyReceivedAmount.toLocaleString('en-IN')} will be generated.
+                                          Full service of <strong>{planDays} Days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be activated. Standard invoice of ₹{planAmount.toLocaleString('en-IN')} will be generated.
                                         </p>
                                       </div>
                                     </div>
@@ -6351,14 +6510,14 @@ function AdminDashboardContent() {
                                           <div className="space-y-1.5 flex-1">
                                             <div className="flex items-center justify-between">
                                               <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                                Case 2: Prorated Days Activation (₹{verifyReceivedAmount.toLocaleString('en-IN')} ke according validity)
+                                                Case 2: Prorated Service Activation (Adjusted Validity)
                                               </span>
                                               <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/10 text-blue-600 dark:text-blue-400">
                                                 {verifyCustomDays} Days
                                               </span>
                                             </div>
                                             <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                                              Service ₹{verifyReceivedAmount.toLocaleString('en-IN')} ke proportional calculated days ke liye active hogi. Custom plan invoice ₹{verifyReceivedAmount.toLocaleString('en-IN')} ka issue hoga.
+                                              Service validity will be prorated proportionally to the received amount ({verifyCustomDays} days). A custom prorated invoice for ₹{verifyReceivedAmount.toLocaleString('en-IN')} will be generated.
                                             </p>
 
                                             {verifyApprovalMode === 'PRORATED' && (
@@ -6400,14 +6559,14 @@ function AdminDashboardContent() {
                                           <div className="space-y-1.5 flex-1">
                                             <div className="flex items-center justify-between">
                                               <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                                Case 3: Baki Amount Ka Discount Dena (Full Month with Discount)
+                                                Case 3: Waive Remaining Balance as Discount (Full Period)
                                               </span>
                                               <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400">
                                                 Full {planDays} Days
                                               </span>
                                             </div>
                                             <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                                              Client ko <strong>full {planDays} days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> access milega. Invoice par show hoga: MRP ₹{planAmount.toLocaleString('en-IN')} - Special Discount ₹{verifyCustomDiscount.toLocaleString('en-IN')} = Paid ₹{verifyReceivedAmount.toLocaleString('en-IN')}.
+                                              Full subscription access for <strong>{planDays} days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be granted. The invoice will reflect: Standard Price ₹{planAmount.toLocaleString('en-IN')} less Special Discount ₹{verifyCustomDiscount.toLocaleString('en-IN')} = Net Amount Paid ₹{verifyReceivedAmount.toLocaleString('en-IN')}.
                                             </p>
 
                                             {verifyApprovalMode === 'DISCOUNT' && (
@@ -6459,7 +6618,7 @@ function AdminDashboardContent() {
                                   <button
                                     type="button"
                                     onClick={handleSubmitVerificationModal}
-                                    disabled={isSubmittingVerify || verifyReceivedAmount <= 0}
+                                    disabled={isSubmittingVerify || verifyReceivedAmount <= 0 || verifyReceivedAmount > planAmount}
                                     className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5"
                                   >
                                     {isSubmittingVerify ? (
@@ -6472,7 +6631,7 @@ function AdminDashboardContent() {
                                         <CheckCircle2 className="w-3.5 h-3.5" />
                                         <span>
                                           {isFullMatch
-                                            ? `Approve Full Plan (₹${verifyReceivedAmount.toLocaleString('en-IN')})`
+                                            ? `Approve Full Plan (₹${planAmount.toLocaleString('en-IN')})`
                                             : verifyApprovalMode === 'PRORATED'
                                             ? `Approve Prorated (${verifyCustomDays} Days)`
                                             : `Approve with ₹${verifyCustomDiscount.toLocaleString('en-IN')} Discount`}
@@ -6518,32 +6677,37 @@ function AdminDashboardContent() {
                     });
 
                     return (
-                      <div className={`w-full ${showMobilePreview ? 'lg:flex items-start' : ''}`}>
-                        <div className="flex-1 space-y-6 lg:pr-6">
-                          {/* Header */}
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h2 className="text-lg font-bold text-slate-900 dark:text-white">SEBI Checklist</h2>
-                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Manage and track your compliance checklist</p>
-                            </div>
-                            <div className="flex items-center space-x-2.5">
-                              <button
-                                type="button"
-                                onClick={() => setShowCalendarModal(true)}
-                                className="flex items-center space-x-2 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition active:scale-95"
-                              >
-                                <CalendarIcon className="w-4 h-4 text-white" />
-                                <span>Calendar View</span>
-                              </button>
-                              <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10">
-                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
-                                <div className="relative">
-                                  <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                  <div className="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary-600"></div>
-                                </div>
-                              </label>
-                            </div>
+                      <div className="w-full space-y-6">
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h2 className="text-lg font-bold text-slate-900 dark:text-white">SEBI Checklist</h2>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Manage and track your compliance checklist</p>
                           </div>
+                          <div className="flex items-center space-x-2.5">
+                            <button
+                              type="button"
+                              onClick={() => setShowCalendarModal(true)}
+                              className="flex items-center space-x-2 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition active:scale-95"
+                            >
+                              <CalendarIcon className="w-4 h-4 text-white" />
+                              <span>Calendar View</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={toggleMobilePreview}
+                              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-sm ${
+                                showMobilePreview
+                                  ? 'bg-blue-600 text-white border-blue-500 shadow-blue-500/20'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-slate-700'
+                              }`}
+                              title="Client Mobile Simulator"
+                            >
+                              <Smartphone className="w-3.5 h-3.5" />
+                              <span>{showMobilePreview ? 'Close Preview' : 'Mobile Preview'}</span>
+                            </button>
+                          </div>
+                        </div>
 
                           {/* Info banner about auto-monitored items */}
                           <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary-500/5 border border-primary-500/20">
@@ -6691,10 +6855,31 @@ function AdminDashboardContent() {
                               </div>
                             );
                           })()}
-                        </div>
                         {showMobilePreview && (
-                          <div className="hidden lg:block w-[350px] shrink-0 border-l border-slate-300 dark:border-white/5 pl-6 h-[calc(100vh-120px)] sticky top-[90px] overflow-y-auto overflow-x-hidden">
-                            <MobilePreview mode="CHECKLIST" checklistItems={checklistSubTab === 'history' ? checklistHistory : activeList} title={NAV_CONFIG.find(n => n.tab === activeTab)?.label} />
+                          <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+                            <div
+                              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+                              onClick={() => setShowMobilePreview(false)}
+                            />
+                            <div className="relative w-full max-w-[400px] bg-slate-900 border-l border-white/10 shadow-2xl p-4 flex flex-col h-full z-10 animate-in slide-in-from-right duration-200">
+                              <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10">
+                                <div className="flex items-center space-x-2">
+                                  <Smartphone className="w-4 h-4 text-blue-400" />
+                                  <span className="text-xs font-bold text-white uppercase tracking-wider">Client Mobile Simulator</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowMobilePreview(false)}
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition"
+                                  title="Close Preview"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex-1 overflow-y-auto overflow-x-hidden flex justify-center py-2">
+                                <MobilePreview mode="CHECKLIST" checklistItems={checklistSubTab === 'history' ? checklistHistory : activeList} title={NAV_CONFIG.find(n => n.tab === activeTab)?.label} />
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -6704,22 +6889,27 @@ function AdminDashboardContent() {
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
-                    <div className={`w-full ${showMobilePreview ? 'lg:flex items-start' : ''}`}>
-                      <div className="flex-1 space-y-6 lg:pr-6">
-                        {/* Header */}
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
-                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
-                          </div>
-                          <div className="flex space-x-2">
-                            <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 mr-2">
-                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
-                              <div className="relative">
-                                <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                <div className="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary-600"></div>
-                              </div>
-                            </label>
+                    <div className="w-full space-y-6">
+                      {/* Header */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            type="button"
+                            onClick={toggleMobilePreview}
+                            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-sm mr-2 ${
+                              showMobilePreview
+                                ? 'bg-blue-600 text-white border-blue-500 shadow-blue-500/20'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                            title="Client Mobile Simulator"
+                          >
+                            <Smartphone className="w-3.5 h-3.5" />
+                            <span>{showMobilePreview ? 'Close Preview' : 'Mobile Preview'}</span>
+                          </button>
                             <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-4 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
                               {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                               <span>Download Periodic Report</span>
@@ -7277,28 +7467,49 @@ function AdminDashboardContent() {
                             </div>
                           );
                         })()}
+                        {showMobilePreview && (
+                          <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+                            <div
+                              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+                              onClick={() => setShowMobilePreview(false)}
+                            />
+                            <div className="relative w-full max-w-[400px] bg-slate-900 border-l border-white/10 shadow-2xl p-4 flex flex-col h-full z-10 animate-in slide-in-from-right duration-200">
+                              <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10">
+                                <div className="flex items-center space-x-2">
+                                  <Smartphone className="w-4 h-4 text-blue-400" />
+                                  <span className="text-xs font-bold text-white uppercase tracking-wider">Client Mobile Simulator</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowMobilePreview(false)}
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition"
+                                  title="Close Preview"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex-1 overflow-y-auto overflow-x-hidden flex justify-center py-2">
+                                <MobilePreview
+                                  mode="COMPLIANCE"
+                                  complianceItems={
+                                    complianceTab === 'overview' ? [
+                                      { _isOverview: true, title: 'Complaints', value: `${complaints.filter((c: any) => c.status === 'OPEN').length}`, suffix: `Open (${complaints.filter((c: any) => c.status === 'CLOSED').length} Resolved)`, colorType: 'primary' },
+                                      { _isOverview: true, title: 'BSE Penalties', value: `₹${(penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').reduce((acc: number, p: any) => acc + p.amount, 0)).toLocaleString()}`, suffix: `${penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').length} Pending`, colorType: 'rose' },
+                                      { _isOverview: true, title: 'Checklist', value: `${checklist.length > 0 ? Math.round((checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length / checklist.length) * 100) : 0}%`, suffix: `${checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length} Compliant`, colorType: 'emerald' },
+                                      { _isOverview: true, title: 'Active Alerts', value: `${alerts.filter((a: any) => a.status === 'OPEN').length}`, suffix: `${alerts.filter((a: any) => a.status === 'OPEN' && a.severity === 'HIGH').length} High Severity`, colorType: 'amber' }
+                                    ] :
+                                      complianceTab === 'alerts' ? alerts :
+                                        complianceTab === 'penalties' ? penalties :
+                                          complianceTab === 'complaints' ? complaints :
+                                            checklistHistory
+                                  }
+                                  title={NAV_CONFIG.find(n => n.tab === activeTab)?.label}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      {showMobilePreview && (
-                        <div className="hidden lg:block w-[350px] shrink-0 border-l border-slate-300 dark:border-white/5 pl-6 h-[calc(100vh-120px)] sticky top-[90px] overflow-y-auto overflow-x-hidden">
-                          <MobilePreview
-                            mode="COMPLIANCE"
-                            complianceItems={
-                              complianceTab === 'overview' ? [
-                                { _isOverview: true, title: 'Complaints', value: `${complaints.filter((c: any) => c.status === 'OPEN').length}`, suffix: `Open (${complaints.filter((c: any) => c.status === 'CLOSED').length} Resolved)`, colorType: 'primary' },
-                                { _isOverview: true, title: 'BSE Penalties', value: `₹${(penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').reduce((acc: number, p: any) => acc + p.amount, 0)).toLocaleString()}`, suffix: `${penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').length} Pending`, colorType: 'rose' },
-                                { _isOverview: true, title: 'Checklist', value: `${checklist.length > 0 ? Math.round((checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length / checklist.length) * 100) : 0}%`, suffix: `${checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length} Compliant`, colorType: 'emerald' },
-                                { _isOverview: true, title: 'Active Alerts', value: `${alerts.filter((a: any) => a.status === 'OPEN').length}`, suffix: `${alerts.filter((a: any) => a.status === 'OPEN' && a.severity === 'HIGH').length} High Severity`, colorType: 'amber' }
-                              ] :
-                                complianceTab === 'alerts' ? alerts :
-                                  complianceTab === 'penalties' ? penalties :
-                                    complianceTab === 'complaints' ? complaints :
-                                      checklistHistory
-                            }
-                            title={NAV_CONFIG.find(n => n.tab === activeTab)?.label}
-                          />
-                        </div>
-                      )}
-                    </div>
                   )}
 
                   {/* ====================================================
@@ -11670,6 +11881,595 @@ function AdminDashboardContent() {
                   </div>
                 </div>
               )}
+
+              {/* ====================================================
+                  ACTIVITY & AUDIT LOGS DESK TAB
+              ==================================================== */}
+              {activeTab === 'auditLogs' && (() => {
+                const filteredAuditLogs = activityLogs.filter((log: any) => {
+                  if (auditSearchQuery.trim()) {
+                    const q = auditSearchQuery.toLowerCase();
+                    const matchSearch =
+                      (log.title || '').toLowerCase().includes(q) ||
+                      (log.description || '').toLowerCase().includes(q) ||
+                      (log.action || '').toLowerCase().includes(q) ||
+                      (log.category || log.module || '').toLowerCase().includes(q) ||
+                      (log.user?.name || '').toLowerCase().includes(q) ||
+                      (log.user?.email || '').toLowerCase().includes(q) ||
+                      (log.ipAddress || '').toLowerCase().includes(q) ||
+                      (log.targetClient?.name || '').toLowerCase().includes(q) ||
+                      (log.targetClient?.mobile || '').toLowerCase().includes(q);
+                    if (!matchSearch) return false;
+                  }
+
+                  if (auditCategoryFilter !== 'ALL') {
+                    const cat = (log.category || log.module || '').toUpperCase();
+                    if (auditCategoryFilter === 'PAYMENT' && !['PAYMENT', 'PAYMENTS', 'SUBSCRIPTION'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'KYC_COMPLIANCE' && !['KYC_COMPLIANCE', 'COMPLIANCE', 'KYC'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'STAFF_ACTION' && !['STAFF_ACTION', 'STAFF', 'USERS'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'AUTH' && !['AUTH', 'LOGIN', 'LOGOUT'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'SYSTEM' && !['SYSTEM', 'TENANTS'].includes(cat)) return false;
+                  }
+
+                  if (auditRoleFilter !== 'ALL') {
+                    const role = (log.user?.role || log.actorType || '').toUpperCase();
+                    if (auditRoleFilter === 'ADMIN' && !role.includes('ADMIN')) return false;
+                    if (auditRoleFilter === 'STAFF' && (!role.includes('STAFF') && !role.includes('OFFICER') && !role.includes('RESEARCHER'))) return false;
+                    if (auditRoleFilter === 'CLIENT' && !role.includes('CLIENT')) return false;
+                    if (auditRoleFilter === 'SYSTEM' && !role.includes('SYSTEM')) return false;
+                  }
+
+                  return true;
+                });
+
+                const auditPageSize = 25;
+                const totalAuditPages = Math.ceil(filteredAuditLogs.length / auditPageSize) || 1;
+                const currentSafePage = Math.min(Math.max(1, auditCurrentPage), totalAuditPages);
+                const paginatedLogs = filteredAuditLogs.slice((currentSafePage - 1) * auditPageSize, currentSafePage * auditPageSize);
+
+                const exportAuditLogsCSV = () => {
+                  try {
+                    const headers = ['Timestamp', 'Source', 'Role', 'User Name', 'User Email', 'Category', 'Action', 'Title', 'Description', 'Status', 'IP Address', 'Device'];
+                    const rows = filteredAuditLogs.map((l: any) => [
+                      `"${new Date(l.timestamp).toLocaleString('en-IN')}"`,
+                      `"${l.source || 'ACTIVITY'}"`,
+                      `"${l.user?.role || l.actorType || 'N/A'}"`,
+                      `"${(l.user?.name || '').replace(/"/g, '""')}"`,
+                      `"${(l.user?.email || '').replace(/"/g, '""')}"`,
+                      `"${l.category || l.module || 'GENERAL'}"`,
+                      `"${l.action || 'EVENT'}"`,
+                      `"${(l.title || '').replace(/"/g, '""')}"`,
+                      `"${(l.description || '').replace(/"/g, '""')}"`,
+                      `"${l.status || 'SUCCESS'}"`,
+                      `"${l.ipAddress || '127.0.0.1'}"`,
+                      `"${l.device || 'Desktop'}"`
+                    ]);
+                    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', encodedUri);
+                    link.setAttribute('download', `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    toast.success('Audit logs exported to CSV');
+                  } catch (e: any) {
+                    toast.error('Failed to export CSV: ' + e.message);
+                  }
+                };
+
+                const totalStaffActions = activityLogs.filter((l: any) => {
+                  const r = (l.user?.role || l.actorType || '').toUpperCase();
+                  return r.includes('ADMIN') || r.includes('STAFF') || r.includes('OFFICER') || l.source === 'AUDIT';
+                }).length;
+
+                const totalPayments = activityLogs.filter((l: any) => {
+                  const cat = (l.category || l.module || '').toUpperCase();
+                  return ['PAYMENT', 'PAYMENTS', 'SUBSCRIPTION'].includes(cat);
+                }).length;
+
+                const totalCompliance = activityLogs.filter((l: any) => {
+                  const cat = (l.category || l.module || '').toUpperCase();
+                  return ['KYC_COMPLIANCE', 'COMPLIANCE', 'KYC'].includes(cat);
+                }).length;
+
+                return (
+                  <div className="w-full space-y-6">
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
+                      <div>
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                            <Activity className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Activity & Audit Logs</h2>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              Tamper-evident trail of administrative updates, staff operations, payments & compliance events
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2.5 self-end sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLoadingAuditLogs(true);
+                            api.getTenantAuditLogs()
+                              .then(res => {
+                                if (res.success && Array.isArray(res.data)) {
+                                  setActivityLogs(res.data);
+                                  toast.success(`Loaded ${res.data.length} activity records`);
+                                }
+                              })
+                              .catch(() => toast.error('Failed to refresh logs'))
+                              .finally(() => setLoadingAuditLogs(false));
+                          }}
+                          disabled={loadingAuditLogs}
+                          className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold border border-slate-300 dark:border-white/10 transition shadow-xs disabled:opacity-50"
+                          title="Refresh Activity Stream"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${loadingAuditLogs ? 'animate-spin' : ''}`} />
+                          <span>Refresh</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={exportAuditLogsCSV}
+                          disabled={filteredAuditLogs.length === 0}
+                          className="flex items-center space-x-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition disabled:opacity-50 active:scale-95"
+                          title="Export Filtered Logs to CSV for SEBI Audits"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Metric Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Total Logged Events</span>
+                          <span className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400"><Layers className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {activityLogs.length.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Complete chronological audit ledger</p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Staff & Admin Operations</span>
+                          <span className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400"><Users className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {totalStaffActions.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-purple-600 dark:text-purple-400 mt-1 font-medium">Internal staff activity trace</p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Payments & Invoicing</span>
+                          <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"><CreditCard className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {totalPayments.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium">QR verifications, invoices & plans</p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Compliance & KYC Audits</span>
+                          <span className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400"><ShieldCheck className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {totalCompliance.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-medium">Checklist updates & penalties</p>
+                      </div>
+                    </div>
+
+                    {/* Filter Bar */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-3.5 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={auditSearchQuery}
+                          onChange={e => {
+                            setAuditSearchQuery(e.target.value);
+                            setAuditCurrentPage(1);
+                          }}
+                          placeholder="Search action, title, description, user, client, IP..."
+                          className="w-full pl-10 pr-9 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        {auditSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuditSearchQuery('');
+                              setAuditCurrentPage(1);
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Category Dropdown */}
+                        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-white/10">
+                          <Filter className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                          <select
+                            value={auditCategoryFilter}
+                            onChange={e => {
+                              setAuditCategoryFilter(e.target.value);
+                              setAuditCurrentPage(1);
+                            }}
+                            className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                          >
+                            <option value="ALL">All Categories</option>
+                            <option value="STAFF_ACTION">Staff & Admin Actions</option>
+                            <option value="PAYMENT">Payments & Billing</option>
+                            <option value="KYC_COMPLIANCE">Compliance & KYC</option>
+                            <option value="AUTH">Authentication / Logins</option>
+                            <option value="SYSTEM">System & Settings</option>
+                          </select>
+                        </div>
+
+                        {/* Actor Role Dropdown */}
+                        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-white/10">
+                          <User className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                          <select
+                            value={auditRoleFilter}
+                            onChange={e => {
+                              setAuditRoleFilter(e.target.value);
+                              setAuditCurrentPage(1);
+                            }}
+                            className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                          >
+                            <option value="ALL">All Actors</option>
+                            <option value="ADMIN">Admin Only</option>
+                            <option value="STAFF">Staff Only</option>
+                            <option value="CLIENT">Clients Only</option>
+                            <option value="SYSTEM">System Only</option>
+                          </select>
+                        </div>
+
+                        {(auditSearchQuery || auditCategoryFilter !== 'ALL' || auditRoleFilter !== 'ALL') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuditSearchQuery('');
+                              setAuditCategoryFilter('ALL');
+                              setAuditRoleFilter('ALL');
+                              setAuditCurrentPage(1);
+                            }}
+                            className="px-2.5 py-1.5 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition font-medium"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Results Counter */}
+                    <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
+                      <span>
+                        Showing <strong className="text-slate-900 dark:text-white">{filteredAuditLogs.length === 0 ? 0 : (currentSafePage - 1) * auditPageSize + 1}</strong> to{' '}
+                        <strong className="text-slate-900 dark:text-white">{Math.min(currentSafePage * auditPageSize, filteredAuditLogs.length)}</strong> of{' '}
+                        <strong className="text-slate-900 dark:text-white">{filteredAuditLogs.length}</strong> activity entries
+                      </span>
+                      {loadingAuditLogs && (
+                        <span className="flex items-center space-x-1 text-blue-500 font-medium">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Updating stream...</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Table View */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-xs overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                          <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-white/10 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold">
+                            <tr>
+                              <th className="py-3 px-4">Date & Time</th>
+                              <th className="py-3 px-4">Actor</th>
+                              <th className="py-3 px-4">Category</th>
+                              <th className="py-3 px-4">Action & Summary</th>
+                              <th className="py-3 px-4">Origin / IP</th>
+                              <th className="py-3 px-4 text-center">Status</th>
+                              <th className="py-3 px-4 text-right">Details</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                            {paginatedLogs.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="py-12 text-center text-slate-400 dark:text-slate-500">
+                                  <div className="flex flex-col items-center justify-center space-y-2">
+                                    <Activity className="w-8 h-8 text-slate-300 dark:text-slate-600 stroke-[1.5]" />
+                                    <p className="font-semibold text-sm text-slate-600 dark:text-slate-300">No activity logs found</p>
+                                    <p className="text-xs text-slate-400">
+                                      {auditSearchQuery || auditCategoryFilter !== 'ALL' || auditRoleFilter !== 'ALL'
+                                        ? 'Try clearing the search or category filters.'
+                                        : 'All future actions by admin, staff, and clients will automatically be logged here.'}
+                                    </p>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
+                              paginatedLogs.map((log: any, idx: number) => {
+                                const logDate = new Date(log.timestamp);
+                                const isRecent = Date.now() - logDate.getTime() < 3600000;
+                                const role = (log.user?.role || log.actorType || 'ADMIN').toUpperCase();
+
+                                // Category badge style
+                                const cat = (log.category || log.module || 'SYSTEM').toUpperCase();
+                                let catColor = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10';
+                                if (['PAYMENT', 'PAYMENTS', 'SUBSCRIPTION'].includes(cat)) {
+                                  catColor = 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/40';
+                                } else if (['KYC_COMPLIANCE', 'COMPLIANCE', 'KYC'].includes(cat)) {
+                                  catColor = 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800/40';
+                                } else if (['STAFF_ACTION', 'STAFF', 'USERS'].includes(cat)) {
+                                  catColor = 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800/40';
+                                } else if (['AUTH', 'LOGIN', 'LOGOUT'].includes(cat)) {
+                                  catColor = 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800/40';
+                                }
+
+                                // Role badge style
+                                let roleBadge = 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/40';
+                                if (role.includes('ADMIN')) {
+                                  roleBadge = 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/40';
+                                } else if (role.includes('CLIENT')) {
+                                  roleBadge = 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/40';
+                                } else if (role.includes('SYSTEM')) {
+                                  roleBadge = 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10';
+                                }
+
+                                const isSuccess = (log.status || 'SUCCESS').toUpperCase() === 'SUCCESS';
+
+                                return (
+                                  <tr key={log.id || log._id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                                    {/* Date & Time */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <div className="font-semibold text-slate-900 dark:text-white">
+                                        {logDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">
+                                        {logDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                                      </div>
+                                    </td>
+
+                                    {/* Actor */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <div className="flex items-center space-x-2">
+                                        <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs shrink-0">
+                                          {(log.user?.name || log.actorType || 'U').charAt(0).toUpperCase()}
+                                        </div>
+                                        <div>
+                                          <div className="font-bold text-slate-900 dark:text-white truncate max-w-[130px]" title={log.user?.name || log.user?.email || 'System'}>
+                                            {log.user?.name || log.user?.email || 'System'}
+                                          </div>
+                                          <span className={`inline-block px-1.5 py-0.2 text-[10px] font-bold rounded-md border ${roleBadge}`}>
+                                            {role}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </td>
+
+                                    {/* Category */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-md border ${catColor}`}>
+                                        {cat}
+                                      </span>
+                                    </td>
+
+                                    {/* Action & Summary */}
+                                    <td className="py-3 px-4 min-w-[240px]">
+                                      <div className="flex items-center space-x-1.5">
+                                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200 text-xs">
+                                          {log.action}
+                                        </span>
+                                        {log.source === 'AUDIT' && (
+                                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 dark:bg-white/5 text-slate-500 border border-slate-200 dark:border-white/10">
+                                            AUDIT
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-slate-600 dark:text-slate-300 text-xs mt-0.5 line-clamp-1" title={log.title || log.description}>
+                                        {log.title || log.description}
+                                      </p>
+                                      {log.targetClient && (
+                                        <div className="mt-1 flex items-center space-x-1 text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                                          <User className="w-3 h-3" />
+                                          <span>Target: {log.targetClient.name} ({log.targetClient.mobile || log.targetClient.email})</span>
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Origin / IP */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <div className="font-mono text-slate-600 dark:text-slate-400 text-xs">
+                                        {log.ipAddress || '127.0.0.1'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 truncate max-w-[120px]">
+                                        {log.device || 'Desktop'} {log.browser ? `• ${log.browser}` : ''}
+                                      </div>
+                                    </td>
+
+                                    {/* Status */}
+                                    <td className="py-3 px-4 whitespace-nowrap text-center">
+                                      {isSuccess ? (
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          <span>SUCCESS</span>
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                                          <AlertCircle className="w-3 h-3" />
+                                          <span>FAILED</span>
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    {/* Actions */}
+                                    <td className="py-3 px-4 whitespace-nowrap text-right">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedAuditLog(log)}
+                                        className="p-1.5 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-blue-500/10 hover:text-blue-600 dark:hover:text-blue-400 text-slate-600 dark:text-slate-400 transition"
+                                        title="View Full Audit Payload"
+                                      >
+                                        <Eye className="w-4 h-4" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Pagination Footer */}
+                      {totalAuditPages > 1 && (
+                        <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => setAuditCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentSafePage <= 1}
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                          >
+                            Previous
+                          </button>
+
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                            Page <strong className="text-slate-900 dark:text-white">{currentSafePage}</strong> of{' '}
+                            <strong className="text-slate-900 dark:text-white">{totalAuditPages}</strong>
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => setAuditCurrentPage(p => Math.min(totalAuditPages, p + 1))}
+                            disabled={currentSafePage >= totalAuditPages}
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Inspect Audit Log Modal */}
+                    {selectedAuditLog && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-fade-in">
+                        <div className="bg-white dark:bg-[#0f1523] border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+                          <div className="flex justify-between items-center p-5 border-b border-slate-200 dark:border-white/10">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                                <Activity className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h3 className="font-bold text-slate-900 dark:text-white text-base">Audit Event Inspector</h3>
+                                <p className="text-[11px] text-slate-500 font-mono mt-0.5">ID: {selectedAuditLog.id || selectedAuditLog._id}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setSelectedAuditLog(null)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+
+                          <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                            {/* Key info summary */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-xl border border-slate-200 dark:border-white/5 text-xs">
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Action</span>
+                                <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedAuditLog.action}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Category</span>
+                                <span className="font-bold text-slate-900 dark:text-white">{selectedAuditLog.category || selectedAuditLog.module}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Actor Role</span>
+                                <span className="font-bold text-purple-600 dark:text-purple-400">{selectedAuditLog.user?.role || selectedAuditLog.actorType || 'ADMIN'}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{selectedAuditLog.status || 'SUCCESS'}</span>
+                              </div>
+                            </div>
+
+                            {/* Details text */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Event Title & Notes</label>
+                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5 text-xs text-slate-800 dark:text-slate-200">
+                                <div className="font-bold mb-1">{selectedAuditLog.title}</div>
+                                {selectedAuditLog.description && <p className="text-slate-600 dark:text-slate-400">{selectedAuditLog.description}</p>}
+                              </div>
+                            </div>
+
+                            {/* User & Client details */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Triggered By</span>
+                                <div className="font-semibold text-slate-900 dark:text-white">{selectedAuditLog.user?.name || 'System / Admin'}</div>
+                                <div className="text-[11px] text-slate-500 font-mono">{selectedAuditLog.user?.email || 'N/A'}</div>
+                              </div>
+                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Network & Device</span>
+                                <div className="font-mono text-slate-900 dark:text-white">{selectedAuditLog.ipAddress || '127.0.0.1'}</div>
+                                <div className="text-[11px] text-slate-500">{selectedAuditLog.device || 'Desktop'} {selectedAuditLog.browser ? `(${selectedAuditLog.browser})` : ''}</div>
+                              </div>
+                            </div>
+
+                            {/* Metadata / Payload */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Technical Payload / State Change</label>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(selectedAuditLog.metadata || selectedAuditLog, null, 2));
+                                    toast.success('JSON payload copied to clipboard');
+                                  }}
+                                  className="text-[10px] text-blue-500 hover:text-blue-400 font-bold flex items-center space-x-1"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy JSON</span>
+                                </button>
+                              </div>
+                              <pre className="p-3.5 bg-slate-950 text-emerald-400 rounded-xl font-mono text-[11px] overflow-x-auto max-h-56 border border-slate-800 leading-relaxed">
+                                {JSON.stringify(selectedAuditLog.metadata || { oldValue: selectedAuditLog.oldValue, newValue: selectedAuditLog.newValue }, null, 2)}
+                              </pre>
+                            </div>
+                          </div>
+
+                          <div className="p-4 border-t border-slate-200 dark:border-white/10 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAuditLog(null)}
+                              className="px-5 py-2 text-xs font-bold bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl transition"
+                            >
+                              Close
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* NON-ADMIN CLIENT VIEWS */}
               {activeTab === 'complaintDataView' && (

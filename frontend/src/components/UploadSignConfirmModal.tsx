@@ -447,7 +447,7 @@ export default function UploadSignConfirmModal({
           {/* Question / Notice */}
           <div className="text-center pt-1">
             <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-              Kya aap is PDF report ko digitally sign karna chahte hain?
+              Do you want to digitally sign this report?
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
               Would you like to apply your official digital signature before publishing, or upload the original PDF file as-is?

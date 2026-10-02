@@ -1169,15 +1169,22 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
     const fullPlanPrice = Number(plan?.amount || plan?.price || payment.amount || 0);
 
     if (status === 'SUCCESS') {
+      if (receivedAmount !== undefined && fullPlanPrice > 0 && Number(receivedAmount) > fullPlanPrice) {
+        return res.status(400).json({
+          success: false,
+          message: `Received amount (₹${receivedAmount}) cannot be greater than the plan price of ₹${fullPlanPrice}.`
+        });
+      }
+
       if (approvalMode === 'PRORATED') {
-        effectiveAmount = receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount;
+        effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPrice || Number(receivedAmount)) : effectiveAmount;
         effectiveValidityDays = customValidityDays !== undefined && Number(customValidityDays) > 0
           ? Number(customValidityDays)
           : Math.max(1, Math.round((effectiveAmount / (fullPlanPrice || effectiveAmount)) * defaultValidityDays));
         effectiveDiscount = 0;
         effectiveRemarks = remarks || `Prorated service activated for ${effectiveValidityDays} days based on received amount ₹${effectiveAmount}.`;
       } else if (approvalMode === 'DISCOUNT') {
-        effectiveAmount = receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount;
+        effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPrice || Number(receivedAmount)) : effectiveAmount;
         effectiveValidityDays = defaultValidityDays;
         effectiveDiscount = discountApplied !== undefined
           ? Number(discountApplied)
@@ -1185,9 +1192,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
         effectiveRemarks = remarks || `Special discount applied: ₹${effectiveDiscount}. Full ${defaultValidityDays} days service activated for ₹${effectiveAmount}.`;
       } else {
         // FULL match / standard approval
-        if (receivedAmount !== undefined && Number(receivedAmount) > 0) {
-          effectiveAmount = Number(receivedAmount);
-        }
+        effectiveAmount = fullPlanPrice > 0 ? fullPlanPrice : (receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount);
         effectiveValidityDays = defaultValidityDays;
         effectiveDiscount = 0;
         effectiveRemarks = remarks || 'Verified by Compliance Staff';
@@ -1332,6 +1337,29 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       newValue: updatedPayment,
       ipAddress: req.ip
     });
+
+    logActivity({
+      tenantId,
+      actorType: 'ADMIN',
+      actorId: req.user?.id,
+      actorName: `${(req.user as any)?.firstName || ''} ${(req.user as any)?.lastName || ''}`.trim() || 'Admin',
+      actorEmail: req.user?.email || undefined,
+      targetClientId: payment.clientId,
+      category: 'PAYMENT',
+      action: status === 'SUCCESS' ? 'PAYMENT_VERIFIED' : 'PAYMENT_REJECTED',
+      title: status === 'SUCCESS' ? 'QR / Manual Payment Verified' : 'Manual Payment Rejected',
+      description: status === 'SUCCESS'
+        ? `Payment verified. Amount Received: Rs.${receivedAmount || payment.amount}. Status: ${status}`
+        : `Payment rejected. Reason: ${remarks || 'Verification Failed'}`,
+      status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+      metadata: {
+        paymentId: payment._id?.toString() || payment.id,
+        receivedAmount,
+        approvalMode,
+        discountApplied
+      },
+      req
+    }).catch(() => {});
 
     return res.status(200).json({
       success: true,

@@ -4,6 +4,7 @@ import dynamicDb from '../config/db';
 import { calculateNextDueDate, getCompliancePeriod } from '../utils/complianceDateHelper';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
+import { logActivity } from '../services/activityService';
 import { calculateCompleteness } from './adminController';
 import { syncTenantToRemote, syncAllTenantsToRemote } from '../services/tenantSyncDispatcher';
 
@@ -1481,6 +1482,37 @@ export const updateAuditStatus = async (req: AuthenticatedRequest, res: Response
       );
     }
 
+    logAudit({
+      tenantId,
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'COMPLIANCE',
+      oldValue: { status: previousStatus },
+      newValue: { status, requirement: requirement.requirement, remarks: officerRemarks },
+      ipAddress: req.ip
+    }).catch(() => {});
+
+    logActivity({
+      tenantId,
+      actorType: 'STAFF',
+      actorId: req.user?.id,
+      actorName: updatedByName,
+      actorEmail: req.user?.email || undefined,
+      category: 'KYC_COMPLIANCE',
+      action: 'COMPLIANCE_STATUS_UPDATE',
+      title: `SEBI Checklist Marked as ${status}`,
+      description: `Rule: "${requirement.requirement}". Remarks: ${officerRemarks || 'No remarks'}`,
+      status: status === 'COMPLIANT' ? 'SUCCESS' : (status === 'NON_COMPLIANT' ? 'FAILED' : 'INFO'),
+      metadata: {
+        requirementId,
+        auditId: audit._id?.toString() || audit.id,
+        previousStatus,
+        newStatus: status,
+        periodLabel: period.label
+      },
+      req
+    }).catch(() => {});
+
     syncTenantToRemote(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => {});
 
     return res.status(200).json({
@@ -1649,6 +1681,36 @@ export const resolvePenalty = async (req: AuthenticatedRequest, res: Response) =
       }
     );
     
+    logAudit({
+      tenantId: penalty.tenantId.toString(),
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'COMPLIANCE',
+      oldValue: { status: 'PENDING_PAYMENT' },
+      newValue: { status: 'RESOLVED', resolutionType, paymentRef, remarks },
+      ipAddress: req.ip
+    }).catch(() => {});
+
+    logActivity({
+      tenantId: penalty.tenantId,
+      actorType: 'STAFF',
+      actorId: req.user?.id,
+      actorName: updatedByName,
+      actorEmail: req.user?.email || undefined,
+      category: 'KYC_COMPLIANCE',
+      action: 'PENALTY_RESOLVED',
+      title: `SEBI Penalty Resolved (${resolutionType})`,
+      description: `Amount: Rs.${penalty.amount}. Ref: ${paymentRef}. Remarks: ${remarks || ''}`,
+      status: 'SUCCESS',
+      metadata: {
+        penaltyId: penalty._id?.toString() || penalty.id,
+        resolutionType,
+        paymentRef,
+        amount: penalty.amount
+      },
+      req
+    }).catch(() => {});
+
     syncTenantToRemote(penalty.tenantId.toString(), { reason: 'PENALTY_RESOLVED' }).catch(() => {});
 
     return res.status(200).json({

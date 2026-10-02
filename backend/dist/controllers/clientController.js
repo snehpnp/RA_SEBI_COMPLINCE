@@ -1244,6 +1244,28 @@ const verifyManualPayment = async (req, res) => {
             newValue: updatedPayment,
             ipAddress: req.ip
         });
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: 'ADMIN',
+            actorId: req.user?.id,
+            actorName: `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || 'Admin',
+            actorEmail: req.user?.email || null,
+            targetClientId: payment.clientId,
+            category: 'PAYMENT',
+            action: status === 'SUCCESS' ? 'PAYMENT_VERIFIED' : 'PAYMENT_REJECTED',
+            title: status === 'SUCCESS' ? 'QR / Manual Payment Verified' : 'Manual Payment Rejected',
+            description: status === 'SUCCESS'
+                ? `Payment verified. Amount Received: Rs.${receivedAmount || payment.amount}. Status: ${status}`
+                : `Payment rejected. Reason: ${rejectionReason || 'Verification Failed'}`,
+            status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+            metadata: {
+                paymentId: payment._id?.toString() || payment.id,
+                receivedAmount,
+                approvalMode,
+                discountApplied
+            },
+            req
+        }).catch(() => { });
         return res.status(200).json({
             success: true,
             message: `Manual payment verification processed as ${status}.`,
