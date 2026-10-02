@@ -2151,7 +2151,7 @@ const createPlan = async (req, res) => {
         if (!category) {
             category = await db_1.default.PlanCategory.findOne({ tenantId }).lean();
             if (!category) {
-                const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Advisory Category';
+                const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Service Category';
                 category = await db_1.default.PlanCategory.create({
                     tenantId,
                     name: cleanName,
@@ -2337,7 +2337,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
+    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2396,6 +2396,12 @@ const updateTenantSettings = async (req, res) => {
         if (lockedTradesPreviewCount !== undefined) {
             const parsedCount = parseInt(lockedTradesPreviewCount, 10);
             dataToUpdate.lockedTradesPreviewCount = isNaN(parsedCount) ? 5 : Math.max(0, Math.min(parsedCount, 50));
+        }
+        if (showOpenTradePotential !== undefined) {
+            dataToUpdate.showOpenTradePotential = showOpenTradePotential === 'true' || showOpenTradePotential === true;
+        }
+        if (showLockedTradePotential !== undefined) {
+            dataToUpdate.showLockedTradePotential = showLockedTradePotential === 'true' || showLockedTradePotential === true;
         }
         if (smsGatewayEnabled !== undefined)
             dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
@@ -3672,17 +3678,17 @@ const previewPolicyPdf = async (req, res) => {
         let defaultFilename = 'document.pdf';
         const normalizedType = String(type || '').toLowerCase();
         if (normalizedType === 'terms' || normalizedType === 'terms-conditions' || normalizedType === 'terms-and-conditions') {
-            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
+            defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
             filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.termsPdfUrl);
             fallbackGenerator = pdfService_1.generateTermsAndConditionsPdf;
         }
         else if (normalizedType === 'privacy' || normalizedType === 'privacy-policy') {
-            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
+            defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
             filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.privacyPdfUrl);
             fallbackGenerator = pdfService_1.generatePrivacyPolicyPdf;
         }
         else if (normalizedType === 'internal-policy' || normalizedType === 'policy' || normalizedType === 'internal') {
-            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
+            defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
             filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.internalPolicyUrl);
             fallbackGenerator = pdfService_1.generateInternalPolicyPdf;
         }
@@ -4221,7 +4227,7 @@ const sendPaymentInvoiceEmail = async (req, res) => {
             toEmail: clientEmail,
             clientName: client?.name || payment.clientName || 'Client',
             companyName: tenantObj?.companyName,
-            planName: plan?.name || payment.planName || 'Advisory Plan',
+            planName: plan?.name || payment.planName || 'Service Plan',
             invoiceNumber: invNumber,
             amount: payment.amount,
             pdfBuffer

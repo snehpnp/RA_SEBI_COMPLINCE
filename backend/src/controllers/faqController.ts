@@ -18,19 +18,19 @@ const DEFAULT_FAQS = [
   },
   {
     question: 'How can I upgrade or renew my subscription plan?',
-    answer: 'You can navigate to the Plans section in your Client Portal, review available research advisory packages, and select "Subscribe" or "Upgrade". Payment is processed securely with immediate receipt generation and contract signing.',
+    answer: 'You can navigate to the Plans section in your Client Portal, review available research service packages, and select "Subscribe" or "Upgrade". Payment is processed securely with immediate receipt generation and contract signing.',
     category: 'Subscription & Billing',
     order: 3
   },
   {
-    question: 'Is there any refund policy for advisory subscriptions?',
-    answer: 'Under SEBI Research Analyst regulations, subscriptions are governed by the terms specified in your Signed Client Advisory Agreement. Fees once paid are generally non-refundable once recommendations have been delivered, except as specified in regulatory guidelines.',
+    question: 'Is there any refund policy for service subscriptions?',
+    answer: 'Under SEBI Research Analyst regulations, subscriptions are governed by the terms specified in your Signed Client Service Agreement. Fees once paid are generally non-refundable once recommendations have been delivered, except as specified in regulatory guidelines.',
     category: 'Compliance & Legal',
     order: 4
   },
   {
     question: 'How do I raise a support ticket or grievance?',
-    answer: 'In the Support section of your portal, click on "Create Ticket", select the query category, and describe your query. Our dedicated advisory compliance desk will review and respond directly within statutory turnaround times.',
+    answer: 'In the Support section of your portal, click on "Create Ticket", select the query category, and describe your query. Our dedicated compliance desk will review and respond directly within statutory turnaround times.',
     category: 'Support & Grievances',
     order: 5
   }

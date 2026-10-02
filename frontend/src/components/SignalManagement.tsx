@@ -1105,7 +1105,7 @@ export default function SignalManagement({
                 <div className="bg-white/50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-3">
                   <p className="text-xs uppercase font-bold text-slate-500 tracking-wider">Terms & Conditions</p>
                   <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                    By publishing this trade signal, you verify that this advisory recommendation complies with the SEBI (Research Analyst) Regulations, 2014. You confirm that you have conducted appropriate research/analysis, disclosed any conflict of interest, and that the advice is suitable for target plan subscribers.
+                    By publishing this trade signal, you verify that this research recommendation complies with the SEBI (Research Analyst) Regulations, 2014. You confirm that you have conducted appropriate research/analysis, disclosed any conflict of interest, and that the research recommendation is suitable for target plan subscribers.
                   </p>
                 </div>
 

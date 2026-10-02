@@ -250,7 +250,7 @@ function ClientPortalContent() {
     // Strict Compliance Guard: If plan is assigned but KYC / Agreement incomplete, block other tabs and redirect to KYC
     if (hasAssignedPlan && !isFullyOnboarded) {
       if (newTab !== 'kyc' && newTab !== 'support' && newTab !== 'legal') {
-        toast.error('SEBI Compliance Alert: Please complete DigiLocker KYC and Advisory Agreement first.');
+        toast.error('SEBI Compliance Alert: Please complete DigiLocker KYC and Service Agreement first.');
         setActiveTab('kyc');
         setShowOnboarding(true);
         return;

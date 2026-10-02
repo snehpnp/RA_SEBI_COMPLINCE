@@ -28,5 +28,6 @@
   { "serialNo": 47, "requirement": "Audit completion timeline", "frequency": "Within 6 months from FY end", "severityLevel": "HIGH", "penaltyAmount": "₹25,000 per violation" },
   { "serialNo": 48, "requirement": "ATR submission", "frequency": "Within 1 month of audit report", "severityLevel": "HIGH", "penaltyAmount": "₹100 per day after due date" },
   { "serialNo": 49, "requirement": "Complaint resolution", "frequency": "Within 21 days", "severityLevel": "HIGH", "penaltyAmount": "₹100 per complaint" },
+  { "serialNo": 50, "requirement": "Monthly Investor Complaints Data Disclosure (Website/Portal)", "frequency": "Monthly (by 7th of succeeding month)", "severityLevel": "HIGH", "penaltyAmount": "General Regulatory Non-Compliance - ₹5,000" },
   { "serialNo": 62, "requirement": "SEBI advertisement code compliance", "frequency": "Continuous compliance", "severityLevel": "HIGH", "penaltyAmount": "₹5,000 per advertisement" }
 ]

@@ -154,12 +154,12 @@ const SUBFOLDER_METADATA: Record<string, {
     badgeBg: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20',
     titleColor: 'text-indigo-600 dark:text-indigo-400',
     headerBg: 'bg-indigo-50 dark:bg-indigo-950/40 border-b border-indigo-100 dark:border-indigo-900/40',
-    formatText: 'Signed Advisory Agreement (PDF)'
+    formatText: 'Signed Service Agreement (PDF)'
   },
   '07_Call_Recordings': {
     icon: PhoneCall,
     number: '07',
-    badge: 'Advisory Audios',
+    badge: 'Service Audios',
     gradient: 'from-rose-500 to-pink-600',
     borderHover: 'hover:border-rose-500 hover:shadow-rose-500/10',
     badgeBg: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
@@ -366,9 +366,9 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
   const handleDownloadAgreement = async (clientName?: string) => {
     if (!selectedClientId) return;
     try {
-      toast.loading('Generating & downloading official Signed Advisory Agreement PDF...', { id: 'agr-download' });
+      toast.loading('Generating & downloading official Signed Service Agreement PDF...', { id: 'agr-download' });
       await api.downloadVaultAgreement(selectedClientId, clientName);
-      toast.success('Signed Advisory Agreement PDF downloaded!', { id: 'agr-download' });
+      toast.success('Signed Service Agreement PDF downloaded!', { id: 'agr-download' });
     } catch (err: any) {
       toast.error('Agreement download failed: ' + (err.message || 'Error'), { id: 'agr-download' });
     }
@@ -1294,7 +1294,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-sm">
                   <div>
-                    <div className="text-xs text-slate-400 font-medium">Total Advisory Plans</div>
+                    <div className="text-xs text-slate-400 font-medium">Total Service Plans</div>
                     <div className="text-2xl font-black text-slate-800 dark:text-white mt-1">
                       {vaultDetails.folders.subscriptions?.data?.subscriptions?.length || 0}
                     </div>
@@ -1329,12 +1329,12 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                 </div>
               </div>
 
-              {/* Advisory Subscriptions Table */}
+              {/* Service Subscriptions Table */}
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                      <span>Advisory Subscriptions & Purchased Plans</span>
+                      <span>Service Subscriptions & Purchased Plans</span>
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 border border-emerald-500/20">
                         {vaultDetails.folders.subscriptions?.data?.subscriptions?.length || 0} Records
                       </span>
@@ -1373,7 +1373,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                           return (
                             <tr key={sub._id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
                               <td className="p-3.5">
-                                <div className="font-bold text-slate-900 dark:text-white text-sm">{sub.plan?.name || 'Custom Advisory Plan'}</div>
+                                <div className="font-bold text-slate-900 dark:text-white text-sm">{sub.plan?.name || 'Custom Service Plan'}</div>
                                 <div className="text-[10px] font-mono text-slate-400 mt-0.5">{sub.plan?.researchSegments || sub.segment || 'EQUITY / DERIVATIVES'}</div>
                               </td>
 
@@ -1517,7 +1517,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Mandatory SEBI Research Analyst Advisory Agreement
+                      Mandatory SEBI Research Analyst Service Agreement
                     </h4>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Official signed client agreement with Aadhaar eSign verification, terms, and SEBI regulatory risk disclosure.
@@ -1738,7 +1738,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                   <div className="py-12 text-center text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
                     <PhoneCall className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
                     <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">No Audio Recordings Yet</p>
-                    <p className="text-xs text-slate-400 mt-1">Click "Upload Recording" above to archive advisory calls.</p>
+                    <p className="text-xs text-slate-400 mt-1">Click "Upload Recording" above to archive service calls.</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -2000,7 +2000,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                         Mandatory SEBI Research Analyst Agreement (Digital / eSigned)
                       </h4>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Official SEBI advisory terms, fee schedule, risk disclosures, and Aadhaar eSign verification record.
+                        Official SEBI service terms, fee schedule, risk disclosures, and Aadhaar eSign verification record.
                       </p>
                     </div>
                   </div>
@@ -2086,7 +2086,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800 dark:text-white">Upload Call Recording</h3>
-                  <p className="text-xs text-slate-400">Save telephone advisory audio into client vault</p>
+                  <p className="text-xs text-slate-400">Save telephone service audio into client vault</p>
                 </div>
               </div>
               <button
@@ -2123,9 +2123,9 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                     onChange={(e) => setUploadCallType(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-rose-500 dark:text-white"
                   >
-                    <option value="ADVISORY">Advisory Call</option>
+                    <option value="ADVISORY">Service Call</option>
                     <option value="INBOUND">Inbound Inquiry</option>
-                    <option value="OUTBOUND">Outbound Advisory</option>
+                    <option value="OUTBOUND">Outbound Service Call</option>
                     <option value="ONBOARDING">Client Onboarding</option>
                     <option value="COMPLAINT">Grievance / Support</option>
                     <option value="RISK_PROFILE">Risk Profiling</option>

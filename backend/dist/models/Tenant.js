@@ -116,6 +116,8 @@ exports.TenantSchema = new mongoose_1.Schema({
     twoFactorChannel: { type: String, enum: ['EMAIL', 'SMS', 'BOTH'], default: 'EMAIL' },
     signupVerificationMode: { type: String, enum: ['EMAIL_ONLY', 'MOBILE_ONLY', 'BOTH'], default: 'EMAIL_ONLY' },
     lockedTradesPreviewCount: { type: Number, default: 5 },
+    showOpenTradePotential: { type: Boolean, default: true },
+    showLockedTradePotential: { type: Boolean, default: true },
     smsGatewayEnabled: { type: Boolean, default: false },
     smsUsername: { type: String, default: null },
     smsPassword: { type: String, default: null },

@@ -204,7 +204,7 @@ export const getClientTimeline = async (req: AuthenticatedRequest, res: Response
         source: 'HISTORICAL',
         category: 'KYC_COMPLIANCE',
         action: 'AGREEMENT_SIGNED',
-        title: `Advisory Agreement Signed (v${agr.version || '1.0'})`,
+        title: `Service Agreement Signed (v${agr.version || '1.0'})`,
         description: `Service terms digitally signed via ${friendlyEsign}`,
         status: 'SUCCESS',
         timestamp: agrTime > now ? now : agrTime,
@@ -243,7 +243,7 @@ export const getClientTimeline = async (req: AuthenticatedRequest, res: Response
         pay.paymentMode === 'CUSTOM_PRO_RATA' ||
         pay.paymentMode === 'ADMIN_ASSIGNED'
       );
-      const planName = (pay.planId as any)?.name || 'Advisory Plan';
+      const planName = (pay.planId as any)?.name || 'Service Plan';
       const friendlyPaymentMode = humanizePaymentMode(pay.paymentMode);
       const cleanNote = cleanRemark(pay.remarks);
 
@@ -338,7 +338,7 @@ export const getClientTimeline = async (req: AuthenticatedRequest, res: Response
       if (handledSubIds.has(String(sub._id))) {
         continue; // Deduplicated with payment card!
       }
-      const planName = (sub.planId as any)?.name || 'Advisory Plan';
+      const planName = (sub.planId as any)?.name || 'Service Plan';
       const sDate = new Date(sub.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
       const eDate = new Date(sub.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -472,8 +472,8 @@ export const getClientTimeline = async (req: AuthenticatedRequest, res: Response
       },
       {
         step: 3,
-        key: 'ADVISORY_ESIGN',
-        label: 'Advisory eSign',
+        key: 'SERVICE_ESIGN',
+        label: 'Service eSign',
         completed: hasAgreement,
         current: hasKyc && !hasAgreement,
         timestamp: hasAgreement ? agreements[0].signedAt : null,

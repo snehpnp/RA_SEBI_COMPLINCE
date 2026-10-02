@@ -58,7 +58,8 @@ import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy, Calendar as CalendarIcon } from 'lucide-react';
+import ComplianceCalendarModal from '../../components/compliance/ComplianceCalendarModal';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -539,6 +540,7 @@ function AdminDashboardContent() {
   const [checklistHistory, setChecklistHistory] = useState<any[]>([]);
   const [checklistSubTab, setChecklistSubTab] = useState<'active' | 'history'>('active');
   const [checklistStatusFilter, setChecklistStatusFilter] = useState<'ALL' | 'OVERDUE' | 'PENDING'>('ALL');
+  const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
   const [alertsSubTab, setAlertsSubTab] = useState<'active' | 'history'>('active');
   const [historyFilterText, setHistoryFilterText] = useState('');
   const [selectedFinancialYear, setSelectedFinancialYear] = useState<string>('All');
@@ -3486,7 +3488,7 @@ function AdminDashboardContent() {
                               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-2 border-b border-slate-300 dark:border-white/5">
                                 <div>
                                   <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Sales & Client Growth</h3>
-                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track advisory revenue and user onboarding progress</p>
+                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track research service revenue and user onboarding progress</p>
                                 </div>
 
                                 {/* Controls */}
@@ -4508,7 +4510,15 @@ function AdminDashboardContent() {
                               <h2 className="text-lg font-bold text-slate-900 dark:text-white">SEBI Checklist</h2>
                               <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Manage and track your compliance checklist</p>
                             </div>
-                            <div className="flex space-x-2">
+                            <div className="flex items-center space-x-2.5">
+                              <button
+                                type="button"
+                                onClick={() => setShowCalendarModal(true)}
+                                className="flex items-center space-x-2 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition active:scale-95"
+                              >
+                                <CalendarIcon className="w-4 h-4 text-white" />
+                                <span>Calendar View</span>
+                              </button>
                               <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10">
                                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
                                 <div className="relative">
@@ -4983,7 +4993,7 @@ function AdminDashboardContent() {
                                         </div>
                                         <div className="text-right">
                                           <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                            {isBreached ? 'SLA BREACHED' : `${daysLeft} days left`}
+                                            {isBreached ? `${Math.abs(daysLeft)} days overdue` : daysLeft === 0 ? 'Due Today' : `${daysLeft} days left`}
                                           </span>
                                         </div>
                                       </div>
@@ -6926,14 +6936,14 @@ function AdminDashboardContent() {
 
                                   {/* Agreements status */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Advisory Agreements</h4>
+                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Service Agreements</h4>
                                     {selectedClient.agreements && selectedClient.agreements.length > 0 ? (
                                       <div className="space-y-3">
                                         {selectedClient.agreements.map((agr: any) => (
                                           <div key={agr.id} className="p-3.5 bg-slate-100 dark:bg-slate-950/40 border border-slate-300 dark:border-white/5 rounded-lg flex items-center justify-between text-xs">
                                             <div className="space-y-1">
                                               <div className="flex items-center space-x-2">
-                                                <strong className="text-slate-900 dark:text-white">Advisory Agreement v{agr.version}</strong>
+                                                <strong className="text-slate-900 dark:text-white">Service Agreement v{agr.version}</strong>
                                                 <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20 uppercase">{agr.status}</span>
                                               </div>
                                               <div className="text-[10px] text-slate-500 dark:text-slate-500">Signed on {new Date(agr.signedAt).toLocaleDateString('en-IN')} via {agr.esignMode}</div>
@@ -6951,7 +6961,7 @@ function AdminDashboardContent() {
                                         ))}
                                       </div>
                                     ) : (
-                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed advisory agreement on file.</div>
+                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed service agreement on file.</div>
                                     )}
                                   </div>
                                 </div>
@@ -9181,6 +9191,22 @@ function AdminDashboardContent() {
             </div>
           </div>
         )}
+
+        {/* SEBI Compliance Google Calendar View Modal */}
+        <ComplianceCalendarModal
+          isOpen={showCalendarModal}
+          onClose={() => setShowCalendarModal(false)}
+          checklist={checklist}
+          checklistHistory={checklistHistory}
+          onReloadData={loadData}
+          onOpenAuditModal={(req) => {
+            setAuditModalReq(req);
+            const status = req.audit?.status || 'PENDING';
+            setAuditStatus(status !== 'PENDING' ? status : '');
+            setAuditRemarks(req.audit?.officerRemarks || '');
+          }}
+          userRole="COMPLIANCE_OFFICER"
+        />
 
         {/* Logout Modal */}
         {isLogoutModalOpen && (

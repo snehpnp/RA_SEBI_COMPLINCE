@@ -2328,7 +2328,7 @@ export const createPlan = async (req: AuthenticatedRequest, res: Response) => {
     if (!category) {
       category = await dynamicDb.PlanCategory.findOne({ tenantId }).lean();
       if (!category) {
-        const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Advisory Category';
+        const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Service Category';
         category = await dynamicDb.PlanCategory.create({
           tenantId,
           name: cleanName,
@@ -2543,6 +2543,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     address, website, mobile,
     passwordPolicy, client2FAEnabled, twoFactorChannel,
     signupVerificationMode, lockedTradesPreviewCount,
+    showOpenTradePotential, showLockedTradePotential,
     smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId
   } = req.body;
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -2601,6 +2602,12 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (lockedTradesPreviewCount !== undefined) {
       const parsedCount = parseInt(lockedTradesPreviewCount, 10);
       dataToUpdate.lockedTradesPreviewCount = isNaN(parsedCount) ? 5 : Math.max(0, Math.min(parsedCount, 50));
+    }
+    if (showOpenTradePotential !== undefined) {
+      dataToUpdate.showOpenTradePotential = showOpenTradePotential === 'true' || showOpenTradePotential === true;
+    }
+    if (showLockedTradePotential !== undefined) {
+      dataToUpdate.showLockedTradePotential = showLockedTradePotential === 'true' || showLockedTradePotential === true;
     }
     if (smsGatewayEnabled !== undefined) dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
     if (smsUsername !== undefined) dataToUpdate.smsUsername = smsUsername ? smsUsername.trim() : null;
@@ -3942,15 +3949,15 @@ export const previewPolicyPdf = async (req: any, res: any) => {
     const normalizedType = String(type || '').toLowerCase();
 
     if (normalizedType === 'terms' || normalizedType === 'terms-conditions' || normalizedType === 'terms-and-conditions') {
-      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
+      defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
       filePath = resolveAttachmentFilePath(tenant?.termsPdfUrl);
       fallbackGenerator = generateTermsAndConditionsPdf;
     } else if (normalizedType === 'privacy' || normalizedType === 'privacy-policy') {
-      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
+      defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
       filePath = resolveAttachmentFilePath(tenant?.privacyPdfUrl);
       fallbackGenerator = generatePrivacyPolicyPdf;
     } else if (normalizedType === 'internal-policy' || normalizedType === 'policy' || normalizedType === 'internal') {
-      defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
+      defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
       filePath = resolveAttachmentFilePath(tenant?.internalPolicyUrl);
       fallbackGenerator = generateInternalPolicyPdf;
     } else {
@@ -4521,7 +4528,7 @@ export const sendPaymentInvoiceEmail = async (req: AuthenticatedRequest, res: Re
       toEmail: clientEmail,
       clientName: client?.name || payment.clientName || 'Client',
       companyName: tenantObj?.companyName,
-      planName: plan?.name || payment.planName || 'Advisory Plan',
+      planName: plan?.name || payment.planName || 'Service Plan',
       invoiceNumber: invNumber,
       amount: payment.amount,
       pdfBuffer

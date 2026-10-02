@@ -160,7 +160,7 @@ export default function SubscriptionCenter({
   const agreementHTML = useMemo(() => {
     const tenant = profile?.user?.tenant;
     if (!tenant) return "Loading agreement...";
-    let content = tenant.agreementContent || "Standard SEBI Advisory Agreement...";
+    let content = tenant.agreementContent || "Standard SEBI Service Agreement...";
     const replacements: Record<string, string> = {
       '{{CLIENT_NAME}}': profile?.name || `${profile?.user?.firstName || ''} ${profile?.user?.lastName || ''}`.trim() || 'Client',
       '{{CLIENT_EMAIL}}': profile?.email || profile?.user?.email || '',
@@ -258,7 +258,7 @@ export default function SubscriptionCenter({
             key: res.keyId,
             amount: res.amount,
             currency: res.currency,
-            name: profile?.user?.tenant?.companyName || 'Premium Advisory',
+            name: profile?.user?.tenant?.companyName || 'Premium Services',
             description: 'Subscription Payment',
             order_id: res.orderId,
             handler: async function (response: any) {
@@ -465,7 +465,7 @@ export default function SubscriptionCenter({
   // 4. SIGN AGREEMENT & AUTO-ROUTE TO CHOSEN PAYMENT METHOD
   const handleSignAgreementAndProceed = async () => {
     if (!agreementConsentChecked) {
-      toast.error('Please accept the Advisory Agreement terms to proceed.');
+      toast.error('Please accept the Service Agreement terms to proceed.');
       return;
     }
 
@@ -478,7 +478,7 @@ export default function SubscriptionCenter({
       if (signRes.success) {
         setIsLocalAgreementDone(true);
         setShowAgreementModal(false);
-        toast.success('Advisory Agreement signed successfully!');
+        toast.success('Service Agreement signed successfully!');
 
         // AUTO-ROUTE to the method the client clicked!
         const targetMethod = pendingPaymentMethod || 'ONLINE';
@@ -674,7 +674,7 @@ export default function SubscriptionCenter({
                           <div>
                             <div className="flex flex-wrap items-center gap-2.5">
                               <h2 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-                                {sub.plan?.name || 'VIP Advisory Plan'}
+                                {sub.plan?.name || 'VIP Service Plan'}
                               </h2>
 
                               {isCurrentlyActive && (
@@ -757,7 +757,7 @@ export default function SubscriptionCenter({
                               Starts sequentially on {new Date(sub.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                             </p>
                             <p className="text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">
-                              This subscription is queued and will automatically activate immediately when your preceding plan ends. Continuous advisory guaranteed!
+                              This subscription is queued and will automatically activate immediately when your preceding plan ends. Continuous service guaranteed!
                             </p>
                           </div>
                         </div>
@@ -806,7 +806,7 @@ export default function SubscriptionCenter({
                       <div className="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800/80 space-y-2.5">
                         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           <Shield className="w-3.5 h-3.5 text-premium-primary" />
-                          <span>Included Advisory Segments</span>
+                          <span>Included Service Segments</span>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {(() => {
@@ -835,7 +835,7 @@ export default function SubscriptionCenter({
                       <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
                         <span className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                          SEBI Compliant Research Advisory Coverage
+                          SEBI Compliant Research Service Coverage
                         </span>
                         <span className="font-mono text-[10px] text-slate-400">
                           Ref: {String(sub.id || sub._id).slice(-8).toUpperCase()}
@@ -1523,7 +1523,7 @@ export default function SubscriptionCenter({
             </div>
           )}
 
-          {/* ADVISORY AGREEMENT SIGNING MODAL (AUTO-ROUTING) */}
+          {/* SERVICE AGREEMENT SIGNING MODAL (AUTO-ROUTING) */}
           {showAgreementModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 max-w-2xl w-full shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
@@ -1533,8 +1533,8 @@ export default function SubscriptionCenter({
                       <FileText className="w-5 h-5" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">Advisory Agreement</h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">SEBI Compliance Advisory Terms &amp; Conditions</p>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">Service Agreement</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">SEBI Compliance Service Terms &amp; Conditions</p>
                     </div>
                   </div>
                   <button
@@ -1548,7 +1548,7 @@ export default function SubscriptionCenter({
                 <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl mb-4 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
                   <Shield className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>
-                    As per SEBI regulations, you must sign the Advisory Agreement before proceeding.
+                    As per SEBI regulations, you must sign the Service Agreement before proceeding.
                     Once signed, you will automatically be routed to <strong>{pendingPaymentMethod === 'UPI_QR' ? 'Pay with QR / UPI' : 'Pay Online'}</strong>.
                   </span>
                 </div>
@@ -1566,7 +1566,7 @@ export default function SubscriptionCenter({
                       className="mt-0.5 rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500"
                     />
                     <span>
-                      I have read, understood, and agree to all terms and conditions of this Advisory Agreement. I hereby consent to digital eSigning.
+                      I have read, understood, and agree to all terms and conditions of this Service Agreement. I hereby consent to digital eSigning.
                     </span>
                   </label>
 

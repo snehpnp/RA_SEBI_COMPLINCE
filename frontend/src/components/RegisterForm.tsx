@@ -230,7 +230,7 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
           </div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Account Created Successfully!</h2>
           <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed max-w-sm mx-auto">
-            Your client account is now active. As per SEBI regulations, you can complete your DigiLocker KYC and Advisory Agreement upon login.
+            Your client account is now active. As per SEBI regulations, you can complete your DigiLocker KYC and Service Agreement upon login.
           </p>
           <div className="pt-4">
             <button

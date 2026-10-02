@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp, Lock } from 'lucide-react';
+import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp, Lock, CheckCircle2 } from 'lucide-react';
 import api from '../../services/api';
 
 export default function Dashboard({ 
@@ -72,7 +72,7 @@ export default function Dashboard({
               id: r.id || r._id,
               title: r.title,
               symbol: r.symbol || r.category || 'RESEARCH',
-              segment: r.segment || 'ADVISORY',
+              segment: r.segment || 'RESEARCH',
               reportUrl: r.fileUrl || r.pdfUrl || r.reportUrl,
               createdAt: r.createdAt,
               type: 'ARTICLE'
@@ -229,7 +229,7 @@ export default function Dashboard({
                 <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
                 <h3 className="font-bold text-sm text-amber-500">Live Signals Locked (SEBI Compliance)</h3>
                 <p className="text-xs text-premium-text/70 max-w-sm mx-auto">
-                  Your advisory plan is active, but SEBI mandates completing DigiLocker KYC and eSigning the Advisory Agreement before receiving live signals.
+                  Your service plan is active, but SEBI mandates completing DigiLocker KYC and eSigning the Service Agreement before receiving live signals.
                 </p>
                 <button
                   onClick={() => setActiveTab('kyc')}
@@ -277,7 +277,7 @@ export default function Dashboard({
                         )}
                         {isLocked && signal.planName && (
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-premium-primary/15 text-premium-primary">
-                            {signal.planName}
+                            {(signal.planName || '').replace(/advisory/gi, 'Service')}
                           </span>
                         )}
                         <span className="font-bold text-lg">{signal.symbol}</span>
@@ -305,14 +305,9 @@ export default function Dashboard({
                           <Lock className="w-3.5 h-3.5" /> Unlock Signal
                         </span>
                       ) : (
-                        <>
-                          <span className="text-xs text-premium-text/60">Confidence</span>
-                          <div className="flex gap-1 mt-1">
-                            {[1, 2, 3, 4, 5].map(c => (
-                              <div key={c} className={`w-2 h-2 rounded-full ${c <= (signal.confidenceScore || 4) ? 'bg-premium-success' : 'bg-premium-bg'}`}></div>
-                            ))}
-                          </div>
-                        </>
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Active
+                        </span>
                       )}
                     </div>
                   </div>
@@ -415,7 +410,7 @@ export default function Dashboard({
                 <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
                 <h3 className="font-bold text-sm text-amber-500">Research Reports Locked (SEBI Compliance)</h3>
                 <p className="text-xs text-premium-text/70 max-w-sm mx-auto">
-                  Complete DigiLocker KYC and Advisory Agreement to access detailed technical and fundamental research reports.
+                  Complete DigiLocker KYC and Service Agreement to access detailed technical and fundamental research reports.
                 </p>
                 <button
                   onClick={() => setActiveTab('kyc')}

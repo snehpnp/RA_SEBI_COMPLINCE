@@ -314,7 +314,7 @@ export default function DashboardTab({
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-4 border-b border-slate-200 dark:border-white/5 mb-4">
                   <div>
                     <h3 className="font-bold text-slate-900 dark:text-white text-lg">Sales & Client Growth</h3>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">Advisory revenue and user onboarding</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">Service revenue and user onboarding</p>
                   </div>
 
                   {/* Controls */}

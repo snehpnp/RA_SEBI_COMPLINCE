@@ -326,7 +326,7 @@ async function sendWelcomeEmail(opts) {
         }
     }
     const cleanRole = role.replace(/_/g, ' ');
-    const displayCompany = companyName || 'Research Analyst Advisory';
+    const displayCompany = companyName || 'Research Analyst Services';
     const subject = `Welcome to ${displayCompany} — Your Account is Ready`;
     const html = `
 <!DOCTYPE html>
@@ -427,7 +427,7 @@ async function sendWelcomeEmail(opts) {
                 </div>
                 <div style="color: #166534 !important; font-size: 13px; line-height: 1.6;">
                   <div style="margin-bottom: 6px; color: #166534 !important;">
-                    • 📄 <strong style="color: #14532d !important;">Terms & Conditions (PDF)</strong> — Advisory terms, statutory disclosures & risk disclaimers
+                    • 📄 <strong style="color: #14532d !important;">Terms & Conditions (PDF)</strong> — Service terms, statutory disclosures & risk disclaimers
                   </div>
                   <div style="color: #166534 !important;">
                     • 📄 <strong style="color: #14532d !important;">Privacy Policy (PDF)</strong> — Client data protection & confidentiality policy
@@ -471,7 +471,7 @@ async function sendWelcomeEmail(opts) {
  */
 async function sendForgotPasswordEmail(opts) {
     const { tenantId, toEmail, name, newPassword, loginUrl, companyName } = opts;
-    const displayCompany = companyName || 'Research Analyst Advisory';
+    const displayCompany = companyName || 'Research Analyst Services';
     const subject = `Password Reset — ${displayCompany}`;
     const html = `
 <!DOCTYPE html>
@@ -556,19 +556,19 @@ async function sendTestEmail(tenantId, toEmail) {
         : { success: false, message: 'Failed to send test email. Please check your SMTP credentials.' };
 }
 const sendAccountActivatedEmail = async ({ toEmail, name, companyName }) => {
-    const displayCompany = companyName || 'Research Analyst Advisory';
+    const displayCompany = companyName || 'Research Analyst Services';
     const html = `
     <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
       <h2 style="color: #16a34a; margin: 0 0 16px;">✅ Account Activated</h2>
       <p style="color: #0f172a; font-weight: 600; font-size: 15px;">Hi ${name},</p>
-      <p style="color: #334155; font-size: 14px; line-height: 1.6;">Your account on <strong>${displayCompany}</strong> has been successfully approved and activated. You can now log in and access your advisory services.</p>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6;">Your account on <strong>${displayCompany}</strong> has been successfully approved and activated. You can now log in and access your research services.</p>
     </div>
   `;
     return await sendEmail(null, toEmail, `Account Activated - ${displayCompany}`, html);
 };
 exports.sendAccountActivatedEmail = sendAccountActivatedEmail;
 const sendAccountDeactivatedEmail = async ({ toEmail, name, companyName }) => {
-    const displayCompany = companyName || 'Research Analyst Advisory';
+    const displayCompany = companyName || 'Research Analyst Services';
     const html = `
     <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
       <h2 style="color: #e11d48; margin: 0 0 16px;">Account Deactivated</h2>
@@ -597,11 +597,11 @@ const sendComplaintNotificationEmail = async ({ tenantId, adminEmail, clientName
 };
 exports.sendComplaintNotificationEmail = sendComplaintNotificationEmail;
 /**
- * Send Signed Advisory Agreement PDF copy to Client upon eSign completion
+ * Send Signed Service Agreement PDF copy to Client upon eSign completion
  */
 async function sendSignedAgreementEmail(opts) {
     const { tenantId, toEmail, clientName, companyName, agreementUrl, pdfBuffer, maskedAadhaar, signedAt } = opts;
-    const displayCompany = companyName || 'Research Analyst Advisory';
+    const displayCompany = companyName || 'Research Analyst Services';
     const formattedDate = (signedAt || new Date()).toLocaleDateString('en-IN', {
         day: '2-digit',
         month: 'short',
@@ -609,11 +609,11 @@ async function sendSignedAgreementEmail(opts) {
         hour: '2-digit',
         minute: '2-digit'
     });
-    const subject = `Your Signed Advisory Agreement — ${displayCompany}`;
+    const subject = `Your Signed Service Agreement — ${displayCompany}`;
     const attachments = [];
     if (pdfBuffer && Buffer.isBuffer(pdfBuffer)) {
         attachments.push({
-            filename: `Advisory_Agreement_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+            filename: `Service_Agreement_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
             content: pdfBuffer,
             contentType: 'application/pdf'
         });
@@ -637,7 +637,7 @@ async function sendSignedAgreementEmail(opts) {
             <td style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 32px 28px; text-align: center;">
               <div style="font-size: 32px; margin-bottom: 8px;">✍️ 📜</div>
               <h1 style="color: #ffffff !important; margin: 0 0 6px; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">
-                Advisory Agreement Signed
+                Service Agreement Signed
               </h1>
               <p style="color: #bfdbfe !important; margin: 0; font-size: 13.5px; font-weight: 500;">
                 ${displayCompany} • SEBI Research Analyst
@@ -652,7 +652,7 @@ async function sendSignedAgreementEmail(opts) {
                 Dear ${clientName},
               </p>
               <p style="color: #475569 !important; font-size: 14px; line-height: 1.6; margin: 0 0 20px;">
-                Thank you for completing your onboarding compliance. Your SEBI-mandated Research Analyst Advisory Agreement has been successfully signed and verified.
+                Thank you for completing your onboarding compliance. Your SEBI-mandated Research Analyst Service Agreement has been successfully signed and verified.
               </p>
 
               <!-- Agreement Summary Card -->
@@ -734,8 +734,8 @@ async function sendSignedAgreementEmail(opts) {
  */
 async function sendTaxInvoiceEmail(opts) {
     const { tenantId, toEmail, clientName, companyName, planName, invoiceNumber, amount, pdfBuffer } = opts;
-    const displayCompany = companyName || 'Research Analyst Advisory';
-    const displayPlan = planName || 'Research Advisory Plan';
+    const displayCompany = companyName || 'Research Analyst Services';
+    const displayPlan = planName || 'Research Service Plan';
     const displayInv = invoiceNumber || `INV-${Date.now()}`;
     const displayAmt = amount !== undefined ? `₹${Number(amount).toLocaleString('en-IN')}` : '';
     const subject = `Tax Invoice ${displayInv} for ${displayPlan} — ${displayCompany}`;
@@ -780,7 +780,7 @@ async function sendTaxInvoiceEmail(opts) {
                 Dear <strong>${clientName}</strong>,
               </p>
               <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
-                Thank you for subscribing to our research advisory services. Your official Tax Invoice has been generated and is attached to this email.
+                Thank you for subscribing to our research services. Your official Tax Invoice has been generated and is attached to this email.
               </p>
 
               <!-- Invoice Details Card -->

@@ -257,7 +257,7 @@ const generateInvoicePdf = async (paymentId) => {
                     categoryName = raw.split(' - ')[0] || raw;
                 }
                 else {
-                    categoryName = 'Research Advisory Services';
+                    categoryName = 'Research Services';
                 }
             }
             if (!segments) {
@@ -378,8 +378,21 @@ const generateInvoicePdf = async (paymentId) => {
             // Determine raw discount
             let rawDiscount = Number(payment.discountApplied || payment.discount || 0);
             // Determine if GST is ENABLED, and whether it is INCLUSIVE or EXCLUSIVE
-            const isGstEnabled = tenant.gstEnabled !== false;
-            let isGstInclusive = tenant.gstCalculationType === 'INCLUSIVE';
+            let isGstEnabled = true;
+            if (payment.gstEnabled !== undefined && payment.gstEnabled !== null) {
+                isGstEnabled = Boolean(payment.gstEnabled);
+            }
+            else if (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') || String(payment.remarks || '').toLowerCase().includes('gst_disable')) {
+                isGstEnabled = false;
+            }
+            else {
+                isGstEnabled = tenant.gstEnabled !== false;
+            }
+            // If tenant has no valid 15-char GSTIN, GST is disabled by default
+            if (!tenant.gst || tenant.gst.trim().length < 15) {
+                isGstEnabled = false;
+            }
+            let isGstInclusive = payment.gstCalculationType === 'INCLUSIVE' || tenant.gstCalculationType === 'INCLUSIVE';
             if (!isGstInclusive && fullPlanPrice > 0 && totalAmount > 0) {
                 if (Math.abs(totalAmount - (fullPlanPrice - rawDiscount)) < 2) {
                     isGstInclusive = true;
@@ -507,7 +520,7 @@ const generateInvoicePdf = async (paymentId) => {
                 doc.font(boldFont).fontSize(14).fillColor('#FFFFFF').text(initials, 36, 50, { width: 44, align: 'center' });
                 doc.font(boldFont).fontSize(12.5).fillColor('#0F2444').text(tenant.companyName, 88, 39);
                 doc.font(boldFont).fontSize(7.5).fillColor('#2563EB').text('SEBI REGISTERED RESEARCH ANALYST', 88, 55);
-                doc.font(regularFont).fontSize(7).fillColor('#64748B').text('Financial Research & Advisory Services', 88, 67);
+                doc.font(regularFont).fontSize(7).fillColor('#64748B').text('Financial Research Services', 88, 67);
             }
             // Right Side: Company Details
             const tenantGst = isGstEnabled ? (tenant.gst || tenant.gstin || '') : '';
@@ -526,7 +539,7 @@ const generateInvoicePdf = async (paymentId) => {
             }
             doc.font(boldFont).fontSize(9).fillColor('#0F172A').text(tenant.companyName, 250, 36, { width: 310, align: 'right' });
             doc.font(regularFont).fontSize(7.5).fillColor('#475569').text(tenantFullAddress, 250, 48, { width: 310, align: 'right' });
-            doc.text(`Email: ${tenant.email || 'support@advisory.com'}  |  Mobile: ${tenant.mobile || 'N/A'}`, 250, 60, { width: 310, align: 'right' });
+            doc.text(`Email: ${tenant.email || 'support@research.com'}  |  Mobile: ${tenant.mobile || 'N/A'}`, 250, 60, { width: 310, align: 'right' });
             if (isGstEnabled && tenantGst) {
                 doc.text(`SEBI Regn: ${tenant.sebiRegistration || 'INH000001234'}  |  PAN: ${tenant.pan || 'N/A'}  |  GSTIN: ${tenantGst}`, 250, 72, { width: 310, align: 'right' });
             }
@@ -542,7 +555,8 @@ const generateInvoicePdf = async (paymentId) => {
             doc.roundedRect(34, 98, 527, 24, 3).fillColor('#0F2444').fill();
             doc.font(boldFont).fontSize(10.5).fillColor('#FFFFFF').text(ribbonTitle, 34, 105, { width: 527, align: 'center' });
             doc.font(boldFont).fontSize(7.5).fillColor('#93C5FD').text('ORIGINAL FOR RECIPIENT', 34, 106, { width: 517, align: 'right' });
-            doc.font(regularFont).fontSize(7.5).fillColor('#94A3B8').text('(Under Rule 46 of CGST Rules, 2017)', 44, 106, { width: 220, align: 'left' });
+            const ribbonRule = isGstEnabled ? '(Under Rule 46 of CGST Rules, 2017)' : '(Non-GST Supply / Bill of Supply)';
+            doc.font(regularFont).fontSize(7.5).fillColor('#94A3B8').text(ribbonRule, 44, 106, { width: 220, align: 'left' });
             // ==========================================
             // 4. TWO-COLUMN METADATA CARDS (Y: 128 to 235)
             // ==========================================
@@ -563,7 +577,7 @@ const generateInvoicePdf = async (paymentId) => {
                 ['Invoice No:', invoiceNo, true],
                 ['Invoice Date:', invoiceDate, false],
                 ['Place of Supply:', `${displayClientState} (State Code: ${clientStateCode || 'N/A'})`, false],
-                ['SAC Code:', '997156 (Financial Advisory Services)', false],
+                ['SAC Code:', '997156 (Financial Research & Information Services)', false],
                 ['Reverse Charge (Y/N):', 'No (N)', false]
             ];
             let invY = cardY + 24;
@@ -646,7 +660,7 @@ const generateInvoicePdf = async (paymentId) => {
                 doc.font(boldFont).fontSize(6.5).fillColor('#047857').text(`Coupon: ${couponCodeText}`, descX + 4, descCurY + 2, { width: descColW - 8 });
             }
             else {
-                doc.font(regularFont).fontSize(6.5).fillColor('#64748B').text('Research Analyst Advisory Subscription', descX, descCurY, { width: descColW });
+                doc.font(regularFont).fontSize(6.5).fillColor('#64748B').text('Research Analyst Service Subscription', descX, descCurY, { width: descColW });
             }
             // SAC Code — vertically centred
             doc.font(regularFont).fontSize(8).fillColor('#0F172A').text('997156', 225, bodyY + Math.round(bodyH / 2) - 5, { width: 50, align: 'center' });
@@ -737,10 +751,10 @@ const generateInvoicePdf = async (paymentId) => {
             const discPoints = [
                 '• 1. Securities Market Risk: Investments in securities market are subject to market risks. Read all the related documents carefully before investing.',
                 '• 2. No Return Assurance: Registration granted by SEBI, membership of BASL and certification from NISM in no way guarantee performance of the intermediary or provide any assurance of returns to investors.',
-                '• 3. Compliance Mandate: Research advisory services are rendered in strict compliance with the SEBI (Research Analysts) Regulations, 2014 and code of conduct stipulated thereunder.',
-                '• 4. Fee & Refund Terms: Advisory subscription fees once remitted are non-refundable as agreed in the service terms and investor agreement.',
-                '• 5. Stop Loss Advisory: Investors are advised to adhere strictly to stop-loss guidelines and practice responsible risk management.',
-                `• 6. Grievance Redressal: For any service queries or unresolved grievances, please reach out to our Compliance Officer at ${tenant.email || 'support@advisory.com'} or phone ${tenant.mobile || 'N/A'}.`,
+                '• 3. Compliance Mandate: Research services are rendered in strict compliance with the SEBI (Research Analysts) Regulations, 2014 and code of conduct stipulated thereunder.',
+                '• 4. Fee & Refund Terms: Service subscription fees once remitted are non-refundable as agreed in the service terms and investor agreement.',
+                '• 5. Stop Loss Discipline: Investors are advised to adhere strictly to stop-loss guidelines and practice responsible risk management.',
+                `• 6. Grievance Redressal: For any service queries or unresolved grievances, please reach out to our Compliance Officer at ${tenant.email || 'support@research.com'} or phone ${tenant.mobile || 'N/A'}.`,
                 '• 7. SEBI Redressal Portals: Investors may also lodge grievances directly on SEBI SCORES portal (https://scores.sebi.gov.in) or access the SMART ODR platform (https://smartodr.in) for online conciliation.'
             ];
             let dy = discY + 24;

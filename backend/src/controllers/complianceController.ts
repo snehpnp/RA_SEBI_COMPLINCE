@@ -816,6 +816,39 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
   const activeRules = await dynamicDb.ComplianceRequirement.find({ isActive: true }).lean();
   const now = new Date();
 
+  // 6A. Transition all past pending audits (e.g. 30 Sep cycle) to OVERDUE and generate penalties
+  const pastPendingAudits = await dynamicDb.ComplianceAudit.find({
+    tenantId,
+    status: 'PENDING',
+    dueDate: { $lt: now }
+  }).lean();
+
+  for (const pAudit of pastPendingAudits) {
+    await dynamicDb.ComplianceAudit.findByIdAndUpdate(pAudit._id, {
+      $set: { status: 'OVERDUE' }
+    });
+
+    const rule = activeRules.find((r: any) => String(r._id) === String(pAudit.requirementId));
+    if (rule && rule.penaltyAmount) {
+      const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
+      const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
+
+      const existingPenalty = await dynamicDb.Penalty.findOne({
+        auditId: pAudit._id
+      }).lean();
+
+      if (!existingPenalty) {
+        await dynamicDb.Penalty.create({
+          tenantId,
+          auditId: pAudit._id,
+          amount: penaltyAmt,
+          reason: `Overdue compliance: ${rule.requirement}`,
+          status: 'PENDING_PAYMENT'
+        });
+      }
+    }
+  }
+
   for (const rule of activeRules) {
     const initialNextDueDate = calculateNextDueDate(rule.frequencyType, rule.serialNo, new Date(), tenant.createdAt);
     if (!initialNextDueDate) continue;
@@ -1266,16 +1299,37 @@ export const getChecklist = async (req: AuthenticatedRequest, res: Response) => 
     for (const reqItem of requirements) {
       const period = getCompliancePeriod(reqItem.frequencyType, now, tenant.createdAt);
       
-      const audit: any = await dynamicDb.ComplianceAudit.findOne({
+      // 1. Look for any active overdue or non-compliant audit first (e.g. unfulfilled tasks from 30 Sep)
+      let audit: any = await dynamicDb.ComplianceAudit.findOne({
         tenantId,
         requirementId: reqItem._id,
-        dueDate: {
-          $gte: period.startDate,
-          $lte: period.dueDate
-        }
+        $or: [
+          { status: { $in: ['OVERDUE', 'NON_COMPLIANT'] } },
+          { status: 'PENDING', dueDate: { $lt: now } }
+        ]
       })
+        .sort({ dueDate: 1 })
         .populate('penalty')
         .lean();
+
+      // If past-due pending audit found, mark its effective status as OVERDUE
+      if (audit && audit.status === 'PENDING' && audit.dueDate && new Date(audit.dueDate) < now) {
+        audit.status = 'OVERDUE';
+      }
+
+      // 2. If no overdue audit, look for current period audit
+      if (!audit) {
+        audit = await dynamicDb.ComplianceAudit.findOne({
+          tenantId,
+          requirementId: reqItem._id,
+          dueDate: {
+            $gte: period.startDate,
+            $lte: period.dueDate
+          }
+        })
+          .populate('penalty')
+          .lean();
+      }
 
       checklist.push({
         ...reqItem,
@@ -1285,7 +1339,13 @@ export const getChecklist = async (req: AuthenticatedRequest, res: Response) => 
           id: audit._id?.toString() || audit.id,
           penalty: audit.penalty ? { ...audit.penalty, id: (audit.penalty as any)._id?.toString() || (audit.penalty as any).id } : null
         } : null,
-        currentPeriod: period
+        currentPeriod: audit && audit.dueDate && new Date(audit.dueDate) < period.startDate
+          ? {
+              startDate: new Date(new Date(audit.dueDate).getFullYear(), new Date(audit.dueDate).getMonth(), 1),
+              dueDate: new Date(audit.dueDate),
+              label: new Date(audit.dueDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+            }
+          : period
       });
     }
 

@@ -442,12 +442,12 @@ export async function provisionAllTenantCollections(
   // 7. Custom Pages
   const defaultPages = [
     { title: 'Complaint Status', slug: 'complaint-status', type: 'CONTENT', content: '<h3>Monthly Complaint Status</h3><p>Status of investor complaints received and resolved per SEBI guidelines.</p>', isSystem: true },
-    { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', content: '<h3>Refund Policy</h3><p>Details regarding fee refunds and advisory subscription cancellations.</p>', isSystem: true },
+    { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', content: '<h3>Refund Policy</h3><p>Details regarding fee refunds and service subscription cancellations.</p>', isSystem: true },
     { title: 'Disclosure', slug: 'disclosure', type: 'CONTENT', content: '<h3>SEBI Disclosures</h3><p>Mandatory disclosures regarding research analyst activities, ownership, and conflicts of interest.</p>', isSystem: true },
     { title: 'Disclaimer', slug: 'disclaimer', type: 'CONTENT', content: '<h3>Disclaimer</h3><p>Investment in securities market are subject to market risks. Read all scheme related documents carefully before investing.</p>', isSystem: true },
     { title: 'Grievance Redressal Process', slug: 'grievance-redressal-process', type: 'CONTENT', content: '<h3>Grievance Redressal Mechanism</h3><p>Step-by-step procedure for lodging and escalating complaints.</p>', isSystem: true },
     { title: 'Investor Charter', slug: 'investor-charter', type: 'CONTENT', content: '<h3>Investor Charter</h3><p>Investor rights, responsibilities, and code of conduct under SEBI Research Analyst Regulations.</p>', isSystem: true },
-    { title: 'Terms & Conditions', slug: 'terms-and-conditions', type: 'CONTENT', content: '<h3>Terms of Service</h3><p>Terms and conditions governing use of research and advisory services.</p>', isSystem: true },
+    { title: 'Terms & Conditions', slug: 'terms-and-conditions', type: 'CONTENT', content: '<h3>Terms of Service</h3><p>Terms and conditions governing use of research services.</p>', isSystem: true },
     { title: 'Privacy Policy', slug: 'privacy-policy', type: 'CONTENT', content: '<h3>Privacy Policy</h3><p>Information on data collection, privacy, and confidentiality practices.</p>', isSystem: true }
   ];
 
@@ -474,10 +474,10 @@ export async function provisionAllTenantCollections(
 
   // 8. Email Templates
   const defaultTemplates = [
-    { type: 'WELCOME', subject: `Welcome to ${targetTenant.companyName}`, body: `Dear {{clientName}},\n\nWelcome to ${targetTenant.companyName}! Your advisory account is registered.\n\nBest regards,\n${targetTenant.companyName}` },
+    { type: 'WELCOME', subject: `Welcome to ${targetTenant.companyName}`, body: `Dear {{clientName}},\n\nWelcome to ${targetTenant.companyName}! Your service account is registered.\n\nBest regards,\n${targetTenant.companyName}` },
     { type: 'CHANGE_PASSWORD', subject: 'Password Reset Request', body: `Dear {{userName}},\n\nYour password reset request has been received. Please use your temporary credentials to log in.\n\nBest regards,\n${targetTenant.companyName}` },
-    { type: 'KYC_AGREEMENT', subject: 'Advisory Service Agreement & KYC Confirmation', body: `Dear {{clientName}},\n\nYour KYC verification and Research Advisory Agreement have been successfully recorded.\n\nBest regards,\n${targetTenant.companyName}` },
-    { type: 'INVOICE', subject: `Tax Invoice - ${targetTenant.companyName}`, body: `Dear {{clientName}},\n\nPlease find attached the tax invoice for your research advisory subscription.\n\nBest regards,\n${targetTenant.companyName}` }
+    { type: 'KYC_AGREEMENT', subject: 'Service Agreement & KYC Confirmation', body: `Dear {{clientName}},\n\nYour KYC verification and Research Service Agreement have been successfully recorded.\n\nBest regards,\n${targetTenant.companyName}` },
+    { type: 'INVOICE', subject: `Tax Invoice - ${targetTenant.companyName}`, body: `Dear {{clientName}},\n\nPlease find attached the tax invoice for your research service subscription.\n\nBest regards,\n${targetTenant.companyName}` }
   ];
 
   const templatesToSync = tenantData.emailTemplates && tenantData.emailTemplates.length > 0 ? tenantData.emailTemplates : defaultTemplates;
@@ -570,7 +570,7 @@ export async function provisionAllTenantCollections(
       await targetModels.Plan.create({
         tenantId,
         categoryId: defaultCategory._id,
-        name: 'Standard Advisory Plan',
+        name: 'Standard Service Plan',
         description: 'Comprehensive equity recommendations and research reports with SEBI compliant disclosures.',
         price: 5000.0,
         durationMonths: 1,
