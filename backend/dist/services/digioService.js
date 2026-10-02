@@ -484,7 +484,7 @@ const createDocumentForEsign = async (clientId, clientSecret, pdfBuffer, fileNam
         formData.append('file', pdfBuffer, { filename: fileName, contentType: 'application/pdf' });
         const signerObj = {
             identifier: signerIdentifier,
-            reason: 'SEBI Research Advisory Agreement eSign'
+            reason: 'SEBI Research Service Agreement eSign'
         };
         if (signerName && (0, exports.isValidName)(signerName)) {
             signerObj.name = signerName.trim();

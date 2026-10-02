@@ -475,7 +475,7 @@ const getClientVaultDetails = async (req, res) => {
                 const name = sig.stockId?.name || sig.stockName || sym;
                 clientResearchReports.push({
                     _id: sig._id,
-                    title: `Research Report - ${sym} (${sig.callType || 'Advisory Call'})`,
+                    title: `Research Report - ${sym} (${sig.callType || 'Service Call'})`,
                     stockSymbol: sym,
                     stockName: name,
                     segment: sig.segment || 'EQUITY',
@@ -540,7 +540,7 @@ const getClientVaultDetails = async (req, res) => {
                     day: '2-digit', month: 'short', year: 'numeric',
                     hour: '2-digit', minute: '2-digit', hour12: true
                 }),
-                planName: sub.plan?.name || 'Advisory Plan',
+                planName: sub.plan?.name || 'Service Plan',
                 segment: sub.plan?.researchSegments || sub.segment || 'N/A',
                 durationMonths: sub.plan?.durationMonths || 1,
                 amount: sub.amount || sub.amountTotal || sub.plan?.price || 0,
@@ -599,7 +599,7 @@ const getClientVaultDetails = async (req, res) => {
             subscriptions: {
                 key: '02_Subscriptions_&_Invoices',
                 title: '02. Subscriptions & Invoices',
-                description: 'Active/Expired Advisory Plans, Payments & Tax Invoices',
+                description: 'Active/Expired Service Plans, Payments & Tax Invoices',
                 fileCount: (enrichedSubscriptions.length || 0) + (enrichedPayments.length || 0),
                 data: {
                     subscriptions: enrichedSubscriptions,
@@ -608,7 +608,7 @@ const getClientVaultDetails = async (req, res) => {
             },
             tradeSignals: {
                 key: '03_Trade_Signals',
-                title: '03. Trade Signals & Advisory Calls',
+                title: '03. Trade Signals & Service Calls',
                 description: 'Open vs. Closed Recommendations, Targets Hit, Stoploss & P&L',
                 fileCount: signals.length,
                 metrics: {
@@ -669,7 +669,7 @@ const getClientVaultDetails = async (req, res) => {
             },
             agreements: {
                 key: '06_Signed_Agreements',
-                title: '06. Signed Advisory Agreements',
+                title: '06. Signed Service Agreements',
                 description: 'SEBI Mandatory Client Agreements & Aadhaar eSign Audit Records',
                 fileCount: enrichedAgreements.length,
                 data: enrichedAgreements
@@ -677,7 +677,7 @@ const getClientVaultDetails = async (req, res) => {
             callRecordings: {
                 key: '07_Call_Recordings',
                 title: '07. Audio Call Recordings',
-                description: 'SEBI Compliance Call Recordings, Advisory Audio & Transcripts',
+                description: 'SEBI Compliance Call Recordings, Service Audio & Transcripts',
                 fileCount: recordings.length,
                 data: recordings
             },
@@ -964,7 +964,7 @@ const exportClientVaultZip = async (req, res) => {
                 const name = sig.stockId?.name || sig.stockName || sym;
                 clientResearchReports.push({
                     _id: sig._id,
-                    title: `Research Report - ${sym} (${sig.callType || 'Advisory Call'})`,
+                    title: `Research Report - ${sym} (${sig.callType || 'Service Call'})`,
                     stockSymbol: sym,
                     stockName: name,
                     segment: sig.segment || 'EQUITY',
@@ -1020,7 +1020,7 @@ PAN Card:           ${client.pan || 'N/A'}
 Client Category:    ${client.category || 'INDIVIDUAL'}
 Registration Date:  ${client.createdAt ? new Date(client.createdAt).toLocaleString() : 'N/A'}
 
-Advisory Entity:    ${tenant?.companyName || 'SEBI Registered Research Analyst'}
+Research Entity:    ${tenant?.companyName || 'SEBI Registered Research Analyst'}
 SEBI Reg. Number:   ${tenant?.sebiRegistration || 'N/A'}
 Export Date & Time: ${new Date().toLocaleString()}
 
@@ -1030,7 +1030,7 @@ CONTENTS OF THIS DOSSIER:
 - 03_Trade_Signals/: Trade recommendations ledger (Open vs Closed, Targets Hit, Stoploss & P&L).
 - 04_Research_Reports/: Published technical and fundamental research reports (with PDFs).
 - 05_KYC_Documents/: Client identity proofs (PAN, Aadhaar, DigiLocker verification certificates).
-- 06_Signed_Agreements/: SEBI-mandated advisory service agreement (Official Signed PDF & Aadhaar eSign records).
+- 06_Signed_Agreements/: SEBI-mandated service agreement (Official Signed PDF & Aadhaar eSign records).
 - 07_Call_Recordings/: Recorded telephone conversations, audio calls (.mp3/.wav), and call metadata ledger.
 - 08_Audit_Trail/: Complete immutable activity logs (Signups, OTP verifications, login IPs, and staff actions).
 
@@ -1254,7 +1254,7 @@ const exportSingleFolder = async (req, res) => {
                 const matchingPay = (payments || []).find((p) => String(p.planId) === String(s.planId || s.plan?._id));
                 const purchaseTime = s.createdAt || matchingPay?.createdAt || s.startDate;
                 return {
-                    planName: s.plan?.name || 'Advisory Plan',
+                    planName: s.plan?.name || 'Service Plan',
                     segment: s.plan?.researchSegments || s.segment || 'N/A',
                     purchaseTimestamp: purchaseTime ? new Date(purchaseTime).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata' }) : 'N/A',
                     startDate: s.startDate ? new Date(s.startDate).toISOString().split('T')[0] : '',
@@ -1402,7 +1402,7 @@ const exportSingleFolder = async (req, res) => {
                     const name = sig.stockId?.name || sig.stockName || sym;
                     clientResearchReports.push({
                         _id: sig._id,
-                        title: `Research Report - ${sym} (${sig.callType || 'Advisory Call'})`,
+                        title: `Research Report - ${sym} (${sig.callType || 'Service Call'})`,
                         stockSymbol: sym,
                         stockName: name,
                         segment: sig.segment || 'EQUITY',

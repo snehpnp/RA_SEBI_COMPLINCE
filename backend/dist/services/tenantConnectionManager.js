@@ -15,6 +15,15 @@ exports.centralConnection = mongoose_1.default.createConnection(defaultCentralUr
     maxPoolSize: 20,
     serverSelectionTimeoutMS: 10000,
 });
+exports.centralConnection.on('connected', () => {
+    console.log(`✅ [DB] Connected to MongoDB: ${defaultDbName}`);
+});
+exports.centralConnection.on('error', (err) => {
+    console.error('❌ [DB] Central MongoDB connection error:', err?.message || err);
+});
+exports.centralConnection.on('disconnected', () => {
+    console.warn('⚠️ [DB] Central MongoDB connection disconnected.');
+});
 // Central Models
 exports.centralModels = (0, models_1.registerTenantModels)(exports.centralConnection);
 // Ensure index sanity for Client collection

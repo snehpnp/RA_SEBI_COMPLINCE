@@ -24,6 +24,8 @@ export interface IPayment extends Document {
   paymentDate?: Date | null;
   couponId?: Types.ObjectId | null;
   discountApplied?: number | null;
+  gstEnabled?: boolean | null;
+  gstCalculationType?: string | null;
   invoicePolicy?: 'IMMEDIATE_ON_PAYMENT' | 'AFTER_KYC_AGREEMENT';
   invoiceStatus?: 'PENDING_AGREEMENT' | 'GENERATED';
   invoiceSentAt?: Date | null;
@@ -54,6 +56,8 @@ export const PaymentSchema = new Schema<IPayment>(
     paymentDate: { type: Date, default: null },
     couponId: { type: Schema.Types.ObjectId, ref: 'Coupon', default: null },
     discountApplied: { type: Number, default: 0 },
+    gstEnabled: { type: Boolean, default: null },
+    gstCalculationType: { type: String, default: null },
     invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },
     invoiceStatus: { type: String, enum: ['PENDING_AGREEMENT', 'GENERATED'], default: 'GENERATED' },
     invoiceSentAt: { type: Date, default: null },

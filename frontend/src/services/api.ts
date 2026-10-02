@@ -1168,7 +1168,7 @@ class ApiClient {
     });
   }
 
-  async fetchDigioRecord(data: { digioId: string; clientId?: string; saveToClient?: boolean }) {
+  async fetchDigioRecord(data: { digioId?: string; kycDigioId?: string; esignDigioId?: string; clientId?: string; saveToClient?: boolean }) {
     return this.request('/admin/digio/fetch-by-id', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1404,7 +1404,7 @@ class ApiClient {
   async downloadVaultAgreement(clientId: string, clientName?: string) {
     return this.downloadVaultFile(
       `/admin/vaults/${clientId}/agreement`,
-      `Signed_Advisory_Agreement_${clientName || 'Client'}.pdf`
+      `Signed_Service_Agreement_${clientName || 'Client'}.pdf`
     );
   }
 

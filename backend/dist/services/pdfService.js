@@ -58,7 +58,7 @@ const generateTermsAndConditionsPdf = async (tenant) => {
             const buffers = [];
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => resolve(Buffer.concat(buffers)));
-            const companyName = tenant?.companyName || 'Research Analyst Advisory';
+            const companyName = tenant?.companyName || 'Research Analyst Services';
             const sebiReg = tenant?.sebiRegistration || 'SEBI Registered RA';
             const email = tenant?.email || '';
             const address = tenant?.address || 'India';
@@ -79,7 +79,7 @@ const generateTermsAndConditionsPdf = async (tenant) => {
                 },
                 {
                     title: '2. Client Eligibility & Onboarding',
-                    body: 'Research recommendations are provided to clients upon successful completion of identity verification (KYC) and acceptance of advisory service terms. Clients must provide accurate and updated personal and financial information.'
+                    body: 'Research recommendations are provided to clients upon successful completion of identity verification (KYC) and acceptance of service terms. Clients must provide accurate and updated personal and financial information.'
                 },
                 {
                     title: '3. Mandatory Risk Warning & Disclaimers',
@@ -124,7 +124,7 @@ const generatePrivacyPolicyPdf = async (tenant) => {
             const buffers = [];
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => resolve(Buffer.concat(buffers)));
-            const companyName = tenant?.companyName || 'Research Analyst Advisory';
+            const companyName = tenant?.companyName || 'Research Analyst Services';
             const sebiReg = tenant?.sebiRegistration || 'SEBI Registered RA';
             const email = tenant?.email || '';
             const address = tenant?.address || 'India';
@@ -190,7 +190,7 @@ const generateInternalPolicyPdf = async (tenant) => {
             const buffers = [];
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => resolve(Buffer.concat(buffers)));
-            const companyName = tenant?.companyName || 'Research Analyst Advisory';
+            const companyName = tenant?.companyName || 'Research Analyst Services';
             const sebiReg = tenant?.sebiRegistration || 'SEBI Registered RA';
             const email = tenant?.email || '';
             const address = tenant?.address || 'India';
@@ -223,7 +223,7 @@ const generateInternalPolicyPdf = async (tenant) => {
                 },
                 {
                     title: '5. Supervisory Controls, Audit Trail & Record Retention',
-                    body: 'All research notes, client communications, advisory recommendations, and supervisory sign-offs shall be retained in tamper-evident electronic archives for a minimum statutory period of 5 years as required under SEBI regulations.'
+                    body: 'All research notes, client communications, research recommendations, and supervisory sign-offs shall be retained in tamper-evident electronic archives for a minimum statutory period of 5 years as required under SEBI regulations.'
                 },
                 {
                     title: '6. Role of Compliance & Principal Officer',
@@ -337,7 +337,7 @@ const generateAgreementPdf = async (clientId, options) => {
                 client = {
                     _id: clientId,
                     name: options?.signerName || 'Client / Investor',
-                    email: 'client@advisory.com',
+                    email: 'client@researchservices.com',
                     mobile: '9876543210',
                     pan: 'ABCDE1234F',
                     aadhaar: 'XXXX-XXXX-1234',
@@ -514,7 +514,7 @@ const generateAgreementPdf = async (clientId, options) => {
                 doc.lineWidth(0.75).strokeColor('#0284C7').rect(stampX - 5, stampY - 5, 230, 80).stroke();
                 doc.fillColor('#0369A1').fontSize(9.5).font('Helvetica-Bold').text(`Signed by: ${clientFullName}`, stampX, stampY);
                 doc.fontSize(8).font('Helvetica').fillColor('#334155');
-                doc.text(`Reason: SEBI Research Advisory Agreement eSign`, stampX, stampY + 14, { width: 220 });
+                doc.text(`Reason: SEBI Research Service Agreement eSign`, stampX, stampY + 14, { width: 220 });
                 doc.text(`eSigned using Aadhaar (Digio.in / UIDAI)`, stampX, stampY + 28);
                 if (options.aadhaarSuffix) {
                     doc.text(`Aadhaar: ${options.aadhaarSuffix}`, stampX, stampY + 42);

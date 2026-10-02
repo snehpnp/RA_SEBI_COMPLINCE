@@ -17,6 +17,18 @@ export const centralConnection = mongoose.createConnection(
   }
 );
 
+centralConnection.on('connected', () => {
+  console.log(`✅ [DB] Connected to MongoDB: ${defaultDbName}`);
+});
+
+centralConnection.on('error', (err: any) => {
+  console.error('❌ [DB] Central MongoDB connection error:', err?.message || err);
+});
+
+centralConnection.on('disconnected', () => {
+  console.warn('⚠️ [DB] Central MongoDB connection disconnected.');
+});
+
 // Central Models
 export const centralModels: ITenantModels = registerTenantModels(centralConnection);
 

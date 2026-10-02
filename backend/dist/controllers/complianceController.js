@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
+const activityService_1 = require("../services/activityService");
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const checkComplianceForTenant = async (tenantId) => {
     try {
@@ -742,6 +743,34 @@ const checkComplianceForTenant = async (tenantId) => {
         // 6. PREEMPTIVE COMPLIANCE AUDIT GENERATION & OVERDUE STATUS MANAGEMENT
         const activeRules = await db_1.default.ComplianceRequirement.find({ isActive: true }).lean();
         const now = new Date();
+        // 6A. Transition all past pending audits (e.g. 30 Sep cycle) to OVERDUE and generate penalties
+        const pastPendingAudits = await db_1.default.ComplianceAudit.find({
+            tenantId,
+            status: 'PENDING',
+            dueDate: { $lt: now }
+        }).lean();
+        for (const pAudit of pastPendingAudits) {
+            await db_1.default.ComplianceAudit.findByIdAndUpdate(pAudit._id, {
+                $set: { status: 'OVERDUE' }
+            });
+            const rule = activeRules.find((r) => String(r._id) === String(pAudit.requirementId));
+            if (rule && rule.penaltyAmount) {
+                const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
+                const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
+                const existingPenalty = await db_1.default.Penalty.findOne({
+                    auditId: pAudit._id
+                }).lean();
+                if (!existingPenalty) {
+                    await db_1.default.Penalty.create({
+                        tenantId,
+                        auditId: pAudit._id,
+                        amount: penaltyAmt,
+                        reason: `Overdue compliance: ${rule.requirement}`,
+                        status: 'PENDING_PAYMENT'
+                    });
+                }
+            }
+        }
         for (const rule of activeRules) {
             const initialNextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, new Date(), tenant.createdAt);
             if (!initialNextDueDate)
@@ -1161,16 +1190,35 @@ const getChecklist = async (req, res) => {
         const now = new Date();
         for (const reqItem of requirements) {
             const period = (0, complianceDateHelper_1.getCompliancePeriod)(reqItem.frequencyType, now, tenant.createdAt);
-            const audit = await db_1.default.ComplianceAudit.findOne({
+            // 1. Look for any active overdue or non-compliant audit first (e.g. unfulfilled tasks from 30 Sep)
+            let audit = await db_1.default.ComplianceAudit.findOne({
                 tenantId,
                 requirementId: reqItem._id,
-                dueDate: {
-                    $gte: period.startDate,
-                    $lte: period.dueDate
-                }
+                $or: [
+                    { status: { $in: ['OVERDUE', 'NON_COMPLIANT'] } },
+                    { status: 'PENDING', dueDate: { $lt: now } }
+                ]
             })
+                .sort({ dueDate: 1 })
                 .populate('penalty')
                 .lean();
+            // If past-due pending audit found, mark its effective status as OVERDUE
+            if (audit && audit.status === 'PENDING' && audit.dueDate && new Date(audit.dueDate) < now) {
+                audit.status = 'OVERDUE';
+            }
+            // 2. If no overdue audit, look for current period audit
+            if (!audit) {
+                audit = await db_1.default.ComplianceAudit.findOne({
+                    tenantId,
+                    requirementId: reqItem._id,
+                    dueDate: {
+                        $gte: period.startDate,
+                        $lte: period.dueDate
+                    }
+                })
+                    .populate('penalty')
+                    .lean();
+            }
             checklist.push({
                 ...reqItem,
                 id: reqItem._id?.toString() || reqItem.id,
@@ -1179,7 +1227,13 @@ const getChecklist = async (req, res) => {
                     id: audit._id?.toString() || audit.id,
                     penalty: audit.penalty ? { ...audit.penalty, id: audit.penalty._id?.toString() || audit.penalty.id } : null
                 } : null,
-                currentPeriod: period
+                currentPeriod: audit && audit.dueDate && new Date(audit.dueDate) < period.startDate
+                    ? {
+                        startDate: new Date(new Date(audit.dueDate).getFullYear(), new Date(audit.dueDate).getMonth(), 1),
+                        dueDate: new Date(audit.dueDate),
+                        label: new Date(audit.dueDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                    }
+                    : period
             });
         }
         return res.status(200).json({ success: true, data: checklist });
@@ -1298,6 +1352,35 @@ const updateAuditStatus = async (req, res) => {
                 }
             });
         }
+        (0, auditService_1.logAudit)({
+            tenantId,
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'COMPLIANCE',
+            oldValue: { status: previousStatus },
+            newValue: { status, requirement: requirement.requirement, remarks: officerRemarks },
+            ipAddress: req.ip
+        }).catch(() => { });
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: 'STAFF',
+            actorId: req.user?.id,
+            actorName: updatedByName,
+            actorEmail: req.user?.email || null,
+            category: 'KYC_COMPLIANCE',
+            action: 'COMPLIANCE_STATUS_UPDATE',
+            title: `SEBI Checklist Marked as ${status}`,
+            description: `Rule: "${requirement.requirement}". Remarks: ${officerRemarks || 'No remarks'}`,
+            status: status === 'COMPLIANT' ? 'SUCCESS' : (status === 'NON_COMPLIANT' ? 'FAILED' : 'INFO'),
+            metadata: {
+                requirementId,
+                auditId: audit._id?.toString() || audit.id,
+                previousStatus,
+                newStatus: status,
+                periodLabel: period.label
+            },
+            req
+        }).catch(() => { });
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'COMPLIANCE_AUDIT_UPDATE' }).catch(() => { });
         return res.status(200).json({
             success: true,
@@ -1446,6 +1529,34 @@ const resolvePenalty = async (req, res) => {
                 proofUrl
             }
         });
+        (0, auditService_1.logAudit)({
+            tenantId: penalty.tenantId.toString(),
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'COMPLIANCE',
+            oldValue: { status: 'PENDING_PAYMENT' },
+            newValue: { status: 'RESOLVED', resolutionType, paymentRef, remarks },
+            ipAddress: req.ip
+        }).catch(() => { });
+        (0, activityService_1.logActivity)({
+            tenantId: penalty.tenantId,
+            actorType: 'STAFF',
+            actorId: req.user?.id,
+            actorName: updatedByName,
+            actorEmail: req.user?.email || null,
+            category: 'KYC_COMPLIANCE',
+            action: 'PENALTY_RESOLVED',
+            title: `SEBI Penalty Resolved (${resolutionType})`,
+            description: `Amount: Rs.${penalty.amount}. Ref: ${paymentRef}. Remarks: ${remarks || ''}`,
+            status: 'SUCCESS',
+            metadata: {
+                penaltyId: penalty._id?.toString() || penalty.id,
+                resolutionType,
+                paymentRef,
+                amount: penalty.amount
+            },
+            req
+        }).catch(() => { });
         (0, tenantSyncDispatcher_1.syncTenantToRemote)(penalty.tenantId.toString(), { reason: 'PENALTY_RESOLVED' }).catch(() => { });
         return res.status(200).json({
             success: true,

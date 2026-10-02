@@ -89,6 +89,9 @@ app.get('/clients', getThirdPartyClients);
 // Health check endpoint
 app.get('/health', async (req: express.Request, res: express.Response) => {
   try {
+    if (centralConnection.readyState !== 1) {
+      return res.status(503).json({ success: false, message: 'Database connecting or disconnected', readyState: centralConnection.readyState });
+    }
     if (centralConnection.db) {
       await centralConnection.db.admin().ping();
     }

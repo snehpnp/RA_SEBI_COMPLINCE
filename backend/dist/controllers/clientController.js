@@ -783,8 +783,8 @@ const signAgreement = async (req, res) => {
             targetClientId: client._id || client.id,
             category: 'KYC_COMPLIANCE',
             action: 'AGREEMENT_SIGNED',
-            title: 'Advisory Agreement Signed',
-            description: `Client digitally signed the Advisory Agreement via Aadhaar eSign`,
+            title: 'Service Agreement Signed',
+            description: `Client digitally signed the Service Agreement via Aadhaar eSign`,
             status: 'SUCCESS',
             metadata: {
                 agreementId: agreement?._id || agreement?.id,
@@ -803,7 +803,7 @@ const signAgreement = async (req, res) => {
                 tenantId: client.tenantId || req.user?.tenantId,
                 toEmail,
                 clientName: signerName || client.name,
-                companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+                companyName: tenant?.companyName || tenant?.name || 'Research Analyst Services',
                 agreementUrl,
                 pdfBuffer,
                 maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
@@ -839,7 +839,7 @@ const signAgreement = async (req, res) => {
                                 toEmail,
                                 clientName: signerName || client.name,
                                 companyName: tenant?.companyName,
-                                planName: pay.planName || pay.plan?.name || 'Research Advisory Plan',
+                                planName: pay.planName || pay.plan?.name || 'Research Service Plan',
                                 invoiceNumber: invNo,
                                 amount: pay.amount,
                                 pdfBuffer: invBuffer
@@ -1007,7 +1007,7 @@ const submitManualPayment = async (req, res) => {
             return res.status(403).json({
                 success: false,
                 requiresAgreement: true,
-                message: 'Advisory Agreement must be signed before purchasing a plan. Please sign your agreement first.'
+                message: 'Service Agreement must be signed before purchasing a plan. Please sign your agreement first.'
             });
         }
         let planDoc = null;
@@ -1066,7 +1066,9 @@ const submitManualPayment = async (req, res) => {
             tenantState: tenantObj?.state || null,
             planValidityDays: planDoc ? (planDoc.durationMonths * 30) : null,
             couponId: appliedCouponId,
-            discountApplied: discountApplied > 0 ? parseFloat(discountApplied.toFixed(2)) : 0
+            discountApplied: discountApplied > 0 ? parseFloat(discountApplied.toFixed(2)) : 0,
+            gstEnabled: tenantObj?.gstEnabled !== false,
+            gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE'
         });
         return res.status(201).json({
             success: true,
@@ -1080,35 +1082,82 @@ const submitManualPayment = async (req, res) => {
 };
 exports.submitManualPayment = submitManualPayment;
 const verifyManualPayment = async (req, res) => {
-    const { paymentId, status, remarks } = req.body;
+    const { paymentId, status, remarks, receivedAmount, approvalMode, // 'FULL' | 'PRORATED' | 'DISCOUNT'
+    customValidityDays, discountApplied, transactionRef } = req.body;
     try {
         const payment = await db_1.default.Payment.findById(paymentId).lean();
         if (!payment)
             return res.status(404).json({ success: false, message: 'Payment record not found' });
         const tenantId = req.user.tenantId;
-        const updatedPayment = await db_1.default.Payment.findByIdAndUpdate(paymentId, {
-            $set: {
-                status,
-                remarks,
-                verifiedByStaffId: req.user.id
-            }
-        }, { returnDocument: 'after', lean: true });
+        let effectiveAmount = Number(payment.amount || 0);
+        let effectiveValidityDays = Number(payment.planValidityDays || 30);
+        let effectiveDiscount = Number(payment.discountApplied || payment.discount || 0);
+        let effectiveRemarks = remarks || 'Verified by Compliance Staff';
+        const plan = payment.planId ? await db_1.default.Plan.findById(payment.planId).lean() : null;
+        const defaultValidityDays = (plan?.durationMonths ? plan.durationMonths * 30 : 30);
+        const fullPlanPrice = Number(plan?.amount || plan?.price || payment.amount || 0);
         if (status === 'SUCCESS') {
-            const plan = await db_1.default.Plan.findById(payment.planId).lean();
+            if (approvalMode === 'PRORATED') {
+                effectiveAmount = receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount;
+                effectiveValidityDays = customValidityDays !== undefined && Number(customValidityDays) > 0
+                    ? Number(customValidityDays)
+                    : Math.max(1, Math.round((effectiveAmount / (fullPlanPrice || effectiveAmount)) * defaultValidityDays));
+                effectiveDiscount = 0;
+                effectiveRemarks = remarks || `Prorated service activated for ${effectiveValidityDays} days based on received amount ₹${effectiveAmount}.`;
+            }
+            else if (approvalMode === 'DISCOUNT') {
+                effectiveAmount = receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount;
+                effectiveValidityDays = defaultValidityDays;
+                effectiveDiscount = discountApplied !== undefined
+                    ? Number(discountApplied)
+                    : Math.max(0, fullPlanPrice - effectiveAmount);
+                effectiveRemarks = remarks || `Special discount applied: ₹${effectiveDiscount}. Full ${defaultValidityDays} days service activated for ₹${effectiveAmount}.`;
+            }
+            else {
+                // FULL match / standard approval
+                if (receivedAmount !== undefined && Number(receivedAmount) > 0) {
+                    effectiveAmount = Number(receivedAmount);
+                }
+                effectiveValidityDays = defaultValidityDays;
+                effectiveDiscount = 0;
+                effectiveRemarks = remarks || 'Verified by Compliance Staff';
+            }
+        }
+        const tenantDoc = await db_1.default.Tenant.findById(tenantId).lean();
+        const isTenantGst = tenantDoc?.gstEnabled !== false && Boolean(tenantDoc?.gst && tenantDoc.gst.trim().length >= 15);
+        const resolvedGstEnabled = payment.gstEnabled !== undefined && payment.gstEnabled !== null
+            ? Boolean(payment.gstEnabled)
+            : (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') ? false : isTenantGst);
+        const paymentUpdatePayload = {
+            status,
+            remarks: effectiveRemarks,
+            verifiedByStaffId: req.user.id,
+            amount: effectiveAmount,
+            planValidityDays: effectiveValidityDays,
+            discountApplied: effectiveDiscount,
+            discount: effectiveDiscount,
+            gstEnabled: resolvedGstEnabled,
+            gstCalculationType: payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE'
+        };
+        if (transactionRef && typeof transactionRef === 'string' && transactionRef.trim()) {
+            paymentUpdatePayload.transactionRef = transactionRef.trim();
+        }
+        const updatedPayment = await db_1.default.Payment.findByIdAndUpdate(paymentId, { $set: paymentUpdatePayload }, { returnDocument: 'after', lean: true });
+        if (status === 'SUCCESS') {
             if (plan) {
                 const client = await db_1.default.Client.findById(payment.clientId).lean();
                 if (client) {
-                    if (payment.amount > 151000) {
+                    if (effectiveAmount > 151000) {
                         await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
                             $set: { category: 'NON_INDIVIDUAL' }
                         });
                     }
-                    if (payment.paymentMode !== 'ONLINE_RAZORPAY' && payment.amount >= 50000) {
+                    if (payment.paymentMode !== 'ONLINE_RAZORPAY' && effectiveAmount >= 50000) {
                         await db_1.default.ComplianceAlert.create({
                             tenantId,
                             alertType: 'COMPLIANCE_PENDING',
                             severity: 'HIGH',
-                            description: `FIU ALERT: Cash/Manual payment of ${payment.amount} received from Client ${client.name} (PAN: ${client.pan}). High risk case logged.`
+                            description: `FIU ALERT: Cash/Manual payment of ${effectiveAmount} received from Client ${client.name} (PAN: ${client.pan}). High risk case logged.`
                         });
                     }
                 }
@@ -1129,9 +1178,9 @@ const verifyManualPayment = async (req, res) => {
                     if (!isNaN(parsed.getTime()))
                         startDate = parsed;
                 }
-                const validityDays = payment.planValidityDays || (plan.durationMonths * 30) || 30;
+                const validityDays = effectiveValidityDays;
                 const endDate = new Date(startDate.getTime() + validityDays * 24 * 60 * 60 * 1000);
-                const amountTotal = Number(payment.amount || 0);
+                const amountTotal = Number(effectiveAmount || 0);
                 const amountBase = amountTotal / 1.18;
                 const amountGst = amountTotal - amountBase;
                 await db_1.default.Subscription.create({
@@ -1144,6 +1193,8 @@ const verifyManualPayment = async (req, res) => {
                     amountBase: parseFloat(amountBase.toFixed(2)),
                     amountGst: parseFloat(amountGst.toFixed(2))
                 });
+                // Generate invoice PDF in background
+                (0, invoiceGenerator_1.generateInvoicePdf)(String(payment._id || payment.id)).catch(() => { });
                 const isKycDone = Boolean(client?.kraVerified === true || client?.kycStatus === 'VERIFIED' || client?.kycStatus === 'APPROVED');
                 const agreement = await db_1.default.Agreement.findOne({
                     $or: [{ clientId: payment.clientId }, { clientId: client?.userId }]
@@ -1193,6 +1244,28 @@ const verifyManualPayment = async (req, res) => {
             newValue: updatedPayment,
             ipAddress: req.ip
         });
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: 'ADMIN',
+            actorId: req.user?.id,
+            actorName: `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || 'Admin',
+            actorEmail: req.user?.email || null,
+            targetClientId: payment.clientId,
+            category: 'PAYMENT',
+            action: status === 'SUCCESS' ? 'PAYMENT_VERIFIED' : 'PAYMENT_REJECTED',
+            title: status === 'SUCCESS' ? 'QR / Manual Payment Verified' : 'Manual Payment Rejected',
+            description: status === 'SUCCESS'
+                ? `Payment verified. Amount Received: Rs.${receivedAmount || payment.amount}. Status: ${status}`
+                : `Payment rejected. Reason: ${rejectionReason || 'Verification Failed'}`,
+            status: status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+            metadata: {
+                paymentId: payment._id?.toString() || payment.id,
+                receivedAmount,
+                approvalMode,
+                discountApplied
+            },
+            req
+        }).catch(() => { });
         return res.status(200).json({
             success: true,
             message: `Manual payment verification processed as ${status}.`,
@@ -1895,7 +1968,7 @@ const getPaymentGatewayStatus = async (req, res) => {
                 activeGateway: 'RAZORPAY',
                 message: 'Administrator has not configured a payment gateway. Please contact admin to buy this plan.',
                 adminContact: {
-                    companyName: 'Advisory Administration',
+                    companyName: 'Service Administration',
                     email: null,
                     mobile: null,
                     sebiRegistration: null,
@@ -1923,7 +1996,7 @@ const getPaymentGatewayStatus = async (req, res) => {
             isConfigured = false;
         }
         const adminContact = {
-            companyName: tenantObj.companyName || 'Advisory Team',
+            companyName: tenantObj.companyName || 'Service Team',
             email: tenantObj.companyEmail || tenantObj.email || null,
             mobile: tenantObj.mobile || null,
             sebiRegistration: tenantObj.sebiRegistration || null,

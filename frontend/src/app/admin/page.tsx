@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target } from 'lucide-react';
+import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -40,6 +40,7 @@ import OccupationsManager from '../../components/admin/OccupationsManager';
 import SecuritySettingsTab from '../../components/admin/SecuritySettingsTab';
 import ClientTimelineModal from '../../components/admin/ClientTimelineModal';
 import ClientVaultExplorer from '../../components/admin/vault/ClientVaultExplorer';
+import ComplianceCalendarModal from '../../components/compliance/ComplianceCalendarModal';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -448,6 +449,12 @@ function AdminDashboardContent() {
   const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc'>('payments');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState<boolean>(false);
+  const [auditSearchQuery, setAuditSearchQuery] = useState<string>('');
+  const [auditCategoryFilter, setAuditCategoryFilter] = useState<string>('ALL');
+  const [auditRoleFilter, setAuditRoleFilter] = useState<string>('ALL');
+  const [selectedAuditLog, setSelectedAuditLog] = useState<any>(null);
+  const [auditCurrentPage, setAuditCurrentPage] = useState<number>(1);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
 
@@ -697,6 +704,7 @@ function AdminDashboardContent() {
   const [checklistHistory, setChecklistHistory] = useState<any[]>([]);
   const [checklistSubTab, setChecklistSubTab] = useState<'active' | 'history'>('active');
   const [checklistStatusFilter, setChecklistStatusFilter] = useState<'ALL' | 'OVERDUE' | 'PENDING'>('ALL');
+  const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
   const [alertsSubTab, setAlertsSubTab] = useState<'active' | 'history'>('active');
   const [historyFilterText, setHistoryFilterText] = useState('');
   const [selectedFinancialYear, setSelectedFinancialYear] = useState<string>('All');
@@ -742,6 +750,12 @@ function AdminDashboardContent() {
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
   const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
   const [allPayments, setAllPayments] = useState<any[]>([]);
+  const pendingQrCount = useMemo(() => {
+    return allPayments.filter((p: any) =>
+      (p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl) &&
+      (p.status || 'PENDING').toUpperCase() === 'PENDING'
+    ).length;
+  }, [allPayments]);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
@@ -1068,11 +1082,14 @@ function AdminDashboardContent() {
   const [testingDigio, setTestingDigio] = useState(false);
   const [digioTestResult, setDigioTestResult] = useState<{ success: boolean; message: string } | null>(null);
   // Fetch by Digio ID states (admin client KYC panel)
-  const [fetchDigioIdInput, setFetchDigioIdInput] = useState('');
+  const [fetchDigioIdInput, setFetchDigioIdInput] = useState(''); // kept for backward compat (stores JSON)
+  const [fetchDigioKycId, setFetchDigioKycId] = useState('');
+  const [fetchDigioEsignId, setFetchDigioEsignId] = useState('');
   const [fetchDigioLoading, setFetchDigioLoading] = useState(false);
   const [fetchDigioResult, setFetchDigioResult] = useState<any>(null);
   const [fetchDigioError, setFetchDigioError] = useState('');
   const [fetchDigioSaveMode, setFetchDigioSaveMode] = useState(false);
+  const [showDigioConfirmPopup, setShowDigioConfirmPopup] = useState(false);
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -1099,8 +1116,134 @@ function AdminDashboardContent() {
   const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications'>('all');
   const [selectedScreenshotModal, setSelectedScreenshotModal] = useState<{ url: string; clientName: string; planName: string; utr: string; amount: number } | null>(null);
 
+  // Smart Verification Modal for QR / Manual Payments
+  const [selectedVerifyPayment, setSelectedVerifyPayment] = useState<any | null>(null);
+  const [verifyReceivedAmount, setVerifyReceivedAmount] = useState<number>(0);
+  const [verifyApprovalMode, setVerifyApprovalMode] = useState<'FULL' | 'PRORATED' | 'DISCOUNT'>('FULL');
+  const [verifyCustomDays, setVerifyCustomDays] = useState<number>(30);
+  const [verifyCustomDiscount, setVerifyCustomDiscount] = useState<number>(0);
+  const [verifyUtr, setVerifyUtr] = useState<string>('');
+  const [verifyRemarks, setVerifyRemarks] = useState<string>('');
+  const [isSubmittingVerify, setIsSubmittingVerify] = useState<boolean>(false);
+
   const [agreementContent, setAgreementContent] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
+
+  // ── Mandatory Firm Setup Prerequisites State & Validation ──
+  const [isSetupPrereqModalOpen, setIsSetupPrereqModalOpen] = useState(false);
+  const [prereqActionTarget, setPrereqActionTarget] = useState('');
+
+  const getPrerequisitesStatus = () => {
+    const hasLogo = Boolean(tenantLogoUrl || tenantDetails?.logoUrl || logoFile);
+    const hasPrivacyPdf = Boolean(privacyPdf || privacyPdfUrl || tenantDetails?.privacyPdfUrl);
+    const hasTermsPdf = Boolean(termsPdf || termsPdfUrl || tenantDetails?.termsPdfUrl);
+    const hasAgreement = Boolean((agreementContent && agreementContent.trim().length > 20) || (tenantDetails?.agreementContent && tenantDetails.agreementContent.trim().length > 20));
+    const hasWelcomeEmail = Boolean((welcomeEmailText && welcomeEmailText.trim().length > 10) || (tenantDetails?.welcomeEmailText && tenantDetails.welcomeEmailText.trim().length > 10));
+    const hasDisclaimer = Boolean((reportDisclaimer && reportDisclaimer.trim().length > 10) || (tenantDetails?.reportDisclaimer && tenantDetails.reportDisclaimer.trim().length > 10));
+    const hasSmtp = Boolean((smtpHost?.trim() && smtpUser?.trim()) || (tenantDetails?.smtpHost && tenantDetails?.smtpUser));
+    const hasDigio = Boolean((digioClientId?.trim() && digioClientSecret?.trim()) || (tenantDetails?.digioClientId && tenantDetails?.digioClientSecret));
+
+    const items = [
+      {
+        id: 'logo',
+        name: 'Company Logo',
+        description: 'Firm logo displayed on client invoices, portal header, research PDFs, and agreements.',
+        completed: hasLogo,
+        tab: 'general' as const,
+        subTab: null,
+        badgeText: hasLogo ? 'Logo Configured' : 'Missing Logo'
+      },
+      {
+        id: 'privacy',
+        name: 'Privacy Policy PDF',
+        description: 'Official investor privacy policy document complying with SEBI data protection standards.',
+        completed: hasPrivacyPdf,
+        tab: 'policies' as const,
+        subTab: null,
+        badgeText: hasPrivacyPdf ? 'PDF Uploaded' : 'Missing PDF'
+      },
+      {
+        id: 'terms',
+        name: 'Terms & Conditions PDF',
+        description: 'Mandatory Research Analyst terms of service, fee schedule, and client operating conditions.',
+        completed: hasTermsPdf,
+        tab: 'policies' as const,
+        subTab: null,
+        badgeText: hasTermsPdf ? 'PDF Uploaded' : 'Missing PDF'
+      },
+      {
+        id: 'agreement',
+        name: 'Service Agreement Content',
+        description: 'Legal clauses and SEBI RA agreement template text used for client Aadhaar eSigning.',
+        completed: hasAgreement,
+        tab: 'policies' as const,
+        subTab: null,
+        badgeText: hasAgreement ? 'Template Ready' : 'Content Missing'
+      },
+      {
+        id: 'welcome_email',
+        name: 'Welcome Email Custom Text',
+        description: 'Introductory guidance text sent in automated welcome onboarding emails to newly registered clients.',
+        completed: hasWelcomeEmail,
+        tab: 'policies' as const,
+        subTab: null,
+        badgeText: hasWelcomeEmail ? 'Email Text Configured' : 'Text Missing'
+      },
+      {
+        id: 'disclaimer',
+        name: 'Research Report Disclaimer',
+        description: 'Statutory SEBI regulatory risk statement automatically appended to all recommendations.',
+        completed: hasDisclaimer,
+        tab: 'policies' as const,
+        subTab: null,
+        badgeText: hasDisclaimer ? 'Disclaimer Configured' : 'Disclaimer Missing'
+      },
+      {
+        id: 'smtp',
+        name: 'Email & SMTP Configuration',
+        description: 'SMTP host, port, credentials, and sender address for delivering KYC emails, OTPs, and invoices.',
+        completed: hasSmtp,
+        tab: 'integrations' as const,
+        subTab: 'email' as const,
+        badgeText: hasSmtp ? 'SMTP Connected' : 'Credentials Missing'
+      },
+      {
+        id: 'digio',
+        name: 'Digio KYC & eSign Configuration',
+        description: 'Digio API credentials for DigiLocker Aadhaar KYC and legal eSign agreement stamping.',
+        completed: hasDigio,
+        tab: 'integrations' as const,
+        subTab: 'kyc' as const,
+        badgeText: hasDigio ? 'Digio Configured' : 'Keys Missing'
+      }
+    ];
+
+    const completedCount = items.filter(i => i.completed).length;
+    const isAllComplete = completedCount === items.length;
+
+    return { items, completedCount, totalCount: items.length, isAllComplete };
+  };
+
+  const requireSetupPrerequisites = (actionName: string): boolean => {
+    const status = getPrerequisitesStatus();
+    if (!status.isAllComplete) {
+      setPrereqActionTarget(actionName);
+      setIsSetupPrereqModalOpen(true);
+      return false;
+    }
+    return true;
+  };
+
+  const handleNavigateToPrerequisite = (item: any) => {
+    setIsSetupPrereqModalOpen(false);
+    setActiveTab('settings');
+    if (item.tab) {
+      setSettingsTab(item.tab);
+    }
+    if (item.subTab) {
+      setIntegrationTab(item.subTab);
+    }
+  };
 
   // Staff creation form state
   const [isSubmittingStaff, setIsSubmittingStaff] = useState(false);
@@ -1465,6 +1608,21 @@ function AdminDashboardContent() {
         api.listAdminTickets().then(res => {
           if (res.success) setAdminTickets(res.data);
         }).catch(() => { });
+        api.getComplianceChecklist().then(res => {
+          if (res.success && Array.isArray(res.data)) setChecklist(res.data);
+        }).catch(() => { });
+        api.getComplianceAlerts().then(res => {
+          if (res.success && Array.isArray(res.data)) setAlerts(res.data);
+        }).catch(() => { });
+        api.getPenalties().then(res => {
+          if (res.success && Array.isArray(res.data)) setPenalties(res.data);
+        }).catch(() => { });
+        api.getAdminClients().then(res => {
+          if (res.success && Array.isArray(res.data)) setClients(res.data);
+        }).catch(() => { });
+        api.getComplianceChecklistHistory().then(res => {
+          if (res.success && Array.isArray(res.data)) setChecklistHistory(res.data);
+        }).catch(() => { });
       }
 
       if (tab === 'tickets') {
@@ -1503,8 +1661,17 @@ function AdminDashboardContent() {
         api.getComplianceChecklistHistory().then(res => { if (res.success) setChecklistHistory(res.data); }).catch(() => { });
       }
 
-      if (tab === 'payments') {
+      if (initStep || tab === 'payments' || tab === 'dashboard') {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+      }
+
+      if (initStep || tab === 'auditLogs' || tab === 'dashboard') {
+        setLoadingAuditLogs(true);
+        api.getTenantAuditLogs().then(res => {
+          if (res.success && Array.isArray(res.data)) setActivityLogs(res.data);
+        }).catch(() => { }).finally(() => {
+          setLoadingAuditLogs(false);
+        });
       }
 
     } catch (err: any) {
@@ -1523,6 +1690,7 @@ function AdminDashboardContent() {
   const salesAndClientChartData = useMemo(() => {
     const formatPeriod = (dateStr: string, timeframe: 'monthly' | 'yearly') => {
       const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return timeframe === 'yearly' ? new Date().getFullYear().toString() : 'Oct 26';
       if (timeframe === 'yearly') {
         return d.getFullYear().toString();
       } else {
@@ -1533,26 +1701,35 @@ function AdminDashboardContent() {
     const timeframe = dashboardTimeframe;
     const metric = dashboardMetric;
 
-
-
     const dataMap = new Map<string, number>();
 
     if (metric === 'sales') {
       allPayments.forEach((p: any) => {
         if (p.status === 'SUCCESS' || p.paymentMode === 'ADMIN_ASSIGNED') {
           const key = formatPeriod(p.createdAt, timeframe);
-          dataMap.set(key, (dataMap.get(key) || 0) + p.amount);
+          dataMap.set(key, (dataMap.get(key) || 0) + Number(p.amount || 0));
         }
       });
     } else {
       clients.forEach((c: any) => {
-        const key = formatPeriod(c.user?.createdAt || c.createdAt || new Date(), timeframe);
+        const rawDate = c.createdAt || c.user?.createdAt || new Date();
+        const key = formatPeriod(rawDate, timeframe);
         dataMap.set(key, (dataMap.get(key) || 0) + 1);
       });
     }
 
     const sortedKeys = Array.from(dataMap.keys()).sort((a, b) => {
-      return new Date('01 ' + a).getTime() - new Date('01 ' + b).getTime();
+      if (timeframe === 'yearly') {
+        return (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0);
+      }
+      const parseMonthKey = (s: string) => {
+        const parts = s.split(' ');
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthIndex = months.indexOf(parts[0]);
+        const year = 2000 + (parseInt(parts[1], 10) || 0);
+        return year * 12 + (monthIndex >= 0 ? monthIndex : 0);
+      };
+      return parseMonthKey(a) - parseMonthKey(b);
     });
 
     return sortedKeys.map(key => ({
@@ -1593,21 +1770,34 @@ function AdminDashboardContent() {
   const historyPagination = usePagination(topLevelFilteredHistory, 10);
 
   useEffect(() => {
+    // Safety fallback so the dashboard never gets stuck on the loading spinner
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 6000);
+
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
-        return;
+        setLoading(false);
+        router.replace('/admin/login?error=expired');
+        return () => clearTimeout(safetyTimer);
       }
-      const u = JSON.parse(userStr);
-      setUser(u);
+      try {
+        const u = JSON.parse(userStr);
+        setUser(u);
 
-      if (u?.role === 'COMPLIANCE_OFFICER') setActiveTab('compliance'); else if (u?.role === 'RESEARCHER' || u?.role === 'PRINCIPAL_OFFICER') setActiveTab('research');
+        if (u?.role === 'COMPLIANCE_OFFICER') setActiveTab('compliance');
+        else if (u?.role === 'RESEARCHER' || u?.role === 'PRINCIPAL_OFFICER') setActiveTab('research');
+      } catch (e) {
+        console.error('Invalid user in localStorage:', e);
+      }
 
       api.getCurrentUser().then(res => {
         if (res.success) {
           const syncedUser = res.data.user;
-          if (u?.isImpersonated) {
+          const currentUserStr = localStorage.getItem('user');
+          const currentU = currentUserStr ? JSON.parse(currentUserStr) : null;
+          if (currentU?.isImpersonated) {
             syncedUser.isImpersonated = true;
           }
           if (!syncedUser.tenantLogo && syncedUser.tenant?.logoUrl) {
@@ -1658,6 +1848,8 @@ function AdminDashboardContent() {
       }).catch(err => console.error('Failed to sync user details:', err));
     }
     loadData(true);
+
+    return () => clearTimeout(safetyTimer);
   }, []);
 
   useEffect(() => {
@@ -1846,7 +2038,7 @@ function AdminDashboardContent() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('showMobilePreview');
-      if (saved !== null) setShowMobilePreview(saved !== 'false');
+      if (saved !== null) setShowMobilePreview(saved === 'true');
     }
   }, []);
 
@@ -2799,6 +2991,48 @@ function AdminDashboardContent() {
     });
   };
 
+  // Smart Verification Modal Submit
+  const handleSubmitVerificationModal = async () => {
+    if (!selectedVerifyPayment) return;
+    if (verifyReceivedAmount <= 0) {
+      toast.error('Please enter a valid received amount (> 0).');
+      return;
+    }
+
+    const planAmount = Number(selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
+    if (planAmount > 0 && verifyReceivedAmount > planAmount) {
+      toast.error(`Received amount cannot exceed the plan standard price of ₹${planAmount.toLocaleString('en-IN')}.`);
+      return;
+    }
+
+    setIsSubmittingVerify(true);
+    try {
+      const payload: any = {
+        paymentId: selectedVerifyPayment.id || selectedVerifyPayment._id,
+        status: 'SUCCESS',
+        receivedAmount: Number(verifyReceivedAmount),
+        approvalMode: verifyApprovalMode,
+        customValidityDays: Number(verifyCustomDays),
+        discountApplied: verifyApprovalMode === 'DISCOUNT' ? Number(verifyCustomDiscount) : 0,
+        transactionRef: verifyUtr,
+        remarks: verifyRemarks.trim() || undefined
+      };
+
+      const res = await api.verifyManualPayment(payload);
+      if (res.success) {
+        toast.success('Payment verified and subscription activated successfully!');
+        setSelectedVerifyPayment(null);
+        loadData();
+      } else {
+        toast.error(res.message || 'Failed to verify payment.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'An error occurred during verification.');
+    } finally {
+      setIsSubmittingVerify(false);
+    }
+  };
+
   // Verify Manual Payment
   const handleVerifyPayment = (paymentId: string, status: 'SUCCESS' | 'FAILED') => {
     const actionText = status === 'SUCCESS' ? 'Approve' : 'Reject';
@@ -2899,6 +3133,7 @@ function AdminDashboardContent() {
   };
 
   const startEditClient = (cl: any) => {
+    if (!requireSetupPrerequisites('Edit Client Profile')) return;
     if (isStaff && !hasPermission('EDIT_CLIENTS')) {
       toast.error('You do not have permission to edit clients.');
       return;
@@ -3100,27 +3335,80 @@ function AdminDashboardContent() {
     );
   };
 
-  const upcomingAlerts = checklist.filter((item: any) => {
-    if (item.audit && item.audit.status !== 'PENDING') return false;
-    const dueDateMs = item.currentPeriod?.dueDate ? new Date(item.currentPeriod.dueDate).getTime() : null;
-    if (!dueDateMs) return false;
-    const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
-    return daysLeft >= 0 && daysLeft <= 7;
-  }).map((item: any) => ({
-    id: item.id,
-    title: `Checklist Task #${item.serialNo}`,
-    description: item.requirement,
-    deadlineAt: item.currentPeriod.dueDate
-  })).sort((a: any, b: any) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
+  const upcomingAlerts = useMemo(() => {
+    const list: any[] = [];
 
-  const overdueAlerts = checklist.filter((item: any) => {
-    if (item.audit?.status === 'OVERDUE') return true;
-    if (item.audit && item.audit.status !== 'PENDING') return false;
-    const dueDateMs = item.currentPeriod?.dueDate ? new Date(item.currentPeriod.dueDate).getTime() : null;
-    if (!dueDateMs) return false;
-    const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
-    return daysLeft < 0;
-  });
+    checklist.forEach((item: any) => {
+      const auditStatus = item.audit?.status || 'PENDING';
+      if (auditStatus !== 'PENDING') return;
+      const dueDateVal = item.currentPeriod?.dueDate || item.audit?.dueDate;
+      const dueDateMs = dueDateVal ? new Date(dueDateVal).getTime() : null;
+      if (!dueDateMs) return;
+      const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
+      if (daysLeft >= 0 && daysLeft <= 7) {
+        list.push({
+          id: item.id || item._id,
+          title: `Checklist Task #${item.serialNo}`,
+          description: item.requirement,
+          deadlineAt: dueDateVal,
+          daysLeft,
+          type: 'CHECKLIST'
+        });
+      }
+    });
+
+    alerts.forEach((alert: any) => {
+      if (alert.status !== 'OPEN') return;
+      const deadlineVal = alert.deadlineAt || alert.createdAt;
+      const dMs = deadlineVal ? new Date(deadlineVal).getTime() : null;
+      if (dMs) {
+        const daysLeft = Math.ceil((dMs - Date.now()) / (1000 * 3600 * 24));
+        if (daysLeft >= 0 && daysLeft <= 7) {
+          list.push({
+            id: alert.id || alert._id,
+            title: alert.title || `Compliance Alert (${alert.severity || 'HIGH'})`,
+            description: alert.description || alert.message || 'Action required',
+            deadlineAt: deadlineVal,
+            daysLeft,
+            type: 'ALERT'
+          });
+        }
+      }
+    });
+
+    return list.sort((a: any, b: any) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
+  }, [checklist, alerts]);
+
+  const overdueAlerts = useMemo(() => {
+    const list: any[] = [];
+
+    checklist.forEach((item: any) => {
+      if (item.audit?.status === 'OVERDUE') {
+        list.push(item);
+        return;
+      }
+      const auditStatus = item.audit?.status || 'PENDING';
+      if (auditStatus !== 'PENDING') return;
+      const dueDateVal = item.currentPeriod?.dueDate || item.audit?.dueDate;
+      const dueDateMs = dueDateVal ? new Date(dueDateVal).getTime() : null;
+      if (!dueDateMs) return;
+      const daysLeft = Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24));
+      if (daysLeft < 0) {
+        list.push(item);
+      }
+    });
+
+    alerts.forEach((alert: any) => {
+      if (alert.status === 'OPEN' && alert.deadlineAt) {
+        const dMs = new Date(alert.deadlineAt).getTime();
+        if (dMs < Date.now()) {
+          list.push(alert);
+        }
+      }
+    });
+
+    return list;
+  }, [checklist, alerts]);
 
   const handleBulkExport = async (type: string, isZip: boolean) => {
     try {
@@ -3699,7 +3987,17 @@ function AdminDashboardContent() {
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => handleVerifyPayment(row.id, 'SUCCESS')}
+                onClick={() => {
+                  const planAmount = Number(row.plan?.amount || row.plan?.price || row.amount || 0);
+                  const planDays = (row.plan?.durationMonths ? row.plan.durationMonths * 30 : 30);
+                  setSelectedVerifyPayment(row);
+                  setVerifyReceivedAmount(row.amount || planAmount);
+                  setVerifyApprovalMode('FULL');
+                  setVerifyCustomDays(planDays);
+                  setVerifyCustomDiscount(0);
+                  setVerifyUtr(row.transactionRef || '');
+                  setVerifyRemarks('');
+                }}
                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1"
                 title="Verify payment and assign plan"
               >
@@ -3994,26 +4292,45 @@ function AdminDashboardContent() {
     },
     {
       name: 'Deadline',
-      width: '130px',
+      width: '145px',
       selector: (row: any) => row.deadlineAt,
       cell: (row: any) => {
-        if (row.status === 'CLOSED') return <span>-</span>;
+        if (row.status === 'CLOSED') return <span className="text-slate-400 font-mono text-xs">-</span>;
         const daysLeft = Math.ceil((new Date(row.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24));
         const isBreached = daysLeft < 0;
         const isWarning = daysLeft >= 0 && daysLeft <= 5;
+        const overdueDays = Math.abs(daysLeft);
+
+        if (isBreached) {
+          return (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 animate-pulse"></span>
+              {overdueDays} {overdueDays === 1 ? 'day' : 'days'} overdue
+            </span>
+          );
+        }
+
+        if (daysLeft === 0) {
+          return (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 whitespace-nowrap">
+              Due Today
+            </span>
+          );
+        }
+
         return (
-          <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-            {daysLeft} days left
+          <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
+            {daysLeft} {daysLeft === 1 ? 'day' : 'days'} left
           </span>
         );
       },
     },
     {
       name: 'Status',
-      width: '110px',
+      width: '120px',
       selector: (row: any) => row.status,
       cell: (row: any) => (
-        <span className={`px-2 py-1 rounded-md text-xs font-bold ${row.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{row.status}</span>
+        <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${row.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{row.status}</span>
       ),
     },
     {
@@ -4240,9 +4557,16 @@ function AdminDashboardContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-center items-center">
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-center items-center p-4">
         <Loader2 className="h-10 w-10 animate-spin text-primary-600 dark:text-primary-500 mb-4" />
-        <span>Loading Advisor Dashboard...</span>
+        <span className="font-semibold text-sm">Loading Advisor Dashboard...</span>
+        <button
+          type="button"
+          onClick={() => setLoading(false)}
+          className="mt-6 px-4 py-1.5 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-white underline transition-colors cursor-pointer"
+        >
+          Taking longer than usual? Click to load immediately
+        </button>
       </div>
     );
   }
@@ -4251,13 +4575,13 @@ function AdminDashboardContent() {
     <div className={isDarkMode ? 'dark' : ''}>
 
       <div className="h-screen h-dvh overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-white flex relative">
-        {/* Mobile Menu Toggle */}
-        <button
-          className="lg:hidden fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-premium-cards border border-premium-border flex items-center justify-center"
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        >
-          {isMobileMenuOpen ? <X className="w-5 h-5 text-premium-text" /> : <Menu className="w-5 h-5 text-premium-text" />}
-        </button>
+        {/* Mobile Sidebar Backdrop */}
+        {isMobileMenuOpen && (
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-40 lg:hidden animate-fade-in"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+        )}
 
         {/* Premium Sidebar (Blue in Light Mode) */}
         <aside className={`fixed lg:relative inset-y-0 left-0 z-50 bg-blue-900 dark:bg-slate-950 border-r border-blue-800 dark:border-premium-border text-white transform transition-all duration-300 ease-in-out flex flex-col shrink-0 ${isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0'
@@ -4367,6 +4691,9 @@ function AdminDashboardContent() {
               }
 
               const isActive = activeTab === mod.tab;
+              const isPaymentsTab = mod.tab === 'payments';
+              const showPendingBadge = isPaymentsTab && pendingQrCount > 0;
+
               return (
                 <button
                   key={mod.tab}
@@ -4374,15 +4701,27 @@ function AdminDashboardContent() {
                     setActiveTab(mod.tab);
                     setIsMobileMenuOpen(false);
                   }}
-                  className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
+                  className={`w-full relative flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
                     ? 'bg-white/20 text-white font-semibold shadow-inner'
                     : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
                     } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
-                  title={isSidebarCollapsed ? mod.label : undefined}
+                  title={isSidebarCollapsed ? (showPendingBadge ? `${mod.label} (${pendingQrCount} Pending QR)` : mod.label) : undefined}
                 >
-                  <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
+                  <div className="relative shrink-0 flex items-center justify-center">
+                    <Icon className={`w-5 h-5 transition-colors ${isActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
+                    {isSidebarCollapsed && showPendingBadge && (
+                      <span className="absolute -top-1.5 -right-2 px-1.5 py-0.2 bg-amber-500 text-black text-[9px] font-black rounded-full shadow-md animate-pulse">
+                        {pendingQrCount}
+                      </span>
+                    )}
+                  </div>
                   {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
-                  {!isSidebarCollapsed && isActive && (
+                  {!isSidebarCollapsed && showPendingBadge && (
+                    <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black shadow-sm shrink-0 animate-pulse">
+                      {pendingQrCount}
+                    </span>
+                  )}
+                  {!isSidebarCollapsed && isActive && !showPendingBadge && (
                     <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
                   )}
                 </button>
@@ -4416,7 +4755,7 @@ function AdminDashboardContent() {
               {/* Mobile menu toggle */}
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                className="lg:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
                 title="Open Navigation"
               >
                 {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -4967,7 +5306,11 @@ function AdminDashboardContent() {
                                       itemStyle={{ color: '#fff', fontSize: '11px' }}
                                       labelStyle={{ color: '#94a3b8', fontSize: '10px', fontWeight: 'bold' }}
                                     />
-                                    <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={36} />
+                                    <Bar dataKey="value" radius={[8, 8, 0, 0]} barSize={36}>
+                                      {complianceChartData.map((entry, index) => (
+                                        <Cell key={`compliance-cell-${index}`} fill={entry.fill} />
+                                      ))}
+                                    </Bar>
                                   </BarChart>
                                 </ResponsiveContainer>
                               </div>
@@ -5001,7 +5344,7 @@ function AdminDashboardContent() {
                               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-2 border-b border-slate-300 dark:border-white/5">
                                 <div>
                                   <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Sales & Client Growth</h3>
-                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track advisory revenue and user onboarding progress</p>
+                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track research service revenue and user onboarding progress</p>
                                 </div>
 
                                 {/* Controls */}
@@ -5083,7 +5426,7 @@ function AdminDashboardContent() {
                                   <strong className="text-slate-900 dark:text-white">
                                     {dashboardMetric === 'sales'
                                       ? `₹${salesAndClientChartData.reduce((acc, curr) => acc + curr.value, 0).toLocaleString()}`
-                                      : `${salesAndClientChartData.reduce((acc, curr) => acc + curr.value, 0)}`}
+                                      : `${clients.length > 0 ? clients.length : salesAndClientChartData.reduce((acc, curr) => acc + curr.value, 0)}`}
                                   </strong>
                                 </span>
                                 <span>
@@ -5093,7 +5436,7 @@ function AdminDashboardContent() {
                                       ? dashboardMetric === 'sales'
                                         ? `₹${salesAndClientChartData[salesAndClientChartData.length - 1].value.toLocaleString()}`
                                         : `${salesAndClientChartData[salesAndClientChartData.length - 1].value} Onboarded`
-                                      : '—'}
+                                      : (dashboardMetric === 'clients' && clients.length > 0 ? `${clients.length} Onboarded` : '—')}
                                   </strong>
                                 </span>
                               </div>
@@ -5766,8 +6109,8 @@ function AdminDashboardContent() {
 
                   {/* PAYMENTS TAB (RESTORED WITH QR VERIFICATIONS SUB-TAB) */}
                   {activeTab === 'payments' && (() => {
-                    const qrVerificationsList = allPayments.filter((p: any) => p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI');
-                    const pendingQrCount = qrVerificationsList.filter((p: any) => (p.status || 'PENDING').toUpperCase() === 'PENDING').length;
+                    const qrVerificationsList = allPayments.filter((p: any) => p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl);
+                    const pendingQrCountLocal = pendingQrCount;
 
                     return (
                       <div className="space-y-6">
@@ -5964,6 +6307,343 @@ function AdminDashboardContent() {
                             </div>
                           </div>
                         )}
+
+                        {/* Smart Payment Verification & Assignment Modal */}
+                        {selectedVerifyPayment && (() => {
+                          const planAmount = Number(selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
+                          const planDays = (selectedVerifyPayment.plan?.durationMonths ? selectedVerifyPayment.plan.durationMonths * 30 : 30);
+                          const difference = Math.max(0, planAmount - verifyReceivedAmount);
+                          const isShortPayment = verifyReceivedAmount > 0 && verifyReceivedAmount < planAmount;
+                          const isFullMatch = verifyReceivedAmount === planAmount && planAmount > 0;
+                          const isOverAmount = verifyReceivedAmount > planAmount && planAmount > 0;
+                          const clientName = selectedVerifyPayment.client?.name || selectedVerifyPayment.client?.user?.name || selectedVerifyPayment.clientName || 'Client';
+                          const planName = selectedVerifyPayment.plan?.name || selectedVerifyPayment.planName || 'Plan';
+                          const proofUrl = selectedVerifyPayment.screenshotUrl || selectedVerifyPayment.receiptUrl;
+
+                          return (
+                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+                                
+                                {/* Header */}
+                                <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                                  <div>
+                                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                      Verify &amp; Approve Payment
+                                    </h3>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                      Client: <span className="font-bold text-slate-800 dark:text-slate-200">{clientName}</span> | Plan: <span className="font-bold text-primary-600">{planName}</span>
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedVerifyPayment(null)}
+                                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                                  >
+                                    <X className="w-5 h-5" />
+                                  </button>
+                                </div>
+
+                                {/* Plan Expected vs Proof Overview */}
+                                <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-white/5 text-xs">
+                                  <div>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Plan Standard Price</span>
+                                    <span className="text-base font-extrabold text-slate-900 dark:text-white mt-0.5 block">
+                                      ₹{planAmount.toLocaleString('en-IN')}
+                                    </span>
+                                    <span className="text-[11px] text-slate-500">Duration: {planDays} Days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Payment Proof Screenshot</span>
+                                    {proofUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedScreenshotModal({ url: proofUrl, clientName, planName, utr: verifyUtr, amount: verifyReceivedAmount })}
+                                        className="mt-1 text-xs font-bold text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1.5"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" /> View Screenshot
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-400 italic text-xs mt-1 block">No image uploaded</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Actual Received Amount & UTR Inputs */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                                        Actual Amount Received in Bank (₹) *
+                                      </label>
+                                      <span className="text-[10px] font-bold text-slate-400">
+                                        Max: ₹{planAmount.toLocaleString('en-IN')}
+                                      </span>
+                                    </div>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={planAmount}
+                                      value={verifyReceivedAmount || ''}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        if (raw === '') {
+                                          setVerifyReceivedAmount(0);
+                                          return;
+                                        }
+                                        let val = parseFloat(raw);
+                                        if (isNaN(val)) val = 0;
+                                        if (planAmount > 0 && val > planAmount) {
+                                          val = planAmount;
+                                        }
+                                        setVerifyReceivedAmount(val);
+                                        const diff = planAmount - val;
+                                        if (diff > 0) {
+                                          const prorated = Math.max(1, Math.round((val / planAmount) * planDays));
+                                          setVerifyCustomDays(prorated);
+                                          setVerifyCustomDiscount(diff);
+                                          if (verifyApprovalMode === 'FULL') {
+                                            setVerifyApprovalMode('PRORATED');
+                                          }
+                                        } else {
+                                          setVerifyApprovalMode('FULL');
+                                          setVerifyCustomDays(planDays);
+                                          setVerifyCustomDiscount(0);
+                                        }
+                                      }}
+                                      className={`w-full bg-white dark:bg-slate-800 border rounded-xl py-2 px-3 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${
+                                        isOverAmount
+                                          ? 'border-rose-500 focus:ring-rose-500 text-rose-600'
+                                          : 'border-slate-300 dark:border-white/10 focus:ring-primary-500'
+                                      }`}
+                                      placeholder={`Max: ₹${planAmount.toLocaleString('en-IN')}`}
+                                      required
+                                    />
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                      Maximum allowed: <strong>₹{planAmount.toLocaleString('en-IN')}</strong> (Plan Standard Price)
+                                    </p>
+                                  </div>
+
+                                  <div>
+                                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                      Verified Bank UTR / Ref *
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={verifyUtr}
+                                      onChange={(e) => setVerifyUtr(e.target.value)}
+                                      className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                      placeholder="12-digit UTR ref"
+                                      required
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* 3 Approval Options Section */}
+                                <div className="space-y-3 pt-1">
+                                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                                    Approval Decision &amp; Service Assignment:
+                                  </label>
+
+                                  {/* Over Amount Alert */}
+                                  {isOverAmount && (
+                                    <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-2.5 text-xs text-rose-700 dark:text-rose-300">
+                                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                                      <span>
+                                        <strong>Amount Exceeded:</strong> Received amount (₹{verifyReceivedAmount.toLocaleString('en-IN')}) cannot exceed the plan price of ₹{planAmount.toLocaleString('en-IN')}.
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {/* Case 1: Full Payment Matched */}
+                                  {isFullMatch && (
+                                    <div
+                                      onClick={() => setVerifyApprovalMode('FULL')}
+                                      className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-start gap-3 cursor-pointer"
+                                    >
+                                      <input
+                                        type="radio"
+                                        name="approvalMode"
+                                        checked={verifyApprovalMode === 'FULL'}
+                                        onChange={() => setVerifyApprovalMode('FULL')}
+                                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                                      />
+                                      <div className="space-y-1">
+                                        <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                          Case 1: Full Payment Matched (₹{planAmount.toLocaleString('en-IN')})
+                                        </span>
+                                        <p className="text-[11px] text-emerald-700/90 dark:text-emerald-400/90 leading-relaxed">
+                                          Full service of <strong>{planDays} Days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be activated. Standard invoice of ₹{planAmount.toLocaleString('en-IN')} will be generated.
+                                        </p>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Short Payment Alert & Case 2 & 3 Options */}
+                                  {isShortPayment && (
+                                    <div className="space-y-2.5">
+                                      <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+                                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                        <span>
+                                          <strong>Short Payment:</strong> Expected ₹{planAmount.toLocaleString('en-IN')}, Received ₹{verifyReceivedAmount.toLocaleString('en-IN')}. Difference: <strong>₹{difference.toLocaleString('en-IN')}</strong>. Select an approval option:
+                                        </span>
+                                      </div>
+
+                                      {/* Case 2: Prorated Days Activation */}
+                                      <div
+                                        onClick={() => setVerifyApprovalMode('PRORATED')}
+                                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                                          verifyApprovalMode === 'PRORATED'
+                                            ? 'bg-blue-500/10 border-blue-500/40 ring-2 ring-blue-500/20'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5 hover:border-slate-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-start gap-3">
+                                          <input
+                                            type="radio"
+                                            name="approvalMode"
+                                            checked={verifyApprovalMode === 'PRORATED'}
+                                            onChange={() => setVerifyApprovalMode('PRORATED')}
+                                            className="mt-0.5 text-blue-600 focus:ring-blue-500"
+                                          />
+                                          <div className="space-y-1.5 flex-1">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                                Case 2: Prorated Service Activation (Adjusted Validity)
+                                              </span>
+                                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                                                {verifyCustomDays} Days
+                                              </span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                                              Service validity will be prorated proportionally to the received amount ({verifyCustomDays} days). A custom prorated invoice for ₹{verifyReceivedAmount.toLocaleString('en-IN')} will be generated.
+                                            </p>
+
+                                            {verifyApprovalMode === 'PRORATED' && (
+                                              <div className="pt-2 flex items-center gap-2">
+                                                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                                                  Active Validity Days:
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  value={verifyCustomDays}
+                                                  onChange={(e) => setVerifyCustomDays(Math.max(1, parseInt(e.target.value) || 1))}
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className="w-24 bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                />
+                                                <span className="text-[10px] text-slate-400">(Auto-calculated, adjustable)</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Case 3: Discount on Remaining Balance */}
+                                      <div
+                                        onClick={() => setVerifyApprovalMode('DISCOUNT')}
+                                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                                          verifyApprovalMode === 'DISCOUNT'
+                                            ? 'bg-purple-500/10 border-purple-500/40 ring-2 ring-purple-500/20'
+                                            : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5 hover:border-slate-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-start gap-3">
+                                          <input
+                                            type="radio"
+                                            name="approvalMode"
+                                            checked={verifyApprovalMode === 'DISCOUNT'}
+                                            onChange={() => setVerifyApprovalMode('DISCOUNT')}
+                                            className="mt-0.5 text-purple-600 focus:ring-purple-500"
+                                          />
+                                          <div className="space-y-1.5 flex-1">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                                Case 3: Waive Remaining Balance as Discount (Full Period)
+                                              </span>
+                                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                                                Full {planDays} Days
+                                              </span>
+                                            </div>
+                                            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                                              Full subscription access for <strong>{planDays} days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be granted. The invoice will reflect: Standard Price ₹{planAmount.toLocaleString('en-IN')} less Special Discount ₹{verifyCustomDiscount.toLocaleString('en-IN')} = Net Amount Paid ₹{verifyReceivedAmount.toLocaleString('en-IN')}.
+                                            </p>
+
+                                            {verifyApprovalMode === 'DISCOUNT' && (
+                                              <div className="pt-2 flex items-center gap-2">
+                                                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                                                  Discount Given (₹):
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  value={verifyCustomDiscount}
+                                                  onChange={(e) => setVerifyCustomDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className="w-28 bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                />
+                                                <span className="text-[10px] text-slate-400">(Remaining balance discount)</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Optional Internal Verification Remarks */}
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                                    Internal Verification Remarks (Optional)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={verifyRemarks}
+                                    onChange={(e) => setVerifyRemarks(e.target.value)}
+                                    placeholder="e.g. Verified with HDFC statement at 11:45 AM"
+                                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-1.5 px-3 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                  />
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedVerifyPayment(null)}
+                                    disabled={isSubmittingVerify}
+                                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleSubmitVerificationModal}
+                                    disabled={isSubmittingVerify || verifyReceivedAmount <= 0 || verifyReceivedAmount > planAmount}
+                                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5"
+                                  >
+                                    {isSubmittingVerify ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Approving &amp; Activating...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle2 className="w-3.5 h-3.5" />
+                                        <span>
+                                          {isFullMatch
+                                            ? `Approve Full Plan (₹${planAmount.toLocaleString('en-IN')})`
+                                            : verifyApprovalMode === 'PRORATED'
+                                            ? `Approve Prorated (${verifyCustomDays} Days)`
+                                            : `Approve with ₹${verifyCustomDiscount.toLocaleString('en-IN')} Discount`}
+                                        </span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}
@@ -5997,24 +6677,37 @@ function AdminDashboardContent() {
                     });
 
                     return (
-                      <div className={`w-full ${showMobilePreview ? 'lg:flex items-start' : ''}`}>
-                        <div className="flex-1 space-y-6 lg:pr-6">
-                          {/* Header */}
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h2 className="text-lg font-bold text-slate-900 dark:text-white">SEBI Checklist</h2>
-                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Manage and track your compliance checklist</p>
-                            </div>
-                            <div className="flex space-x-2">
-                              <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10">
-                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
-                                <div className="relative">
-                                  <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                  <div className="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary-600"></div>
-                                </div>
-                              </label>
-                            </div>
+                      <div className="w-full space-y-6">
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h2 className="text-lg font-bold text-slate-900 dark:text-white">SEBI Checklist</h2>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Manage and track your compliance checklist</p>
                           </div>
+                          <div className="flex items-center space-x-2.5">
+                            <button
+                              type="button"
+                              onClick={() => setShowCalendarModal(true)}
+                              className="flex items-center space-x-2 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition active:scale-95"
+                            >
+                              <CalendarIcon className="w-4 h-4 text-white" />
+                              <span>Calendar View</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={toggleMobilePreview}
+                              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-sm ${
+                                showMobilePreview
+                                  ? 'bg-blue-600 text-white border-blue-500 shadow-blue-500/20'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-slate-700'
+                              }`}
+                              title="Client Mobile Simulator"
+                            >
+                              <Smartphone className="w-3.5 h-3.5" />
+                              <span>{showMobilePreview ? 'Close Preview' : 'Mobile Preview'}</span>
+                            </button>
+                          </div>
+                        </div>
 
                           {/* Info banner about auto-monitored items */}
                           <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary-500/5 border border-primary-500/20">
@@ -6162,10 +6855,31 @@ function AdminDashboardContent() {
                               </div>
                             );
                           })()}
-                        </div>
                         {showMobilePreview && (
-                          <div className="hidden lg:block w-[350px] shrink-0 border-l border-slate-300 dark:border-white/5 pl-6 h-[calc(100vh-120px)] sticky top-[90px] overflow-y-auto overflow-x-hidden">
-                            <MobilePreview mode="CHECKLIST" checklistItems={checklistSubTab === 'history' ? checklistHistory : activeList} title={NAV_CONFIG.find(n => n.tab === activeTab)?.label} />
+                          <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+                            <div
+                              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+                              onClick={() => setShowMobilePreview(false)}
+                            />
+                            <div className="relative w-full max-w-[400px] bg-slate-900 border-l border-white/10 shadow-2xl p-4 flex flex-col h-full z-10 animate-in slide-in-from-right duration-200">
+                              <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10">
+                                <div className="flex items-center space-x-2">
+                                  <Smartphone className="w-4 h-4 text-blue-400" />
+                                  <span className="text-xs font-bold text-white uppercase tracking-wider">Client Mobile Simulator</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowMobilePreview(false)}
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition"
+                                  title="Close Preview"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex-1 overflow-y-auto overflow-x-hidden flex justify-center py-2">
+                                <MobilePreview mode="CHECKLIST" checklistItems={checklistSubTab === 'history' ? checklistHistory : activeList} title={NAV_CONFIG.find(n => n.tab === activeTab)?.label} />
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -6175,22 +6889,27 @@ function AdminDashboardContent() {
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
-                    <div className={`w-full ${showMobilePreview ? 'lg:flex items-start' : ''}`}>
-                      <div className="flex-1 space-y-6 lg:pr-6">
-                        {/* Header */}
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
-                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
-                          </div>
-                          <div className="flex space-x-2">
-                            <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 mr-2">
-                              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
-                              <div className="relative">
-                                <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                                <div className="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary-600"></div>
-                              </div>
-                            </label>
+                    <div className="w-full space-y-6">
+                      {/* Header */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            type="button"
+                            onClick={toggleMobilePreview}
+                            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-sm mr-2 ${
+                              showMobilePreview
+                                ? 'bg-blue-600 text-white border-blue-500 shadow-blue-500/20'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                            title="Client Mobile Simulator"
+                          >
+                            <Smartphone className="w-3.5 h-3.5" />
+                            <span>{showMobilePreview ? 'Close Preview' : 'Mobile Preview'}</span>
+                          </button>
                             <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-4 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
                               {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                               <span>Download Periodic Report</span>
@@ -6333,7 +7052,7 @@ function AdminDashboardContent() {
                                         </div>
                                         <div className="text-right">
                                           <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                            {isBreached ? 'SLA BREACHED' : `${daysLeft} days left`}
+                                            {isBreached ? `${Math.abs(daysLeft)} days overdue` : daysLeft === 0 ? 'Due Today' : `${daysLeft} days left`}
                                           </span>
                                         </div>
                                       </div>
@@ -6748,28 +7467,49 @@ function AdminDashboardContent() {
                             </div>
                           );
                         })()}
+                        {showMobilePreview && (
+                          <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+                            <div
+                              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+                              onClick={() => setShowMobilePreview(false)}
+                            />
+                            <div className="relative w-full max-w-[400px] bg-slate-900 border-l border-white/10 shadow-2xl p-4 flex flex-col h-full z-10 animate-in slide-in-from-right duration-200">
+                              <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10">
+                                <div className="flex items-center space-x-2">
+                                  <Smartphone className="w-4 h-4 text-blue-400" />
+                                  <span className="text-xs font-bold text-white uppercase tracking-wider">Client Mobile Simulator</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowMobilePreview(false)}
+                                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition"
+                                  title="Close Preview"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex-1 overflow-y-auto overflow-x-hidden flex justify-center py-2">
+                                <MobilePreview
+                                  mode="COMPLIANCE"
+                                  complianceItems={
+                                    complianceTab === 'overview' ? [
+                                      { _isOverview: true, title: 'Complaints', value: `${complaints.filter((c: any) => c.status === 'OPEN').length}`, suffix: `Open (${complaints.filter((c: any) => c.status === 'CLOSED').length} Resolved)`, colorType: 'primary' },
+                                      { _isOverview: true, title: 'BSE Penalties', value: `₹${(penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').reduce((acc: number, p: any) => acc + p.amount, 0)).toLocaleString()}`, suffix: `${penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').length} Pending`, colorType: 'rose' },
+                                      { _isOverview: true, title: 'Checklist', value: `${checklist.length > 0 ? Math.round((checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length / checklist.length) * 100) : 0}%`, suffix: `${checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length} Compliant`, colorType: 'emerald' },
+                                      { _isOverview: true, title: 'Active Alerts', value: `${alerts.filter((a: any) => a.status === 'OPEN').length}`, suffix: `${alerts.filter((a: any) => a.status === 'OPEN' && a.severity === 'HIGH').length} High Severity`, colorType: 'amber' }
+                                    ] :
+                                      complianceTab === 'alerts' ? alerts :
+                                        complianceTab === 'penalties' ? penalties :
+                                          complianceTab === 'complaints' ? complaints :
+                                            checklistHistory
+                                  }
+                                  title={NAV_CONFIG.find(n => n.tab === activeTab)?.label}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      {showMobilePreview && (
-                        <div className="hidden lg:block w-[350px] shrink-0 border-l border-slate-300 dark:border-white/5 pl-6 h-[calc(100vh-120px)] sticky top-[90px] overflow-y-auto overflow-x-hidden">
-                          <MobilePreview
-                            mode="COMPLIANCE"
-                            complianceItems={
-                              complianceTab === 'overview' ? [
-                                { _isOverview: true, title: 'Complaints', value: `${complaints.filter((c: any) => c.status === 'OPEN').length}`, suffix: `Open (${complaints.filter((c: any) => c.status === 'CLOSED').length} Resolved)`, colorType: 'primary' },
-                                { _isOverview: true, title: 'BSE Penalties', value: `₹${(penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').reduce((acc: number, p: any) => acc + p.amount, 0)).toLocaleString()}`, suffix: `${penalties.filter((p: any) => p.status === 'PENDING_PAYMENT').length} Pending`, colorType: 'rose' },
-                                { _isOverview: true, title: 'Checklist', value: `${checklist.length > 0 ? Math.round((checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length / checklist.length) * 100) : 0}%`, suffix: `${checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length} Compliant`, colorType: 'emerald' },
-                                { _isOverview: true, title: 'Active Alerts', value: `${alerts.filter((a: any) => a.status === 'OPEN').length}`, suffix: `${alerts.filter((a: any) => a.status === 'OPEN' && a.severity === 'HIGH').length} High Severity`, colorType: 'amber' }
-                              ] :
-                                complianceTab === 'alerts' ? alerts :
-                                  complianceTab === 'penalties' ? penalties :
-                                    complianceTab === 'complaints' ? complaints :
-                                      checklistHistory
-                            }
-                            title={NAV_CONFIG.find(n => n.tab === activeTab)?.label}
-                          />
-                        </div>
-                      )}
-                    </div>
                   )}
 
                   {/* ====================================================
@@ -6795,6 +7535,34 @@ function AdminDashboardContent() {
                ==================================================== */}
                   {activeTab === 'clients' && (
                     <div className="space-y-6">
+                      {!getPrerequisitesStatus().isAllComplete && (
+                        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                              <AlertTriangle className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                Firm Setup Incomplete ({getPrerequisitesStatus().completedCount}/8 Foundation Settings Configured)
+                              </p>
+                              <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+                                Please configure all 8 core firm settings in Admin Settings before adding or updating client records.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPrereqActionTarget('Add or Manage Clients');
+                              setIsSetupPrereqModalOpen(true);
+                            }}
+                            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm shrink-0 self-end sm:self-center"
+                          >
+                            <Settings className="w-3.5 h-3.5" />
+                            <span>View Missing Setup</span>
+                          </button>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <div>
                           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Client Management</h2>
@@ -6952,6 +7720,7 @@ function AdminDashboardContent() {
                           {(!isStaff || hasPermission('CREATE_CLIENTS')) && (
                             <button
                               onClick={() => {
+                                if (!requireSetupPrerequisites('Add New Client')) return;
                                 setClientName(''); setClientEmail(''); setClientMobile('');
                                 setClientPassword(''); setClientPan(''); setClientAadhaar('');
                                 setClientCategory('INDIVIDUAL'); setClientOccupation('');
@@ -8014,6 +8783,144 @@ function AdminDashboardContent() {
                                 <div className="space-y-6">
 
                                   {/* ── Fetch by Digio ID ─────────────────────────────── */}
+
+                                  {/* CONFIRMATION POPUP MODAL */}
+                                  {showDigioConfirmPopup && fetchDigioResult && (
+                                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                                      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-violet-200 dark:border-violet-500/30 w-full max-w-lg max-h-[85vh] overflow-y-auto">
+                                        {/* Header */}
+                                        <div className="sticky top-0 bg-white dark:bg-slate-900 p-5 border-b border-slate-200 dark:border-white/5 rounded-t-2xl z-10">
+                                          <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                              <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
+                                                <svg className="w-5 h-5 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                              </div>
+                                              <div>
+                                                <h3 className="text-sm font-bold text-slate-800 dark:text-white">Digio se Fetched Data</h3>
+                                                <p className="text-[10px] text-slate-500 mt-0.5">Neeche details verify karein — Confirm karne ke baad client profile update hoga</p>
+                                              </div>
+                                            </div>
+                                            <button onClick={() => setShowDigioConfirmPopup(false)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-red-500 transition text-lg font-bold">✕</button>
+                                          </div>
+                                          {/* Fetch type badges */}
+                                          <div className="flex gap-2 mt-3 flex-wrap">
+                                            {fetchDigioResult.fetchTypes?.kycFetched && (
+                                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">✓ KYC Data Fetched</span>
+                                            )}
+                                            {fetchDigioResult.fetchTypes?.esignFetched && (
+                                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20">✓ eSign/Agreement Fetched</span>
+                                            )}
+                                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-white/5">Status: {fetchDigioResult.digioStatus}</span>
+                                          </div>
+                                        </div>
+
+                                        {/* Body */}
+                                        <div className="p-5 space-y-5">
+                                          {/* KYC Details */}
+                                          {Object.values(fetchDigioResult.extracted || {}).some(Boolean) && (
+                                            <div>
+                                              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">📄 KYC Details (Digio se)</p>
+                                              <div className="grid grid-cols-2 gap-2">
+                                                {[
+                                                  ['Aadhaar Name', fetchDigioResult.extracted?.aadhaarName],
+                                                  ['PAN Name', fetchDigioResult.extracted?.panName],
+                                                  ['PAN Number', fetchDigioResult.extracted?.panNumber],
+                                                  ['Masked Aadhaar', fetchDigioResult.extracted?.maskedAadhaar],
+                                                  ['Date of Birth', fetchDigioResult.extracted?.dob],
+                                                  ['Gender', fetchDigioResult.extracted?.gender],
+                                                  ['Father Name', fetchDigioResult.extracted?.fatherName],
+                                                  ['City', fetchDigioResult.extracted?.city],
+                                                  ['State', fetchDigioResult.extracted?.state],
+                                                  ['ZIP Code', fetchDigioResult.extracted?.zipCode],
+                                                ].filter(([, v]) => v).map(([label, value]) => (
+                                                  <div key={label as string} className="flex flex-col gap-0.5 p-2.5 bg-violet-50 dark:bg-slate-800/60 rounded-xl border border-violet-100 dark:border-violet-500/10">
+                                                    <span className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</span>
+                                                    <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{value}</strong>
+                                                  </div>
+                                                ))}
+                                                {fetchDigioResult.extracted?.address && (
+                                                  <div className="col-span-2 flex flex-col gap-0.5 p-2.5 bg-violet-50 dark:bg-slate-800/60 rounded-xl border border-violet-100 dark:border-violet-500/10">
+                                                    <span className="text-[9px] text-slate-500 uppercase tracking-wider">Full Address</span>
+                                                    <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{fetchDigioResult.extracted.address}</strong>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {/* Agreement info */}
+                                          {fetchDigioResult.fetchTypes?.esignFetched && (
+                                            <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-500/20 rounded-xl">
+                                              <div className="flex items-start gap-2.5">
+                                                <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                                <div>
+                                                  <p className="text-[11px] font-bold text-blue-700 dark:text-blue-300">eSign Agreement Record</p>
+                                                  <p className="text-[10px] text-blue-600 dark:text-blue-400 mt-0.5">Confirm karne ke baad Digio se signed PDF download hoga aur Agreement record create hoga.</p>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {/* Warning */}
+                                          <div className="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-500/20 rounded-xl flex items-start gap-2.5">
+                                            <svg className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                            <p className="text-[10px] text-amber-700 dark:text-amber-300">Confirm karne ke baad client profile permanently update ho jayega. Kya aap sure hain?</p>
+                                          </div>
+                                        </div>
+
+                                        {/* Footer buttons */}
+                                        <div className="sticky bottom-0 bg-white dark:bg-slate-900 p-4 border-t border-slate-200 dark:border-white/5 rounded-b-2xl flex gap-3">
+                                          <button
+                                            onClick={() => setShowDigioConfirmPopup(false)}
+                                            className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition"
+                                          >
+                                            ✕ Cancel
+                                          </button>
+                                          <button
+                                            disabled={fetchDigioSaveMode}
+                                            onClick={async () => {
+                                              setFetchDigioSaveMode(true);
+                                              try {
+                                                const payload: any = {
+                                                  kycDigioId: fetchDigioKycId || undefined,
+                                                  esignDigioId: fetchDigioEsignId || undefined,
+                                                  clientId: selectedClient._id || selectedClient.id,
+                                                  saveToClient: true
+                                                };
+                                                const res: any = await api.fetchDigioRecord(payload);
+                                                if (res?.success) {
+                                                  setFetchDigioResult({ ...res });
+                                                  setShowDigioConfirmPopup(false);
+                                                  toast.success(res.agreementCreated ? '✅ Profile + Agreement saved!' : '✅ KYC details saved!');
+                                                  try {
+                                                    const updated: any = await api.getAdminClients();
+                                                    const found = (updated?.clients || updated?.data || []).find((c: any) =>
+                                                      String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
+                                                    );
+                                                    if (found) setSelectedClient(found);
+                                                  } catch { }
+                                                } else {
+                                                  toast.error(res?.message || 'Failed to save');
+                                                }
+                                              } catch (err: any) {
+                                                toast.error(err.message || 'Failed');
+                                              } finally {
+                                                setFetchDigioSaveMode(false);
+                                              }
+                                            }}
+                                            className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-bold flex items-center justify-center gap-2 transition"
+                                          >
+                                            {fetchDigioSaveMode ? (
+                                              <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</>
+                                            ) : (
+                                              <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>Confirm & Save to Profile</>
+                                            )}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
                                   <div className="glassmorphism p-5 rounded-xl border border-violet-400/30 dark:border-violet-500/20 space-y-4 bg-violet-50/50 dark:bg-violet-900/5">
                                     <div className="flex items-center gap-2">
                                       <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
@@ -8021,55 +8928,78 @@ function AdminDashboardContent() {
                                       </div>
                                       <div>
                                         <h4 className="text-xs font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">⭐ Fetch by Digio ID</h4>
-                                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Client ne Digio portal se KYC/eSign kar liya hai? Uska Digio ID yahan enter karo — details automatically fetch ho jayenge.</p>
+                                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Digio se KYC/eSign ID enter karo — details auto-fetch ho jayenge aur client profile update ho jayegi.</p>
                                       </div>
                                     </div>
 
-                                    <div className="flex gap-2">
-                                      <input
-                                        type="text"
-                                        placeholder="Digio ID daalo (e.g. KYC2024... ya DID2024...)"
-                                        value={fetchDigioIdInput}
-                                        onChange={e => { setFetchDigioIdInput(e.target.value); setFetchDigioResult(null); setFetchDigioError(''); }}
-                                        className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
-                                        onKeyDown={e => {
-                                          if (e.key === 'Enter' && fetchDigioIdInput.trim() && !fetchDigioLoading) {
-                                            (async () => {
-                                              setFetchDigioLoading(true);
-                                              setFetchDigioResult(null);
-                                              setFetchDigioError('');
-                                              try {
-                                                const res: any = await api.fetchDigioRecord({ digioId: fetchDigioIdInput.trim() });
-                                                if (res?.success) { setFetchDigioResult(res); }
-                                                else { setFetchDigioError(res?.message || 'Fetch failed'); }
-                                              } catch (err: any) { setFetchDigioError(err.message || 'Failed'); }
-                                              finally { setFetchDigioLoading(false); }
-                                            })();
-                                          }
-                                        }}
-                                      />
-                                      <button
-                                        disabled={fetchDigioLoading || !fetchDigioIdInput.trim()}
-                                        onClick={async () => {
-                                          setFetchDigioLoading(true);
-                                          setFetchDigioResult(null);
-                                          setFetchDigioError('');
-                                          try {
-                                            const res: any = await api.fetchDigioRecord({ digioId: fetchDigioIdInput.trim() });
-                                            if (res?.success) { setFetchDigioResult(res); }
-                                            else { setFetchDigioError(res?.message || 'Fetch failed'); }
-                                          } catch (err: any) { setFetchDigioError(err.message || 'Failed'); }
-                                          finally { setFetchDigioLoading(false); }
-                                        }}
-                                        className="px-3 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition whitespace-nowrap"
-                                      >
-                                        {fetchDigioLoading ? (
-                                          <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span>Fetching...</span></>
-                                        ) : (
-                                          <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg><span>Fetch</span></>
-                                        )}
-                                      </button>
+                                    {/* Info note */}
+                                    <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-500/20 rounded-lg text-[10px] text-blue-700 dark:text-blue-300 space-y-1">
+                                      <div><strong>KYC ID</strong> (KYC...) → Aadhaar Name, PAN, DOB, Gender, Father Name, Address, City, State, ZIP</div>
+                                      <div><strong>eSign ID</strong> (DID...) → Agreement PDF download + Agreement record create</div>
+                                      <div className="text-blue-500 dark:text-blue-400">💡 Dono IDs enter karo for complete data. Ya sirf jo available ho.</div>
                                     </div>
+
+                                    {/* Dual input fields */}
+                                    <div className="grid grid-cols-1 gap-2">
+                                      <div className="flex gap-2 items-center">
+                                        <span className="text-[10px] font-bold text-slate-500 w-16 flex-shrink-0">KYC ID</span>
+                                        <input
+                                          type="text"
+                                          placeholder="KYC2024... (Aadhaar/PAN details)"
+                                          value={(() => { try { return JSON.parse(fetchDigioIdInput || '{}').kycId || ''; } catch { return /^KYC/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })()}
+                                          onChange={e => {
+                                            const esignPart = (() => { try { return JSON.parse(fetchDigioIdInput || '{}').esignId || ''; } catch { return /^DID/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })();
+                                            setFetchDigioIdInput(JSON.stringify({ kycId: e.target.value.trim(), esignId: esignPart }));
+                                            setFetchDigioResult(null); setFetchDigioError('');
+                                          }}
+                                          className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
+                                        />
+                                      </div>
+                                      <div className="flex gap-2 items-center">
+                                        <span className="text-[10px] font-bold text-slate-500 w-16 flex-shrink-0">eSign ID</span>
+                                        <input
+                                          type="text"
+                                          placeholder="DID2024... (eSign/Agreement)"
+                                          value={(() => { try { return JSON.parse(fetchDigioIdInput || '{}').esignId || ''; } catch { return /^DID/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })()}
+                                          onChange={e => {
+                                            const kycPart = (() => { try { return JSON.parse(fetchDigioIdInput || '{}').kycId || ''; } catch { return /^KYC/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })();
+                                            setFetchDigioIdInput(JSON.stringify({ kycId: kycPart, esignId: e.target.value.trim() }));
+                                            setFetchDigioResult(null); setFetchDigioError('');
+                                          }}
+                                          className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <button
+                                      disabled={fetchDigioLoading || (() => { try { const p = JSON.parse(fetchDigioIdInput || '{}'); return !p.kycId && !p.esignId; } catch { return !fetchDigioIdInput.trim(); } })()}
+                                      onClick={async () => {
+                                        setFetchDigioLoading(true);
+                                        setFetchDigioResult(null);
+                                        setFetchDigioError('');
+                                        try {
+                                          let payload: any = {};
+                                          try {
+                                            const p = JSON.parse(fetchDigioIdInput || '{}');
+                                            if (p.kycId) payload.kycDigioId = p.kycId;
+                                            if (p.esignId) payload.esignDigioId = p.esignId;
+                                          } catch {
+                                            payload.digioId = fetchDigioIdInput.trim();
+                                          }
+                                          const res: any = await api.fetchDigioRecord(payload);
+                                          if (res?.success) { setFetchDigioResult(res); }
+                                          else { setFetchDigioError(res?.message || 'Fetch failed'); }
+                                        } catch (err: any) { setFetchDigioError(err.message || 'Failed'); }
+                                        finally { setFetchDigioLoading(false); }
+                                      }}
+                                      className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition"
+                                    >
+                                      {fetchDigioLoading ? (
+                                        <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Fetching from Digio...</>
+                                      ) : (
+                                        <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Digio se Fetch Karo</>
+                                      )}
+                                    </button>
 
                                     {/* Error */}
                                     {fetchDigioError && (
@@ -8082,48 +9012,116 @@ function AdminDashboardContent() {
                                     {/* Result Preview */}
                                     {fetchDigioResult && (
                                       <div className="space-y-3">
-                                        <div className="flex items-center justify-between">
-                                          <div className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-                                              Record Found — {fetchDigioResult.fetchType} &nbsp;|&nbsp; Status: {fetchDigioResult.digioStatus}
-                                            </span>
+                                        {/* Status badges */}
+                                        <div className="flex items-center justify-between flex-wrap gap-2">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            {fetchDigioResult.fetchTypes?.kycFetched && (
+                                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">✓ KYC Fetched</span>
+                                            )}
+                                            {fetchDigioResult.fetchTypes?.esignFetched && (
+                                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-500/20">✓ eSign Fetched</span>
+                                            )}
+                                            <span className="text-[9px] font-bold text-slate-500 uppercase">Status: {fetchDigioResult.digioStatus}</span>
                                           </div>
                                           <button onClick={() => { setFetchDigioResult(null); setFetchDigioIdInput(''); }} className="text-[9px] text-slate-400 hover:text-red-500 transition">✕ Clear</button>
                                         </div>
 
-                                        {/* Extracted fields grid */}
-                                        <div className="grid grid-cols-2 gap-2 text-[11px]">
-                                          {[
-                                            ['Aadhaar Name', fetchDigioResult.extracted?.aadhaarName],
-                                            ['PAN Name', fetchDigioResult.extracted?.panName],
-                                            ['PAN Number', fetchDigioResult.extracted?.panNumber],
-                                            ['Masked Aadhaar', fetchDigioResult.extracted?.maskedAadhaar],
-                                            ['Date of Birth', fetchDigioResult.extracted?.dob],
-                                            ['Gender', fetchDigioResult.extracted?.gender],
-                                            ['Father Name', fetchDigioResult.extracted?.fatherName],
-                                            ['City', fetchDigioResult.extracted?.city],
-                                            ['State', fetchDigioResult.extracted?.state],
-                                            ['ZIP Code', fetchDigioResult.extracted?.zipCode],
-                                          ].filter(([, v]) => v).map(([label, value]) => (
-                                            <div key={label as string} className="flex flex-col gap-0.5 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5">
-                                              <span className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</span>
-                                              <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{value}</strong>
+                                        {/* Extracted fields from Digio */}
+                                        {Object.values(fetchDigioResult.extracted || {}).some(Boolean) && (
+                                          <div>
+                                            <p className="text-[9px] text-slate-500 uppercase tracking-wider font-bold mb-1.5">📄 Digio se Extracted Data</p>
+                                            <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                                              {[
+                                                ['Aadhaar Name', fetchDigioResult.extracted?.aadhaarName],
+                                                ['PAN Name', fetchDigioResult.extracted?.panName],
+                                                ['PAN Number', fetchDigioResult.extracted?.panNumber],
+                                                ['Masked Aadhaar', fetchDigioResult.extracted?.maskedAadhaar],
+                                                ['Date of Birth', fetchDigioResult.extracted?.dob],
+                                                ['Gender', fetchDigioResult.extracted?.gender],
+                                                ['Father Name', fetchDigioResult.extracted?.fatherName],
+                                                ['City', fetchDigioResult.extracted?.city],
+                                                ['State', fetchDigioResult.extracted?.state],
+                                                ['ZIP Code', fetchDigioResult.extracted?.zipCode],
+                                              ].filter(([, v]) => v).map(([label, value]) => (
+                                                <div key={label as string} className="flex flex-col gap-0.5 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5">
+                                                  <span className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</span>
+                                                  <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{value}</strong>
+                                                </div>
+                                              ))}
+                                              {fetchDigioResult.extracted?.address && (
+                                                <div className="col-span-2 flex flex-col gap-0.5 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5">
+                                                  <span className="text-[9px] text-slate-500 uppercase tracking-wider">Full Address</span>
+                                                  <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{fetchDigioResult.extracted.address}</strong>
+                                                </div>
+                                              )}
                                             </div>
-                                          ))}
-                                          {fetchDigioResult.extracted?.address && (
-                                            <div className="col-span-2 flex flex-col gap-0.5 p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5">
-                                              <span className="text-[9px] text-slate-500 uppercase tracking-wider">Full Address</span>
-                                              <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{fetchDigioResult.extracted.address}</strong>
-                                            </div>
-                                          )}
-                                        </div>
+                                          </div>
+                                        )}
 
-                                        {/* Save to client button */}
+                                        {/* Client snapshot from DB */}
+                                        {fetchDigioResult.clientSnapshot && (
+                                          <div>
+                                            <p className="text-[9px] text-slate-500 uppercase tracking-wider font-bold mb-1.5">👤 Client Full Profile (DB + Digio Merged)</p>
+                                            <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                                              {[
+                                                ['Name', fetchDigioResult.clientSnapshot.name],
+                                                ['Email', fetchDigioResult.clientSnapshot.email],
+                                                ['Mobile', fetchDigioResult.clientSnapshot.mobile],
+                                                ['PAN', fetchDigioResult.clientSnapshot.pan],
+                                                ['Aadhaar', fetchDigioResult.clientSnapshot.aadhaar],
+                                                ['DOB', fetchDigioResult.clientSnapshot.dob],
+                                                ['Gender', fetchDigioResult.clientSnapshot.gender],
+                                                ['Father Name', fetchDigioResult.clientSnapshot.fatherName],
+                                                ['City', fetchDigioResult.clientSnapshot.city],
+                                                ['State', fetchDigioResult.clientSnapshot.state],
+                                                ['ZIP Code', fetchDigioResult.clientSnapshot.zipCode],
+                                              ].filter(([, v]) => v).map(([label, value]) => (
+                                                <div key={label as string} className="flex flex-col gap-0.5 p-2 bg-emerald-50/50 dark:bg-slate-900 rounded-lg border border-emerald-200/50 dark:border-white/5">
+                                                  <span className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</span>
+                                                  <strong className="text-slate-800 dark:text-white font-mono text-[11px] break-all">{value}</strong>
+                                                </div>
+                                              ))}
+                                              {fetchDigioResult.clientSnapshot.address && (
+                                                <div className="col-span-2 flex flex-col gap-0.5 p-2 bg-emerald-50/50 dark:bg-slate-900 rounded-lg border border-emerald-200/50 dark:border-white/5">
+                                                  <span className="text-[9px] text-slate-500 uppercase tracking-wider">Address</span>
+                                                  <strong className="text-slate-800 dark:text-white font-mono text-[11px]">{fetchDigioResult.clientSnapshot.address}</strong>
+                                                </div>
+                                              )}
+                                            </div>
+
+                                            {/* Agreements */}
+                                            {(fetchDigioResult.clientSnapshot.agreements?.length > 0 || fetchDigioResult.agreementCreated) && (
+                                              <div className="mt-2">
+                                                <p className="text-[9px] text-slate-500 uppercase tracking-wider font-bold mb-1.5">📜 Agreements</p>
+                                                {fetchDigioResult.agreementCreated && (
+                                                  <div className="flex items-center gap-2 p-2 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold mb-1.5">
+                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                                                    New Agreement record created successfully!
+                                                  </div>
+                                                )}
+                                                {fetchDigioResult.clientSnapshot.agreements.map((agr: any) => (
+                                                  <div key={agr.id} className="flex items-center justify-between p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-white/5 text-[10px]">
+                                                    <div>
+                                                      <span className={`font-bold ${agr.status === 'SIGNED' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600'}`}>{agr.status}</span>
+                                                      <span className="text-slate-500 ml-2">{agr.esignMode}</span>
+                                                      {agr.signedAt && <span className="text-slate-400 ml-2">{new Date(agr.signedAt).toLocaleDateString('en-IN')}</span>}
+                                                    </div>
+                                                    {agr.agreementUrl && (
+                                                      <a href={agr.agreementUrl} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700 font-semibold underline ml-2">View PDF</a>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        {/* Save button */}
                                         {fetchDigioResult.savedToClient ? (
                                           <div className="flex items-center gap-2 p-2.5 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
                                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
                                             Client profile successfully updated with Digio data!
+                                            {fetchDigioResult.agreementCreated && <span className="ml-1 text-blue-500">+ Agreement created.</span>}
                                           </div>
                                         ) : (
                                           <button
@@ -8131,24 +9129,25 @@ function AdminDashboardContent() {
                                             onClick={async () => {
                                               setFetchDigioSaveMode(true);
                                               try {
-                                                const res: any = await api.fetchDigioRecord({
-                                                  digioId: fetchDigioResult.digioId,
-                                                  clientId: selectedClient._id || selectedClient.id,
-                                                  saveToClient: true
-                                                });
+                                                let payload: any = { clientId: selectedClient._id || selectedClient.id, saveToClient: true };
+                                                try {
+                                                  const p = JSON.parse(fetchDigioIdInput || '{}');
+                                                  if (p.kycId) payload.kycDigioId = p.kycId;
+                                                  if (p.esignId) payload.esignDigioId = p.esignId;
+                                                } catch {
+                                                  payload.digioId = fetchDigioIdInput.trim();
+                                                }
+                                                const res: any = await api.fetchDigioRecord(payload);
                                                 if (res?.success) {
                                                   setFetchDigioResult({ ...res });
-                                                  toast.success('KYC details saved to client profile successfully!');
-                                                  // Refresh client data
-                                                  if (selectedClient._id || selectedClient.id) {
-                                                    try {
-                                                      const updated: any = await api.getAdminClients();
-                                                      const found = (updated?.clients || updated?.data || []).find((c: any) =>
-                                                        String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
-                                                      );
-                                                      if (found) setSelectedClient(found);
-                                                    } catch { }
-                                                  }
+                                                  toast.success(res.agreementCreated ? 'Profile + Agreement saved!' : 'KYC details saved to client profile!');
+                                                  try {
+                                                    const updated: any = await api.getAdminClients();
+                                                    const found = (updated?.clients || updated?.data || []).find((c: any) =>
+                                                      String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
+                                                    );
+                                                    if (found) setSelectedClient(found);
+                                                  } catch { }
                                                 } else {
                                                   toast.error(res?.message || 'Failed to save');
                                                 }
@@ -8163,7 +9162,7 @@ function AdminDashboardContent() {
                                             {fetchDigioSaveMode ? (
                                               <><svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</>
                                             ) : (
-                                              <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>Client Profile Mein Save Karo</>
+                                              <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>Client Profile + Agreement Save Karo</>
                                             )}
                                           </button>
                                         )}
@@ -8206,14 +9205,14 @@ function AdminDashboardContent() {
 
                                   {/* Agreements status */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Advisory Agreements</h4>
+                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Service Agreements</h4>
                                     {selectedClient.agreements && selectedClient.agreements.length > 0 ? (
                                       <div className="space-y-3">
                                         {selectedClient.agreements.map((agr: any) => (
                                           <div key={agr.id} className="p-3.5 bg-slate-100 dark:bg-slate-950/40 border border-slate-300 dark:border-white/5 rounded-lg flex items-center justify-between text-xs">
                                             <div className="space-y-1">
                                               <div className="flex items-center space-x-2">
-                                                <strong className="text-slate-900 dark:text-white">Advisory Agreement v{agr.version}</strong>
+                                                <strong className="text-slate-900 dark:text-white">Service Agreement v{agr.version}</strong>
                                                 <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20 uppercase">{agr.status}</span>
                                               </div>
                                               <div className="text-[10px] text-slate-500 dark:text-slate-500">Signed on {new Date(agr.signedAt).toLocaleDateString('en-IN')} via {agr.esignMode}</div>
@@ -8231,7 +9230,7 @@ function AdminDashboardContent() {
                                         ))}
                                       </div>
                                     ) : (
-                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed advisory agreement on file.</div>
+                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed service agreement on file.</div>
                                     )}
                                   </div>
                                 </div>
@@ -8516,6 +9515,34 @@ function AdminDashboardContent() {
 
                   {activeTab === 'plans' && (
                     <div className="space-y-6">
+                      {!getPrerequisitesStatus().isAllComplete && (
+                        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                              <AlertTriangle className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                Firm Setup Incomplete ({getPrerequisitesStatus().completedCount}/8 Foundation Settings Configured)
+                              </p>
+                              <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+                                Please configure all 8 core firm settings in Admin Settings before creating or editing service plans.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPrereqActionTarget('Create or Manage Plans');
+                              setIsSetupPrereqModalOpen(true);
+                            }}
+                            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm shrink-0 self-end sm:self-center"
+                          >
+                            <Settings className="w-3.5 h-3.5" />
+                            <span>View Missing Setup</span>
+                          </button>
+                        </div>
+                      )}
                       <div className="flex space-x-4 border-b border-slate-400 dark:border-white/10 pb-4">
                         <button onClick={() => setPlanManagementTab('categories')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'categories' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Categories</button>
                         <button onClick={() => setPlanManagementTab('plans')} className={`px-4 py-2 rounded-lg font-bold text-sm ${planManagementTab === 'plans' ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>Plans</button>
@@ -8526,7 +9553,10 @@ function AdminDashboardContent() {
                           <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold">Category Management</h2>
                             {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                              <button onClick={() => setIsCategoryModalOpen(true)} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm flex items-center space-x-2">
+                              <button onClick={() => {
+                                if (!requireSetupPrerequisites('Create Plan Category')) return;
+                                setIsCategoryModalOpen(true);
+                              }} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-sm flex items-center space-x-2">
                                 <Plus className="h-4 w-4" /> <span>Create Category</span>
                               </button>
                             )}
@@ -8565,7 +9595,10 @@ function AdminDashboardContent() {
                                 <Trash2 className="h-4 w-4" /> <span>{showDeletedPlans ? 'View Active Plans' : 'View Deleted Plans'}</span>
                               </button>
                               {(!isStaff || hasPermission('CREATE_PLANS')) && (
-                                <button onClick={() => { setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(categories[0]?.id || categories[0]?._id || ''); setIsPlanModalOpen(true); }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
+                                <button onClick={() => {
+                                  if (!requireSetupPrerequisites('Create Research Service Plan')) return;
+                                  setEditingPlan(null); setPlanName(''); setPlanDesc(''); setPlanPrice(''); setPlanDuration('1'); setPlanCategoryId(categories[0]?.id || categories[0]?._id || ''); setIsPlanModalOpen(true);
+                                }} className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-xl text-xs transition flex items-center space-x-2">
                                   <Plus className="h-4 w-4" /> <span>Create New Plan</span>
                                 </button>
                               )}
@@ -8649,7 +9682,8 @@ function AdminDashboardContent() {
                                     {!isDeleted ? (
                                       <>
                                         {(!isStaff || hasPermission('EDIT_PLANS')) && (
-                                          <button onClick={() => { setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
+                                          <button onClick={() => { if (!requireSetupPrerequisites('Edit Research Service Plan')) return;
+                                             setEditingPlan(plan); setPlanName(plan.name); setPlanDesc(plan.description); setPlanPrice(plan.price.toString()); setPlanDuration(plan.durationMonths.toString()); setPlanCategoryId(plan.categoryId || ''); setIsPlanModalOpen(true); }} className="flex-1 flex items-center justify-center space-x-1.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-slate-300 dark:hover:border-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all">
                                             <Edit2 className="h-3.5 w-3.5" /> <span>Edit</span>
                                           </button>
                                         )}
@@ -8866,7 +9900,7 @@ function AdminDashboardContent() {
                                     )}
                                   </div>
                                   <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mb-2.5">
-                                    Client must verify PAN/KRA and sign Advisory Agreement <strong>first</strong>. Pricing &amp; payments unlock only after agreement.
+                                    Client must verify PAN/KRA and sign Service Agreement <strong>first</strong>. Pricing &amp; payments unlock only after agreement.
                                   </p>
                                   <div className="pt-2 border-t border-slate-200/60 dark:border-white/5 flex items-center gap-1.5 text-[10px] font-mono text-blue-700 dark:text-blue-300 font-semibold">
                                     <span>Welcome</span> ➔ <span>KYC</span> ➔ <span>Agreement</span> ➔ <span>Payment</span>
@@ -9665,7 +10699,7 @@ function AdminDashboardContent() {
                                           type="text"
                                           value={upiPayeeName}
                                           onChange={e => setUpiPayeeName(e.target.value)}
-                                          placeholder="e.g. ABC Research Advisory Services"
+                                          placeholder="e.g. ABC Research Services"
                                           className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3.5 text-xs focus:border-primary-500 outline-none transition"
                                         />
                                         <p className="text-[10px] text-slate-400 mt-1">Name displayed under the QR code during payment.</p>
@@ -9826,7 +10860,7 @@ function AdminDashboardContent() {
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/60">
                                 <div>
                                   <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Digio KYC &amp; eSign Configuration</h3>
-                                  <p className="text-xs text-slate-500 mt-0.5">Configure your Digio credentials to enable Aadhaar DigiLocker KYC and Advisory Agreement eSigning for clients.</p>
+                                  <p className="text-xs text-slate-500 mt-0.5">Configure your Digio credentials to enable Aadhaar DigiLocker KYC and Service Agreement eSigning for clients.</p>
                                 </div>
                                 <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider self-start sm:self-auto ${
                                   (digioEnvironment || '').toUpperCase() === 'PRODUCTION'
@@ -10848,6 +11882,595 @@ function AdminDashboardContent() {
                 </div>
               )}
 
+              {/* ====================================================
+                  ACTIVITY & AUDIT LOGS DESK TAB
+              ==================================================== */}
+              {activeTab === 'auditLogs' && (() => {
+                const filteredAuditLogs = activityLogs.filter((log: any) => {
+                  if (auditSearchQuery.trim()) {
+                    const q = auditSearchQuery.toLowerCase();
+                    const matchSearch =
+                      (log.title || '').toLowerCase().includes(q) ||
+                      (log.description || '').toLowerCase().includes(q) ||
+                      (log.action || '').toLowerCase().includes(q) ||
+                      (log.category || log.module || '').toLowerCase().includes(q) ||
+                      (log.user?.name || '').toLowerCase().includes(q) ||
+                      (log.user?.email || '').toLowerCase().includes(q) ||
+                      (log.ipAddress || '').toLowerCase().includes(q) ||
+                      (log.targetClient?.name || '').toLowerCase().includes(q) ||
+                      (log.targetClient?.mobile || '').toLowerCase().includes(q);
+                    if (!matchSearch) return false;
+                  }
+
+                  if (auditCategoryFilter !== 'ALL') {
+                    const cat = (log.category || log.module || '').toUpperCase();
+                    if (auditCategoryFilter === 'PAYMENT' && !['PAYMENT', 'PAYMENTS', 'SUBSCRIPTION'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'KYC_COMPLIANCE' && !['KYC_COMPLIANCE', 'COMPLIANCE', 'KYC'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'STAFF_ACTION' && !['STAFF_ACTION', 'STAFF', 'USERS'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'AUTH' && !['AUTH', 'LOGIN', 'LOGOUT'].includes(cat)) return false;
+                    if (auditCategoryFilter === 'SYSTEM' && !['SYSTEM', 'TENANTS'].includes(cat)) return false;
+                  }
+
+                  if (auditRoleFilter !== 'ALL') {
+                    const role = (log.user?.role || log.actorType || '').toUpperCase();
+                    if (auditRoleFilter === 'ADMIN' && !role.includes('ADMIN')) return false;
+                    if (auditRoleFilter === 'STAFF' && (!role.includes('STAFF') && !role.includes('OFFICER') && !role.includes('RESEARCHER'))) return false;
+                    if (auditRoleFilter === 'CLIENT' && !role.includes('CLIENT')) return false;
+                    if (auditRoleFilter === 'SYSTEM' && !role.includes('SYSTEM')) return false;
+                  }
+
+                  return true;
+                });
+
+                const auditPageSize = 25;
+                const totalAuditPages = Math.ceil(filteredAuditLogs.length / auditPageSize) || 1;
+                const currentSafePage = Math.min(Math.max(1, auditCurrentPage), totalAuditPages);
+                const paginatedLogs = filteredAuditLogs.slice((currentSafePage - 1) * auditPageSize, currentSafePage * auditPageSize);
+
+                const exportAuditLogsCSV = () => {
+                  try {
+                    const headers = ['Timestamp', 'Source', 'Role', 'User Name', 'User Email', 'Category', 'Action', 'Title', 'Description', 'Status', 'IP Address', 'Device'];
+                    const rows = filteredAuditLogs.map((l: any) => [
+                      `"${new Date(l.timestamp).toLocaleString('en-IN')}"`,
+                      `"${l.source || 'ACTIVITY'}"`,
+                      `"${l.user?.role || l.actorType || 'N/A'}"`,
+                      `"${(l.user?.name || '').replace(/"/g, '""')}"`,
+                      `"${(l.user?.email || '').replace(/"/g, '""')}"`,
+                      `"${l.category || l.module || 'GENERAL'}"`,
+                      `"${l.action || 'EVENT'}"`,
+                      `"${(l.title || '').replace(/"/g, '""')}"`,
+                      `"${(l.description || '').replace(/"/g, '""')}"`,
+                      `"${l.status || 'SUCCESS'}"`,
+                      `"${l.ipAddress || '127.0.0.1'}"`,
+                      `"${l.device || 'Desktop'}"`
+                    ]);
+                    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', encodedUri);
+                    link.setAttribute('download', `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    toast.success('Audit logs exported to CSV');
+                  } catch (e: any) {
+                    toast.error('Failed to export CSV: ' + e.message);
+                  }
+                };
+
+                const totalStaffActions = activityLogs.filter((l: any) => {
+                  const r = (l.user?.role || l.actorType || '').toUpperCase();
+                  return r.includes('ADMIN') || r.includes('STAFF') || r.includes('OFFICER') || l.source === 'AUDIT';
+                }).length;
+
+                const totalPayments = activityLogs.filter((l: any) => {
+                  const cat = (l.category || l.module || '').toUpperCase();
+                  return ['PAYMENT', 'PAYMENTS', 'SUBSCRIPTION'].includes(cat);
+                }).length;
+
+                const totalCompliance = activityLogs.filter((l: any) => {
+                  const cat = (l.category || l.module || '').toUpperCase();
+                  return ['KYC_COMPLIANCE', 'COMPLIANCE', 'KYC'].includes(cat);
+                }).length;
+
+                return (
+                  <div className="w-full space-y-6">
+                    {/* Header */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 dark:border-white/10 pb-4">
+                      <div>
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                            <Activity className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">Activity & Audit Logs</h2>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              Tamper-evident trail of administrative updates, staff operations, payments & compliance events
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2.5 self-end sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLoadingAuditLogs(true);
+                            api.getTenantAuditLogs()
+                              .then(res => {
+                                if (res.success && Array.isArray(res.data)) {
+                                  setActivityLogs(res.data);
+                                  toast.success(`Loaded ${res.data.length} activity records`);
+                                }
+                              })
+                              .catch(() => toast.error('Failed to refresh logs'))
+                              .finally(() => setLoadingAuditLogs(false));
+                          }}
+                          disabled={loadingAuditLogs}
+                          className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold border border-slate-300 dark:border-white/10 transition shadow-xs disabled:opacity-50"
+                          title="Refresh Activity Stream"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${loadingAuditLogs ? 'animate-spin' : ''}`} />
+                          <span>Refresh</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={exportAuditLogsCSV}
+                          disabled={filteredAuditLogs.length === 0}
+                          className="flex items-center space-x-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition disabled:opacity-50 active:scale-95"
+                          title="Export Filtered Logs to CSV for SEBI Audits"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Metric Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Total Logged Events</span>
+                          <span className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400"><Layers className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {activityLogs.length.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Complete chronological audit ledger</p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Staff & Admin Operations</span>
+                          <span className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400"><Users className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {totalStaffActions.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-purple-600 dark:text-purple-400 mt-1 font-medium">Internal staff activity trace</p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Payments & Invoicing</span>
+                          <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"><CreditCard className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {totalPayments.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-medium">QR verifications, invoices & plans</p>
+                      </div>
+
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-4.5 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Compliance & KYC Audits</span>
+                          <span className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400"><ShieldCheck className="w-4 h-4" /></span>
+                        </div>
+                        <div className="mt-3 text-2xl font-black text-slate-900 dark:text-white">
+                          {totalCompliance.toLocaleString()}
+                        </div>
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 font-medium">Checklist updates & penalties</p>
+                      </div>
+                    </div>
+
+                    {/* Filter Bar */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl p-3.5 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={auditSearchQuery}
+                          onChange={e => {
+                            setAuditSearchQuery(e.target.value);
+                            setAuditCurrentPage(1);
+                          }}
+                          placeholder="Search action, title, description, user, client, IP..."
+                          className="w-full pl-10 pr-9 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        {auditSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuditSearchQuery('');
+                              setAuditCurrentPage(1);
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Category Dropdown */}
+                        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-white/10">
+                          <Filter className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                          <select
+                            value={auditCategoryFilter}
+                            onChange={e => {
+                              setAuditCategoryFilter(e.target.value);
+                              setAuditCurrentPage(1);
+                            }}
+                            className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                          >
+                            <option value="ALL">All Categories</option>
+                            <option value="STAFF_ACTION">Staff & Admin Actions</option>
+                            <option value="PAYMENT">Payments & Billing</option>
+                            <option value="KYC_COMPLIANCE">Compliance & KYC</option>
+                            <option value="AUTH">Authentication / Logins</option>
+                            <option value="SYSTEM">System & Settings</option>
+                          </select>
+                        </div>
+
+                        {/* Actor Role Dropdown */}
+                        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-white/10">
+                          <User className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                          <select
+                            value={auditRoleFilter}
+                            onChange={e => {
+                              setAuditRoleFilter(e.target.value);
+                              setAuditCurrentPage(1);
+                            }}
+                            className="bg-transparent text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none cursor-pointer"
+                          >
+                            <option value="ALL">All Actors</option>
+                            <option value="ADMIN">Admin Only</option>
+                            <option value="STAFF">Staff Only</option>
+                            <option value="CLIENT">Clients Only</option>
+                            <option value="SYSTEM">System Only</option>
+                          </select>
+                        </div>
+
+                        {(auditSearchQuery || auditCategoryFilter !== 'ALL' || auditRoleFilter !== 'ALL') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuditSearchQuery('');
+                              setAuditCategoryFilter('ALL');
+                              setAuditRoleFilter('ALL');
+                              setAuditCurrentPage(1);
+                            }}
+                            className="px-2.5 py-1.5 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-lg transition font-medium"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Results Counter */}
+                    <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 px-1">
+                      <span>
+                        Showing <strong className="text-slate-900 dark:text-white">{filteredAuditLogs.length === 0 ? 0 : (currentSafePage - 1) * auditPageSize + 1}</strong> to{' '}
+                        <strong className="text-slate-900 dark:text-white">{Math.min(currentSafePage * auditPageSize, filteredAuditLogs.length)}</strong> of{' '}
+                        <strong className="text-slate-900 dark:text-white">{filteredAuditLogs.length}</strong> activity entries
+                      </span>
+                      {loadingAuditLogs && (
+                        <span className="flex items-center space-x-1 text-blue-500 font-medium">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Updating stream...</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Table View */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-xs overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                          <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-white/10 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold">
+                            <tr>
+                              <th className="py-3 px-4">Date & Time</th>
+                              <th className="py-3 px-4">Actor</th>
+                              <th className="py-3 px-4">Category</th>
+                              <th className="py-3 px-4">Action & Summary</th>
+                              <th className="py-3 px-4">Origin / IP</th>
+                              <th className="py-3 px-4 text-center">Status</th>
+                              <th className="py-3 px-4 text-right">Details</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                            {paginatedLogs.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="py-12 text-center text-slate-400 dark:text-slate-500">
+                                  <div className="flex flex-col items-center justify-center space-y-2">
+                                    <Activity className="w-8 h-8 text-slate-300 dark:text-slate-600 stroke-[1.5]" />
+                                    <p className="font-semibold text-sm text-slate-600 dark:text-slate-300">No activity logs found</p>
+                                    <p className="text-xs text-slate-400">
+                                      {auditSearchQuery || auditCategoryFilter !== 'ALL' || auditRoleFilter !== 'ALL'
+                                        ? 'Try clearing the search or category filters.'
+                                        : 'All future actions by admin, staff, and clients will automatically be logged here.'}
+                                    </p>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
+                              paginatedLogs.map((log: any, idx: number) => {
+                                const logDate = new Date(log.timestamp);
+                                const isRecent = Date.now() - logDate.getTime() < 3600000;
+                                const role = (log.user?.role || log.actorType || 'ADMIN').toUpperCase();
+
+                                // Category badge style
+                                const cat = (log.category || log.module || 'SYSTEM').toUpperCase();
+                                let catColor = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10';
+                                if (['PAYMENT', 'PAYMENTS', 'SUBSCRIPTION'].includes(cat)) {
+                                  catColor = 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/40';
+                                } else if (['KYC_COMPLIANCE', 'COMPLIANCE', 'KYC'].includes(cat)) {
+                                  catColor = 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800/40';
+                                } else if (['STAFF_ACTION', 'STAFF', 'USERS'].includes(cat)) {
+                                  catColor = 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800/40';
+                                } else if (['AUTH', 'LOGIN', 'LOGOUT'].includes(cat)) {
+                                  catColor = 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800/40';
+                                }
+
+                                // Role badge style
+                                let roleBadge = 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800/40';
+                                if (role.includes('ADMIN')) {
+                                  roleBadge = 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800/40';
+                                } else if (role.includes('CLIENT')) {
+                                  roleBadge = 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/40';
+                                } else if (role.includes('SYSTEM')) {
+                                  roleBadge = 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10';
+                                }
+
+                                const isSuccess = (log.status || 'SUCCESS').toUpperCase() === 'SUCCESS';
+
+                                return (
+                                  <tr key={log.id || log._id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                                    {/* Date & Time */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <div className="font-semibold text-slate-900 dark:text-white">
+                                        {logDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400 dark:text-slate-500 font-mono mt-0.5">
+                                        {logDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
+                                      </div>
+                                    </td>
+
+                                    {/* Actor */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <div className="flex items-center space-x-2">
+                                        <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center text-xs shrink-0">
+                                          {(log.user?.name || log.actorType || 'U').charAt(0).toUpperCase()}
+                                        </div>
+                                        <div>
+                                          <div className="font-bold text-slate-900 dark:text-white truncate max-w-[130px]" title={log.user?.name || log.user?.email || 'System'}>
+                                            {log.user?.name || log.user?.email || 'System'}
+                                          </div>
+                                          <span className={`inline-block px-1.5 py-0.2 text-[10px] font-bold rounded-md border ${roleBadge}`}>
+                                            {role}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </td>
+
+                                    {/* Category */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <span className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-md border ${catColor}`}>
+                                        {cat}
+                                      </span>
+                                    </td>
+
+                                    {/* Action & Summary */}
+                                    <td className="py-3 px-4 min-w-[240px]">
+                                      <div className="flex items-center space-x-1.5">
+                                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200 text-xs">
+                                          {log.action}
+                                        </span>
+                                        {log.source === 'AUDIT' && (
+                                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 dark:bg-white/5 text-slate-500 border border-slate-200 dark:border-white/10">
+                                            AUDIT
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-slate-600 dark:text-slate-300 text-xs mt-0.5 line-clamp-1" title={log.title || log.description}>
+                                        {log.title || log.description}
+                                      </p>
+                                      {log.targetClient && (
+                                        <div className="mt-1 flex items-center space-x-1 text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                                          <User className="w-3 h-3" />
+                                          <span>Target: {log.targetClient.name} ({log.targetClient.mobile || log.targetClient.email})</span>
+                                        </div>
+                                      )}
+                                    </td>
+
+                                    {/* Origin / IP */}
+                                    <td className="py-3 px-4 whitespace-nowrap">
+                                      <div className="font-mono text-slate-600 dark:text-slate-400 text-xs">
+                                        {log.ipAddress || '127.0.0.1'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 truncate max-w-[120px]">
+                                        {log.device || 'Desktop'} {log.browser ? `• ${log.browser}` : ''}
+                                      </div>
+                                    </td>
+
+                                    {/* Status */}
+                                    <td className="py-3 px-4 whitespace-nowrap text-center">
+                                      {isSuccess ? (
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          <span>SUCCESS</span>
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                                          <AlertCircle className="w-3 h-3" />
+                                          <span>FAILED</span>
+                                        </span>
+                                      )}
+                                    </td>
+
+                                    {/* Actions */}
+                                    <td className="py-3 px-4 whitespace-nowrap text-right">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedAuditLog(log)}
+                                        className="p-1.5 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-blue-500/10 hover:text-blue-600 dark:hover:text-blue-400 text-slate-600 dark:text-slate-400 transition"
+                                        title="View Full Audit Payload"
+                                      >
+                                        <Eye className="w-4 h-4" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Pagination Footer */}
+                      {totalAuditPages > 1 && (
+                        <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border-t border-slate-200 dark:border-white/10 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => setAuditCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentSafePage <= 1}
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                          >
+                            Previous
+                          </button>
+
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                            Page <strong className="text-slate-900 dark:text-white">{currentSafePage}</strong> of{' '}
+                            <strong className="text-slate-900 dark:text-white">{totalAuditPages}</strong>
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => setAuditCurrentPage(p => Math.min(totalAuditPages, p + 1))}
+                            disabled={currentSafePage >= totalAuditPages}
+                            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Inspect Audit Log Modal */}
+                    {selectedAuditLog && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-fade-in">
+                        <div className="bg-white dark:bg-[#0f1523] border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+                          <div className="flex justify-between items-center p-5 border-b border-slate-200 dark:border-white/10">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                                <Activity className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <h3 className="font-bold text-slate-900 dark:text-white text-base">Audit Event Inspector</h3>
+                                <p className="text-[11px] text-slate-500 font-mono mt-0.5">ID: {selectedAuditLog.id || selectedAuditLog._id}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setSelectedAuditLog(null)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                          </div>
+
+                          <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                            {/* Key info summary */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-xl border border-slate-200 dark:border-white/5 text-xs">
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Action</span>
+                                <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedAuditLog.action}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Category</span>
+                                <span className="font-bold text-slate-900 dark:text-white">{selectedAuditLog.category || selectedAuditLog.module}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Actor Role</span>
+                                <span className="font-bold text-purple-600 dark:text-purple-400">{selectedAuditLog.user?.role || selectedAuditLog.actorType || 'ADMIN'}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{selectedAuditLog.status || 'SUCCESS'}</span>
+                              </div>
+                            </div>
+
+                            {/* Details text */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Event Title & Notes</label>
+                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5 text-xs text-slate-800 dark:text-slate-200">
+                                <div className="font-bold mb-1">{selectedAuditLog.title}</div>
+                                {selectedAuditLog.description && <p className="text-slate-600 dark:text-slate-400">{selectedAuditLog.description}</p>}
+                              </div>
+                            </div>
+
+                            {/* User & Client details */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Triggered By</span>
+                                <div className="font-semibold text-slate-900 dark:text-white">{selectedAuditLog.user?.name || 'System / Admin'}</div>
+                                <div className="text-[11px] text-slate-500 font-mono">{selectedAuditLog.user?.email || 'N/A'}</div>
+                              </div>
+                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Network & Device</span>
+                                <div className="font-mono text-slate-900 dark:text-white">{selectedAuditLog.ipAddress || '127.0.0.1'}</div>
+                                <div className="text-[11px] text-slate-500">{selectedAuditLog.device || 'Desktop'} {selectedAuditLog.browser ? `(${selectedAuditLog.browser})` : ''}</div>
+                              </div>
+                            </div>
+
+                            {/* Metadata / Payload */}
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Technical Payload / State Change</label>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(JSON.stringify(selectedAuditLog.metadata || selectedAuditLog, null, 2));
+                                    toast.success('JSON payload copied to clipboard');
+                                  }}
+                                  className="text-[10px] text-blue-500 hover:text-blue-400 font-bold flex items-center space-x-1"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copy JSON</span>
+                                </button>
+                              </div>
+                              <pre className="p-3.5 bg-slate-950 text-emerald-400 rounded-xl font-mono text-[11px] overflow-x-auto max-h-56 border border-slate-800 leading-relaxed">
+                                {JSON.stringify(selectedAuditLog.metadata || { oldValue: selectedAuditLog.oldValue, newValue: selectedAuditLog.newValue }, null, 2)}
+                              </pre>
+                            </div>
+                          </div>
+
+                          <div className="p-4 border-t border-slate-200 dark:border-white/10 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAuditLog(null)}
+                              className="px-5 py-2 text-xs font-bold bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl transition"
+                            >
+                              Close
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* NON-ADMIN CLIENT VIEWS */}
               {activeTab === 'complaintDataView' && (
                 <CustomPageView page={{ slug: 'complaint-status', title: 'Complaint Data' }} />
@@ -11373,10 +12996,10 @@ function AdminDashboardContent() {
                       <ShieldCheck className="w-4 h-4 text-blue-600" /> Strict Compliance Flow (KYC First):
                     </p>
                     <p className="text-[11px] leading-relaxed">
-                      1. Clients will verify Identity KYC (PAN / KRA) and sign Advisory Agreement <strong>before</strong> accessing plan selection or payments.
+                      1. Clients will verify Identity KYC (PAN / KRA) and sign Service Agreement <strong>before</strong> accessing plan selection or payments.
                     </p>
                     <p className="text-[11px] leading-relaxed">
-                      2. Recommended for adherence to strict SEBI advisory guidelines.
+                      2. Recommended for adherence to strict SEBI guidelines.
                     </p>
                     <div className="pt-2 border-t border-blue-200 dark:border-blue-800/60 font-mono text-[10px] text-blue-700 dark:text-blue-300 font-semibold">
                       Sequence: Welcome ➔ Identity KYC ➔ Legal Agreement ➔ Subscription
@@ -11391,7 +13014,7 @@ function AdminDashboardContent() {
                       1. Clients will select their plan and complete payment <strong>first</strong>.
                     </p>
                     <p className="text-[11px] leading-relaxed">
-                      2. After payment confirmation, the client must complete Identity KYC and sign the Advisory Agreement before market recommendations unlock.
+                      2. After payment confirmation, the client must complete Identity KYC and sign the Service Agreement before market recommendations unlock.
                     </p>
                     <p className="text-[11px] leading-relaxed">
                       3. <em>If Admin assigns a plan directly to a client, payment is bypassed and the client is prompted to do KYC &amp; Agreement directly upon login.</em>
@@ -11431,6 +13054,164 @@ function AdminDashboardContent() {
             </div>
           </div>
         )}
+
+        
+        {/* Mandatory Setup Prerequisites Required Modal */}
+        {isSetupPrereqModalOpen && (() => {
+          const prereqStatus = getPrerequisitesStatus();
+          const percent = Math.round((prereqStatus.completedCount / prereqStatus.totalCount) * 100);
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+              <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-200 dark:border-white/10 flex flex-col max-h-[90vh] animate-fade-in-up">
+                
+                {/* Header */}
+                <div className="flex items-start justify-between pb-4 border-b border-slate-200 dark:border-white/10">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center justify-center shrink-0">
+                      <ShieldAlert className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>Firm Setup Required</span>
+                        <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                          SEBI Compliance
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        Action blocked: <strong className="text-slate-700 dark:text-slate-200">{prereqActionTarget || 'Manage Client / Plan'}</strong> requires all 8 foundation settings to be completed first.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSetupPrereqModalOpen(false)}
+                    className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Progress bar */}
+                <div className="py-4 border-b border-slate-200 dark:border-white/10 space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">
+                      Prerequisites Progress ({prereqStatus.completedCount} of {prereqStatus.totalCount} Configured)
+                    </span>
+                    <span className={`font-mono font-bold ${percent === 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      {percent}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${percent === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-500 to-orange-500'}`}
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Checklist of 8 Items */}
+                <div className="flex-1 overflow-y-auto pr-1 py-4 space-y-2.5 custom-scrollbar">
+                  {prereqStatus.items.map((item, idx) => (
+                    <div
+                      key={item.id}
+                      className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        item.completed
+                          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/80 dark:border-emerald-800/40'
+                          : 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200/80 dark:border-amber-800/40 hover:border-amber-400'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                          item.completed
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                        }`}>
+                          {item.completed ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-900 dark:text-white">
+                              {idx + 1}. {item.name}
+                            </span>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                              item.completed
+                                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                            }`}>
+                              {item.badgeText}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                            {item.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleNavigateToPrerequisite(item)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0 self-end sm:self-center ${
+                          item.completed
+                            ? 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-sm'
+                        }`}
+                      >
+                        <span>{item.completed ? 'Review' : 'Configure Now'}</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer */}
+                <div className="pt-4 border-t border-slate-200 dark:border-white/10 flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-400">
+                    Need help? Navigate to <strong>Settings</strong> to complete firm verification.
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsSetupPrereqModalOpen(false)}
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs transition"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSetupPrereqModalOpen(false);
+                        setActiveTab('settings');
+                        setSettingsTab('general');
+                      }}
+                      className="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-bold text-xs transition shadow-md shadow-primary-500/20 flex items-center gap-1.5"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Go to Settings</span>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* SEBI Compliance Google Calendar View Modal */}
+        <ComplianceCalendarModal
+          isOpen={showCalendarModal}
+          onClose={() => setShowCalendarModal(false)}
+          checklist={checklist}
+          checklistHistory={checklistHistory}
+          onReloadData={loadData}
+          onOpenAuditModal={(req) => {
+            setAuditModalReq(req);
+            const status = req.audit?.status || 'PENDING';
+            setAuditStatus(status !== 'PENDING' ? status : '');
+            setAuditRemarks(req.audit?.officerRemarks || '');
+          }}
+          userRole={user?.role}
+        />
 
         {/* Logout Modal */}
         {isLogoutModalOpen && (

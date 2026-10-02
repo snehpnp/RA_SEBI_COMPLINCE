@@ -266,7 +266,7 @@ export default function SupportCenter() {
         <div className="bg-premium-cards border border-premium-border rounded-3xl p-6 sm:p-8 max-w-4xl shadow-xl">
           <div className="mb-6">
             <h3 className="text-xl font-bold text-premium-text mb-1">Frequently Asked Questions</h3>
-            <p className="text-xs text-premium-text/60">Find quick answers to common questions about research signals, advisory packages, KYC verification, and SEBI compliance.</p>
+            <p className="text-xs text-premium-text/60">Find quick answers to common questions about research signals, service packages, KYC verification, and SEBI compliance.</p>
           </div>
 
           {/* Search & Category Filter */}

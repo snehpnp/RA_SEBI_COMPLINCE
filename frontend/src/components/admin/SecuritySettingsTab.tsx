@@ -50,8 +50,10 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   // Client Signup Verification Mode (SEBI Compliance)
   const [signupVerificationMode, setSignupVerificationMode] = useState<'EMAIL_ONLY' | 'MOBILE_ONLY' | 'BOTH'>('EMAIL_ONLY');
 
-  // Locked / Teaser Trades Preview Count
+  // Locked / Teaser Trades Preview Count & Potential Toggles
   const [lockedTradesPreviewCount, setLockedTradesPreviewCount] = useState<number>(5);
+  const [showOpenTradePotential, setShowOpenTradePotential] = useState<boolean>(true);
+  const [showLockedTradePotential, setShowLockedTradePotential] = useState<boolean>(true);
 
   // Client 2FA
   const [client2FAEnabled, setClient2FAEnabled] = useState(false);
@@ -99,6 +101,8 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       if (tenantData.passwordPolicy) setPasswordPolicy(tenantData.passwordPolicy);
       if (tenantData.signupVerificationMode) setSignupVerificationMode(tenantData.signupVerificationMode);
       if (typeof tenantData.lockedTradesPreviewCount === 'number') setLockedTradesPreviewCount(tenantData.lockedTradesPreviewCount);
+      if (typeof tenantData.showOpenTradePotential === 'boolean') setShowOpenTradePotential(tenantData.showOpenTradePotential);
+      if (typeof tenantData.showLockedTradePotential === 'boolean') setShowLockedTradePotential(tenantData.showLockedTradePotential);
       if (typeof tenantData.client2FAEnabled === 'boolean') setClient2FAEnabled(tenantData.client2FAEnabled);
       if (tenantData.twoFactorChannel) setTwoFactorChannel(tenantData.twoFactorChannel);
       if (typeof tenantData.smsGatewayEnabled === 'boolean') setSmsGatewayEnabled(tenantData.smsGatewayEnabled);
@@ -136,6 +140,8 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       formData.append('passwordPolicy', passwordPolicy);
       formData.append('signupVerificationMode', signupVerificationMode);
       formData.append('lockedTradesPreviewCount', String(lockedTradesPreviewCount));
+      formData.append('showOpenTradePotential', String(showOpenTradePotential));
+      formData.append('showLockedTradePotential', String(showLockedTradePotential));
       formData.append('client2FAEnabled', String(client2FAEnabled));
       formData.append('twoFactorChannel', twoFactorChannel);
       formData.append('smsGatewayEnabled', String(smsGatewayEnabled));
@@ -529,6 +535,54 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
             />
             <span className="text-xs font-semibold text-slate-500">Trades</span>
           </div>
+        </div>
+
+        {/* Toggle 1: Show Potential on Open Trades */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+              Show Potential Upside on Open Trades
+            </label>
+            <p className="text-xs text-slate-500">
+              Display "% Potential Upside Remaining" badge on active unlocked research recommendations for clients
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={showOpenTradePotential}
+              onChange={e => setShowOpenTradePotential(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
+            <span className="ml-3 text-xs font-semibold text-slate-700 dark:text-slate-300">
+              {showOpenTradePotential ? 'Enabled' : 'Disabled'}
+            </span>
+          </label>
+        </div>
+
+        {/* Toggle 2: Show Potential on Locked Trades */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+              Show Potential Upside on Locked Trades
+            </label>
+            <p className="text-xs text-slate-500">
+              Display "% Potential Upside Remaining" teaser banner on locked trades to non-subscribed clients to drive plan upgrades
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={showLockedTradePotential}
+              onChange={e => setShowLockedTradePotential(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-600"></div>
+            <span className="ml-3 text-xs font-semibold text-slate-700 dark:text-slate-300">
+              {showLockedTradePotential ? 'Enabled' : 'Disabled'}
+            </span>
+          </label>
         </div>
 
         <div className="p-3.5 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl flex items-start gap-2.5">

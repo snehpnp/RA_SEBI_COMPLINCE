@@ -228,9 +228,11 @@ export const listSignals = async (req: Request, res: Response) => {
         });
       }
 
-      // Fetch tenant settings to get lockedTradesPreviewCount
+      // Fetch tenant settings to get lockedTradesPreviewCount and potential toggles
       const tenantDoc = await dynamicDb.Tenant.findById(tenantId).lean() || await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
       const previewLimit = tenantDoc?.lockedTradesPreviewCount !== undefined ? tenantDoc.lockedTradesPreviewCount : 5;
+      const showOpenTradePotential = tenantDoc?.showOpenTradePotential !== false;
+      const showLockedTradePotential = tenantDoc?.showLockedTradePotential !== false;
 
       let unlockedSignals: any[] = [];
       const subscribedPlanIds = allSubs.map((s: any) => s.planId.toString());
@@ -338,7 +340,9 @@ export const listSignals = async (req: Request, res: Response) => {
           (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
           (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
 
-        const potential = calculatePotential(s);
+        const potential = showOpenTradePotential
+          ? calculatePotential(s)
+          : { remainingPotentialPercent: null, isTarget1Done: false, potentialMessage: null, directionText: null };
 
         return {
           ...s,
@@ -358,7 +362,9 @@ export const listSignals = async (req: Request, res: Response) => {
       // Map locked teaser signals
       const mappedLocked = lockedSignals.map((s: any) => {
         const pIdStr = s.planId?.toString();
-        const potential = calculatePotential(s);
+        const potential = showLockedTradePotential
+          ? calculatePotential(s)
+          : { remainingPotentialPercent: null, isTarget1Done: false, potentialMessage: null, directionText: null };
         const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
         const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
           (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null);
@@ -376,7 +382,7 @@ export const listSignals = async (req: Request, res: Response) => {
           callType: s.callType || 'BUY',
           tradeDuration: s.tradeDuration || 'INTRADAY',
           planId: pIdStr || (s.planId ? s.planId.toString() : ''),
-          planName: (pIdStr && planMap.get(pIdStr)) || 'Premium Advisory Plan',
+          planName: (pIdStr && planMap.get(pIdStr)) || 'Premium Service Plan',
           entryPrice: null,
           target1: null,
           target2: null,
@@ -391,7 +397,11 @@ export const listSignals = async (req: Request, res: Response) => {
       return res.json({
         success: true,
         data: [...mappedUnlocked, ...mappedLocked],
-        hasActivePlan: allSubs.length > 0
+        hasActivePlan: allSubs.length > 0,
+        settings: {
+          showOpenTradePotential,
+          showLockedTradePotential
+        }
       });
     }
 

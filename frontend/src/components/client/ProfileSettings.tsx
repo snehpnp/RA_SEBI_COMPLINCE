@@ -324,7 +324,7 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
                   Personal Information
                 </h2>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Basic contact details linked to your research advisory subscription
+                  Basic contact details linked to your research service subscription
                 </p>
               </div>
             </div>

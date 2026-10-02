@@ -402,7 +402,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 });
                 setAgreementSigned(true);
                 setLoading(false);
-                toast.success('Advisory Agreement signed successfully!');
+                toast.success('Service Agreement signed successfully!');
               }
             },
             logo: 'https://digio.in/images/logo.png',
@@ -439,7 +439,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       const signRes = await api.signAgreement({ signatureText: verifiedName });
       if (signRes.success) {
         setAgreementSigned(true);
-        toast.success('Advisory Agreement signed successfully!');
+        toast.success('Service Agreement signed successfully!');
       } else {
         toast.error(signRes.message || 'Failed to sign agreement');
       }
@@ -523,7 +523,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             key: res.keyId,
             amount: res.amount,
             currency: res.currency,
-            name: clientProfile?.user?.tenant?.companyName || 'Premium Advisory',
+            name: clientProfile?.user?.tenant?.companyName || 'Premium Services',
             description: 'Subscription Payment',
             order_id: res.orderId,
             handler: async function (response: any) {
@@ -730,7 +730,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
             <div className="w-14 h-14 rounded-2xl bg-blue-600/10 dark:bg-blue-500/20 flex items-center justify-center mb-5 border border-blue-600/20">
               <ShieldCheck className="w-7 h-7 text-blue-600 dark:text-blue-400" />
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold mb-3 text-slate-900 dark:text-white">Welcome to Premium Advisory</h1>
+            <h1 className="text-2xl md:text-3xl font-bold mb-3 text-slate-900 dark:text-white">Welcome to Premium Services</h1>
             <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed mb-6">
               Before we can provide you with exclusive market signals and research, SEBI regulations require us to complete a quick onboarding process.
             </p>
@@ -759,7 +759,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
               </h2>
             </div>
             <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
-              Please verify your contact details for SEBI compliance and advisory records.
+              Please verify your contact details for SEBI compliance and service records.
             </p>
 
             <div className="space-y-4 flex-1">
@@ -913,7 +913,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                   </div>
                   <h3 className="text-lg font-bold text-emerald-600 dark:text-emerald-400 mb-1">Agreement Signed Successfully</h3>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mb-3 max-w-md">
-                    You have legally eSigned the Research Analyst Advisory Agreement. This document is officially locked and compliance-verified.
+                    You have legally eSigned the Research Analyst Service Agreement. This document is officially locked and compliance-verified.
                   </p>
                   {hasActiveSubscription && (
                     <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold">
@@ -923,7 +923,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 </div>
               ) : (
                 <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex flex-col relative overflow-hidden">
-                  <h3 className="font-bold text-sm mb-2 flex items-center gap-2 text-slate-900 dark:text-white"><FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Advisory Agreement</h3>
+                  <h3 className="font-bold text-sm mb-2 flex items-center gap-2 text-slate-900 dark:text-white"><FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Service Agreement</h3>
                   <div className="flex-1 overflow-y-auto pr-1 text-[11px] text-slate-600 dark:text-slate-300 space-y-2 mb-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl max-h-[180px] custom-scrollbar">
                     <div dangerouslySetInnerHTML={{ __html: agreementHTML }} />
                   </div>
@@ -955,7 +955,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
       case 'subscription':
         if (hasActiveSubscription) {
           const activeSub = clientProfile?.subscriptions?.find((s: any) => s.status === 'ACTIVE' || s.status === 'active') || clientProfile?.subscriptions?.[0];
-          const planName = activeSub?.plan?.name || activeSub?.planName || activeSub?.name || 'Active Advisory Plan';
+          const planName = activeSub?.plan?.name || activeSub?.planName || activeSub?.name || 'Active Service Plan';
           const planPrice = activeSub?.plan?.price || activeSub?.amount || 0;
 
           return (
@@ -969,7 +969,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
                 </h2>
               </div>
               <p className="text-slate-500 dark:text-slate-400 text-xs mb-5">
-                Your research advisory subscription is active and assigned.
+                Your research service subscription is active and assigned.
               </p>
 
               <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/30 rounded-2xl p-5 mb-5 relative overflow-hidden">

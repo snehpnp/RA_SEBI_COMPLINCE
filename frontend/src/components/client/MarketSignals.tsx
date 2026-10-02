@@ -16,6 +16,7 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
   const [showAlertsForSignal, setShowAlertsForSignal] = useState<any>(null);
   const [signals, setSignals] = useState<any[]>([]);
   const [compliancePending, setCompliancePending] = useState(false);
+  const [hasActivePlan, setHasActivePlan] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const categories = ['all', 'cash', 'future', 'option'];
@@ -26,6 +27,11 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
         const res = await api.getSignals();
         if (res.success) {
           setSignals(res.data || []);
+          if (res.hasActivePlan !== undefined) {
+            setHasActivePlan(Boolean(res.hasActivePlan));
+          } else {
+            setHasActivePlan((res.data || []).some((s: any) => !s.isLocked));
+          }
           if (res.compliancePending) {
             setCompliancePending(true);
           }
@@ -40,6 +46,11 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
   }, []);
 
   const filteredSignals = signals.filter(s => {
+    // If client has an active plan, do NOT show locked trades on Market Signals page (only on Dashboard)
+    // If client does not have an active plan, show locked trades
+    if (hasActivePlan && s.isLocked) {
+      return false;
+    }
     const statusMatch = activeTab === 'active' ? s.status === 'OPEN' || s.status === 'open' : s.status === 'CLOSED' || s.status === 'closed';
     const segment = s.stock?.segment || s.segment;
     const typeMatch = category === 'all' || segment?.toLowerCase() === category;
@@ -64,7 +75,7 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
           <div className="flex-1 text-center md:text-left">
             <h3 className="text-base font-bold text-amber-500">Compliance Verification Required</h3>
             <p className="text-xs text-premium-text/70 mt-1">
-              Your research advisory plan is assigned. SEBI regulations require completing your DigiLocker KYC &amp; Advisory Agreement to unlock live recommendations.
+              Your research service plan is assigned. SEBI regulations require completing your DigiLocker KYC &amp; Service Agreement to unlock live recommendations.
             </p>
           </div>
           <button
@@ -139,7 +150,7 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
                         </span>
                         {signal.planName && (
                           <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase bg-premium-primary/15 text-premium-primary">
-                            {signal.planName}
+                            {(signal.planName || '').replace(/advisory/gi, 'Service')}
                           </span>
                         )}
                       </div>
@@ -153,7 +164,7 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
                         </span>
                       </h3>
                       <p className="text-xs text-premium-text/50 uppercase mt-0.5 font-medium">
-                        {signal.segment || 'CASH'} • {signal.tradeDuration?.replace(/_/g, ' ') || 'Advisory Call'}
+                        {signal.segment || 'CASH'} • {signal.tradeDuration?.replace(/_/g, ' ') || 'Service Call'}
                       </p>
                     </div>
 
@@ -238,12 +249,25 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
                     <h3 className="text-xl font-bold mt-2 group-hover:text-premium-primary transition-colors">{signal.stock?.symbol || signal.symbol}</h3>
                     <p className="text-xs text-premium-text/50 uppercase">{signal.stock?.segment || signal.segment} • {signal.tradeDuration || signal.type}</p>
                   </div>
-                  <div className="flex gap-0.5">
-                    {[1, 2, 3, 4, 5].map(i => (
-                      <div key={i} className={`w-1.5 h-1.5 rounded-full ${i <= signal.confidenceScore ? 'bg-premium-success' : 'bg-premium-border'}`}></div>
-                    ))}
-                  </div>
                 </div>
+
+                {/* Dynamic Direction-Aware Potential Banner for Open Trades */}
+                {signal.potentialMessage && (
+                  <div className="mb-4 p-3 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">{signal.callType === 'BUY' || signal.recommendation === 'BUY' ? '🔥' : '⚡'}</span>
+                      <div>
+                        <p className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                          {signal.potentialMessage}
+                        </p>
+                        <p className="text-[10px] text-premium-text/50">
+                          Calculated {(signal.callType === 'BUY' || signal.recommendation === 'BUY') ? 'upside' : 'downside'} remaining
+                        </p>
+                      </div>
+                    </div>
+                    <Sparkles className="w-4 h-4 text-emerald-500 animate-pulse shrink-0" />
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-4 mb-4 bg-premium-bg rounded-2xl p-4 border border-premium-border">
                   <div>

@@ -3373,7 +3373,7 @@ function AdminDashboardContent() {
                               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-2 border-b border-slate-300 dark:border-white/5">
                                 <div>
                                   <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Sales & Client Growth</h3>
-                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track advisory revenue and user onboarding progress</p>
+                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track research service revenue and user onboarding progress</p>
                                 </div>
 
                                 {/* Controls */}
@@ -4870,7 +4870,7 @@ function AdminDashboardContent() {
                                         </div>
                                         <div className="text-right">
                                           <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                            {isBreached ? 'SLA BREACHED' : `${daysLeft} days left`}
+                                            {isBreached ? `${Math.abs(daysLeft)} days overdue` : daysLeft === 0 ? 'Due Today' : `${daysLeft} days left`}
                                           </span>
                                         </div>
                                       </div>
@@ -6817,14 +6817,14 @@ function AdminDashboardContent() {
 
                                   {/* Agreements status */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Advisory Agreements</h4>
+                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Service Agreements</h4>
                                     {selectedClient.agreements && selectedClient.agreements.length > 0 ? (
                                       <div className="space-y-3">
                                         {selectedClient.agreements.map((agr: any) => (
                                           <div key={agr.id} className="p-3.5 bg-slate-100 dark:bg-slate-950/40 border border-slate-300 dark:border-white/5 rounded-lg flex items-center justify-between text-xs">
                                             <div className="space-y-1">
                                               <div className="flex items-center space-x-2">
-                                                <strong className="text-slate-900 dark:text-white">Advisory Agreement v{agr.version}</strong>
+                                                <strong className="text-slate-900 dark:text-white">Service Agreement v{agr.version}</strong>
                                                 <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20 uppercase">{agr.status}</span>
                                               </div>
                                               <div className="text-[10px] text-slate-500 dark:text-slate-500">Signed on {new Date(agr.signedAt).toLocaleDateString('en-IN')} via {agr.esignMode}</div>
@@ -6842,7 +6842,7 @@ function AdminDashboardContent() {
                                         ))}
                                       </div>
                                     ) : (
-                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed advisory agreement on file.</div>
+                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed service agreement on file.</div>
                                     )}
                                   </div>
                                 </div>

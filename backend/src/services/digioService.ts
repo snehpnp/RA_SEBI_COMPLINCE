@@ -503,7 +503,7 @@ export const createDocumentForEsign = async (
 
     const signerObj: Record<string, any> = {
       identifier: signerIdentifier,
-      reason: 'SEBI Research Advisory Agreement eSign'
+      reason: 'SEBI Research Service Agreement eSign'
     };
     if (signerName && isValidName(signerName)) {
       signerObj.name = signerName.trim();

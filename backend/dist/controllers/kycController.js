@@ -494,7 +494,7 @@ const updateKycAgreementStatus = async (req, res) => {
                     tenantId: client.tenantId || req.user?.tenantId,
                     toEmail,
                     clientName: signerName || client.name,
-                    companyName: tenant?.companyName || tenant?.name || 'Research Analyst Advisory',
+                    companyName: tenant?.companyName || tenant?.name || 'Research Analyst Services',
                     agreementUrl,
                     pdfBuffer,
                     maskedAadhaar: verifiedMaskedAadhaar || client.aadhaar,
@@ -529,7 +529,7 @@ const updateKycAgreementStatus = async (req, res) => {
                                     toEmail,
                                     clientName: signerName || client.name,
                                     companyName: tenant?.companyName,
-                                    planName: pay.planName || pay.plan?.name || 'Research Advisory Plan',
+                                    planName: pay.planName || pay.plan?.name || 'Research Service Plan',
                                     invoiceNumber: invNo,
                                     amount: pay.amount,
                                     pdfBuffer: invBuffer
@@ -589,13 +589,17 @@ exports.updateKycAgreementStatus = updateKycAgreementStatus;
 // =====================================================
 // Admin: Fetch Client KYC Details by Digio ID
 // POST /api/v1/admin/digio/fetch-by-id
-// Body: { digioId, clientId?, saveToClient? }
+// Body: { digioId, kycDigioId?, esignDigioId?, clientId?, saveToClient? }
 // =====================================================
 const fetchDigioRecord = async (req, res) => {
     try {
-        const { digioId, clientId, saveToClient } = req.body;
-        if (!digioId || !digioId.trim()) {
-            return res.status(400).json({ success: false, message: 'Digio ID is required' });
+        // Supports: single `digioId` OR separate `kycDigioId` + `esignDigioId`
+        const { digioId, kycDigioId, esignDigioId, clientId, saveToClient } = req.body;
+        const singleId = (digioId || '').trim();
+        const kycId = (kycDigioId || '').trim();
+        const esignId = (esignDigioId || '').trim();
+        if (!singleId && !kycId && !esignId) {
+            return res.status(400).json({ success: false, message: 'At least one Digio ID is required' });
         }
         const tenantId = req.user.tenantId;
         const tenant = tenantId ? await db_1.default.Tenant.findById(tenantId).lean() : null;
@@ -605,161 +609,322 @@ const fetchDigioRecord = async (req, res) => {
                 message: 'Digio API credentials are not configured. Please configure them in Settings > Integrations > Digio KYC.'
             });
         }
-        const cleanDigioId = digioId.trim();
-        const digioClientId = tenant.digioClientId;
-        const digioClientSecret = tenant.digioClientSecret;
-        const digioEnvironment = tenant.digioEnvironment;
-        let rawData = null;
-        let fetchType = 'unknown';
-        // Auto-detect: KYC IDs usually start with "KYC" prefix; Document IDs start with "DID"
-        // But we try both to be safe
-        const looksLikeKyc = /^KYC/i.test(cleanDigioId);
-        const looksLikeDoc = /^DID/i.test(cleanDigioId);
-        if (looksLikeKyc || (!looksLikeDoc)) {
-            // Try KYC fetch first
-            try {
-                rawData = await (0, digioService_1.getKycStatus)(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
-                if (rawData?.id || rawData?.status)
-                    fetchType = 'KYC';
-            }
-            catch { }
-        }
-        if (!rawData && (looksLikeDoc || !looksLikeKyc)) {
-            // Try Document (eSign) fetch
-            try {
-                rawData = await (0, digioService_1.getDocumentStatus)(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
-                if (rawData?.id || rawData?.status)
-                    fetchType = 'ESIGN_DOCUMENT';
-            }
-            catch { }
-        }
-        // Fallback: try the other type
-        if (!rawData) {
-            if (!looksLikeKyc) {
+        const dClientId = tenant.digioClientId;
+        const dClientSecret = tenant.digioClientSecret;
+        const dEnv = tenant.digioEnvironment;
+        const isGeneric = (n) => {
+            if (!n || typeof n !== 'string')
+                return true;
+            const l = n.toLowerCase().trim();
+            return l === '' || l === 'digio' || l === 'client' || l === 'test' || l === 'user' || l.includes('@') || l.length < 2;
+        };
+        // ── Helper: fetch a single ID, auto-detect KYC vs eSign ──
+        const fetchOneId = async (id) => {
+            const looksLikeKyc = /^KYC/i.test(id);
+            const looksLikeDoc = /^DID/i.test(id);
+            let rawData = null;
+            let fetchType = 'unknown';
+            if (looksLikeKyc || !looksLikeDoc) {
                 try {
-                    rawData = await (0, digioService_1.getKycStatus)(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
-                    if (rawData?.id || rawData?.status)
+                    rawData = await (0, digioService_1.getKycStatus)(dClientId, dClientSecret, id, dEnv);
+                    if (rawData?.id || rawData?.status || rawData?.kyc_status) {
                         fetchType = 'KYC';
+                    }
+                    else
+                        rawData = null;
                 }
-                catch { }
+                catch {
+                    rawData = null;
+                }
+            }
+            if (!rawData) {
+                try {
+                    rawData = await (0, digioService_1.getDocumentStatus)(dClientId, dClientSecret, id, dEnv);
+                    if (rawData?.id || rawData?.status) {
+                        fetchType = 'ESIGN_DOCUMENT';
+                    }
+                    else
+                        rawData = null;
+                }
+                catch {
+                    rawData = null;
+                }
+            }
+            if (!rawData && !looksLikeKyc) {
+                try {
+                    rawData = await (0, digioService_1.getKycStatus)(dClientId, dClientSecret, id, dEnv);
+                    if (rawData?.id || rawData?.status || rawData?.kyc_status) {
+                        fetchType = 'KYC';
+                    }
+                    else
+                        rawData = null;
+                }
+                catch {
+                    rawData = null;
+                }
             }
             if (!rawData && !looksLikeDoc) {
                 try {
-                    rawData = await (0, digioService_1.getDocumentStatus)(digioClientId, digioClientSecret, cleanDigioId, digioEnvironment);
-                    if (rawData?.id || rawData?.status)
+                    rawData = await (0, digioService_1.getDocumentStatus)(dClientId, dClientSecret, id, dEnv);
+                    if (rawData?.id || rawData?.status) {
                         fetchType = 'ESIGN_DOCUMENT';
+                    }
+                    else
+                        rawData = null;
                 }
-                catch { }
+                catch {
+                    rawData = null;
+                }
+            }
+            return { rawData, fetchType };
+        };
+        // ── Resolve all IDs ──
+        let kycRawData = null;
+        let esignRawData = null;
+        let resolvedKycId = kycId;
+        let resolvedEsignId = esignId;
+        if (kycId) {
+            const r = await fetchOneId(kycId);
+            kycRawData = r.rawData;
+        }
+        if (esignId) {
+            const r = await fetchOneId(esignId);
+            esignRawData = r.rawData;
+        }
+        // Single ID mode: auto-route to kyc or esign bucket
+        if (singleId) {
+            const r = await fetchOneId(singleId);
+            if (r.fetchType === 'KYC') {
+                kycRawData = kycRawData || r.rawData;
+                resolvedKycId = resolvedKycId || singleId;
+            }
+            else if (r.fetchType === 'ESIGN_DOCUMENT') {
+                esignRawData = esignRawData || r.rawData;
+                resolvedEsignId = resolvedEsignId || singleId;
             }
         }
-        if (!rawData) {
+        if (!kycRawData && !esignRawData) {
             return res.status(404).json({
                 success: false,
-                message: `No record found on Digio for ID: ${cleanDigioId}. Please verify the ID is correct and belongs to your Digio account.`
+                message: 'No record found on Digio for the provided ID(s). Please verify the ID is correct and belongs to your Digio account.'
             });
         }
-        // Extract KYC details
-        const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(rawData);
-        console.log(`\n🔍 [Admin Fetch Digio] ID=${cleanDigioId} | Type=${fetchType} | Client=${clientId || 'N/A'}`);
-        console.log('   Extracted Name:', extracted?.aadhaarName || extracted?.panName || '—');
-        console.log('   PAN:', extracted?.panNumber || '—');
-        console.log('   Masked Aadhaar:', extracted?.maskedAadhaar || '—');
-        // If saveToClient is true and clientId is provided, save the details
+        // ── Extract & merge data ──
+        const extractedKyc = kycRawData ? ((0, digioService_1.extractAadhaarDetailsFromDigio)(kycRawData) || {}) : {};
+        const extractedEsign = esignRawData ? ((0, digioService_1.extractAadhaarDetailsFromDigio)(esignRawData) || {}) : {};
+        const merged = {
+            aadhaarName: extractedKyc.aadhaarName || extractedEsign.aadhaarName || null,
+            panName: extractedKyc.panName || extractedEsign.panName || null,
+            panNumber: extractedKyc.panNumber || extractedEsign.panNumber || null,
+            maskedAadhaar: extractedKyc.maskedAadhaar || extractedEsign.maskedAadhaar || null,
+            dob: extractedKyc.dob || extractedEsign.dob || null,
+            gender: extractedKyc.gender || extractedEsign.gender || null,
+            fatherName: extractedKyc.fatherName || extractedEsign.fatherName || null,
+            address: extractedKyc.address || extractedEsign.address || null,
+            city: extractedKyc.city || extractedEsign.city || null,
+            state: extractedKyc.state || extractedEsign.state || null,
+            zipCode: extractedKyc.zipCode || extractedEsign.zipCode || null,
+        };
+        console.log(`\n🔍 [Admin Fetch Digio] KycID=${resolvedKycId || '—'} | EsignID=${resolvedEsignId || '—'} | Client=${clientId || 'N/A'}`);
+        console.log('   Name:', merged.aadhaarName || merged.panName || '—', '| PAN:', merged.panNumber || '—');
+        // ── Load client data from DB ──
+        let existingClient = null;
+        let existingProfile = null;
+        let existingAgreements = [];
+        if (clientId) {
+            existingClient = await db_1.default.Client.findById(clientId).lean();
+            existingProfile = await db_1.default.ClientProfile.findOne({ clientId }).lean();
+            existingAgreements = await db_1.default.Agreement.find({ clientId }).sort({ createdAt: -1 }).lean();
+        }
+        // ── SAVE TO CLIENT ──
         let savedToClient = false;
+        let agreementCreated = false;
+        let agreementUrl = '';
         if (saveToClient && clientId) {
             try {
-                const isGeneric = (n) => {
-                    if (!n || typeof n !== 'string')
-                        return true;
-                    const l = n.toLowerCase().trim();
-                    return l === '' || l === 'digio' || l === 'client' || l === 'test' || l === 'user' || l.includes('@') || l.length < 2;
-                };
-                const primaryName = (extracted?.panName && !isGeneric(extracted.panName))
-                    ? extracted.panName
-                    : (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName) ? extracted.aadhaarName : null);
-                const clientUpdateFields = {
-                    digilockerData: rawData,
-                    kraVerified: true,
-                    kycStatus: 'VERIFIED'
-                };
+                const primaryName = (merged.panName && !isGeneric(merged.panName)) ? merged.panName :
+                    (merged.aadhaarName && !isGeneric(merged.aadhaarName)) ? merged.aadhaarName : null;
+                // 1. Update Client record
+                const clientFields = { kraVerified: true };
+                if (kycRawData) {
+                    clientFields.digilockerData = kycRawData;
+                    clientFields.kycStatus = 'VERIFIED';
+                }
                 if (primaryName)
-                    clientUpdateFields.name = primaryName;
-                if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName))
-                    clientUpdateFields.aadhaarName = extracted.aadhaarName;
-                if (extracted?.panName && !isGeneric(extracted.panName))
-                    clientUpdateFields.panName = extracted.panName;
-                if (extracted?.maskedAadhaar)
-                    clientUpdateFields.aadhaar = extracted.maskedAadhaar;
-                if (extracted?.panNumber)
-                    clientUpdateFields.pan = extracted.panNumber;
-                if (extracted?.dob)
-                    clientUpdateFields.dob = extracted.dob;
-                if (extracted?.gender)
-                    clientUpdateFields.gender = extracted.gender;
-                if (extracted?.fatherName)
-                    clientUpdateFields.fatherName = extracted.fatherName;
-                if (extracted?.address)
-                    clientUpdateFields.address = extracted.address;
-                if (extracted?.city)
-                    clientUpdateFields.city = extracted.city;
-                if (extracted?.state)
-                    clientUpdateFields.state = extracted.state;
-                if (extracted?.zipCode)
-                    clientUpdateFields.zipCode = extracted.zipCode;
-                await db_1.default.Client.findByIdAndUpdate(clientId, { $set: clientUpdateFields });
-                const profileUpdateFields = { kraVerified: true, isDigiLockerLocked: true };
-                if (extracted?.panName && !isGeneric(extracted.panName))
-                    profileUpdateFields.panName = extracted.panName;
-                if (extracted?.aadhaarName && !isGeneric(extracted.aadhaarName))
-                    profileUpdateFields.aadhaarName = extracted.aadhaarName;
-                if (extracted?.dob)
-                    profileUpdateFields.dob = extracted.dob;
-                if (extracted?.gender)
-                    profileUpdateFields.gender = extracted.gender;
-                if (extracted?.fatherName)
-                    profileUpdateFields.fatherName = extracted.fatherName;
-                if (extracted?.address)
-                    profileUpdateFields.addressLine1 = extracted.address;
-                if (extracted?.city)
-                    profileUpdateFields.city = extracted.city;
-                if (extracted?.state)
-                    profileUpdateFields.state = extracted.state;
-                if (extracted?.zipCode)
-                    profileUpdateFields.zipCode = extracted.zipCode;
-                if (rawData)
-                    profileUpdateFields.digilockerData = rawData;
-                await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, { $set: profileUpdateFields }, { upsert: true });
-                if (primaryName) {
-                    const nameParts = primaryName.split(' ');
-                    await db_1.default.User.findOneAndUpdate({ _id: (await db_1.default.Client.findById(clientId).lean())?.userId }, { $set: { firstName: nameParts[0] || '', lastName: nameParts.slice(1).join(' ') || '' } });
+                    clientFields.name = primaryName;
+                if (merged.aadhaarName && !isGeneric(merged.aadhaarName))
+                    clientFields.aadhaarName = merged.aadhaarName;
+                if (merged.panName && !isGeneric(merged.panName))
+                    clientFields.panName = merged.panName;
+                if (merged.maskedAadhaar)
+                    clientFields.aadhaar = merged.maskedAadhaar;
+                if (merged.panNumber)
+                    clientFields.pan = merged.panNumber;
+                if (merged.dob)
+                    clientFields.dob = merged.dob;
+                if (merged.gender)
+                    clientFields.gender = merged.gender;
+                if (merged.fatherName)
+                    clientFields.fatherName = merged.fatherName;
+                if (merged.address)
+                    clientFields.address = merged.address;
+                if (merged.city)
+                    clientFields.city = merged.city;
+                if (merged.state)
+                    clientFields.state = merged.state;
+                if (merged.zipCode)
+                    clientFields.zipCode = merged.zipCode;
+                await db_1.default.Client.findByIdAndUpdate(clientId, { $set: clientFields });
+                // 2. Update ClientProfile
+                const profileFields = { kraVerified: true };
+                if (kycRawData) {
+                    profileFields.isDigiLockerLocked = true;
+                    profileFields.digilockerData = kycRawData;
+                }
+                if (merged.panName && !isGeneric(merged.panName))
+                    profileFields.panName = merged.panName;
+                if (merged.aadhaarName && !isGeneric(merged.aadhaarName))
+                    profileFields.aadhaarName = merged.aadhaarName;
+                if (merged.dob)
+                    profileFields.dob = merged.dob;
+                if (merged.gender)
+                    profileFields.gender = merged.gender;
+                if (merged.fatherName)
+                    profileFields.fatherName = merged.fatherName;
+                if (merged.address)
+                    profileFields.addressLine1 = merged.address;
+                if (merged.city)
+                    profileFields.city = merged.city;
+                if (merged.state)
+                    profileFields.state = merged.state;
+                if (merged.zipCode)
+                    profileFields.zipCode = merged.zipCode;
+                await db_1.default.ClientProfile.findOneAndUpdate({ clientId }, { $set: profileFields }, { upsert: true });
+                // 3. Update User name
+                if (primaryName && existingClient?.userId) {
+                    const parts = primaryName.split(' ');
+                    await db_1.default.User.findByIdAndUpdate(existingClient.userId, {
+                        $set: { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') || '' }
+                    });
+                }
+                // 4. eSign document → download PDF → create Agreement record
+                if (resolvedEsignId && esignRawData) {
+                    const clientIdStr = String(clientId);
+                    const fileName = `${clientIdStr}_signed_agreement.pdf`;
+                    agreementUrl = `/uploads/agreements/${fileName}`;
+                    let pdfBuffer = null;
+                    // Try Digio PDF download
+                    try {
+                        pdfBuffer = await (0, digioService_1.downloadDocument)(dClientId, dClientSecret, resolvedEsignId, dEnv);
+                    }
+                    catch { }
+                    // Fallback: generate locally
+                    if (!pdfBuffer) {
+                        try {
+                            const signerName = merged.aadhaarName || merged.panName || existingClient?.name || 'Client';
+                            pdfBuffer = await (0, pdfService_1.generateAgreementPdf)(clientIdStr, {
+                                signerName,
+                                aadhaarSuffix: merged.maskedAadhaar || existingClient?.aadhaar || undefined,
+                                isSigned: true,
+                                signingDate: new Date()
+                            });
+                        }
+                        catch { }
+                    }
+                    // Save PDF to disk
+                    if (pdfBuffer) {
+                        for (const dir of [
+                            path_1.default.resolve(process.cwd(), 'uploads/agreements'),
+                            path_1.default.resolve(__dirname, '../../../uploads/agreements'),
+                            path_1.default.resolve(__dirname, '../../public/uploads/agreements')
+                        ]) {
+                            try {
+                                if (!fs_1.default.existsSync(dir))
+                                    fs_1.default.mkdirSync(dir, { recursive: true });
+                                fs_1.default.writeFileSync(path_1.default.join(dir, fileName), pdfBuffer);
+                            }
+                            catch { }
+                        }
+                    }
+                    // Upsert Agreement record
+                    const existingAgreement = await db_1.default.Agreement.findOne({ clientId, status: 'SIGNED' }).lean();
+                    if (!existingAgreement) {
+                        await db_1.default.Agreement.create({
+                            clientId,
+                            agreementUrl,
+                            esignMode: 'AADHAAR_ESIGN',
+                            ipAddress: req.ip || '0.0.0.0',
+                            status: 'SIGNED',
+                            signedAt: new Date(),
+                            digioDocumentId: resolvedEsignId
+                        });
+                        agreementCreated = true;
+                    }
+                    else {
+                        agreementUrl = existingAgreement.agreementUrl || agreementUrl;
+                    }
+                    // Mark client agreementSigned
+                    const activeSub = await db_1.default.Subscription.findOne({ clientId, status: 'ACTIVE' }).lean();
+                    await db_1.default.Client.findByIdAndUpdate(clientId, {
+                        $set: {
+                            agreementSigned: true,
+                            status: activeSub ? 'ACTIVE' : (existingClient?.status || 'PAYMENT_PENDING')
+                        }
+                    });
                 }
                 savedToClient = true;
-                console.log(`✅ [Admin Fetch Digio] KYC details saved to client ${clientId}`);
+                console.log(`✅ [Admin Fetch Digio] Saved to client ${clientId} | Agreement created: ${agreementCreated}`);
+                // Reload after save
+                existingClient = await db_1.default.Client.findById(clientId).lean();
+                existingProfile = await db_1.default.ClientProfile.findOne({ clientId }).lean();
+                existingAgreements = await db_1.default.Agreement.find({ clientId }).sort({ createdAt: -1 }).lean();
             }
             catch (saveErr) {
-                console.warn('[Admin Fetch Digio] Failed to save to client:', saveErr.message);
+                console.warn('[Admin Fetch Digio] Save failed:', saveErr.message);
             }
         }
+        // ── Client snapshot: merge Digio data + DB data ──
+        const clientSnapshot = existingClient ? {
+            name: merged.aadhaarName || merged.panName || existingClient.name,
+            panName: merged.panName || existingClient.panName,
+            aadhaarName: merged.aadhaarName || existingClient.aadhaarName,
+            pan: merged.panNumber || existingClient.pan,
+            aadhaar: merged.maskedAadhaar || existingClient.aadhaar,
+            dob: merged.dob || existingClient.dob,
+            gender: merged.gender || existingClient.gender,
+            fatherName: merged.fatherName || existingClient.fatherName,
+            address: merged.address || existingClient.address || existingProfile?.addressLine1,
+            city: merged.city || existingClient.city || existingProfile?.city,
+            state: merged.state || existingClient.state || existingProfile?.state,
+            zipCode: merged.zipCode || existingClient.zipCode || existingProfile?.zipCode,
+            email: existingClient.email,
+            mobile: existingClient.mobile,
+            status: existingClient.status,
+            kraVerified: existingClient.kraVerified,
+            agreementSigned: existingClient.agreementSigned,
+            agreements: existingAgreements.map((a) => ({
+                id: String(a._id),
+                status: a.status,
+                esignMode: a.esignMode,
+                signedAt: a.signedAt,
+                agreementUrl: a.agreementUrl,
+                digioDocumentId: a.digioDocumentId
+            }))
+        } : null;
         return res.json({
             success: true,
-            fetchType,
-            digioId: cleanDigioId,
-            digioStatus: rawData?.status || rawData?.kyc_status || 'UNKNOWN',
-            extracted: {
-                aadhaarName: extracted?.aadhaarName || null,
-                panName: extracted?.panName || null,
-                panNumber: extracted?.panNumber || null,
-                maskedAadhaar: extracted?.maskedAadhaar || null,
-                dob: extracted?.dob || null,
-                gender: extracted?.gender || null,
-                fatherName: extracted?.fatherName || null,
-                address: extracted?.address || null,
-                city: extracted?.city || null,
-                state: extracted?.state || null,
-                zipCode: extracted?.zipCode || null
+            fetchTypes: {
+                kycId: resolvedKycId || null,
+                esignId: resolvedEsignId || null,
+                kycFetched: !!kycRawData,
+                esignFetched: !!esignRawData,
             },
+            digioStatus: kycRawData?.status || kycRawData?.kyc_status || esignRawData?.status || 'UNKNOWN',
+            extracted: merged,
             savedToClient,
-            rawData
+            agreementCreated,
+            agreementUrl: agreementUrl || null,
+            clientSnapshot
         });
     }
     catch (error) {

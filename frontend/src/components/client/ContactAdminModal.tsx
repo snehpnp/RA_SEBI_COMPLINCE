@@ -41,7 +41,7 @@ export default function ContactAdminModal({
 }: ContactAdminModalProps) {
   if (!isOpen) return null;
 
-  const companyName = adminContact?.companyName || userProfile?.user?.tenant?.companyName || 'Advisory Team';
+  const companyName = adminContact?.companyName || userProfile?.user?.tenant?.companyName || 'Service Team';
   const sebiReg = adminContact?.sebiRegistration || userProfile?.user?.tenant?.sebiRegistration;
 
   const planName = plan?.name || 'Selected Plan';

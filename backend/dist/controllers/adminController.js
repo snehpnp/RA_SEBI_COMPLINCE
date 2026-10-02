@@ -2151,7 +2151,7 @@ const createPlan = async (req, res) => {
         if (!category) {
             category = await db_1.default.PlanCategory.findOne({ tenantId }).lean();
             if (!category) {
-                const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Advisory Category';
+                const cleanName = catIdStr.replace(/\s*\([^)]*\)\s*$/, '').trim() || 'Standard Service Category';
                 category = await db_1.default.PlanCategory.create({
                     tenantId,
                     name: cleanName,
@@ -2337,7 +2337,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
+    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2396,6 +2396,12 @@ const updateTenantSettings = async (req, res) => {
         if (lockedTradesPreviewCount !== undefined) {
             const parsedCount = parseInt(lockedTradesPreviewCount, 10);
             dataToUpdate.lockedTradesPreviewCount = isNaN(parsedCount) ? 5 : Math.max(0, Math.min(parsedCount, 50));
+        }
+        if (showOpenTradePotential !== undefined) {
+            dataToUpdate.showOpenTradePotential = showOpenTradePotential === 'true' || showOpenTradePotential === true;
+        }
+        if (showLockedTradePotential !== undefined) {
+            dataToUpdate.showLockedTradePotential = showLockedTradePotential === 'true' || showLockedTradePotential === true;
         }
         if (smsGatewayEnabled !== undefined)
             dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
@@ -2859,27 +2865,113 @@ const getTenantAuditLogs = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const logs = await db_1.default.AuditLog.find({ tenantId })
-            .populate({
-            path: 'userId',
-            select: 'firstName lastName email roleId',
-            populate: { path: 'roleId', select: 'name' }
-        })
-            .sort({ timestamp: -1 })
-            .lean();
-        const formatted = logs.map((l) => ({
-            ...l,
+        const tId = mongoose_1.default.Types.ObjectId.isValid(tenantId) ? new mongoose_1.default.Types.ObjectId(tenantId) : tenantId;
+        const tenantFilter = { $or: [{ tenantId: tId }, { tenantId: String(tenantId) }] };
+        const [auditLogs, activityLogs] = await Promise.all([
+            db_1.default.AuditLog.find(tenantFilter)
+                .populate({
+                path: 'userId',
+                select: 'firstName lastName email roleId',
+                populate: { path: 'roleId', select: 'name' }
+            })
+                .sort({ timestamp: -1 })
+                .limit(300)
+                .lean(),
+            db_1.default.ActivityLog.find(tenantFilter)
+                .populate({
+                path: 'actorId',
+                select: 'firstName lastName email roleId',
+                populate: { path: 'roleId', select: 'name' }
+            })
+                .populate({
+                path: 'targetClientId',
+                select: 'name email mobile phone pan clientCode'
+            })
+                .sort({ timestamp: -1 })
+                .limit(300)
+                .lean()
+        ]);
+        // Format AuditLog entries
+        const formattedAudit = (auditLogs || []).map((l) => ({
             id: String(l._id || l.id),
+            _id: l._id,
+            tenantId: l.tenantId,
+            source: 'AUDIT',
+            category: l.module || 'SYSTEM',
+            action: l.action || 'AUDIT_EVENT',
+            title: `${l.action || 'EVENT'} on ${l.module || 'SYSTEM'}`,
+            description: l.newValue
+                ? (typeof l.newValue === 'string' ? l.newValue : JSON.stringify(l.newValue).slice(0, 120))
+                : (l.oldValue ? `Previous: ${typeof l.oldValue === 'string' ? l.oldValue : JSON.stringify(l.oldValue).slice(0, 80)}` : 'System Audit Record'),
+            status: 'SUCCESS',
+            ipAddress: l.ipAddress || '127.0.0.1',
+            device: 'Desktop',
+            browser: null,
+            os: null,
+            timestamp: l.timestamp || l.createdAt || new Date(),
             user: l.userId ? {
-                firstName: l.userId.firstName,
-                lastName: l.userId.lastName,
-                email: l.userId.email,
-                role: l.userId.roleId ? { name: l.userId.roleId.name } : null
-            } : null
+                id: String(l.userId._id || l.userId.id || ''),
+                firstName: l.userId.firstName || '',
+                lastName: l.userId.lastName || '',
+                name: `${l.userId.firstName || ''} ${l.userId.lastName || ''}`.trim() || l.userId.email || 'Admin',
+                email: l.userId.email || '',
+                role: l.userId.roleId?.name || 'ADMIN'
+            } : {
+                name: 'System / Admin',
+                email: req.user?.email || 'admin',
+                role: 'ADMIN'
+            },
+            metadata: { oldValue: l.oldValue, newValue: l.newValue }
         }));
-        return res.status(200).json({ success: true, data: formatted });
+        // Format ActivityLog entries
+        const formattedActivity = (activityLogs || []).map((l) => {
+            const actorUser = l.actorId;
+            const targetClient = l.targetClientId;
+            const userName = l.actorName || (actorUser ? `${actorUser.firstName || ''} ${actorUser.lastName || ''}`.trim() : null) || l.actorEmail || 'System';
+            const userRole = actorUser?.roleId?.name || l.actorType || 'STAFF';
+            return {
+                id: String(l._id || l.id),
+                _id: l._id,
+                tenantId: l.tenantId,
+                source: 'ACTIVITY',
+                category: l.category || 'STAFF_ACTION',
+                action: l.action || 'ACTIVITY_EVENT',
+                title: l.title || l.action || 'Staff Activity',
+                description: l.description || l.title || '',
+                status: l.status || 'SUCCESS',
+                ipAddress: l.ipAddress || '127.0.0.1',
+                device: l.device || 'Desktop',
+                browser: l.browser || null,
+                os: l.os || null,
+                timestamp: l.timestamp || l.createdAt || new Date(),
+                targetClient: targetClient ? {
+                    id: String(targetClient._id || targetClient.id || ''),
+                    name: targetClient.name || 'Client',
+                    email: targetClient.email || '',
+                    mobile: targetClient.mobile || targetClient.phone || '',
+                    pan: targetClient.pan || ''
+                } : null,
+                user: {
+                    id: actorUser ? String(actorUser._id || actorUser.id || '') : null,
+                    firstName: userName.split(' ')[0] || userName,
+                    lastName: userName.split(' ').slice(1).join(' ') || '',
+                    name: userName,
+                    email: l.actorEmail || actorUser?.email || '',
+                    role: userRole
+                },
+                metadata: l.metadata || {}
+            };
+        });
+        // Merge and sort in reverse chronological order
+        const combined = [...formattedActivity, ...formattedAudit].sort((a, b) => {
+            const timeA = new Date(a.timestamp).getTime();
+            const timeB = new Date(b.timestamp).getTime();
+            return timeB - timeA;
+        });
+        return res.status(200).json({ success: true, count: combined.length, data: combined });
     }
     catch (error) {
+        console.error('Error fetching tenant audit logs:', error);
         return res.status(500).json({ success: false, errors: [error.message] });
     }
 };
@@ -3672,17 +3764,17 @@ const previewPolicyPdf = async (req, res) => {
         let defaultFilename = 'document.pdf';
         const normalizedType = String(type || '').toLowerCase();
         if (normalizedType === 'terms' || normalizedType === 'terms-conditions' || normalizedType === 'terms-and-conditions') {
-            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
+            defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Terms_and_Conditions.pdf`;
             filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.termsPdfUrl);
             fallbackGenerator = pdfService_1.generateTermsAndConditionsPdf;
         }
         else if (normalizedType === 'privacy' || normalizedType === 'privacy-policy') {
-            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
+            defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Privacy_Policy.pdf`;
             filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.privacyPdfUrl);
             fallbackGenerator = pdfService_1.generatePrivacyPolicyPdf;
         }
         else if (normalizedType === 'internal-policy' || normalizedType === 'policy' || normalizedType === 'internal') {
-            defaultFilename = `${(tenant?.companyName || 'Advisory').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
+            defaultFilename = `${(tenant?.companyName || 'Service').replace(/[^a-zA-Z0-9]/g, '_')}_Internal_Policy.pdf`;
             filePath = (0, pdfService_1.resolveAttachmentFilePath)(tenant?.internalPolicyUrl);
             fallbackGenerator = pdfService_1.generateInternalPolicyPdf;
         }
@@ -4221,7 +4313,7 @@ const sendPaymentInvoiceEmail = async (req, res) => {
             toEmail: clientEmail,
             clientName: client?.name || payment.clientName || 'Client',
             companyName: tenantObj?.companyName,
-            planName: plan?.name || payment.planName || 'Advisory Plan',
+            planName: plan?.name || payment.planName || 'Service Plan',
             invoiceNumber: invNumber,
             amount: payment.amount,
             pdfBuffer

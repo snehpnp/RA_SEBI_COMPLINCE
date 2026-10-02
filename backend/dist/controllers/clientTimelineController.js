@@ -175,7 +175,7 @@ const getClientTimeline = async (req, res) => {
                 source: 'HISTORICAL',
                 category: 'KYC_COMPLIANCE',
                 action: 'AGREEMENT_SIGNED',
-                title: `Advisory Agreement Signed (v${agr.version || '1.0'})`,
+                title: `Service Agreement Signed (v${agr.version || '1.0'})`,
                 description: `Service terms digitally signed via ${friendlyEsign}`,
                 status: 'SUCCESS',
                 timestamp: agrTime > now ? now : agrTime,
@@ -208,7 +208,7 @@ const getClientTimeline = async (req, res) => {
                 pay.assignedByStaffName ||
                 pay.paymentMode === 'CUSTOM_PRO_RATA' ||
                 pay.paymentMode === 'ADMIN_ASSIGNED');
-            const planName = pay.planId?.name || 'Advisory Plan';
+            const planName = pay.planId?.name || 'Service Plan';
             const friendlyPaymentMode = humanizePaymentMode(pay.paymentMode);
             const cleanNote = cleanRemark(pay.remarks);
             // Match with an unhandled subscription if exists
@@ -296,7 +296,7 @@ const getClientTimeline = async (req, res) => {
             if (handledSubIds.has(String(sub._id))) {
                 continue; // Deduplicated with payment card!
             }
-            const planName = sub.planId?.name || 'Advisory Plan';
+            const planName = sub.planId?.name || 'Service Plan';
             const sDate = new Date(sub.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
             const eDate = new Date(sub.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
             // IMPORTANT: Activity event timestamp is when this happened (sub.createdAt), NEVER future startDate/endDate!
@@ -414,8 +414,8 @@ const getClientTimeline = async (req, res) => {
             },
             {
                 step: 3,
-                key: 'ADVISORY_ESIGN',
-                label: 'Advisory eSign',
+                key: 'SERVICE_ESIGN',
+                label: 'Service eSign',
                 completed: hasAgreement,
                 current: hasKyc && !hasAgreement,
                 timestamp: hasAgreement ? agreements[0].signedAt : null,

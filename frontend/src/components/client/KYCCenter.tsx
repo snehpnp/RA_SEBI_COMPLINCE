@@ -175,7 +175,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                 console.log('%c💾 [DIGIO AGREEMENT SAVED TO BACKEND]', 'background: #2563EB; color: #ffffff; font-weight: bold; font-size: 13px; padding: 4px 8px; border-radius: 4px;');
                 console.log('📌 Save Result:', statusRes);
                 if (statusRes.success) {
-                  toast.success('Advisory Agreement signed successfully! Digio has emailed your copy.');
+                  toast.success('Service Agreement signed successfully! Digio has emailed your copy.');
                   await fetchProfile();
                 } else {
                   toast.error(statusRes.message || 'Failed to update agreement status.');
@@ -208,7 +208,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
           signatureText: verifiedSignerName
         });
         if (signRes.success) {
-          toast.success('Advisory Agreement signed successfully!');
+          toast.success('Service Agreement signed successfully!');
           await fetchProfile();
         } else {
           toast.error(signRes.message || 'Failed to sign agreement.');
@@ -274,7 +274,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               100% SEBI Compliance Verified
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
-              Your DigiLocker KYC and Advisory Agreement are active and locked. You have unrestricted access to all subscribed market research.
+              Your DigiLocker KYC and Service Agreement are active and locked. You have unrestricted access to all subscribed market research.
             </p>
           </div>
           {latestAgreement?.agreementUrl && (
@@ -298,7 +298,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               Compliance Onboarding Pending
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
-              Per SEBI guidelines, you must complete the 2 sequential steps below: first fetch your verified details from DigiLocker, then eSign your Advisory Agreement.
+              Per SEBI guidelines, you must complete the 2 sequential steps below: first fetch your verified details from DigiLocker, then eSign your Service Agreement.
             </p>
           </div>
         </div>
@@ -420,7 +420,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               2. Sign Agreement (Aadhaar eSign)
             </h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
-              Pre-fills your DigiLocker verified details into the SEBI-mandated Research Analyst Advisory Agreement and signs digitally via Digio Aadhaar OTP. Digio automatically emails a signed copy to your inbox upon completion.
+              Pre-fills your DigiLocker verified details into the SEBI-mandated Research Analyst Service Agreement and signs digitally via Digio Aadhaar OTP. Digio automatically emails a signed copy to your inbox upon completion.
             </p>
 
             {/* If KYC Completed & Agreement not signed: show verified signer preview */}
@@ -492,7 +492,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
               </a>
             ) : (
               <div className="w-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-1.5">
-                <Check className="w-4 h-4" /> Advisory Agreement Signed
+                <Check className="w-4 h-4" /> Service Agreement Signed
               </div>
             )}
           </div>
