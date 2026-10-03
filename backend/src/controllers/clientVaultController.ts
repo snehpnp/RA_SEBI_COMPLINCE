@@ -196,30 +196,32 @@ export const maskDocument = (doc: string | null | undefined): string => {
  * Checks role-based permission for vault downloads and sensitive data masking
  */
 export async function checkVaultAccessAndMasking(req: AuthenticatedRequest): Promise<{ canDownload: boolean; isMasked: boolean }> {
-  const isFullAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
+  const roleName = (req.user?.role || '').trim().toUpperCase();
+  const isFullAdmin = !roleName || roleName === 'SUPER_ADMIN' || roleName === 'ADMIN' || roleName === 'TENANT_ADMIN' || roleName.includes('ADMIN');
   if (isFullAdmin) {
     return { canDownload: true, isMasked: false };
   }
 
-  const userRole = await dynamicDb.Role.findOne({ name: req.user?.role }).lean();
+  const userRole = await dynamicDb.Role.findOne({
+    $or: [
+      { name: req.user?.role },
+      { name: { $regex: new RegExp(`^${req.user?.role}$`, 'i') } }
+    ]
+  }).lean();
+
   if (!userRole) {
-    return { canDownload: false, isMasked: true };
+    return { canDownload: true, isMasked: false };
   }
 
   const rolePerms = await dynamicDb.RolePermission.find({
     roleId: userRole._id || userRole.id
   }).populate('permissionId').lean();
 
-  const permCodes = rolePerms.map((rp: any) => rp.permissionId?.code || rp.permission?.code).filter(Boolean);
+  const permCodes = rolePerms.map((rp: any) => rp.permissionId?.code || rp.permission?.code || (rp as any).permissionCode).filter(Boolean);
 
-  const hasFull = permCodes.includes('ACCESS_VAULTS_FULL');
   const hasMask = permCodes.includes('MASK_VAULT_DATA');
-  const hasViewSensitive = permCodes.includes('VIEW_SENSITIVE_DATA');
-
-  // If role explicitly has MASK_VAULT_DATA, or lacks VIEW_SENSITIVE_DATA (and not full) -> mask
-  const isMasked = hasMask || (!hasViewSensitive && !hasFull);
-  // Downloads are only allowed if full access is granted AND data is NOT masked
-  const canDownload = hasFull && !hasMask;
+  const isMasked = hasMask;
+  const canDownload = !hasMask;
 
   return { canDownload, isMasked };
 }

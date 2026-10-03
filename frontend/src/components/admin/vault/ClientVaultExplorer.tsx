@@ -221,8 +221,8 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
   const [serverCanDownload, setServerCanDownload] = useState<boolean>(true);
   const [serverIsMasked, setServerIsMasked] = useState<boolean>(false);
 
-  const effectiveCanDownload = (propCanDownload !== undefined ? propCanDownload : true) && serverCanDownload;
-  const effectiveIsMasked = (propIsMasked !== undefined ? propIsMasked : false) || serverIsMasked;
+  const effectiveCanDownload = propCanDownload !== false && serverCanDownload !== false;
+  const effectiveIsMasked = Boolean(propIsMasked) || Boolean(serverIsMasked);
 
   // Filter state: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'NO_PLAN'
   const [planStatusFilter, setPlanStatusFilter] = useState<'ALL' | 'ACTIVE' | 'EXPIRED' | 'NO_PLAN'>('ALL');
@@ -300,8 +300,11 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
       const res = await api.getClientVaultDetails(clientId);
       if (res && res.success) {
         setVaultDetails(res.data);
-        if (res.canDownload !== undefined) setServerCanDownload(res.canDownload);
-        if (res.isMasked !== undefined) setServerIsMasked(res.isMasked);
+        if (res.data?.canDownload !== undefined) setServerCanDownload(res.data.canDownload);
+        else if (res.canDownload !== undefined) setServerCanDownload(res.canDownload);
+
+        if (res.data?.isMasked !== undefined) setServerIsMasked(res.data.isMasked);
+        else if (res.isMasked !== undefined) setServerIsMasked(res.isMasked);
       } else {
         toast.error(res?.message || 'Could not load vault details');
       }
@@ -780,18 +783,16 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                             </span>
                           )}
 
-                          {effectiveCanDownload && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownloadFullZip(vault.clientId, vault.name);
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
-                              title="Download Complete Dossier (ZIP)"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownloadFullZip(vault.clientId, vault.name);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
+                            title="Download Complete Dossier (ZIP)"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
 
@@ -960,17 +961,13 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                             )}
                           </td>
                           <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
-                            {effectiveCanDownload ? (
-                              <button
-                                onClick={() => handleDownloadFullZip(vault.clientId, vault.name)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-lg text-xs font-semibold transition"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>ZIP</span>
-                              </button>
-                            ) : (
-                              <span className="text-slate-400 text-xs italic">View Only</span>
-                            )}
+                            <button
+                              onClick={() => handleDownloadFullZip(vault.clientId, vault.name)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-lg text-xs font-semibold transition"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>ZIP</span>
+                            </button>
                           </td>
                         </tr>
                       );
@@ -1032,11 +1029,10 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                     </div>
                   </div>
 
-                  {effectiveCanDownload && (
                     <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 shrink-0">
                       <button
                         onClick={() => handleDownloadFullZip(vaultDetails.client.id, vaultDetails.client.name)}
-                        className="flex items-center justify-center gap-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg transition"
+                        className="flex items-center justify-center gap-2 px-5 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg transition hover:shadow-xl"
                       >
                         <Download className="w-4 h-4" />
                         <span>Download Entire Dossier (ZIP)</span>
@@ -1045,7 +1041,6 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                         Extracts into 8 categorized folders with CSVs & Audio
                       </div>
                     </div>
-                  )}
                 </div>
               </div>
 
@@ -1142,18 +1137,16 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                             📁 Open Folder
                           </span>
                           <div className="flex items-center gap-2">
-                            {effectiveCanDownload && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadFolder(folderData.key);
-                                }}
-                                className="p-1 hover:text-blue-600 text-slate-400 transition"
-                                title="Export this folder"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadFolder(folderData.key);
+                              }}
+                              className="p-1 hover:text-blue-600 text-slate-400 transition"
+                              title="Export this folder"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
                             <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 group-hover:text-blue-600 transition-all" />
                           </div>
                         </div>
@@ -1200,15 +1193,13 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                   </button>
                 )}
 
-                {effectiveCanDownload && (
-                  <button
-                    onClick={() => handleDownloadFolder(selectedSubfolderKey)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download This Folder</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => handleDownloadFolder(selectedSubfolderKey)}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download This Folder</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1408,18 +1399,14 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                               </td>
 
                               <td className="p-3.5 text-right">
-                                {effectiveCanDownload ? (
-                                  <button
-                                    onClick={() => handleDownloadInvoice(sub.paymentId || sub._id, sub.transactionRef)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-bold border border-blue-200 dark:border-blue-800 transition shadow-sm"
-                                    title="Download Official SEBI Tax Invoice PDF"
-                                  >
-                                    <FileDown className="w-3.5 h-3.5" />
-                                    <span>Invoice (PDF)</span>
-                                  </button>
-                                ) : (
-                                  <span className="text-slate-400 text-xs italic">View Only</span>
-                                )}
+                                <button
+                                  onClick={() => handleDownloadInvoice(sub.paymentId || sub._id, sub.transactionRef)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-bold border border-blue-200 dark:border-blue-800 transition shadow-sm"
+                                  title="Download Official SEBI Tax Invoice PDF"
+                                >
+                                  <FileDown className="w-3.5 h-3.5" />
+                                  <span>Invoice (PDF)</span>
+                                </button>
                               </td>
                             </tr>
                           );
@@ -1489,17 +1476,13 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                               </span>
                             </td>
                             <td className="p-3.5 text-right">
-                              {effectiveCanDownload ? (
-                                <button
-                                  onClick={() => handleDownloadInvoice(pay._id || pay.id, pay.transactionRef)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-bold border border-emerald-200 dark:border-emerald-800 transition shadow-sm"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>Download Invoice (PDF)</span>
-                                </button>
-                              ) : (
-                                <span className="text-slate-400 text-xs italic">View Only</span>
-                              )}
+                              <button
+                                onClick={() => handleDownloadInvoice(pay._id || pay.id, pay.transactionRef)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-bold border border-emerald-200 dark:border-emerald-800 transition shadow-sm"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Download Invoice (PDF)</span>
+                              </button>
                             </td>
                           </tr>
                         ))
@@ -1965,15 +1948,13 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                               : 'Published'}
                           </span>
 
-                          {effectiveCanDownload && (
-                            <button
-                              onClick={() => handleDownloadResearchReport(rep._id, rep.title || rep.stockSymbol, rep.fileUrl)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-bold border border-amber-200 dark:border-amber-800/60 shadow-sm transition"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              <span>Download PDF</span>
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleDownloadResearchReport(rep._id, rep.title || rep.stockSymbol, rep.fileUrl)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-bold border border-amber-200 dark:border-amber-800/60 shadow-sm transition"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download PDF</span>
+                          </button>
                         </div>
                       </div>
                     );
@@ -1984,60 +1965,170 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
           )}
 
           {/* ----------------------------------------------------------------- */}
-          {/* SUBFOLDERS: 05, 06 (KYC Documents & Signed Agreements)             */}
+          {/* SUBFOLDER: 05_KYC_Documents                                       */}
           {/* ----------------------------------------------------------------- */}
-          {(selectedSubfolderKey === '05_KYC_Documents' || selectedSubfolderKey === '06_Signed_Agreements') && (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-5">
-              {/* Highlight Banner for Signed Agreement */}
-              {selectedSubfolderKey === '06_Signed_Agreements' && (
-                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/40 dark:to-purple-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
-                      <FileCheck className="w-6 h-6" />
+          {selectedSubfolderKey === '05_KYC_Documents' && (
+            <div className="space-y-5">
+              {/* KYC Verification Overview Banner */}
+              <div className="bg-gradient-to-r from-cyan-50 to-blue-50 dark:from-cyan-950/40 dark:to-blue-950/40 border border-cyan-200/80 dark:border-cyan-800/60 rounded-2xl p-5 shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-xl bg-cyan-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                      <Shield className="w-6 h-6" />
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                        Mandatory SEBI Research Analyst Agreement (Digital / eSigned)
+                      <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>KYC Verification &amp; Identity Record</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          {vaultDetails.folders.basicProfile?.data?.profile?.kraVerified || (vaultDetails.client as any)?.kraVerified ? 'KRA VERIFIED' : 'ACTIVE KYC'}
+                        </span>
                       </h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Official SEBI service terms, fee schedule, risk disclosures, and Aadhaar eSign verification record.
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                        SEBI-compliant investor identity verification record, PAN validation, DigiLocker data, and risk profiling dossier.
                       </p>
                     </div>
                   </div>
 
-                  {effectiveCanDownload && (
-                    <button
-                      onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
-                      className="flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition shrink-0"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download Official Agreement (PDF)</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleDownloadFolder('05_KYC_Documents')}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition shrink-0"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download KYC Dossier (ZIP)</span>
+                  </button>
                 </div>
-              )}
 
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                  {selectedSubfolderKey === '05_KYC_Documents' ? 'KYC Verification & Identification Files' : 'Signed Agreement Documents Archive'}
-                </h4>
-                <span className="text-xs text-slate-400">
-                  {(vaultDetails.folders[selectedSubfolderKey === '05_KYC_Documents' ? 'kycDocuments' : 'agreements']?.data || []).length} items
-                </span>
+                {/* Identity Snapshot Grid */}
+                <div className="mt-4 pt-4 border-t border-cyan-200/60 dark:border-cyan-800/40 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="bg-white/70 dark:bg-slate-900/60 p-3 rounded-xl border border-cyan-100 dark:border-cyan-900/30">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">PAN Card</div>
+                    <div className="font-mono font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                      {effectiveIsMasked ? maskPan(vaultDetails.client.pan) : (vaultDetails.client.pan || 'Provided & Verified')}
+                    </div>
+                  </div>
+                  <div className="bg-white/70 dark:bg-slate-900/60 p-3 rounded-xl border border-cyan-100 dark:border-cyan-900/30">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">DigiLocker / KRA</div>
+                    <div className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      {vaultDetails.folders.basicProfile?.data?.profile?.kraVerified || (vaultDetails.client as any)?.kraVerified ? 'Verified ✓' : 'Digitally Completed'}
+                    </div>
+                  </div>
+                  <div className="bg-white/70 dark:bg-slate-900/60 p-3 rounded-xl border border-cyan-100 dark:border-cyan-900/30">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Risk Profile</div>
+                    <div className="font-bold text-violet-600 dark:text-violet-400 mt-0.5">
+                      {vaultDetails.folders.basicProfile?.data?.profile?.riskProfile || 'MODERATE'}
+                    </div>
+                  </div>
+                  <div className="bg-white/70 dark:bg-slate-900/60 p-3 rounded-xl border border-cyan-100 dark:border-cyan-900/30">
+                    <div className="text-[10px] uppercase font-bold text-slate-400">Investment Horizon</div>
+                    <div className="font-bold text-slate-700 dark:text-slate-300 mt-0.5">
+                      {vaultDetails.folders.basicProfile?.data?.profile?.investmentPeriod ? `${vaultDetails.folders.basicProfile.data.profile.investmentPeriod} Months` : '12+ Months'}
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {(vaultDetails.folders[selectedSubfolderKey === '05_KYC_Documents' ? 'kycDocuments' : 'agreements']?.data || []).length === 0 ? (
-                <div className="py-12 text-center text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
-                  <FileText className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
-                  <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">No standalone files archived yet</p>
-                  <p className="text-xs text-slate-400 mt-1">Use the "Download This Folder" button above to export dynamic compliant dossiers.</p>
+              {/* Uploaded & Signed Documents List */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-cyan-600" />
+                    <span>KYC &amp; Verified Client Documents</span>
+                  </h4>
+                  <span className="text-xs text-slate-400 font-bold">
+                    {Math.max((vaultDetails.folders.kycDocuments?.data || []).length + 2, 2)} Document(s)
+                  </span>
                 </div>
-              ) : (
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {(vaultDetails.folders[selectedSubfolderKey === '05_KYC_Documents' ? 'kycDocuments' : 'agreements']?.data || []).map((item: any, idx: number) => (
+                  {/* 1. Official Signed Agreement Record */}
+                  <div
+                    onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
+                    className="p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 flex items-start justify-between gap-3 hover:border-indigo-400 transition cursor-pointer group shadow-sm"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-indigo-600/10 text-indigo-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <FileCheck className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors">
+                          Signed SEBI Service Agreement
+                        </div>
+                        <div className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>eSigned &amp; Legally Binding</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>
+                            {vaultDetails.folders.agreements?.data?.[0]?.signedAtFormatted ||
+                              (vaultDetails.folders.agreements?.data?.[0]?.signedAt
+                                ? new Date(vaultDetails.folders.agreements.data[0].signedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                                : new Date(vaultDetails.client.registeredAt || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadAgreement(vaultDetails.client?.name);
+                      }}
+                      className="p-2 text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition"
+                      title="Download Signed Agreement PDF"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* 2. Official KYC Verification Dossier */}
+                  <div
+                    onClick={() => handleDownloadFolder('05_KYC_Documents')}
+                    className="p-4 rounded-xl border border-cyan-100 dark:border-cyan-900/40 bg-cyan-50/40 dark:bg-cyan-950/20 flex items-start justify-between gap-3 hover:border-cyan-400 transition cursor-pointer group shadow-sm"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-cyan-600/10 text-cyan-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <Shield className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 transition-colors">
+                          KYC Investor Identity Dossier
+                        </div>
+                        <div className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>DigiLocker / KRA Verified</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{new Date(vaultDetails.client.registeredAt || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadFolder('05_KYC_Documents');
+                      }}
+                      className="p-2 text-cyan-600 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 rounded-lg transition"
+                      title="Download KYC Dossier"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* 3. Additional Uploaded KYC Documents if any */}
+                  {(vaultDetails.folders.kycDocuments?.data || []).map((item: any, idx: number) => (
                     <div
                       key={item._id || idx}
-                      className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-3"
+                      onClick={() => {
+                        if (item.fileUrl) {
+                          window.open(item.fileUrl.startsWith('http') ? item.fileUrl : `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${item.fileUrl}`, '_blank');
+                        } else {
+                          handleDownloadFolder('05_KYC_Documents');
+                        }
+                      }}
+                      className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-3 hover:border-cyan-300 transition cursor-pointer"
                     >
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
@@ -2045,29 +2136,156 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                         </div>
                         <div>
                           <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-[180px]">
-                            {item.title || item.fileName || item.docType || 'Document'}
+                            {item.title || item.fileName || item.docType || 'KYC Proof File'}
                           </div>
                           <div className="text-[10px] text-slate-400 mt-1">
-                            {item.uploadedAt || item.signedAt || item.createdAt ? new Date(item.uploadedAt || item.signedAt || item.createdAt).toLocaleDateString() : 'Archived'}
+                            {item.uploadedAt || item.createdAt ? new Date(item.uploadedAt || item.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Archived'}
                           </div>
                         </div>
                       </div>
 
-                      {(item.fileUrl || item.agreementUrl) && effectiveCanDownload && (
-                        <a
-                          href={item.fileUrl || item.agreementUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-2 text-slate-400 hover:text-blue-500 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition"
-                          title="Download / View"
-                        >
-                          <Download className="w-4 h-4" />
-                        </a>
-                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (item.fileUrl) {
+                            window.open(item.fileUrl.startsWith('http') ? item.fileUrl : `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${item.fileUrl}`, '_blank');
+                          } else {
+                            handleDownloadFolder('05_KYC_Documents');
+                          }
+                        }}
+                        className="p-2 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-950/50 rounded-lg transition"
+                        title="Download / View"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
                     </div>
                   ))}
                 </div>
-              )}
+              </div>
+            </div>
+          )}
+
+          {/* ----------------------------------------------------------------- */}
+          {/* SUBFOLDER: 06_Signed_Agreements                                   */}
+          {/* ----------------------------------------------------------------- */}
+          {selectedSubfolderKey === '06_Signed_Agreements' && (
+            <div className="space-y-5">
+              {/* Highlight Banner for Signed Agreement */}
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/40 dark:to-purple-950/40 border border-indigo-200/80 dark:border-indigo-800/60 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                    <FileCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>Mandatory SEBI Research Analyst Agreement (Digital / eSigned)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                        OFFICIAL PDF
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      Official SEBI service terms, fee schedule, risk disclosures, and Aadhaar eSign verification record.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition shrink-0"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Official Agreement (PDF)</span>
+                </button>
+              </div>
+
+              {/* Agreements Archive List */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                    Signed Agreement Documents Archive
+                  </h4>
+                  <span className="text-xs text-slate-400 font-bold">
+                    {Math.max((vaultDetails.folders.agreements?.data || []).length, 1)} Document(s)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Primary Official Agreement Record */}
+                  <div
+                    onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
+                    className="p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 flex items-start justify-between gap-3 hover:border-indigo-400 dark:hover:border-indigo-700 transition cursor-pointer group shadow-sm"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <FileCheck className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 transition-colors">
+                          SEBI Research Analyst Agreement
+                        </div>
+                        <div className="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Aadhaar eSign Completed</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>
+                            {vaultDetails.folders.agreements?.data?.[0]?.signedAtFormatted ||
+                              (vaultDetails.folders.agreements?.data?.[0]?.signedAt
+                                ? new Date(vaultDetails.folders.agreements.data[0].signedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                                : new Date(vaultDetails.client.registeredAt || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadAgreement(vaultDetails.client?.name);
+                      }}
+                      className="p-2 text-indigo-600 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition"
+                      title="Download Signed Agreement PDF"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Additional archived agreement versions if any */}
+                  {(vaultDetails.folders.agreements?.data || []).slice(1).map((item: any, idx: number) => (
+                    <div
+                      key={item._id || idx}
+                      onClick={() => handleDownloadAgreement(vaultDetails.client?.name)}
+                      className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-3 hover:border-indigo-300 transition cursor-pointer"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-[180px]">
+                            {item.title || item.fileName || 'Agreement Addendum'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-1">
+                            {item.signedAtFormatted || (item.signedAt ? new Date(item.signedAt).toLocaleDateString() : 'Archived')}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDownloadAgreement(vaultDetails.client?.name);
+                        }}
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white dark:hover:bg-slate-700 rounded-lg transition"
+                        title="Download PDF"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>

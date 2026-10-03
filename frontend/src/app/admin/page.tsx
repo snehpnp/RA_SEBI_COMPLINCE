@@ -6528,6 +6528,7 @@ function AdminDashboardContent() {
                                                 <input
                                                   type="number"
                                                   value={verifyCustomDays}
+                                                  disabled
                                                   onChange={(e) => setVerifyCustomDays(Math.max(1, parseInt(e.target.value) || 1))}
                                                   onClick={(e) => e.stopPropagation()}
                                                   className="w-24 bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -6577,6 +6578,7 @@ function AdminDashboardContent() {
                                                 <input
                                                   type="number"
                                                   value={verifyCustomDiscount}
+                                                  disabled
                                                   onChange={(e) => setVerifyCustomDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
                                                   onClick={(e) => e.stopPropagation()}
                                                   className="w-28 bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -7517,16 +7519,8 @@ function AdminDashboardContent() {
                ==================================================== */}
                   {activeTab === 'vaults' && hasPermission('ACCESS_VAULTS') && (
                     <ClientVaultExplorer 
-                      canDownload={
-                        (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')
-                          ? !user?.permissions?.includes('MASK_VAULT_DATA')
-                          : (user?.permissions?.includes('ACCESS_VAULTS_FULL') && !user?.permissions?.includes('MASK_VAULT_DATA'))
-                      } 
-                      isMasked={
-                        user?.role === 'SUPER_ADMIN'
-                          ? false
-                          : (user?.permissions?.includes('MASK_VAULT_DATA') || (!user?.permissions?.includes('VIEW_SENSITIVE_DATA') && !user?.permissions?.includes('ACCESS_VAULTS_FULL')))
-                      } 
+                      canDownload={!user?.permissions?.includes('MASK_VAULT_DATA')} 
+                      isMasked={Boolean(user?.permissions?.includes('MASK_VAULT_DATA'))} 
                     />
                   )}
 
