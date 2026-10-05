@@ -781,7 +781,7 @@ class ApiClient {
     });
   }
 
-  async forgotPassword(payload: { email: string }) {
+  async forgotPassword(payload: { email?: string; username?: string; identifier?: string }) {
     return this.request('/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify(payload)

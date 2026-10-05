@@ -313,11 +313,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
       const passwordHash = await bcrypt.hash('Po@12345', salt);
 
       const email = data.email;
-
-      const emailConflictUser: any = await dynamicDb.User.findOne({ email }).lean();
-      if (emailConflictUser && emailConflictUser.tenantId !== tenantId) {
-        return res.status(400).json({ success: false, message: 'This email is already registered in the system under a different company. Please use a unique email.' });
-      }
+      const poUsername = (data.username ? String(data.username).trim().toLowerCase() : (email ? email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.-]/g, '') : 'po_user'));
 
       const existingPO: any = await dynamicDb.User.findOne({
         tenantId,
@@ -325,14 +321,8 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
       });
 
       if (existingPO) {
-        if (existingPO.email !== email) {
-          const newEmailConflict = await dynamicDb.User.findOne({ email }).lean();
-          if (newEmailConflict) {
-            return res.status(400).json({ success: false, message: 'This email is already in use by another user.' });
-          }
-        }
         await dynamicDb.User.findByIdAndUpdate(existingPO._id || existingPO.id, {
-          $set: { firstName: data.name, mobile: data.mobile, email }
+          $set: { firstName: data.name, mobile: data.mobile, email, username: poUsername }
         });
 
         await dynamicDb.Staff.findOneAndUpdate(
@@ -341,6 +331,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
             $set: {
               name: data.name,
               email,
+              username: poUsername,
               mobile: data.mobile,
               nismNumber: data.nismNumber,
               nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
@@ -358,6 +349,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
         const newUser: any = await dynamicDb.User.create({
           tenantId,
           roleId: poRole._id || poRole.id,
+          username: poUsername,
           email,
           firstName: data.name,
           lastName: '(PO)',
@@ -368,6 +360,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
         await dynamicDb.Staff.create({
           userId: newUser._id || newUser.id,
           employeeId: 'EMP-PO-' + Math.floor(100 + Math.random() * 900),
+          username: poUsername,
           name: data.name,
           email,
           mobile: data.mobile,
@@ -385,11 +378,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
       const passwordHash = await bcrypt.hash('Co@12345', salt);
 
       const email = data.email;
-
-      const emailConflictUserCO: any = await dynamicDb.User.findOne({ email }).lean();
-      if (emailConflictUserCO && emailConflictUserCO.tenantId !== tenantId) {
-        return res.status(400).json({ success: false, message: 'This email is already registered in the system under a different company. Please use a unique email.' });
-      }
+      const coUsername = (data.username ? String(data.username).trim().toLowerCase() : (email ? email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.-]/g, '') : 'co_user'));
 
       const existingCO: any = await dynamicDb.User.findOne({
         tenantId,
@@ -397,14 +386,8 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
       });
 
       if (existingCO) {
-        if (existingCO.email !== email) {
-          const newEmailConflict = await dynamicDb.User.findOne({ email }).lean();
-          if (newEmailConflict) {
-            return res.status(400).json({ success: false, message: 'This email is already in use by another user.' });
-          }
-        }
         await dynamicDb.User.findByIdAndUpdate(existingCO._id || existingCO.id, {
-          $set: { firstName: data.name, mobile: data.mobile, email }
+          $set: { firstName: data.name, mobile: data.mobile, email, username: coUsername }
         });
 
         await dynamicDb.Staff.findOneAndUpdate(
@@ -413,6 +396,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
             $set: {
               name: data.name,
               email,
+              username: coUsername,
               mobile: data.mobile,
               nismNumber: data.nismNumber,
               nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
@@ -430,6 +414,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
         const newUser: any = await dynamicDb.User.create({
           tenantId,
           roleId: coRole._id || coRole.id,
+          username: coUsername,
           email,
           firstName: data.name,
           lastName: '(CO)',
@@ -440,6 +425,7 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
         await dynamicDb.Staff.create({
           userId: newUser._id || newUser.id,
           employeeId: 'EMP-CO-' + Math.floor(100 + Math.random() * 900),
+          username: coUsername,
           name: data.name,
           email,
           mobile: data.mobile,
@@ -483,13 +469,21 @@ export const saveProfileStep = async (req: AuthenticatedRequest, res: Response) 
 
 export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
-  const { name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
+  const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
 
   if (!tenantId) {
     return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   }
 
   // VALIDATIONS
+  const cleanUsername = String(username || '').trim().toLowerCase();
+  if (!cleanUsername || cleanUsername.length < 3) {
+    return res.status(400).json({ success: false, message: 'Staff username is required and must be at least 3 characters.' });
+  }
+  if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+    return res.status(400).json({ success: false, message: 'Staff username can only contain letters, numbers, dots, hyphens, and underscores.' });
+  }
+
   if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
     return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
   }
@@ -542,9 +536,18 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    const existingUser = await dynamicDb.User.findOne({ email }).lean();
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: 'User with this email already exists.' });
+    const existingUserWithUsername = await dynamicDb.User.findOne({
+      username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+    }).lean();
+    if (existingUserWithUsername) {
+      return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose a different username.` });
+    }
+
+    const centralExisting = await centralModels.User.findOne({
+      username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+    }).lean().catch(() => null);
+    if (centralExisting) {
+      return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose a different username.` });
     }
 
     const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
@@ -559,6 +562,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     const user: any = await dynamicDb.User.create({
       tenantId,
       roleId: targetRole._id || targetRole.id,
+      username: cleanUsername,
       firstName: name.split(' ')[0],
       lastName: name.split(' ').slice(1).join(' ') || 'Staff',
       email,
@@ -570,6 +574,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     const staff: any = await dynamicDb.Staff.create({
       userId: user._id || user.id,
       employeeId: 'EMP' + Math.floor(1000 + Math.random() * 900),
+      username: cleanUsername,
       name,
       email,
       mobile,
@@ -595,7 +600,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       recipient: email,
       channel: 'EMAIL',
       title: 'Staff Account Created',
-      message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${email}, Password: ${randomPassword}`,
+      message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${cleanUsername}, Password: ${randomPassword}`,
       status: 'SENT'
     }).catch(() => { });
 
@@ -636,6 +641,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       message: 'Staff created successfully',
       data: {
         staff,
+        username: cleanUsername,
         generatedPassword: randomPassword
       }
     });
@@ -667,12 +673,15 @@ export const getStaff = async (req: AuthenticatedRequest, res: Response) => {
     const staffMembers = staffList.map((s: any) => {
       const user = userMap.get(String(s.userId));
       const pa = paMap.get(String(s._id || s.id));
+      const staffUsername = s.username || user?.username || (s.email ? s.email.split('@')[0] : null);
       return {
         ...s,
         id: String(s._id || s.id),
+        username: staffUsername,
         user: user ? {
           ...user,
           id: String(user._id || user.id),
+          username: user.username || staffUsername,
           role: user.roleId
         } : null,
         personAssociated: pa || null
@@ -688,7 +697,7 @@ export const getStaff = async (req: AuthenticatedRequest, res: Response) => {
 export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   const { id } = req.params;
-  const { name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
+  const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
 
   if (!tenantId) {
     return res.status(400).json({ success: false, message: 'Invalid tenant context' });
@@ -784,6 +793,7 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     const updateUserData: any = {
       firstName: name.split(' ')[0],
       lastName: name.split(' ').slice(1).join(' ') || 'Staff',
+      email,
       mobile
     };
     if (targetRole) {
@@ -791,13 +801,20 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     const targetUserId = staff.userId || staffUser?._id;
-    if (email && email !== staff.email) {
-      const emailExists = await dynamicDb.User.findOne({
-        email,
+
+    if (username) {
+      const cleanUsername = String(username).trim().toLowerCase();
+      if (cleanUsername.length < 3 || !/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+        return res.status(400).json({ success: false, message: 'Username must be at least 3 characters and contain only letters, numbers, dots, hyphens, and underscores.' });
+      }
+      const existingWithUsername = await dynamicDb.User.findOne({
+        username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
         ...(targetUserId ? { _id: { $ne: targetUserId } } : {})
       }).lean();
-      if (emailExists) throw new Error('Email already in use by another user.');
-      updateUserData.email = email;
+      if (existingWithUsername) {
+        return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose another.` });
+      }
+      updateUserData.username = cleanUsername;
     }
 
     if (targetUserId) {
@@ -812,6 +829,7 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       joiningDate: joiningDate ? new Date(joiningDate) : null,
       nismNumber,
       nismValidity: nismValidity ? new Date(nismValidity) : null,
+      ...(updateUserData.username ? { username: updateUserData.username } : {}),
       ...(targetUserId ? { userId: targetUserId } : {})
     };
 

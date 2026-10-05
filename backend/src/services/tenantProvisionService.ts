@@ -86,6 +86,7 @@ export interface TenantProvisionData {
 export interface AdminUserData {
   id?: string;
   email: string;
+  username?: string | null;
   passwordHash?: string;
   tempPassword?: string | null;
   password?: string | null;
@@ -355,9 +356,11 @@ export async function provisionAllTenantCollections(
     ? 'SUSPENDED'
     : (targetTenant.status === 'DELETED' ? 'DELETED' : (adminUserData.status || 'ACTIVE'));
 
+  const adminUsername = (adminUserData.username || adminEmail.split('@')[0] || 'admin').toLowerCase().replace(/[^a-z0-9_.-]/g, '');
   const userPayload: any = {
     tenantId,
     roleId: adminRoleId,
+    username: adminUsername,
     firstName: adminUserData.firstName || targetTenant.companyName,
     lastName: adminUserData.lastName || 'Admin',
     email: adminEmail,
@@ -388,6 +391,7 @@ export async function provisionAllTenantCollections(
         $set: {
           tenantId,
           userId: adminUserId,
+          username: adminUsername,
           name: adminFullName,
           email: adminEmail,
           mobile: createdAdminUser.mobile || targetTenant.mobile || 'N/A',

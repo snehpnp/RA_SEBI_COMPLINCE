@@ -32,7 +32,7 @@ centralConnection.on('disconnected', () => {
 // Central Models
 export const centralModels: ITenantModels = registerTenantModels(centralConnection);
 
-// Ensure index sanity for Client collection
+// Ensure index sanity for Client and User collections & backfill usernames
 centralConnection.on('open', async () => {
   try {
     const clientCol = centralConnection.db?.collection('Client');
@@ -54,6 +54,59 @@ centralConnection.on('open', async () => {
         { aadhaar: 1 },
         { unique: true, partialFilterExpression: { aadhaar: { $type: 'string', $gt: '' } }, name: 'aadhaar_unique_partial', background: true }
       ).catch(() => {});
+    }
+
+    const userCol = centralConnection.db?.collection('User');
+    if (userCol) {
+      const userIdxs = await userCol.indexes();
+      for (const idx of userIdxs) {
+        if (idx.key && idx.key.email && idx.unique && idx.name !== '_id_') {
+          await userCol.dropIndex(idx.name).catch(() => {});
+        }
+      }
+      await userCol.createIndex(
+        { username: 1 },
+        { unique: true, partialFilterExpression: { username: { $type: 'string', $gt: '' } }, name: 'username_unique_partial', background: true }
+      ).catch(() => {});
+    }
+
+    // Backfill missing usernames for existing users & staff
+    try {
+      const usersWithoutUsername: any[] = await centralModels.User.find({
+        $or: [{ username: null }, { username: { $exists: false } }, { username: '' }]
+      }).populate('role').lean();
+
+      for (const u of usersWithoutUsername) {
+        let suggestedUsername = '';
+        const roleName = u.role?.name;
+        if (roleName === 'SUPER_ADMIN') {
+          suggestedUsername = 'superadmin';
+        } else if (roleName === 'ADMIN' && u.email === 'admin@gmail.com') {
+          suggestedUsername = 'admin';
+        } else if (roleName === 'COMPLIANCE_OFFICER' && u.email?.includes('compliance')) {
+          suggestedUsername = 'compliance';
+        } else if (roleName === 'RESEARCHER' && u.email?.includes('researcher')) {
+          suggestedUsername = 'researcher';
+        } else if (u.email) {
+          suggestedUsername = u.email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.-]/g, '');
+        } else {
+          suggestedUsername = `user_${String(u._id || u.id).slice(-4)}`;
+        }
+
+        let finalUsername = suggestedUsername;
+        let counter = 1;
+        while (await centralModels.User.findOne({ username: finalUsername, _id: { $ne: u._id || u.id } }).lean()) {
+          finalUsername = `${suggestedUsername}_${counter}`;
+          counter++;
+        }
+
+        await centralModels.User.findByIdAndUpdate(u._id || u.id, { $set: { username: finalUsername } });
+        if (centralModels.Staff) {
+          await centralModels.Staff.findOneAndUpdate({ userId: u._id || u.id }, { $set: { username: finalUsername } });
+        }
+      }
+    } catch (bfErr: any) {
+      console.warn('[DB] Username backfill notice:', bfErr?.message || bfErr);
     }
   } catch (err: any) {
     console.warn('[DB] Index sync notice:', err?.message || err);

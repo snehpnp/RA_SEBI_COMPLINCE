@@ -11,6 +11,7 @@ export interface IAgreement extends Document {
   signedAt: Date;
   ipAddress?: string | null;
   status: string;
+  digioDocumentId?: string | null;
 }
 
 export const AgreementSchema = new Schema<IAgreement>(
@@ -21,7 +22,8 @@ export const AgreementSchema = new Schema<IAgreement>(
     esignMode: { type: String, default: 'MOCK_AADHAAR' },
     signedAt: { type: Date, default: Date.now },
     ipAddress: { type: String, default: null },
-    status: { type: String, default: 'SIGNED' }
+    status: { type: String, default: 'SIGNED' },
+    digioDocumentId: { type: String, default: null }
   },
   { ...baseSchemaOptions, collection: 'Agreement' }
 );

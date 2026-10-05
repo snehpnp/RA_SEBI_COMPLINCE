@@ -6,6 +6,7 @@ export interface IStaff extends Document {
   id: string;
   userId: Types.ObjectId;
   employeeId: string;
+  username?: string | null;
   name: string;
   email: string;
   mobile: string;
@@ -21,6 +22,7 @@ export const StaffSchema = new Schema<IStaff>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     employeeId: { type: String, required: true, unique: true },
+    username: { type: String, trim: true, default: null },
     name: { type: String, required: true },
     email: { type: String, required: true },
     mobile: { type: String, required: true },

@@ -800,6 +800,7 @@ function AdminDashboardContent() {
   // Staff creation form state
   const [isSubmittingStaff, setIsSubmittingStaff] = useState(false);
   const [staffName, setStaffName] = useState('');
+  const [staffUsername, setStaffUsername] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [staffMobile, setStaffMobile] = useState('');
   const [staffRole, setStaffRole] = useState('RESEARCHER');
@@ -1825,6 +1826,7 @@ function AdminDashboardContent() {
 
   const resetStaffForm = () => {
     setStaffName('');
+    setStaffUsername('');
     setStaffEmail('');
     setStaffMobile('');
     setStaffRole('RESEARCHER');
@@ -1891,6 +1893,7 @@ function AdminDashboardContent() {
   const startEditStaff = (st: any) => {
     setEditingStaff(st);
     setStaffName(st.name || '');
+    setStaffUsername(st.username || st.user?.username || '');
     setStaffEmail(st.email || '');
     setStaffMobile(st.mobile || '');
     const rName = st.user?.role?.name;
@@ -1937,6 +1940,15 @@ function AdminDashboardContent() {
         toast('Staff name must contain only letters and spaces (min 2 chars).');
         return;
       }
+      const cleanUsername = (staffUsername || '').trim().toLowerCase();
+      if (!cleanUsername || cleanUsername.length < 3) {
+        toast('Staff username is required and must be at least 3 characters.');
+        return;
+      }
+      if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+        toast('Username can only contain letters, numbers, underscores, dots, and hyphens.');
+        return;
+      }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!staffEmail || !emailRegex.test(staffEmail)) {
         setWizardErrors({ coEmail: 'Please enter a valid email address.' });
@@ -1977,6 +1989,7 @@ function AdminDashboardContent() {
 
       const formData = new FormData();
       formData.append('name', staffName);
+      formData.append('username', cleanUsername);
       formData.append('email', staffEmail);
       formData.append('mobile', staffMobile);
       formData.append('roleName', staffRole);
@@ -3664,6 +3677,9 @@ function AdminDashboardContent() {
                                             </span>
                                           )}
                                         </span>
+                                        {(st.username || st.user?.username) && (
+                                          <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-bold block">@{st.username || st.user?.username}</span>
+                                        )}
                                         <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.email}</span>
                                         <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.mobile}</span>
                                       </td>
@@ -3779,7 +3795,7 @@ function AdminDashboardContent() {
                             <form onSubmit={handleCreateOrUpdateStaff} className="space-y-4 pt-2">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Full Name</label>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Full Name *</label>
                                   <input
                                     type="text"
                                     required
@@ -3791,7 +3807,21 @@ function AdminDashboardContent() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Email Address</label>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
+                                    Username (Unique Login ID) *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    required
+                                    value={staffUsername}
+                                    onChange={e => setStaffUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                                    className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    placeholder="amit_sharma"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Email Address *</label>
                                   <input
                                     type="email"
                                     required
@@ -3804,7 +3834,7 @@ function AdminDashboardContent() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Mobile Number</label>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Mobile Number *</label>
                                   <input
                                     type="text"
                                     required
@@ -4014,9 +4044,22 @@ function AdminDashboardContent() {
                             {/* Credentials */}
                             <div className="space-y-3">
                               <div className="bg-slate-100 dark:bg-slate-950/80 border border-slate-400 dark:border-white/10 rounded-xl p-4 space-y-1">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500 uppercase tracking-wider block">Login ID (Email)</span>
+                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500 uppercase tracking-wider block">Login ID (Username)</span>
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-mono text-sm text-emerald-700 dark:text-emerald-300 font-bold break-all">{createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}</span>
+                                  <span className="font-mono text-sm text-emerald-700 dark:text-emerald-300 font-bold break-all">
+                                    {createdStaffCreds?.username || createdStaffCreds?.staff?.username || createdStaffCreds?.user?.username || createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}
+                                  </span>
+                                  <button
+                                    onClick={() => navigator.clipboard.writeText(createdStaffCreds?.username || createdStaffCreds?.staff?.username || createdStaffCreds?.user?.username || createdStaffCreds?.staff?.email || createdStaffCreds?.email || '')}
+                                    className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
+                                  >Copy</button>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-100 dark:bg-slate-950/80 border border-slate-400 dark:border-white/10 rounded-xl p-4 space-y-1">
+                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500 uppercase tracking-wider block">Registered Email</span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-xs text-slate-700 dark:text-slate-300 font-bold break-all">{createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}</span>
                                   <button
                                     onClick={() => navigator.clipboard.writeText(createdStaffCreds?.staff?.email || createdStaffCreds?.email || '')}
                                     className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
@@ -4074,6 +4117,11 @@ function AdminDashboardContent() {
                                 <div className="flex justify-between border-b border-slate-300 dark:border-white/5 pb-2">
                                   <span className="text-slate-600 dark:text-slate-400">Full Name</span>
                                   <span className="font-bold text-slate-900 dark:text-white">{selectedStaff.name}</span>
+                                </div>
+
+                                <div className="flex justify-between border-b border-slate-300 dark:border-white/5 pb-2">
+                                  <span className="text-slate-600 dark:text-slate-400">Username (Login ID)</span>
+                                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400">@{selectedStaff.username || selectedStaff.user?.username || '—'}</span>
                                 </div>
 
                                 <div className="flex justify-between border-b border-slate-300 dark:border-white/5 pb-2">

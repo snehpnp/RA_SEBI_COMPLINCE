@@ -133,8 +133,9 @@ export default function LoginForm({
     setError(null);
     setErrorType(null);
 
+    const cleanInput = email.trim();
     try {
-      const res = await api.login({ email, password });
+      const res = await api.login({ email: cleanInput, username: cleanInput, identifier: cleanInput, password });
       if (res.requires2FA) {
         setIsSubmitting(false);
         setIs2FAStep(true);
@@ -354,22 +355,22 @@ export default function LoginForm({
     setErrorType(null);
     setForgotSuccess(null);
 
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) {
-      setError('Please enter your registered email address.');
+    const cleanIdentifier = email.trim();
+    if (!cleanIdentifier) {
+      setError(isAdmin ? 'Please enter your staff username or registered email.' : 'Please enter your registered email address.');
       setIsSubmitting(false);
       return;
     }
 
     try {
-      const res = await api.forgotPassword({ email: cleanEmail });
+      const res = await api.forgotPassword({ email: cleanIdentifier, username: cleanIdentifier, identifier: cleanIdentifier });
       if (res.success) {
         setForgotSuccess(res.message || 'A temporary password has been sent to your registered email address.');
       } else {
-        setError(res.message || 'No account found with this email address.');
+        setError(res.message || 'No account found with this username or email.');
       }
     } catch (err: any) {
-      setError(err.message || 'No account found with this email address.');
+      setError(err.message || 'No account found with this username or email.');
     } finally {
       setIsSubmitting(false);
     }
@@ -402,7 +403,7 @@ export default function LoginForm({
                 ? 'Enter the 6-digit passcode sent to your mobile via SMS'
                 : 'Enter the 6-digit passcode sent to your email address'
               : isForgotPassword
-              ? 'Enter your registered email to receive reset instructions'
+              ? (isAdmin ? 'Enter your staff username or registered email to reset password' : 'Enter your registered email to receive reset instructions')
               : isAdmin
               ? 'Enter your administrative credentials to sign in'
               : 'Enter your credentials to authenticate session'}
@@ -817,19 +818,19 @@ export default function LoginForm({
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                    Email Address
+                    {isAdmin ? 'Staff Username / Email' : 'Email Address'}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
                       <Mail className="h-4 w-4" />
                     </span>
                     <input
-                      type="email"
+                      type="text"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
-                      placeholder="name@company.com"
+                      placeholder={isAdmin ? "Enter your username or email" : "name@company.com"}
                     />
                   </div>
                 </div>
@@ -912,19 +913,19 @@ export default function LoginForm({
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                Registered Email Address
+                {isAdmin ? 'Staff Username or Registered Email' : 'Registered Email Address'}
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
                   <Mail className="h-4 w-4" />
                 </span>
                 <input
-                  type="email"
+                  type="text"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
-                  placeholder="name@company.com"
+                  placeholder={isAdmin ? "Enter your username or email" : "name@company.com"}
                 />
               </div>
             </div>
