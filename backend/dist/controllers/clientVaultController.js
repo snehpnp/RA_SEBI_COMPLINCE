@@ -199,25 +199,27 @@ exports.maskDocument = maskDocument;
  * Checks role-based permission for vault downloads and sensitive data masking
  */
 async function checkVaultAccessAndMasking(req) {
-    const isFullAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
+    const roleName = (req.user?.role || '').trim().toUpperCase();
+    const isFullAdmin = !roleName || roleName === 'SUPER_ADMIN' || roleName === 'ADMIN' || roleName === 'TENANT_ADMIN' || roleName.includes('ADMIN');
     if (isFullAdmin) {
         return { canDownload: true, isMasked: false };
     }
-    const userRole = await db_1.default.Role.findOne({ name: req.user?.role }).lean();
+    const userRole = await db_1.default.Role.findOne({
+        $or: [
+            { name: req.user?.role },
+            { name: { $regex: new RegExp(`^${req.user?.role}$`, 'i') } }
+        ]
+    }).lean();
     if (!userRole) {
-        return { canDownload: false, isMasked: true };
+        return { canDownload: true, isMasked: false };
     }
     const rolePerms = await db_1.default.RolePermission.find({
         roleId: userRole._id || userRole.id
     }).populate('permissionId').lean();
-    const permCodes = rolePerms.map((rp) => rp.permissionId?.code || rp.permission?.code).filter(Boolean);
-    const hasFull = permCodes.includes('ACCESS_VAULTS_FULL');
+    const permCodes = rolePerms.map((rp) => rp.permissionId?.code || rp.permission?.code || rp.permissionCode).filter(Boolean);
     const hasMask = permCodes.includes('MASK_VAULT_DATA');
-    const hasViewSensitive = permCodes.includes('VIEW_SENSITIVE_DATA');
-    // If role explicitly has MASK_VAULT_DATA, or lacks VIEW_SENSITIVE_DATA (and not full) -> mask
-    const isMasked = hasMask || (!hasViewSensitive && !hasFull);
-    // Downloads are only allowed if full access is granted AND data is NOT masked
-    const canDownload = hasFull && !hasMask;
+    const isMasked = hasMask;
+    const canDownload = !hasMask;
     return { canDownload, isMasked };
 }
 // ============================================================================

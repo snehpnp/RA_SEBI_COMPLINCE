@@ -39,6 +39,7 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.StaffSchema = new mongoose_1.Schema({
     userId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     employeeId: { type: String, required: true, unique: true },
+    username: { type: String, trim: true, default: null },
     name: { type: String, required: true },
     email: { type: String, required: true },
     mobile: { type: String, required: true },

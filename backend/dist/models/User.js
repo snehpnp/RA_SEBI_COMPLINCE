@@ -39,10 +39,11 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.UserSchema = new mongoose_1.Schema({
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', default: null },
     roleId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Role', required: true },
+    username: { type: String, trim: true, default: null },
     employeeCode: { type: String, default: null },
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
+    email: { type: String, required: true },
     mobile: { type: String, required: true },
     passwordHash: { type: String, required: true },
     status: { type: String, default: 'ACTIVE' },

@@ -177,7 +177,9 @@ const createTenant = async (req, res) => {
             state: effectiveState,
             status: 'PENDING_PROFILE'
         };
+        const adminUsernameToUse = (req.body.adminUsername || req.body.username || adminEmailToUse.split('@')[0] || 'admin').toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '');
         const adminUserPayload = {
+            username: adminUsernameToUse,
             email: adminEmailToUse,
             firstName: adminFirstName,
             lastName: adminLastName,

@@ -764,6 +764,11 @@ function AdminDashboardContent() {
   const [smtpPort, setSmtpPort] = useState('');
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFrom, setSmtpFrom] = useState('');
+  const [ccInvoiceEnabled, setCcInvoiceEnabled] = useState(false);
+  const [ccInvoiceEmail, setCcInvoiceEmail] = useState('');
+  const [ccAgreementEnabled, setCcAgreementEnabled] = useState(false);
+  const [ccAgreementEmail, setCcAgreementEmail] = useState('');
 
 
   // Periodic Report Settings
@@ -795,7 +800,6 @@ function AdminDashboardContent() {
   const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
-  const [smtpFrom, setSmtpFrom] = useState('');
 
   // Staff creation form state
   const [isSubmittingStaff, setIsSubmittingStaff] = useState(false);
@@ -1070,6 +1074,10 @@ function AdminDashboardContent() {
               if (t.smtpUser) setSmtpUser(t.smtpUser);
               if (t.smtpPassword) setSmtpPassword(t.smtpPassword);
               if (t.smtpFrom) setSmtpFrom(t.smtpFrom);
+              if (t.ccInvoiceEnabled !== undefined) setCcInvoiceEnabled(Boolean(t.ccInvoiceEnabled));
+              if (t.ccInvoiceEmail !== undefined) setCcInvoiceEmail(t.ccInvoiceEmail || '');
+              if (t.ccAgreementEnabled !== undefined) setCcAgreementEnabled(Boolean(t.ccAgreementEnabled));
+              if (t.ccAgreementEmail !== undefined) setCcAgreementEmail(t.ccAgreementEmail || '');
               if (t.bankAccountName) setBankAccountName(t.bankAccountName);
               if (t.bankAccountNo) setBankAccountNo(t.bankAccountNo);
               if (t.bankAccountType) setBankAccountType(t.bankAccountType);
@@ -1580,6 +1588,10 @@ function AdminDashboardContent() {
       if (smtpUser) formData.append('smtpUser', smtpUser);
       if (smtpPassword) formData.append('smtpPassword', smtpPassword);
       if (smtpFrom) formData.append('smtpFrom', smtpFrom);
+      formData.append('ccInvoiceEnabled', String(ccInvoiceEnabled));
+      formData.append('ccInvoiceEmail', (ccInvoiceEmail || '').trim());
+      formData.append('ccAgreementEnabled', String(ccAgreementEnabled));
+      formData.append('ccAgreementEmail', (ccAgreementEmail || '').trim());
       if (bankAccountName) formData.append('bankAccountName', bankAccountName);
       if (bankAccountNo) formData.append('bankAccountNo', bankAccountNo);
       if (bankAccountType) formData.append('bankAccountType', bankAccountType);
@@ -7898,6 +7910,114 @@ function AdminDashboardContent() {
                                 <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Password (App Password)</label>
                                   <input type="password" value={smtpPassword} onChange={e => setSmtpPassword(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Enter password to update" />
+                                </div>
+                                <div className="md:col-span-2">
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Sender Name / From Header (Optional)</label>
+                                  <input type="text" value={smtpFrom} onChange={e => setSmtpFrom(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. RAGCP Support or leave blank to use Username" />
+                                </div>
+                              </div>
+
+                              {/* CC Invoice & CC Agreement Configuration */}
+                              <div className="border-t border-slate-200 dark:border-slate-800 pt-5">
+                                <div className="mb-4">
+                                  <h4 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                                    <span>📬 CC (Carbon Copy) Automated Email Dispatch</span>
+                                  </h4>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Configure CC email addresses for automatic carbon copies when client invoices and signed agreements are sent.
+                                  </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* CC Invoice Card */}
+                                  <div className={`p-4 rounded-xl border transition-all ${
+                                    ccInvoiceEnabled
+                                      ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/60 shadow-sm'
+                                      : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800'
+                                  }`}>
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold">
+                                          🧾
+                                        </div>
+                                        <div>
+                                          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">CC Invoice</label>
+                                          <p className="text-[11px] text-slate-500">Auto-copy for client Tax Invoices</p>
+                                        </div>
+                                      </div>
+                                      <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="sr-only peer"
+                                          checked={ccInvoiceEnabled}
+                                          onChange={e => setCcInvoiceEnabled(e.target.checked)}
+                                        />
+                                        <div className="w-10 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600"></div>
+                                      </label>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                        CC Invoice Email Address {ccInvoiceEnabled && <span className="text-red-500">*</span>}
+                                      </label>
+                                      <input
+                                        type="email"
+                                        disabled={!ccInvoiceEnabled}
+                                        value={ccInvoiceEmail}
+                                        onChange={e => setCcInvoiceEmail(e.target.value)}
+                                        placeholder="e.g. accounts@yourcompany.com"
+                                        className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800/60 focus:border-primary-500 outline-none transition"
+                                      />
+                                      <p className="text-[10px] text-slate-400 mt-1">
+                                        When enabled, an exact PDF copy of every generated client invoice is sent here.
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* CC Agreement Card */}
+                                  <div className={`p-4 rounded-xl border transition-all ${
+                                    ccAgreementEnabled
+                                      ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60 shadow-sm'
+                                      : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800'
+                                  }`}>
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-sm font-bold">
+                                          📜
+                                        </div>
+                                        <div>
+                                          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">CC Agreement</label>
+                                          <p className="text-[11px] text-slate-500">Auto-copy for signed Service Agreements</p>
+                                        </div>
+                                      </div>
+                                      <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="sr-only peer"
+                                          checked={ccAgreementEnabled}
+                                          onChange={e => setCcAgreementEnabled(e.target.checked)}
+                                        />
+                                        <div className="w-10 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600"></div>
+                                      </label>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                        CC Agreement Email Address {ccAgreementEnabled && <span className="text-red-500">*</span>}
+                                      </label>
+                                      <input
+                                        type="email"
+                                        disabled={!ccAgreementEnabled}
+                                        value={ccAgreementEmail}
+                                        onChange={e => setCcAgreementEmail(e.target.value)}
+                                        placeholder="e.g. compliance@yourcompany.com"
+                                        className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800/60 focus:border-primary-500 outline-none transition"
+                                      />
+                                      <p className="text-[10px] text-slate-400 mt-1">
+                                        When enabled, an executed copy of client service agreements with PDF is sent here.
+                                      </p>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             </div>

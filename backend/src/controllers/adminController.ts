@@ -105,6 +105,10 @@ export const calculateCompleteness = async (tenantId: string) => {
           tenant.smtpUser = parsed.smtpUser;
           tenant.smtpPassword = parsed.smtpPassword;
           tenant.smtpFrom = parsed.smtpFrom;
+          if (parsed.ccInvoiceEnabled !== undefined) tenant.ccInvoiceEnabled = parsed.ccInvoiceEnabled;
+          if (parsed.ccInvoiceEmail !== undefined) tenant.ccInvoiceEmail = parsed.ccInvoiceEmail;
+          if (parsed.ccAgreementEnabled !== undefined) tenant.ccAgreementEnabled = parsed.ccAgreementEnabled;
+          if (parsed.ccAgreementEmail !== undefined) tenant.ccAgreementEmail = parsed.ccAgreementEmail;
         }
       }
     } catch { }
@@ -2552,7 +2556,8 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
 
   const {
     themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort,
-    smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
+    smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail,
+    bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
     bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment,
     agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
     activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey,
@@ -2683,6 +2688,10 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     } else if (dataToUpdate.smtpUser || oldTenant?.smtpUser) {
       dataToUpdate.smtpFrom = dataToUpdate.smtpUser || oldTenant?.smtpUser;
     }
+    if (ccInvoiceEnabled !== undefined) dataToUpdate.ccInvoiceEnabled = ccInvoiceEnabled === 'true' || ccInvoiceEnabled === true;
+    if (ccInvoiceEmail !== undefined) dataToUpdate.ccInvoiceEmail = ccInvoiceEmail ? ccInvoiceEmail.trim() : null;
+    if (ccAgreementEnabled !== undefined) dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
+    if (ccAgreementEmail !== undefined) dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
     if (kycFirst !== undefined) dataToUpdate.kycFirst = kycFirst === 'true' || kycFirst === true;
     if (welcomeEmailText !== undefined) dataToUpdate.welcomeEmailText = welcomeEmailText;
     if (reportDisclaimer !== undefined) dataToUpdate.reportDisclaimer = reportDisclaimer;
@@ -2741,7 +2750,11 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
         smtpPort: dataToUpdate.smtpPort !== undefined ? dataToUpdate.smtpPort : (oldTenant?.smtpPort || 587),
         smtpUser: dataToUpdate.smtpUser !== undefined ? dataToUpdate.smtpUser : oldTenant?.smtpUser,
         smtpPassword: dataToUpdate.smtpPassword || oldTenant?.smtpPassword,
-        smtpFrom: dataToUpdate.smtpFrom || dataToUpdate.smtpUser || oldTenant?.smtpFrom || oldTenant?.smtpUser
+        smtpFrom: dataToUpdate.smtpFrom || dataToUpdate.smtpUser || oldTenant?.smtpFrom || oldTenant?.smtpUser,
+        ccInvoiceEnabled: dataToUpdate.ccInvoiceEnabled !== undefined ? dataToUpdate.ccInvoiceEnabled : oldTenant?.ccInvoiceEnabled,
+        ccInvoiceEmail: dataToUpdate.ccInvoiceEmail !== undefined ? dataToUpdate.ccInvoiceEmail : oldTenant?.ccInvoiceEmail,
+        ccAgreementEnabled: dataToUpdate.ccAgreementEnabled !== undefined ? dataToUpdate.ccAgreementEnabled : oldTenant?.ccAgreementEnabled,
+        ccAgreementEmail: dataToUpdate.ccAgreementEmail !== undefined ? dataToUpdate.ccAgreementEmail : oldTenant?.ccAgreementEmail
       };
       await dynamicDb.SystemSetting.findOneAndUpdate(
         { key: 'GLOBAL_SMTP' },

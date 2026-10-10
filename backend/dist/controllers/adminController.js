@@ -141,6 +141,14 @@ const calculateCompleteness = async (tenantId) => {
                     tenant.smtpUser = parsed.smtpUser;
                     tenant.smtpPassword = parsed.smtpPassword;
                     tenant.smtpFrom = parsed.smtpFrom;
+                    if (parsed.ccInvoiceEnabled !== undefined)
+                        tenant.ccInvoiceEnabled = parsed.ccInvoiceEnabled;
+                    if (parsed.ccInvoiceEmail !== undefined)
+                        tenant.ccInvoiceEmail = parsed.ccInvoiceEmail;
+                    if (parsed.ccAgreementEnabled !== undefined)
+                        tenant.ccAgreementEnabled = parsed.ccAgreementEnabled;
+                    if (parsed.ccAgreementEmail !== undefined)
+                        tenant.ccAgreementEmail = parsed.ccAgreementEmail;
                 }
             }
         }
@@ -334,28 +342,20 @@ const saveProfileStep = async (req, res) => {
             const salt = await bcrypt.genSalt(10);
             const passwordHash = await bcrypt.hash('Po@12345', salt);
             const email = data.email;
-            const emailConflictUser = await db_1.default.User.findOne({ email }).lean();
-            if (emailConflictUser && emailConflictUser.tenantId !== tenantId) {
-                return res.status(400).json({ success: false, message: 'This email is already registered in the system under a different company. Please use a unique email.' });
-            }
+            const poUsername = (data.username ? String(data.username).trim().toLowerCase() : (email ? email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.-]/g, '') : 'po_user'));
             const existingPO = await db_1.default.User.findOne({
                 tenantId,
                 roleId: poRole._id || poRole.id
             });
             if (existingPO) {
-                if (existingPO.email !== email) {
-                    const newEmailConflict = await db_1.default.User.findOne({ email }).lean();
-                    if (newEmailConflict) {
-                        return res.status(400).json({ success: false, message: 'This email is already in use by another user.' });
-                    }
-                }
                 await db_1.default.User.findByIdAndUpdate(existingPO._id || existingPO.id, {
-                    $set: { firstName: data.name, mobile: data.mobile, email }
+                    $set: { firstName: data.name, mobile: data.mobile, email, username: poUsername }
                 });
                 await db_1.default.Staff.findOneAndUpdate({ userId: existingPO._id || existingPO.id }, {
                     $set: {
                         name: data.name,
                         email,
+                        username: poUsername,
                         mobile: data.mobile,
                         nismNumber: data.nismNumber,
                         nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
@@ -372,6 +372,7 @@ const saveProfileStep = async (req, res) => {
                 const newUser = await db_1.default.User.create({
                     tenantId,
                     roleId: poRole._id || poRole.id,
+                    username: poUsername,
                     email,
                     firstName: data.name,
                     lastName: '(PO)',
@@ -382,6 +383,7 @@ const saveProfileStep = async (req, res) => {
                 await db_1.default.Staff.create({
                     userId: newUser._id || newUser.id,
                     employeeId: 'EMP-PO-' + Math.floor(100 + Math.random() * 900),
+                    username: poUsername,
                     name: data.name,
                     email,
                     mobile: data.mobile,
@@ -399,28 +401,20 @@ const saveProfileStep = async (req, res) => {
             const salt = await bcrypt.genSalt(10);
             const passwordHash = await bcrypt.hash('Co@12345', salt);
             const email = data.email;
-            const emailConflictUserCO = await db_1.default.User.findOne({ email }).lean();
-            if (emailConflictUserCO && emailConflictUserCO.tenantId !== tenantId) {
-                return res.status(400).json({ success: false, message: 'This email is already registered in the system under a different company. Please use a unique email.' });
-            }
+            const coUsername = (data.username ? String(data.username).trim().toLowerCase() : (email ? email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.-]/g, '') : 'co_user'));
             const existingCO = await db_1.default.User.findOne({
                 tenantId,
                 roleId: coRole._id || coRole.id
             });
             if (existingCO) {
-                if (existingCO.email !== email) {
-                    const newEmailConflict = await db_1.default.User.findOne({ email }).lean();
-                    if (newEmailConflict) {
-                        return res.status(400).json({ success: false, message: 'This email is already in use by another user.' });
-                    }
-                }
                 await db_1.default.User.findByIdAndUpdate(existingCO._id || existingCO.id, {
-                    $set: { firstName: data.name, mobile: data.mobile, email }
+                    $set: { firstName: data.name, mobile: data.mobile, email, username: coUsername }
                 });
                 await db_1.default.Staff.findOneAndUpdate({ userId: existingCO._id || existingCO.id }, {
                     $set: {
                         name: data.name,
                         email,
+                        username: coUsername,
                         mobile: data.mobile,
                         nismNumber: data.nismNumber,
                         nismValidity: data.nismValidity ? new Date(data.nismValidity) : null,
@@ -437,6 +431,7 @@ const saveProfileStep = async (req, res) => {
                 const newUser = await db_1.default.User.create({
                     tenantId,
                     roleId: coRole._id || coRole.id,
+                    username: coUsername,
                     email,
                     firstName: data.name,
                     lastName: '(CO)',
@@ -447,6 +442,7 @@ const saveProfileStep = async (req, res) => {
                 await db_1.default.Staff.create({
                     userId: newUser._id || newUser.id,
                     employeeId: 'EMP-CO-' + Math.floor(100 + Math.random() * 900),
+                    username: coUsername,
                     name: data.name,
                     email,
                     mobile: data.mobile,
@@ -487,11 +483,18 @@ const saveProfileStep = async (req, res) => {
 exports.saveProfileStep = saveProfileStep;
 const createStaff = async (req, res) => {
     const tenantId = req.user.tenantId;
-    const { name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
+    const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
     if (!tenantId) {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
     // VALIDATIONS
+    const cleanUsername = String(username || '').trim().toLowerCase();
+    if (!cleanUsername || cleanUsername.length < 3) {
+        return res.status(400).json({ success: false, message: 'Staff username is required and must be at least 3 characters.' });
+    }
+    if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+        return res.status(400).json({ success: false, message: 'Staff username can only contain letters, numbers, dots, hyphens, and underscores.' });
+    }
     if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
         return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
     }
@@ -542,9 +545,17 @@ const createStaff = async (req, res) => {
                 return res.status(400).json({ success: false, message: 'Duplicate NISM Certificate Number. This number is already in use.' });
             }
         }
-        const existingUser = await db_1.default.User.findOne({ email }).lean();
-        if (existingUser) {
-            return res.status(400).json({ success: false, message: 'User with this email already exists.' });
+        const existingUserWithUsername = await db_1.default.User.findOne({
+            username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+        }).lean();
+        if (existingUserWithUsername) {
+            return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose a different username.` });
+        }
+        const centralExisting = await db_1.centralModels.User.findOne({
+            username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+        }).lean().catch(() => null);
+        if (centralExisting) {
+            return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose a different username.` });
         }
         const targetRole = await db_1.default.Role.findOne({ name: effectiveRoleName }).lean();
         if (!targetRole) {
@@ -556,6 +567,7 @@ const createStaff = async (req, res) => {
         const user = await db_1.default.User.create({
             tenantId,
             roleId: targetRole._id || targetRole.id,
+            username: cleanUsername,
             firstName: name.split(' ')[0],
             lastName: name.split(' ').slice(1).join(' ') || 'Staff',
             email,
@@ -566,6 +578,7 @@ const createStaff = async (req, res) => {
         const staff = await db_1.default.Staff.create({
             userId: user._id || user.id,
             employeeId: 'EMP' + Math.floor(1000 + Math.random() * 900),
+            username: cleanUsername,
             name,
             email,
             mobile,
@@ -589,7 +602,7 @@ const createStaff = async (req, res) => {
             recipient: email,
             channel: 'EMAIL',
             title: 'Staff Account Created',
-            message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${email}, Password: ${randomPassword}`,
+            message: `Welcome ${name}! Your account has been created on RAGCP. Role: ${roleName}. Credentials: Username: ${cleanUsername}, Password: ${randomPassword}`,
             status: 'SENT'
         }).catch(() => { });
         // Write audit log
@@ -626,6 +639,7 @@ const createStaff = async (req, res) => {
             message: 'Staff created successfully',
             data: {
                 staff,
+                username: cleanUsername,
                 generatedPassword: randomPassword
             }
         });
@@ -654,12 +668,15 @@ const getStaff = async (req, res) => {
         const staffMembers = staffList.map((s) => {
             const user = userMap.get(String(s.userId));
             const pa = paMap.get(String(s._id || s.id));
+            const staffUsername = s.username || user?.username || (s.email ? s.email.split('@')[0] : null);
             return {
                 ...s,
                 id: String(s._id || s.id),
+                username: staffUsername,
                 user: user ? {
                     ...user,
                     id: String(user._id || user.id),
+                    username: user.username || staffUsername,
                     role: user.roleId
                 } : null,
                 personAssociated: pa || null
@@ -675,7 +692,7 @@ exports.getStaff = getStaff;
 const updateStaff = async (req, res) => {
     const tenantId = req.user.tenantId;
     const { id } = req.params;
-    const { name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
+    const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
     if (!tenantId) {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
@@ -763,20 +780,26 @@ const updateStaff = async (req, res) => {
         const updateUserData = {
             firstName: name.split(' ')[0],
             lastName: name.split(' ').slice(1).join(' ') || 'Staff',
+            email,
             mobile
         };
         if (targetRole) {
             updateUserData.roleId = targetRole._id || targetRole.id;
         }
         const targetUserId = staff.userId || staffUser?._id;
-        if (email && email !== staff.email) {
-            const emailExists = await db_1.default.User.findOne({
-                email,
+        if (username) {
+            const cleanUsername = String(username).trim().toLowerCase();
+            if (cleanUsername.length < 3 || !/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+                return res.status(400).json({ success: false, message: 'Username must be at least 3 characters and contain only letters, numbers, dots, hyphens, and underscores.' });
+            }
+            const existingWithUsername = await db_1.default.User.findOne({
+                username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
                 ...(targetUserId ? { _id: { $ne: targetUserId } } : {})
             }).lean();
-            if (emailExists)
-                throw new Error('Email already in use by another user.');
-            updateUserData.email = email;
+            if (existingWithUsername) {
+                return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose another.` });
+            }
+            updateUserData.username = cleanUsername;
         }
         if (targetUserId) {
             await db_1.default.User.findByIdAndUpdate(targetUserId, { $set: updateUserData });
@@ -789,6 +812,7 @@ const updateStaff = async (req, res) => {
             joiningDate: joiningDate ? new Date(joiningDate) : null,
             nismNumber,
             nismValidity: nismValidity ? new Date(nismValidity) : null,
+            ...(updateUserData.username ? { username: updateUserData.username } : {}),
             ...(targetUserId ? { userId: targetUserId } : {})
         };
         if (req.file) {
@@ -2337,7 +2361,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
+    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2508,6 +2532,14 @@ const updateTenantSettings = async (req, res) => {
         else if (dataToUpdate.smtpUser || oldTenant?.smtpUser) {
             dataToUpdate.smtpFrom = dataToUpdate.smtpUser || oldTenant?.smtpUser;
         }
+        if (ccInvoiceEnabled !== undefined)
+            dataToUpdate.ccInvoiceEnabled = ccInvoiceEnabled === 'true' || ccInvoiceEnabled === true;
+        if (ccInvoiceEmail !== undefined)
+            dataToUpdate.ccInvoiceEmail = ccInvoiceEmail ? ccInvoiceEmail.trim() : null;
+        if (ccAgreementEnabled !== undefined)
+            dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
+        if (ccAgreementEmail !== undefined)
+            dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
         if (kycFirst !== undefined)
             dataToUpdate.kycFirst = kycFirst === 'true' || kycFirst === true;
         if (welcomeEmailText !== undefined)
@@ -2553,7 +2585,11 @@ const updateTenantSettings = async (req, res) => {
                 smtpPort: dataToUpdate.smtpPort !== undefined ? dataToUpdate.smtpPort : (oldTenant?.smtpPort || 587),
                 smtpUser: dataToUpdate.smtpUser !== undefined ? dataToUpdate.smtpUser : oldTenant?.smtpUser,
                 smtpPassword: dataToUpdate.smtpPassword || oldTenant?.smtpPassword,
-                smtpFrom: dataToUpdate.smtpFrom || dataToUpdate.smtpUser || oldTenant?.smtpFrom || oldTenant?.smtpUser
+                smtpFrom: dataToUpdate.smtpFrom || dataToUpdate.smtpUser || oldTenant?.smtpFrom || oldTenant?.smtpUser,
+                ccInvoiceEnabled: dataToUpdate.ccInvoiceEnabled !== undefined ? dataToUpdate.ccInvoiceEnabled : oldTenant?.ccInvoiceEnabled,
+                ccInvoiceEmail: dataToUpdate.ccInvoiceEmail !== undefined ? dataToUpdate.ccInvoiceEmail : oldTenant?.ccInvoiceEmail,
+                ccAgreementEnabled: dataToUpdate.ccAgreementEnabled !== undefined ? dataToUpdate.ccAgreementEnabled : oldTenant?.ccAgreementEnabled,
+                ccAgreementEmail: dataToUpdate.ccAgreementEmail !== undefined ? dataToUpdate.ccAgreementEmail : oldTenant?.ccAgreementEmail
             };
             await db_1.default.SystemSetting.findOneAndUpdate({ key: 'GLOBAL_SMTP' }, { $set: { value: JSON.stringify(finalSmtpConfig) }, $setOnInsert: { key: 'GLOBAL_SMTP' } }, { upsert: true }).catch(() => { });
         }

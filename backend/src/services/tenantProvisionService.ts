@@ -39,6 +39,10 @@ export interface TenantProvisionData {
   smtpUser?: string | null;
   smtpPassword?: string | null;
   smtpFrom?: string | null;
+  ccInvoiceEnabled?: boolean;
+  ccInvoiceEmail?: string | null;
+  ccAgreementEnabled?: boolean;
+  ccAgreementEmail?: string | null;
   bankAccountName?: string | null;
   bankAccountNo?: string | null;
   bankAccountType?: string | null;
@@ -275,6 +279,10 @@ export async function provisionAllTenantCollections(
     smtpUser: tenantData.smtpUser || null,
     smtpPassword: tenantData.smtpPassword || null,
     smtpFrom: tenantData.smtpFrom || null,
+    ccInvoiceEnabled: tenantData.ccInvoiceEnabled !== undefined ? Boolean(tenantData.ccInvoiceEnabled) : false,
+    ccInvoiceEmail: tenantData.ccInvoiceEmail || null,
+    ccAgreementEnabled: tenantData.ccAgreementEnabled !== undefined ? Boolean(tenantData.ccAgreementEnabled) : false,
+    ccAgreementEmail: tenantData.ccAgreementEmail || null,
     bankAccountName: tenantData.bankAccountName || null,
     bankAccountNo: tenantData.bankAccountNo || null,
     bankAccountType: tenantData.bankAccountType || null,
@@ -730,6 +738,10 @@ export async function syncTenantDedicatedMongoDirect(
       smtpUser: tenantData.smtpUser || null,
       smtpPassword: tenantData.smtpPassword || null,
       smtpFrom: tenantData.smtpFrom || null,
+      ccInvoiceEnabled: tenantData.ccInvoiceEnabled !== undefined ? Boolean(tenantData.ccInvoiceEnabled) : false,
+      ccInvoiceEmail: tenantData.ccInvoiceEmail || null,
+      ccAgreementEnabled: tenantData.ccAgreementEnabled !== undefined ? Boolean(tenantData.ccAgreementEnabled) : false,
+      ccAgreementEmail: tenantData.ccAgreementEmail || null,
       bankAccountName: tenantData.bankAccountName || null,
       bankAccountNo: tenantData.bankAccountNo || null,
       bankAccountType: tenantData.bankAccountType || null,

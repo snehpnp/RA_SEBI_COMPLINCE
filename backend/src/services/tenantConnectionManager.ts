@@ -60,7 +60,7 @@ centralConnection.on('open', async () => {
     if (userCol) {
       const userIdxs = await userCol.indexes();
       for (const idx of userIdxs) {
-        if (idx.key && idx.key.email && idx.unique && idx.name !== '_id_') {
+        if (idx.key && idx.key.email && idx.unique && idx.name && idx.name !== '_id_') {
           await userCol.dropIndex(idx.name).catch(() => {});
         }
       }

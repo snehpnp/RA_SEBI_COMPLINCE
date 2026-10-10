@@ -174,6 +174,10 @@ async function provisionAllTenantCollections(targetModels, tenantData, adminUser
         smtpUser: tenantData.smtpUser || null,
         smtpPassword: tenantData.smtpPassword || null,
         smtpFrom: tenantData.smtpFrom || null,
+        ccInvoiceEnabled: tenantData.ccInvoiceEnabled !== undefined ? Boolean(tenantData.ccInvoiceEnabled) : false,
+        ccInvoiceEmail: tenantData.ccInvoiceEmail || null,
+        ccAgreementEnabled: tenantData.ccAgreementEnabled !== undefined ? Boolean(tenantData.ccAgreementEnabled) : false,
+        ccAgreementEmail: tenantData.ccAgreementEmail || null,
         bankAccountName: tenantData.bankAccountName || null,
         bankAccountNo: tenantData.bankAccountNo || null,
         bankAccountType: tenantData.bankAccountType || null,
@@ -245,9 +249,11 @@ async function provisionAllTenantCollections(targetModels, tenantData, adminUser
     const effectiveStatus = targetTenant.status === 'SUSPENDED'
         ? 'SUSPENDED'
         : (targetTenant.status === 'DELETED' ? 'DELETED' : (adminUserData.status || 'ACTIVE'));
+    const adminUsername = (adminUserData.username || adminEmail.split('@')[0] || 'admin').toLowerCase().replace(/[^a-z0-9_.-]/g, '');
     const userPayload = {
         tenantId,
         roleId: adminRoleId,
+        username: adminUsername,
         firstName: adminUserData.firstName || targetTenant.companyName,
         lastName: adminUserData.lastName || 'Admin',
         email: adminEmail,
@@ -271,6 +277,7 @@ async function provisionAllTenantCollections(targetModels, tenantData, adminUser
             $set: {
                 tenantId,
                 userId: adminUserId,
+                username: adminUsername,
                 name: adminFullName,
                 email: adminEmail,
                 mobile: createdAdminUser.mobile || targetTenant.mobile || 'N/A',
@@ -551,6 +558,10 @@ async function syncTenantDedicatedMongoDirect(mongoDbUrl, tenantData, adminUserD
             smtpUser: tenantData.smtpUser || null,
             smtpPassword: tenantData.smtpPassword || null,
             smtpFrom: tenantData.smtpFrom || null,
+            ccInvoiceEnabled: tenantData.ccInvoiceEnabled !== undefined ? Boolean(tenantData.ccInvoiceEnabled) : false,
+            ccInvoiceEmail: tenantData.ccInvoiceEmail || null,
+            ccAgreementEnabled: tenantData.ccAgreementEnabled !== undefined ? Boolean(tenantData.ccAgreementEnabled) : false,
+            ccAgreementEmail: tenantData.ccAgreementEmail || null,
             bankAccountName: tenantData.bankAccountName || null,
             bankAccountNo: tenantData.bankAccountNo || null,
             bankAccountType: tenantData.bankAccountType || null,

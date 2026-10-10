@@ -43,7 +43,8 @@ exports.AgreementSchema = new mongoose_1.Schema({
     esignMode: { type: String, default: 'MOCK_AADHAAR' },
     signedAt: { type: Date, default: Date.now },
     ipAddress: { type: String, default: null },
-    status: { type: String, default: 'SIGNED' }
+    status: { type: String, default: 'SIGNED' },
+    digioDocumentId: { type: String, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Agreement' });
 exports.AgreementSchema.virtual('client', {
     ref: 'Client',

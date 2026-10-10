@@ -67,18 +67,26 @@ const maskMobile = (mobile) => {
     return digits.length > 4 ? digits.substring(0, 2) + '*'.repeat(digits.length - 4) + digits.substring(digits.length - 2) : '******';
 };
 const login = async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const rawIdentifier = req.body.username || req.body.email || req.body.identifier;
+    const { password } = req.body;
+    if (!rawIdentifier || !password) {
         return res.status(400).json({
             success: false,
-            message: 'Email and password are required',
+            message: 'Username/Email and password are required',
             errors: ['Missing fields']
         });
     }
     try {
-        const cleanEmail = String(email || '').toLowerCase().trim();
-        const emailQuery = { email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
-        let user = await db_1.User.findOne(emailQuery)
+        const cleanId = String(rawIdentifier || '').toLowerCase().trim();
+        const regexId = new RegExp(`^${cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const userQuery = {
+            $or: [
+                { username: { $regex: regexId } },
+                { email: { $regex: regexId } },
+                { employeeCode: { $regex: regexId } }
+            ]
+        };
+        let user = await db_1.User.findOne(userQuery)
             .populate({
             path: 'role',
             populate: {
@@ -90,12 +98,22 @@ const login = async (req, res) => {
             .lean();
         // Fallback: If user wasn't found in current context (e.g. portal login without domain header), locate tenant
         if (!user) {
-            const tenantMatch = (await tenantConnectionManager_1.centralModels.AllCompany.findOne(emailQuery).lean().catch(() => null)) ||
-                (await tenantConnectionManager_1.centralModels.Tenant.findOne(emailQuery).lean().catch(() => null));
+            const tenantMatch = (await tenantConnectionManager_1.centralModels.AllCompany.findOne({
+                $or: [
+                    { email: { $regex: regexId } },
+                    { domainUrl: { $regex: regexId } }
+                ]
+            }).lean().catch(() => null)) ||
+                (await tenantConnectionManager_1.centralModels.Tenant.findOne({
+                    $or: [
+                        { email: { $regex: regexId } },
+                        { domainUrl: { $regex: regexId } }
+                    ]
+                }).lean().catch(() => null));
             if (tenantMatch) {
                 const resolved = await tenantConnectionManager_2.default.getTenantConnection(tenantMatch.tenantId || tenantMatch._id || tenantMatch.id);
                 if (resolved) {
-                    user = await resolved.models.User.findOne(emailQuery)
+                    user = await resolved.models.User.findOne(userQuery)
                         .populate({
                         path: 'role',
                         populate: {
@@ -106,6 +124,19 @@ const login = async (req, res) => {
                         .populate('tenant')
                         .lean();
                 }
+            }
+            // Also try central User directly
+            if (!user) {
+                user = await tenantConnectionManager_1.centralModels.User.findOne(userQuery)
+                    .populate({
+                    path: 'role',
+                    populate: {
+                        path: 'permissions',
+                        populate: { path: 'permission' }
+                    }
+                })
+                    .populate('tenant')
+                    .lean().catch(() => null);
             }
         }
         // if (!user || user.deletedAt || user.status === 'DELETED') {
@@ -186,7 +217,7 @@ const login = async (req, res) => {
         let tenantInfo = user?.tenant;
         if (!tenantInfo && activeTenantId) {
             try {
-                tenantInfo = await dynamicDb.Tenant.findById(activeTenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
+                tenantInfo = await tenantConnectionManager_1.centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
             }
             catch { }
         }
@@ -264,7 +295,7 @@ const login = async (req, res) => {
                 }
             }
             const effectiveChannel = smsDispatched && emailDispatched ? 'BOTH' : (smsDispatched ? 'SMS' : 'EMAIL');
-            await db_1.EmailVerification.findOneAndUpdate({ email: cleanEmail }, {
+            await db_1.EmailVerification.findOneAndUpdate({ email: user.email }, {
                 otp: emailOtp,
                 smsOtp: (effectiveChannel === 'BOTH' || effectiveChannel === 'SMS') ? smsOtp : null,
                 emailVerified: false,
@@ -355,6 +386,7 @@ const login = async (req, res) => {
                     id: userId,
                     firstName: user.firstName,
                     lastName: user.lastName,
+                    username: user.username || (user.email ? user.email.split('@')[0] : null),
                     email: user.email,
                     role: user.role?.name,
                     allowMultiDeviceLogin: user.role?.allowMultiDeviceLogin || false,
@@ -419,19 +451,28 @@ const refreshToken = async (req, res) => {
 };
 exports.refreshToken = refreshToken;
 const forgotPassword = async (req, res) => {
-    const { email } = req.body;
-    if (!email) {
-        return res.status(400).json({ success: false, message: 'Email is required' });
+    const rawIdentifier = req.body.username || req.body.email || req.body.identifier;
+    if (!rawIdentifier) {
+        return res.status(400).json({ success: false, message: 'Username or Email is required' });
     }
     try {
-        const cleanEmail = String(email || '').toLowerCase().trim();
-        const user = await db_1.User.findOne({
-            email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
-        }).populate('role').lean();
+        const cleanId = String(rawIdentifier || '').toLowerCase().trim();
+        const regexId = new RegExp(`^${cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const userQuery = {
+            $or: [
+                { username: { $regex: regexId } },
+                { email: { $regex: regexId } },
+                { employeeCode: { $regex: regexId } }
+            ]
+        };
+        let user = await db_1.User.findOne(userQuery).populate('role').populate('tenant').lean();
+        if (!user) {
+            user = await tenantConnectionManager_1.centralModels.User.findOne(userQuery).populate('role').populate('tenant').lean().catch(() => null);
+        }
         if (!user || user.deletedAt || user.status === 'DELETED') {
             return res.status(404).json({
                 success: false,
-                message: 'No account found with this email address. Please check your email or create a new account.'
+                message: 'No account found matching this username or email address. Please verify your details.'
             });
         }
         const newPassword = 'Temp@' + Math.floor(100000 + Math.random() * 900000);
@@ -443,28 +484,39 @@ const forgotPassword = async (req, res) => {
             currentSessionId: null,
             sessionExpiresAt: null
         });
+        if (tenantConnectionManager_1.centralModels.User) {
+            await tenantConnectionManager_1.centralModels.User.findByIdAndUpdate(user._id || user.id, {
+                passwordHash,
+                $inc: { tokenVersion: 1 },
+                currentSessionId: null,
+                sessionExpiresAt: null
+            }).catch(() => { });
+        }
         const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
-        const tenant = user.tenantId ? await db_1.Tenant.findById(user.tenantId).lean() : null;
+        const tenant = user.tenantId ? (await db_1.Tenant.findById(user.tenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(user.tenantId).lean().catch(() => null)) : null;
         const userName = user.firstName + (user.lastName ? ' ' + user.lastName : '');
-        await (0, emailService_1.sendForgotPasswordEmail)({
-            tenantId: user.tenantId ? user.tenantId.toString() : null,
-            toEmail: cleanEmail,
-            name: userName,
-            newPassword,
-            loginUrl,
-            companyName: tenant?.companyName || 'RAGCP Platform'
-        });
-        await db_1.NotificationLog.create({
-            tenantId: user.tenantId || null,
-            recipient: cleanEmail,
-            channel: 'EMAIL',
-            title: 'Password Reset',
-            message: `New temporary password sent to ${cleanEmail}`,
-            status: 'SENT'
-        });
+        const userEmail = user.email;
+        if (userEmail) {
+            await (0, emailService_1.sendForgotPasswordEmail)({
+                tenantId: user.tenantId ? user.tenantId.toString() : null,
+                toEmail: userEmail,
+                name: userName,
+                newPassword,
+                loginUrl,
+                companyName: tenant?.companyName || 'RAGCP Platform'
+            });
+            await db_1.NotificationLog.create({
+                tenantId: user.tenantId || null,
+                recipient: userEmail,
+                channel: 'EMAIL',
+                title: 'Password Reset',
+                message: `New temporary password sent for account ${user.username || userEmail}`,
+                status: 'SENT'
+            }).catch(() => { });
+        }
         return res.status(200).json({
             success: true,
-            message: 'A temporary password has been sent to your registered email address.'
+            message: `A temporary password has been sent to your registered email address (${maskEmail(userEmail)}).`
         });
     }
     catch (error) {
@@ -577,13 +629,13 @@ const getMe = async (req, res) => {
         let tenantInfo = user.tenant;
         if (!tenantInfo && user.tenantId) {
             try {
-                tenantInfo = await dynamicDb.Tenant.findById(user.tenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(user.tenantId).lean().catch(() => null);
+                tenantInfo = await tenantConnectionManager_1.centralModels.Tenant.findById(user.tenantId).lean().catch(() => null);
             }
             catch { }
         }
         if (!tenantInfo && user.role?.name !== 'SUPER_ADMIN') {
             try {
-                tenantInfo = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean().catch(() => null);
+                tenantInfo = await tenantConnectionManager_1.centralModels.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean().catch(() => null);
             }
             catch { }
         }
@@ -594,6 +646,7 @@ const getMe = async (req, res) => {
                     id: userId,
                     firstName: user.firstName,
                     lastName: user.lastName,
+                    username: user.username || (user.email ? user.email.split('@')[0] : null),
                     email: user.email,
                     mobile: user.mobile,
                     role: user.role?.name,
@@ -952,13 +1005,13 @@ const verify2FALogin = async (req, res) => {
         let tenantInfo = user.tenant;
         if (!tenantInfo && activeTenantId) {
             try {
-                tenantInfo = await dynamicDb.Tenant.findById(activeTenantId).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
+                tenantInfo = await tenantConnectionManager_1.centralModels.Tenant.findById(activeTenantId).lean().catch(() => null);
             }
             catch { }
         }
         if (!tenantInfo && user?.role?.name !== 'SUPER_ADMIN') {
             try {
-                tenantInfo = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean().catch(() => null);
+                tenantInfo = await tenantConnectionManager_1.centralModels.Tenant.findOne({ deletedAt: null }).lean().catch(() => null) || await tenantConnectionManager_1.centralModels.Tenant.findOne().lean().catch(() => null);
             }
             catch { }
         }
@@ -1104,10 +1157,12 @@ const requestLoginOtp = async (req, res) => {
     try {
         const { identifier } = req.body;
         if (!identifier) {
-            return res.status(400).json({ success: false, message: 'Email or Mobile number is required.' });
+            return res.status(400).json({ success: false, message: 'Username, Email or Mobile number is required.' });
         }
         const cleanInput = String(identifier).trim();
         const isEmail = cleanInput.includes('@');
+        const digits = cleanInput.replace(/\D/g, '');
+        const isMobile = !isEmail && digits.length === 10;
         let user = null;
         if (isEmail) {
             const cleanEmail = cleanInput.toLowerCase();
@@ -1115,17 +1170,21 @@ const requestLoginOtp = async (req, res) => {
                 email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
             }).populate('role').populate('tenant').lean();
         }
-        else {
-            const digits = cleanInput.replace(/\D/g, '');
+        else if (isMobile) {
             const mobile10 = digits.slice(-10);
             user = await db_1.User.findOne({
                 mobile: { $regex: new RegExp(`${mobile10}$`) }
             }).populate('role').populate('tenant').lean();
         }
+        else {
+            user = await db_1.User.findOne({
+                username: { $regex: new RegExp(`^${cleanInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+            }).populate('role').populate('tenant').lean();
+        }
         if (!user) {
             return res.status(404).json({
                 success: false,
-                message: 'No registered account found with this ' + (isEmail ? 'email address.' : 'mobile number.')
+                message: 'No registered account found matching identifier.'
             });
         }
         if (user.status !== 'ACTIVE' && user.status !== 'active') {
@@ -1233,6 +1292,8 @@ const loginWithOtp = async (req, res) => {
         }
         const cleanInput = String(identifier).trim();
         const isEmail = cleanInput.includes('@');
+        const digits = cleanInput.replace(/\D/g, '');
+        const isMobile = !isEmail && digits.length === 10;
         let user = null;
         if (isEmail) {
             const cleanEmail = cleanInput.toLowerCase();
@@ -1246,11 +1307,21 @@ const loginWithOtp = async (req, res) => {
                 }
             }).populate('tenant').lean();
         }
-        else {
-            const digits = cleanInput.replace(/\D/g, '');
+        else if (isMobile) {
             const mobile10 = digits.slice(-10);
             user = await db_1.User.findOne({
                 mobile: { $regex: new RegExp(`${mobile10}$`) }
+            }).populate({
+                path: 'role',
+                populate: {
+                    path: 'permissions',
+                    populate: { path: 'permission' }
+                }
+            }).populate('tenant').lean();
+        }
+        else {
+            user = await db_1.User.findOne({
+                username: { $regex: new RegExp(`^${cleanInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
             }).populate({
                 path: 'role',
                 populate: {

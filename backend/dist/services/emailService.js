@@ -38,6 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendComplaintNotificationEmail = exports.sendAccountDeactivatedEmail = exports.sendAccountActivatedEmail = void 0;
 exports.resolveSmtpCredentials = resolveSmtpCredentials;
+exports.resolveTenantDoc = resolveTenantDoc;
 exports.sendEmail = sendEmail;
 exports.sendOtpEmail = sendOtpEmail;
 exports.sendTwoFactorLoginOtpEmail = sendTwoFactorLoginOtpEmail;
@@ -46,6 +47,7 @@ exports.sendForgotPasswordEmail = sendForgotPasswordEmail;
 exports.sendTestEmail = sendTestEmail;
 exports.sendSignedAgreementEmail = sendSignedAgreementEmail;
 exports.sendTaxInvoiceEmail = sendTaxInvoiceEmail;
+const mongoose_1 = __importDefault(require("mongoose"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const db_1 = __importStar(require("../config/db"));
 const pdfService_1 = require("./pdfService");
@@ -215,9 +217,71 @@ async function resolveSmtpCredentials(tenantId) {
     return null;
 }
 /**
+ * Helper to fetch tenant document from DB or central models
+ */
+async function resolveTenantDoc(tenantId) {
+    let tenantDoc = null;
+    if (tenantId) {
+        try {
+            if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                tenantDoc = await db_1.default.Tenant.findById(tenantId).lean();
+            }
+        }
+        catch { }
+        if (!tenantDoc) {
+            try {
+                tenantDoc = await db_1.default.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                    tenantDoc = await db_1.centralModels.Tenant.findById(tenantId).lean();
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                tenantDoc = await db_1.centralModels.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                tenantDoc = await db_1.centralModels.AllCompany.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            catch { }
+        }
+    }
+    if (!tenantDoc) {
+        try {
+            tenantDoc = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        catch { }
+    }
+    if (!tenantDoc) {
+        try {
+            const setting = await db_1.default.SystemSetting.findOne({ key: 'GLOBAL_SMTP' }).lean();
+            if (setting?.value) {
+                tenantDoc = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+            }
+        }
+        catch { }
+    }
+    return tenantDoc;
+}
+/**
  * Generic email sender using resolved SMTP settings from Database.
  */
-async function sendEmail(tenantId, to, subject, html, attachments) {
+async function sendEmail(tenantId, to, subject, html, attachments, cc) {
     try {
         const smtp = await resolveSmtpCredentials(tenantId);
         if (!smtp) {
@@ -234,19 +298,24 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
             },
             tls: { rejectUnauthorized: false }
         });
-        await transporter.sendMail({
+        const mailOptions = {
             from: `"${smtp.fromName}" <${smtp.fromEmail}>`,
             to,
             subject,
             html,
             attachments
-        });
-        console.log(`[EMAIL] Email sent to ${to} using DB SMTP (${smtp.user} @ ${smtp.host}:${smtp.port})`);
+        };
+        if (cc && (typeof cc === 'string' ? cc.trim() : (Array.isArray(cc) && cc.length > 0))) {
+            mailOptions.cc = cc;
+            console.log(`[EMAIL] 📋 CC attached: ${Array.isArray(cc) ? cc.join(', ') : cc}`);
+        }
+        await transporter.sendMail(mailOptions);
+        console.log(`[EMAIL] Email sent to ${to}${mailOptions.cc ? ` (CC: ${mailOptions.cc})` : ''} using DB SMTP (${smtp.user} @ ${smtp.host}:${smtp.port})`);
         // Log to NotificationLog
         try {
             await db_1.NotificationLog.create({
                 tenantId: tenantId || null,
-                recipient: to,
+                recipient: mailOptions.cc ? `${to}, CC: ${mailOptions.cc}` : to,
                 channel: 'EMAIL',
                 title: subject,
                 message: html.replace(/<[^>]*>/g, '').slice(0, 500),
@@ -262,7 +331,7 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
             try {
                 await db_1.NotificationLog.create({
                     tenantId,
-                    recipient: to,
+                    recipient: cc ? `${to}, CC: ${cc}` : to,
                     channel: 'EMAIL',
                     title: subject,
                     message: `Failed: ${err.message}`,
@@ -601,6 +670,19 @@ exports.sendComplaintNotificationEmail = sendComplaintNotificationEmail;
  */
 async function sendSignedAgreementEmail(opts) {
     const { tenantId, toEmail, clientName, companyName, agreementUrl, pdfBuffer, maskedAadhaar, signedAt } = opts;
+    let cc = opts.ccEmail;
+    if (!cc) {
+        try {
+            const doc = await resolveTenantDoc(tenantId);
+            if (doc && (doc.ccAgreementEnabled === true || doc.ccAgreementEnabled === 'true') && doc.ccAgreementEmail && doc.ccAgreementEmail.trim()) {
+                cc = doc.ccAgreementEmail.trim();
+                console.log(`[EMAIL] 📄 Auto-resolved CC Agreement email: ${cc}`);
+            }
+        }
+        catch (e) {
+            console.warn('[EMAIL] Failed to resolve CC for signed agreement:', e?.message);
+        }
+    }
     const displayCompany = companyName || 'Research Analyst Services';
     const formattedDate = (signedAt || new Date()).toLocaleDateString('en-IN', {
         day: '2-digit',
@@ -727,13 +809,26 @@ async function sendSignedAgreementEmail(opts) {
   </table>
 </body>
 </html>`;
-    return sendEmail(tenantId, toEmail, subject, html, attachments);
+    return sendEmail(tenantId, toEmail, subject, html, attachments, cc);
 }
 /**
  * Send Official Tax Invoice PDF to Client
  */
 async function sendTaxInvoiceEmail(opts) {
     const { tenantId, toEmail, clientName, companyName, planName, invoiceNumber, amount, pdfBuffer } = opts;
+    let cc = opts.ccEmail;
+    if (!cc) {
+        try {
+            const doc = await resolveTenantDoc(tenantId);
+            if (doc && (doc.ccInvoiceEnabled === true || doc.ccInvoiceEnabled === 'true') && doc.ccInvoiceEmail && doc.ccInvoiceEmail.trim()) {
+                cc = doc.ccInvoiceEmail.trim();
+                console.log(`[EMAIL] 🧾 Auto-resolved CC Invoice email: ${cc}`);
+            }
+        }
+        catch (e) {
+            console.warn('[EMAIL] Failed to resolve CC for tax invoice:', e?.message);
+        }
+    }
     const displayCompany = companyName || 'Research Analyst Services';
     const displayPlan = planName || 'Research Service Plan';
     const displayInv = invoiceNumber || `INV-${Date.now()}`;
@@ -833,5 +928,5 @@ async function sendTaxInvoiceEmail(opts) {
   </table>
 </body>
 </html>`;
-    return sendEmail(tenantId, toEmail, subject, html, attachments);
+    return sendEmail(tenantId, toEmail, subject, html, attachments, cc);
 }

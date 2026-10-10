@@ -36,6 +36,10 @@ export interface ITenant extends Document {
   smtpUser?: string | null;
   smtpPassword?: string | null;
   smtpFrom?: string | null;
+  ccInvoiceEnabled?: boolean;
+  ccInvoiceEmail?: string | null;
+  ccAgreementEnabled?: boolean;
+  ccAgreementEmail?: string | null;
   bankAccountName?: string | null;
   bankAccountNo?: string | null;
   bankAccountType?: string | null;
@@ -130,6 +134,10 @@ export const TenantSchema = new Schema<ITenant>(
     smtpUser: { type: String, default: null },
     smtpPassword: { type: String, default: null },
     smtpFrom: { type: String, default: null },
+    ccInvoiceEnabled: { type: Boolean, default: false },
+    ccInvoiceEmail: { type: String, default: null },
+    ccAgreementEnabled: { type: Boolean, default: false },
+    ccAgreementEmail: { type: String, default: null },
     bankAccountName: { type: String, default: null },
     bankAccountNo: { type: String, default: null },
     bankAccountType: { type: String, default: null },
