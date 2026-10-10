@@ -575,15 +575,8 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
               Already have an account?{' '}
               <button
                 type="button"
-                onClick={(e) => {
-                  if (onFlip) {
-                    e.preventDefault();
-                    onFlip();
-                  } else {
-                    router.push('/login');
-                  }
-                }}
-                className="text-primary-600 dark:text-primary-400 font-bold hover:underline"
+                onClick={() => router.push('/login')}
+                className="text-primary-600 dark:text-primary-400 font-bold hover:underline cursor-pointer"
               >
                 Login here
               </button>

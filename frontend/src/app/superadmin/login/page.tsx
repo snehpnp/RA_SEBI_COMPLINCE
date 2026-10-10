@@ -8,7 +8,7 @@ export default function RedirectToLogin() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/login');
+    router.replace('/adminlogin');
   }, [router]);
 
   return (

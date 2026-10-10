@@ -23,7 +23,7 @@ function RedirectContent() {
   );
 }
 
-export default function AdminLoginRedirect() {
+export default function StaffLoginAlias() {
   return (
     <Suspense fallback={null}>
       <RedirectContent />

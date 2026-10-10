@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ShieldAlert, AlertTriangle, X, Key, Smartphone, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ShieldAlert, AlertTriangle, X, Key, Smartphone, ArrowLeft, ArrowRight, CheckCircle2, User, UserCog } from 'lucide-react';
 import api from '../services/api';
 import { useBranding } from '@/contexts/BrandingContext';
 
@@ -20,7 +20,7 @@ export default function LoginForm({
   const searchParams = useSearchParams();
 
   const roleParam = defaultRole || searchParams?.get('role') || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('role') : null);
-  const isAdmin = Boolean(isAdminPortal || roleParam === 'admin' || (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')));
+  const isAdmin = Boolean(isAdminPortal || roleParam === 'admin' || (typeof window !== 'undefined' && (window.location.pathname.startsWith('/admin') || window.location.pathname.startsWith('/adminlogin') || window.location.pathname.startsWith('/staff'))));
 
   const [email, setEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -103,13 +103,7 @@ export default function LoginForm({
     }
 
     const roleParam = defaultRole || searchParams?.get('role') || (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('role') : null);
-    if (roleParam === 'super-admin') {
-      setEmail('superadmin@gmail.com');
-      setPassword('Admin@987');
-    } else if (roleParam === 'admin') {
-      setEmail('admin@gmail.com');
-      setPassword('12345678');
-    } else if (roleParam === 'client') {
+    if (roleParam === 'client') {
       setEmail('client@demomail.com');
       setPassword('Admin@12345');
     }
@@ -134,8 +128,21 @@ export default function LoginForm({
     setErrorType(null);
 
     const cleanInput = email.trim();
+    if (isAdmin && cleanInput.includes('@')) {
+      setError('Staff members must enter their assigned Username, not Email address.');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
-      const res = await api.login({ email: cleanInput, username: cleanInput, identifier: cleanInput, password });
+      const res = await api.login({
+        email: cleanInput,
+        username: cleanInput,
+        identifier: cleanInput,
+        password,
+        portalType: isAdmin ? 'STAFF' : 'CLIENT',
+        loginType: isAdmin ? 'STAFF' : 'CLIENT'
+      });
       if (res.requires2FA) {
         setIsSubmitting(false);
         setIs2FAStep(true);
@@ -157,6 +164,12 @@ export default function LoginForm({
 
       if (res.success) {
         const user = res.data.user;
+        if (!isAdmin && user.role !== 'CLIENT') {
+          setIsSubmitting(false);
+          setError('This login portal is exclusively for Clients. Staff members cannot log in with email from here. Please use the Staff portal (/adminlogin) to log in with your Username.');
+          return;
+        }
+
         if (isAdmin && user.role === 'CLIENT') {
           setIsSubmitting(false);
           setError('Access restricted: This portal is for Administrators and Staff only. Please use the Client Login.');
@@ -388,9 +401,9 @@ export default function LoginForm({
                 ? 'Mobile SMS Verification'
                 : 'Email Verification'
               : isForgotPassword
-              ? 'Reset Password'
+              ? (isAdmin ? 'Reset Staff Password' : 'Reset Password')
               : isAdmin
-              ? 'Admin & Staff Portal'
+              ? 'Staff & Management Portal'
               : 'Access Platform'}
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -403,9 +416,9 @@ export default function LoginForm({
                 ? 'Enter the 6-digit passcode sent to your mobile via SMS'
                 : 'Enter the 6-digit passcode sent to your email address'
               : isForgotPassword
-              ? (isAdmin ? 'Enter your staff username or registered email to reset password' : 'Enter your registered email to receive reset instructions')
+              ? (isAdmin ? 'Enter your staff username to receive temporary credentials' : 'Enter your registered email to receive reset instructions')
               : isAdmin
-              ? 'Enter your administrative credentials to sign in'
+              ? 'Sign in with your assigned Staff Username and password'
               : 'Enter your credentials to authenticate session'}
           </p>
         </div>
@@ -818,11 +831,11 @@ export default function LoginForm({
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                    {isAdmin ? 'Staff Username / Email' : 'Email Address'}
+                    {isAdmin ? 'Staff Username' : 'Email Address'}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                      <Mail className="h-4 w-4" />
+                      {isAdmin ? <User className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
                     </span>
                     <input
                       type="text"
@@ -830,7 +843,8 @@ export default function LoginForm({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
-                      placeholder={isAdmin ? "Enter your username or email" : "name@company.com"}
+                      placeholder={isAdmin ? "Enter staff username (e.g. sneha_ra)" : "name@company.com"}
+                      autoComplete={isAdmin ? "username" : "email"}
                     />
                   </div>
                 </div>
@@ -850,6 +864,7 @@ export default function LoginForm({
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 pl-10 pr-10 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
                       placeholder="••••••••"
+                      autoComplete="current-password"
                     />
                     <button
                       type="button"
@@ -872,52 +887,48 @@ export default function LoginForm({
                       <span>Authenticating...</span>
                     </>
                   ) : (
-                    <span>{isAdmin ? 'Sign In to Management Console' : 'Authenticate Session'}</span>
+                    <span>{isAdmin ? 'Sign In as Staff' : 'Authenticate Session'}</span>
                   )}
                 </button>
               </form>
             )}
 
-            <div className="pt-3 text-center space-y-2">
+            <div className="pt-3 text-center space-y-2.5">
               {loginMode === 'PASSWORD' && (
-                <button
-                  type="button"
-                  onClick={() => { setIsForgotPassword(true); setError(null); setForgotSuccess(null); }}
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 cursor-pointer"
-                >
-                  Forgot Password?
-                </button>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => { setIsForgotPassword(true); setError(null); setForgotSuccess(null); }}
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 cursor-pointer"
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
               )}
               {!isAdmin && (
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   Don&apos;t have an account?{' '}
                   <button
                     type="button"
-                    onClick={(e) => {
-                      if (onFlip) {
-                        e.preventDefault();
-                        onFlip();
-                      } else {
-                        router.push('/register');
-                      }
-                    }}
+                    onClick={() => router.push('/signup')}
                     className="text-blue-600 dark:text-blue-400 font-semibold hover:underline cursor-pointer"
                   >
                     Sign up here
                   </button>
                 </div>
               )}
+
             </div>
           </div>
         ) : (
           <form onSubmit={handleForgotPassword} className="space-y-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                {isAdmin ? 'Staff Username or Registered Email' : 'Registered Email Address'}
+                {isAdmin ? 'Staff Username' : 'Registered Email Address'}
               </label>
               <div className="relative">
                 <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
-                  <Mail className="h-4 w-4" />
+                  {isAdmin ? <User className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
                 </span>
                 <input
                   type="text"
@@ -925,16 +936,21 @@ export default function LoginForm({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
-                  placeholder={isAdmin ? "Enter your username or email" : "name@company.com"}
+                  placeholder={isAdmin ? "Enter your staff username" : "name@company.com"}
                 />
               </div>
+              {isAdmin && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
+                  A temporary password will be sent to the registered email address linked to this staff username.
+                </p>
+              )}
             </div>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm transition cursor-pointer"
+              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-sm transition cursor-pointer shadow-md shadow-blue-500/20"
             >
-              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Send Reset Link'}
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : (isAdmin ? 'Send Temporary Password' : 'Send Reset Link')}
             </button>
             <div className="text-center pt-2">
               <button
