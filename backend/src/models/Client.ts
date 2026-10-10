@@ -27,7 +27,10 @@ export interface IClient extends Document {
   kycStatus?: string | null;
   agreementSigned?: boolean;
   kraVerified: boolean;
+  kraStatus?: string | null;
   digilockerData?: any;
+  camsKraData?: any;
+  camsKraPdfUrl?: string | null;
   signatureUrl?: string | null;
   signedAt?: Date | null;
   createdById?: Types.ObjectId | null;
@@ -60,7 +63,10 @@ export const ClientSchema = new Schema<IClient>(
     kycStatus: { type: String, default: 'PENDING' },
     agreementSigned: { type: Boolean, default: false },
     kraVerified: { type: Boolean, default: false },
+    kraStatus: { type: String, default: null },
     digilockerData: { type: Schema.Types.Mixed, default: null },
+    camsKraData: { type: Schema.Types.Mixed, default: null },
+    camsKraPdfUrl: { type: String, default: null },
     signatureUrl: { type: String, default: null },
     signedAt: { type: Date, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null }

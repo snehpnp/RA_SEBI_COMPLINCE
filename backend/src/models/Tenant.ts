@@ -55,6 +55,11 @@ export interface ITenant extends Document {
   kraProvider?: string | null;
   kraApiKey?: string | null;
   kraApiSecret?: string | null;
+  camsClientCode?: string | null;
+  camsClientId?: string | null;
+  camsClientSecret?: string | null;
+  camsPoscode?: string | null;
+  camsStatus?: string | null;
   coSignatureUrl?: string | null;
   activePaymentGateway?: string | null;
   paymentGatewayEnabled?: boolean;
@@ -153,6 +158,11 @@ export const TenantSchema = new Schema<ITenant>(
     kraProvider: { type: String, default: null },
     kraApiKey: { type: String, default: null },
     kraApiSecret: { type: String, default: null },
+    camsClientCode: { type: String, default: null },
+    camsClientId: { type: String, default: null },
+    camsClientSecret: { type: String, default: null },
+    camsPoscode: { type: String, default: null },
+    camsStatus: { type: String, default: '1' },
     coSignatureUrl: { type: String, default: null },
     activePaymentGateway: { type: String, default: 'RAZORPAY' },
     paymentGatewayEnabled: { type: Boolean, default: true },

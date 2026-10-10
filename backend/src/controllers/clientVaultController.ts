@@ -714,9 +714,22 @@ export const getClientVaultDetails = async (req: AuthenticatedRequest, res: Resp
       kycDocuments: {
         key: '05_KYC_Documents',
         title: '05. KYC Documents & Identity Proofs',
-        description: 'PAN Card, Aadhaar, DigiLocker Verification Dossier',
-        fileCount: documents.length,
-        data: documents
+        description: 'PAN Card, Aadhaar, DigiLocker Verification Dossier, SEBI CAMS KRA PDF',
+        fileCount: (documents || []).length + ((client.camsKraData || client.camsKraPdfUrl) && !(documents || []).some((d: any) => d.docType === 'CAMS_KRA_KYC_REPORT') ? 1 : 0),
+        data: ((client.camsKraData || client.camsKraPdfUrl) && !(documents || []).some((d: any) => d.docType === 'CAMS_KRA_KYC_REPORT'))
+          ? [
+              {
+                _id: 'cams-kra-doc-' + client._id,
+                clientId: client._id,
+                docType: 'CAMS_KRA_KYC_REPORT',
+                fileName: `CAMS_KRA_KYC_${client.pan || 'REPORT'}.pdf`,
+                fileUrl: client.camsKraPdfUrl || `/api/v1/admin/cams-kra/pdf/${client._id}`,
+                status: 'VERIFIED',
+                uploadedAt: client.updatedAt || new Date()
+              },
+              ...(documents || [])
+            ]
+          : (documents || [])
       },
       agreements: {
         key: '06_Signed_Agreements',

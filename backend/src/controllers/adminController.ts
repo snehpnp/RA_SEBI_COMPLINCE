@@ -15,6 +15,7 @@ import { resolveAttachmentFilePath, generateTermsAndConditionsPdf, generatePriva
 import axios from 'axios';
 import { sendSms, ensureDefaultSmsTemplates } from '../services/smsService';
 import { testDigioConnection } from '../services/digioService';
+import { getCamsCredentials, getCamsToken } from '../services/camsKraService';
 import { logActivity } from '../services/activityService';
 
 const maskEmail = (email: string | null | undefined) => {
@@ -2559,6 +2560,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail,
     bankAccountName, bankAccountNo, bankAccountType, bankIfsc,
     bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment,
+    camsClientCode, camsClientId, camsClientSecret, camsPoscode,
     agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret,
     activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey,
     ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey,
@@ -2658,6 +2660,10 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (digioClientSecret !== undefined) dataToUpdate.digioClientSecret = digioClientSecret;
     if (digioKycTemplateName !== undefined) dataToUpdate.digioKycTemplateName = digioKycTemplateName;
     if (digioEnvironment !== undefined) dataToUpdate.digioEnvironment = digioEnvironment;
+    if (camsClientCode !== undefined) dataToUpdate.camsClientCode = camsClientCode ? camsClientCode.trim() : null;
+    if (camsClientId !== undefined) dataToUpdate.camsClientId = camsClientId ? camsClientId.trim() : null;
+    if (camsClientSecret !== undefined && camsClientSecret.trim() !== '') dataToUpdate.camsClientSecret = camsClientSecret.trim();
+    if (camsPoscode !== undefined) dataToUpdate.camsPoscode = camsPoscode ? camsPoscode.trim() : null;
     if (agreementContent !== undefined) dataToUpdate.agreementContent = agreementContent;
     if (kraProvider !== undefined) dataToUpdate.kraProvider = kraProvider;
     if (kraApiKey !== undefined) dataToUpdate.kraApiKey = kraApiKey;
@@ -4598,6 +4604,60 @@ export const testDigioConfig = async (req: AuthenticatedRequest, res: Response) 
     });
   }
 };
+
+export const testCamsKraConfig = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { camsClientCode, camsClientId, camsClientSecret, camsPoscode } = req.body;
+    const tenantId = req.user?.tenantId;
+    const creds = await getCamsCredentials(tenantId, {
+      camsClientCode,
+      camsClientId,
+      camsClientSecret,
+      camsPoscode
+    });
+
+    if (!creds.camsClientCode || !creds.camsClientId || !creds.camsClientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'CAMS Client Code, Client ID, and Client Secret are required.'
+      });
+    }
+
+    if (creds.camsClientId.trim() === creds.camsClientSecret.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'CAMS Client ID aur Client Secret same nahi ho sakte! CAMS KRA me Client Secret (Password) alag hota hai. Isi wajah se CAMS server "No data found." return karta hai. Kripya apna sahi CAMS Client Secret dalein.'
+      });
+    }
+
+    const testRes = await getCamsToken(creds);
+    if (!testRes.success) {
+      const errorMsg = testRes.message === 'No data found.'
+        ? 'CAMS KRA server error: "No data found." Kripya check karein: Client Code (STOCKLIV), Client ID aur Client Secret sahi hain ya nahi (Client Secret aur Client ID alag hone chahiye).'
+        : (testRes.message || 'CAMS KRA Authentication Failed');
+
+      return res.status(400).json({
+        success: false,
+        message: errorMsg,
+        data: testRes.data
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'CAMS KRA Authentication Token generated successfully!',
+      tokenPreview: testRes.token ? (testRes.token.slice(0, 8) + '...' + testRes.token.slice(-6)) : '',
+      data: testRes.data
+    });
+  } catch (err: any) {
+    console.error('Error testing CAMS KRA credentials:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Error communicating with CAMS KRA API'
+    });
+  }
+};
+
 
 /**
  * Send or Resend Official Tax Invoice PDF via Email to Client

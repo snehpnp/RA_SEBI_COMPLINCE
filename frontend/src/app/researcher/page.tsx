@@ -5905,11 +5905,11 @@ function AdminDashboardContent() {
                                             <td className="py-4 px-5">
                                               <div className="flex flex-col gap-1.5 items-start">
                                                 {/* KRA Status Badge */}
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.kraVerified
+                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${(cl.kraVerified && (cl.camsKraData || cl.kraStatus))
                                                   ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
                                                   : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
                                                   }`}>
-                                                  KRA: {cl.kraVerified ? 'VERIFIED' : 'PENDING'}
+                                                  KRA: {(cl.kraVerified && (cl.camsKraData || cl.kraStatus)) ? 'VERIFIED' : 'PENDING'}
                                                 </span>
                                                 {/* eSign Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')

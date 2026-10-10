@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon } from 'lucide-react';
+import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -1095,6 +1095,24 @@ function AdminDashboardContent() {
   const [fetchDigioError, setFetchDigioError] = useState('');
   const [fetchDigioSaveMode, setFetchDigioSaveMode] = useState(false);
   const [showDigioConfirmPopup, setShowDigioConfirmPopup] = useState(false);
+
+  // CAMS KRA Settings & Test
+  const [camsClientCode, setCamsClientCode] = useState('');
+  const [camsClientId, setCamsClientId] = useState('');
+  const [camsClientSecret, setCamsClientSecret] = useState('');
+  const [camsPoscode, setCamsPoscode] = useState('');
+  const [testingCams, setTestingCams] = useState(false);
+  const [camsTestResult, setCamsTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // CAMS KRA Fetch states (admin client KYC panel)
+  const [camsPanInput, setCamsPanInput] = useState('');
+  const [camsDobInput, setCamsDobInput] = useState('');
+  const [fetchCamsLoading, setFetchCamsLoading] = useState(false);
+  const [fetchCamsResult, setFetchCamsResult] = useState<any>(null);
+  const [fetchCamsError, setFetchCamsError] = useState('');
+  const [fetchCamsSaveMode, setFetchCamsSaveMode] = useState(false);
+  const [showRawCamsJson, setShowRawCamsJson] = useState(false);
+  const [camsEditMode, setCamsEditMode] = useState(false);
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -1543,6 +1561,10 @@ function AdminDashboardContent() {
               if (t.digioClientSecret) setDigioClientSecret(t.digioClientSecret);
               if (t.digioKycTemplateName) setDigioKycTemplateName(t.digioKycTemplateName);
               if (t.digioEnvironment) setDigioEnvironment(t.digioEnvironment);
+              if (t.camsClientCode) setCamsClientCode(t.camsClientCode);
+              if (t.camsClientId) setCamsClientId(t.camsClientId);
+              if (t.camsClientSecret) setCamsClientSecret(t.camsClientSecret);
+              if (t.camsPoscode) setCamsPoscode(t.camsPoscode);
               if (t.activePaymentGateway) setActivePaymentGateway(t.activePaymentGateway);
               if (t.razorpayKeyId) setRazorpayKeyId(t.razorpayKeyId);
               if (t.razorpayKeySecret) setRazorpayKeySecret(t.razorpayKeySecret);
@@ -2035,6 +2057,22 @@ function AdminDashboardContent() {
 
   const [showMobilePreview, setShowMobilePreview] = useState<boolean>(false);
   useEffect(() => {
+    if (selectedClient) {
+      const p = selectedClient.pan?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.pan || '';
+      setCamsPanInput(p);
+      let d = '';
+      if (selectedClient.dob) {
+        if (typeof selectedClient.dob === 'string') {
+          d = selectedClient.dob.split('T')[0];
+        } else if (selectedClient.dob instanceof Date) {
+          d = selectedClient.dob.toISOString().split('T')[0];
+        }
+      }
+      setCamsDobInput(d);
+      setFetchCamsResult(null);
+      setFetchCamsError('');
+      setCamsEditMode(false);
+    }
     if (selectedClient && selectedClient.id) {
       api.getClientCommunicationsAdmin(selectedClient.id)
         .then(res => setClientCommunications(res.data || []))
@@ -2129,6 +2167,10 @@ function AdminDashboardContent() {
       if (digioClientSecret) formData.append('digioClientSecret', digioClientSecret);
       if (digioKycTemplateName) formData.append('digioKycTemplateName', digioKycTemplateName);
       if (digioEnvironment) formData.append('digioEnvironment', digioEnvironment);
+      if (camsClientCode) formData.append('camsClientCode', camsClientCode);
+      if (camsClientId) formData.append('camsClientId', camsClientId);
+      if (camsClientSecret) formData.append('camsClientSecret', camsClientSecret);
+      if (camsPoscode) formData.append('camsPoscode', camsPoscode);
       if (activePaymentGateway) formData.append('activePaymentGateway', activePaymentGateway);
       if (razorpayKeyId) formData.append('razorpayKeyId', razorpayKeyId);
       if (razorpayKeySecret) formData.append('razorpayKeySecret', razorpayKeySecret);
@@ -4507,16 +4549,19 @@ function AdminDashboardContent() {
     {
       name: 'Esign/KRA',
       width: '140px',
-      cell: (row: any) => (
-        <div className="flex flex-col gap-1.5 items-start">
-          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.kraVerified ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
-            KRA: {row.kraVerified ? 'VERIFIED' : 'PENDING'}
-          </span>
-          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
-            eSign: {row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
-          </span>
-        </div>
-      )
+      cell: (row: any) => {
+        const isKraVerified = Boolean((row.camsKraData || row.kraStatus) && row.kraVerified);
+        return (
+          <div className="flex flex-col gap-1.5 items-start">
+            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${isKraVerified ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
+              KRA: {isKraVerified ? 'VERIFIED' : 'PENDING'}
+            </span>
+            <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
+              eSign: {row.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE') ? 'DONE' : 'NO'}
+            </span>
+          </div>
+        );
+      }
     },
     {
       name: 'Actions',
@@ -8762,77 +8807,399 @@ function AdminDashboardContent() {
                         </div>
                       )}
 
+                      {/* Official SEBI / CAMS KRA Status Mapping:
+                          07 -> KYC VALIDATED
+                          02 -> KYC REGISTERED
+                          01 -> UNDER PROCESS
+                          03 -> ON HOLD
+                          04 -> KYC REJECTED
+                          05 -> NOT AVAILABLE
+                          06 -> DEACTIVATED
+                      */}
+                      {(() => { return null; })()}
+
                       {/* View Client Details Modal */}
-                      {isViewClientModalOpen && selectedClient && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-                          <div className="w-full max-w-4xl bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+                      {isViewClientModalOpen && selectedClient && (() => {
+                        const CAMS_KRA_STATUS_CONFIG: Record<string, {
+                          code: string;
+                          label: string;
+                          isVerified: boolean;
+                          badgeClass: string;
+                          theme: 'emerald' | 'blue' | 'amber' | 'rose' | 'slate';
+                          icon: string;
+                          desc: string;
+                        }> = {
+                          '07': { code: '07', label: 'KYC VALIDATED', isVerified: true, badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700', theme: 'emerald', icon: '✓', desc: 'SEBI KYC Validated (Aadhaar / DigiLocker validated across all intermediaries)' },
+                          '7': { code: '07', label: 'KYC VALIDATED', isVerified: true, badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700', theme: 'emerald', icon: '✓', desc: 'SEBI KYC Validated (Aadhaar / DigiLocker validated across all intermediaries)' },
+                          '02': { code: '02', label: 'KYC REGISTERED', isVerified: true, badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700', theme: 'emerald', icon: '✓', desc: 'KYC Registered in KRA Database' },
+                          '2': { code: '02', label: 'KYC REGISTERED', isVerified: true, badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700', theme: 'emerald', icon: '✓', desc: 'KYC Registered in KRA Database' },
+                          '01': { code: '01', label: 'UNDER PROCESS', isVerified: false, badgeClass: 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 border-blue-300 dark:border-blue-700', theme: 'blue', icon: '🔄', desc: 'KYC Application is currently under process in KRA registry' },
+                          '1': { code: '01', label: 'UNDER PROCESS', isVerified: false, badgeClass: 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 border-blue-300 dark:border-blue-700', theme: 'blue', icon: '🔄', desc: 'KYC Application is currently under process in KRA registry' },
+                          '03': { code: '03', label: 'ON HOLD', isVerified: false, badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border-amber-300 dark:border-amber-700', theme: 'amber', icon: '⏳', desc: 'KYC is On Hold due to pending documents or clarification' },
+                          '3': { code: '03', label: 'ON HOLD', isVerified: false, badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border-amber-300 dark:border-amber-700', theme: 'amber', icon: '⏳', desc: 'KYC is On Hold due to pending documents or clarification' },
+                          '04': { code: '04', label: 'KYC REJECTED', isVerified: false, badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300 border-rose-300 dark:border-rose-700', theme: 'rose', icon: '❌', desc: 'KYC Application has been rejected by KRA' },
+                          '4': { code: '04', label: 'KYC REJECTED', isVerified: false, badgeClass: 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-300 border-rose-300 dark:border-rose-700', theme: 'rose', icon: '❌', desc: 'KYC Application has been rejected by KRA' },
+                          '05': { code: '05', label: 'NOT AVAILABLE', isVerified: false, badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border-amber-300 dark:border-amber-700', theme: 'amber', icon: '⚠️', desc: 'KYC Record Not Available in KRA Registry (Fresh KYC required)' },
+                          '5': { code: '05', label: 'NOT AVAILABLE', isVerified: false, badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border-amber-300 dark:border-amber-700', theme: 'amber', icon: '⚠️', desc: 'KYC Record Not Available in KRA Registry (Fresh KYC required)' },
+                          '06': { code: '06', label: 'DEACTIVATED', isVerified: false, badgeClass: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700', theme: 'slate', icon: '🚫', desc: 'KYC Record has been deactivated by KRA' },
+                          '6': { code: '06', label: 'DEACTIVATED', isVerified: false, badgeClass: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700', theme: 'slate', icon: '🚫', desc: 'KYC Record has been deactivated by KRA' }
+                        };
+
+                        const getKraConfig = (statusStr?: string | null) => {
+                          if (!statusStr) return { code: '', label: 'PENDING', isVerified: false, badgeClass: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-300 dark:border-slate-700', theme: 'slate' as const, icon: '⏱️', desc: 'Verification Pending' };
+                          const trimmed = String(statusStr).trim();
+                          if (CAMS_KRA_STATUS_CONFIG[trimmed]) return CAMS_KRA_STATUS_CONFIG[trimmed];
+                          const match = trimmed.match(/\b(0[1-7]|[1-7])\b/);
+                          if (match && CAMS_KRA_STATUS_CONFIG[match[1]]) return CAMS_KRA_STATUS_CONFIG[match[1]];
+                          const upper = trimmed.toUpperCase();
+                          if (upper.includes('VALIDATED')) return CAMS_KRA_STATUS_CONFIG['07'];
+                          if (upper.includes('REGISTERED')) return CAMS_KRA_STATUS_CONFIG['02'];
+                          if (upper.includes('UNDER PROCESS') || upper.includes('PROCESS')) return CAMS_KRA_STATUS_CONFIG['01'];
+                          if (upper.includes('ON HOLD') || upper.includes('HOLD')) return CAMS_KRA_STATUS_CONFIG['03'];
+                          if (upper.includes('REJECTED')) return CAMS_KRA_STATUS_CONFIG['04'];
+                          if (upper.includes('NOT AVAILABLE') || upper.includes('NOT FOUND')) return CAMS_KRA_STATUS_CONFIG['05'];
+                          if (upper.includes('DEACTIVATED')) return CAMS_KRA_STATUS_CONFIG['06'];
+                          return { code: trimmed, label: trimmed, isVerified: false, badgeClass: 'bg-slate-100 text-slate-700 border-slate-300', theme: 'slate' as const, icon: 'ℹ️', desc: trimmed };
+                        };
+
+                        const headerKraCode = selectedClient.camsKraData?.kycData?.[0]?.status || selectedClient.kraStatusCode || selectedClient.kraStatus;
+                        const headerKraCfg = getKraConfig(headerKraCode);
+
+                        return (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-3 sm:p-6">
+                          <div className="w-full max-w-5xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between px-8 py-6 border-b border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40">
-                              <div>
-                                <div className="flex items-center space-x-3">
-                                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">{selectedClient.name}</h3>
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${selectedClient.user?.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
-                                    {selectedClient.user?.status}
-                                  </span>
-                                  <span className="text-xs text-slate-600 dark:text-slate-400">({selectedClient.category})</span>
+                            <div className="px-6 sm:px-8 py-5 border-b border-slate-200 dark:border-white/10 bg-slate-50/80 dark:bg-slate-800/50 backdrop-blur-sm">
+                              <div className="flex items-start sm:items-center justify-between gap-4">
+                                <div className="flex items-center gap-3.5">
+                                  {/* Client Avatar Initials */}
+                                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white font-bold text-base flex items-center justify-center shadow-md shadow-indigo-500/25 shrink-0 tracking-wider">
+                                    {(selectedClient.name || 'CL').slice(0, 2).toUpperCase()}
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center gap-2.5 flex-wrap">
+                                      <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+                                        {selectedClient.name}
+                                      </h3>
+                                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border tracking-wider ${
+                                        selectedClient.user?.status === 'ACTIVE'
+                                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                          : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
+                                      }`}>
+                                        {selectedClient.user?.status || selectedClient.status || 'ACTIVE'}
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                        {selectedClient.category || 'INDIVIDUAL'}
+                                      </span>
+                                      {/* KRA Pill */}
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 ${headerKraCfg.badgeClass}`}>
+                                        <span>{headerKraCfg.icon}</span> {headerKraCfg.label} ({headerKraCfg.code || 'PENDING'})
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                                      <span>ID: {selectedClient.id || selectedClient._id}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(selectedClient.id || selectedClient._id);
+                                          toast.success('Client ID copied!');
+                                        }}
+                                        className="p-1 hover:text-slate-800 dark:hover:text-white rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                                        title="Copy Client ID"
+                                      >
+                                        <Copy className="w-3 h-3" />
+                                      </button>
+                                      {selectedClient.createdAt && (
+                                        <span className="font-sans text-slate-400">
+                                          • Registered: {new Date(selectedClient.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-1">Client ID: {selectedClient.id}</p>
+
+                                <button
+                                  onClick={() => {
+                                    setIsViewClientModalOpen(false);
+                                    setSelectedClient(null);
+                                  }}
+                                  className="w-8 h-8 rounded-xl bg-slate-200/60 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition shrink-0"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
                               </div>
-                              <button
-                                onClick={() => {
-                                  setIsViewClientModalOpen(false);
-                                  setSelectedClient(null);
-                                }}
-                                className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition"
-                              >
-                                <X className="h-5 w-5" />
-                              </button>
                             </div>
 
                             {/* Modal Tabs Selection */}
-                            <div className="flex px-8 border-b border-slate-400 dark:border-white/10 bg-white dark:bg-slate-900/60 p-1 space-x-2 text-xs overflow-x-auto">
+                            <div className="flex px-6 sm:px-8 border-b border-slate-200 dark:border-white/10 bg-slate-100/60 dark:bg-slate-900/80 p-2 space-x-1.5 text-xs overflow-x-auto">
                               {[
-                                { id: 'profile', label: 'Profile Overview' },
-                                { id: 'kyc', label: 'KYC & Documents' },
-                                { id: 'subscriptions', label: 'Subscription Logs' },
-                                { id: 'communications', label: 'Communications' },
-                                { id: 'timeline', label: 'Activity Timeline' }
-                              ].map(tab => (
-                                <button
-                                  key={tab.id}
-                                  onClick={() => setClientDetailsTab(tab.id as any)}
-                                  className={`px-4 py-2.5 font-bold transition rounded-lg whitespace-nowrap ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
-                                >
-                                  {tab.label}
-                                </button>
-                              ))}
+                                { id: 'profile', label: 'Profile Overview', icon: User },
+                                { id: 'kyc', label: 'KYC & Documents', icon: ShieldCheck },
+                                { id: 'subscriptions', label: 'Subscription Logs', icon: CreditCard },
+                                { id: 'communications', label: 'Communications', icon: Mail },
+                                { id: 'timeline', label: 'Activity Timeline', icon: Clock }
+                              ].map(tab => {
+                                const Icon = tab.icon;
+                                const isActive = clientDetailsTab === tab.id;
+                                return (
+                                  <button
+                                    key={tab.id}
+                                    onClick={() => setClientDetailsTab(tab.id as any)}
+                                    className={`px-3.5 py-2 font-semibold transition rounded-xl whitespace-nowrap flex items-center gap-2 ${
+                                      isActive
+                                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-800'
+                                    }`}
+                                  >
+                                    <Icon className="w-3.5 h-3.5" />
+                                    <span>{tab.label}</span>
+                                    {tab.id === 'kyc' && (selectedClient.camsKraData || selectedClient.kraVerified) && (
+                                      <span className={`w-2 h-2 rounded-full ${
+                                        selectedClient.kraVerified || selectedClient.camsKraData?.kycData?.[0]?.status === '07' ? 'bg-emerald-400' : 'bg-amber-400'
+                                      }`} />
+                                    )}
+                                  </button>
+                                );
+                              })}
                             </div>
 
                             {/* Modal Scrollable Content */}
-                            <div className="p-8 overflow-y-auto flex-grow space-y-6">
+                            <div className="p-6 sm:p-8 overflow-y-auto flex-grow space-y-6">
                               {clientDetailsTab === 'profile' && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                  {/* Contact Details */}
-                                  <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Contact Details</h4>
-                                    <div className="space-y-2.5 text-xs">
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Email Address</span><strong className="text-slate-900 dark:text-white">{selectedClient.email?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.email}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Mobile Number</span><strong className="text-slate-900 dark:text-white">{selectedClient.mobile?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.mobile}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Occupation</span><strong className="text-slate-900 dark:text-white">{selectedClient.occupation || '—'}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">PAN</span><strong className="text-slate-900 dark:text-white font-mono">{selectedClient.pan?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.pan}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Aadhaar</span><strong className="text-slate-900 dark:text-white font-mono">{selectedClient.aadhaar?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.aadhaar}</strong></div>
+                                <div className="space-y-6">
+                                  {/* Top 4 Quick Metric / Compliance Cards */}
+                                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                    {/* 1. Account Status */}
+                                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-white/5 space-y-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Account Status</span>
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                      </div>
+                                      <div className="text-xs font-bold text-slate-900 dark:text-white">
+                                        {selectedClient.user?.status || selectedClient.status || 'ACTIVE'}
+                                      </div>
+                                      <p className="text-[10px] text-slate-400">
+                                        Type: {selectedClient.category || 'INDIVIDUAL'}
+                                      </p>
+                                    </div>
+
+                                    {/* 2. KRA Verification */}
+                                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-white/5 space-y-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">SEBI KRA Status</span>
+                                        <Shield className="w-3.5 h-3.5 text-blue-500" />
+                                      </div>
+                                      <div className="text-xs font-bold truncate">
+                                        {(() => {
+                                          const kraCode = selectedClient.camsKraData?.kycData?.[0]?.status || selectedClient.kraStatusCode || selectedClient.kraStatus;
+                                          const kraCfg = getKraConfig(kraCode);
+                                          const colorClass = kraCfg.isVerified
+                                            ? 'text-emerald-600 dark:text-emerald-400'
+                                            : (kraCfg.theme === 'rose'
+                                                ? 'text-rose-600 dark:text-rose-400'
+                                                : (kraCfg.theme === 'blue'
+                                                    ? 'text-blue-600 dark:text-blue-400'
+                                                    : 'text-amber-600 dark:text-amber-400'));
+                                          return (
+                                            <span className={colorClass}>
+                                              {kraCfg.label} ({kraCfg.code || 'PENDING'})
+                                            </span>
+                                          );
+                                        })()}
+                                      </div>
+                                      <p className="text-[10px] text-slate-400">
+                                        Agency: {selectedClient.camsKraData?.kycData?.[0]?.kraInfo || 'CAMS KRA'}
+                                      </p>
+                                    </div>
+
+                                    {/* 3. Service Agreement */}
+                                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-white/5 space-y-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Service Agreement</span>
+                                        <FileCheck className="w-3.5 h-3.5 text-indigo-500" />
+                                      </div>
+                                      <div className="text-xs font-bold">
+                                        {selectedClient.agreementSigned || (selectedClient.agreements && selectedClient.agreements.length > 0) ? (
+                                          <span className="text-emerald-600 dark:text-emerald-400">SIGNED &amp; EXECUTED</span>
+                                        ) : (
+                                          <span className="text-rose-500 dark:text-rose-400">NOT SIGNED</span>
+                                        )}
+                                      </div>
+                                      <p className="text-[10px] text-slate-400">
+                                        SEBI Mandated eSign
+                                      </p>
+                                    </div>
+
+                                    {/* 4. Subscriptions */}
+                                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-white/5 space-y-1">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Subscriptions</span>
+                                        <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                                      </div>
+                                      <div className="text-xs font-bold text-slate-900 dark:text-white">
+                                        {(selectedClient.subscriptions || []).filter((s: any) => new Date(s.endDate) > new Date()).length} Active Plans
+                                      </div>
+                                      <p className="text-[10px] text-slate-400">
+                                        {(selectedClient.subscriptions || []).length} Total Subscribed
+                                      </p>
                                     </div>
                                   </div>
 
-                                  {/* Address Details */}
-                                  <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Address Info</h4>
-                                    <div className="space-y-2.5 text-xs">
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Street Address</span><strong className="text-slate-900 dark:text-white text-right max-w-[60%] truncate">{selectedClient.profile?.addressLine1 || '—'}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">City</span><strong className="text-slate-900 dark:text-white">{selectedClient.profile?.city || '—'}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">State</span><strong className="text-slate-900 dark:text-white">{selectedClient.profile?.state || '—'}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">ZIP Code</span><strong className="text-slate-900 dark:text-white font-mono">{selectedClient.profile?.zipCode || '—'}</strong></div>
-                                      <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Country</span><strong className="text-slate-900 dark:text-white">{selectedClient.profile?.country || 'India'}</strong></div>
+                                  {/* Contact & Identity Details Card */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-white/10 p-5 space-y-4 shadow-xs">
+                                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-2.5">
+                                        <h4 className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                                          <User className="w-3.5 h-3.5" /> Contact &amp; Identity
+                                        </h4>
+                                        <span className="text-[10px] text-slate-400">Verified Client Attributes</span>
+                                      </div>
+
+                                      <div className="space-y-3 text-xs">
+                                        {/* Email */}
+                                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                          <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 text-[11px]">
+                                            <Mail className="w-3.5 h-3.5 text-slate-400" /> Email
+                                          </span>
+                                          <div className="flex items-center gap-1.5">
+                                            <strong className="text-slate-900 dark:text-white font-mono text-xs">
+                                              {selectedClient.email?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.email || '—'}
+                                            </strong>
+                                            {selectedClient.email && (
+                                              <button
+                                                onClick={() => {
+                                                  navigator.clipboard.writeText(selectedClient.email?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.email);
+                                                  toast.success('Email copied!');
+                                                }}
+                                                className="p-1 text-slate-400 hover:text-blue-600 transition"
+                                                title="Copy Email"
+                                              >
+                                                <Copy className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Mobile */}
+                                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                          <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 text-[11px]">
+                                            <Phone className="w-3.5 h-3.5 text-slate-400" /> Mobile
+                                          </span>
+                                          <div className="flex items-center gap-1.5">
+                                            <strong className="text-slate-900 dark:text-white font-mono text-xs">
+                                              {selectedClient.mobile?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.mobile || '—'}
+                                            </strong>
+                                            {selectedClient.mobile && (
+                                              <button
+                                                onClick={() => {
+                                                  navigator.clipboard.writeText(selectedClient.mobile?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.mobile);
+                                                  toast.success('Mobile copied!');
+                                                }}
+                                                className="p-1 text-slate-400 hover:text-blue-600 transition"
+                                                title="Copy Mobile"
+                                              >
+                                                <Copy className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* PAN */}
+                                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                          <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 text-[11px]">
+                                            <Shield className="w-3.5 h-3.5 text-slate-400" /> PAN Number
+                                          </span>
+                                          <div className="flex items-center gap-1.5">
+                                            <strong className="text-slate-900 dark:text-white font-mono text-xs font-bold">
+                                              {selectedClient.pan?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.pan || <span className="text-slate-400 italic font-normal">Not Provided</span>}
+                                            </strong>
+                                            {selectedClient.pan && (
+                                              <button
+                                                onClick={() => {
+                                                  navigator.clipboard.writeText(selectedClient.pan?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.pan);
+                                                  toast.success('PAN copied!');
+                                                }}
+                                                className="p-1 text-slate-400 hover:text-blue-600 transition"
+                                                title="Copy PAN"
+                                              >
+                                                <Copy className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Aadhaar */}
+                                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                          <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 text-[11px]">
+                                            <Shield className="w-3.5 h-3.5 text-slate-400" /> Aadhaar No.
+                                          </span>
+                                          <strong className="text-slate-900 dark:text-white font-mono text-xs">
+                                            {selectedClient.aadhaar?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.aadhaar || <span className="text-slate-400 italic font-normal">Not Provided</span>}
+                                          </strong>
+                                        </div>
+
+                                        {/* Occupation */}
+                                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                          <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5 text-[11px]">
+                                            <Briefcase className="w-3.5 h-3.5 text-slate-400" /> Occupation
+                                          </span>
+                                          <strong className="text-slate-900 dark:text-white text-xs">
+                                            {selectedClient.occupation || <span className="text-slate-400 italic font-normal">Not Specified</span>}
+                                          </strong>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Address Details Card */}
+                                    <div className="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-white/10 p-5 space-y-4 shadow-xs">
+                                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-2.5">
+                                        <h4 className="text-xs font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                                          <MapPin className="w-3.5 h-3.5" /> Address &amp; Location
+                                        </h4>
+                                        <span className="text-[10px] text-slate-400">Residential / Office</span>
+                                      </div>
+
+                                      <div className="space-y-3 text-xs">
+                                        {/* Street Address */}
+                                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5 space-y-0.5">
+                                          <span className="text-slate-400 uppercase font-semibold text-[9px] block">Street Address</span>
+                                          <p className="text-slate-900 dark:text-white text-xs font-medium">
+                                            {selectedClient.address || selectedClient.profile?.addressLine1 || <span className="text-slate-400 italic font-normal">Not Provided</span>}
+                                          </p>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                            <span className="text-slate-400 uppercase font-semibold text-[9px] block">City</span>
+                                            <strong className="text-slate-900 dark:text-white text-xs">
+                                              {selectedClient.city || selectedClient.profile?.city || <span className="text-slate-400 italic font-normal">—</span>}
+                                            </strong>
+                                          </div>
+
+                                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                            <span className="text-slate-400 uppercase font-semibold text-[9px] block">State</span>
+                                            <strong className="text-slate-900 dark:text-white text-xs">
+                                              {selectedClient.state || selectedClient.profile?.state || <span className="text-slate-400 italic font-normal">—</span>}
+                                            </strong>
+                                          </div>
+
+                                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                            <span className="text-slate-400 uppercase font-semibold text-[9px] block">ZIP / Pincode</span>
+                                            <strong className="text-slate-900 dark:text-white font-mono text-xs">
+                                              {selectedClient.zipCode || selectedClient.profile?.zipCode || <span className="text-slate-400 italic font-normal">—</span>}
+                                            </strong>
+                                          </div>
+
+                                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-white/5">
+                                            <span className="text-slate-400 uppercase font-semibold text-[9px] block">Country</span>
+                                            <strong className="text-slate-900 dark:text-white text-xs">
+                                              {selectedClient.profile?.country || 'India'}
+                                            </strong>
+                                          </div>
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
@@ -8979,6 +9346,416 @@ function AdminDashboardContent() {
                                       </div>
                                     </div>
                                   )}
+
+                                  {/* ── CAMS KRA Auto PAN Download & Verification ─────────────────────────── */}
+                                  {(() => {
+                                    const camsRaw = selectedClient.camsKraData?.kycData?.[0] || selectedClient.camsKraData?.PAN?.[0] || {};
+                                    const kraPan = selectedClient.pan || camsRaw.pan || camsPanInput;
+                                    const kraName = selectedClient.panName || selectedClient.name || camsRaw.name || '';
+                                    const kraDob = selectedClient.dob
+                                      ? (typeof selectedClient.dob === 'string'
+                                          ? (selectedClient.dob.includes('/') ? selectedClient.dob : selectedClient.dob.split('T')[0])
+                                          : new Date(selectedClient.dob).toISOString().split('T')[0])
+                                      : (camsRaw.dob || camsDobInput || '');
+                                    const kraGender = selectedClient.gender || (camsRaw.gender === 'M' ? 'MALE' : camsRaw.gender === 'F' ? 'FEMALE' : camsRaw.gender) || '';
+                                    const kraFather = selectedClient.fatherName || camsRaw.firtName || camsRaw.father_name || '';
+                                    const kraMobile = selectedClient.mobile || camsRaw.mobileNo || camsRaw.mobile || '';
+                                    const kraEmail = selectedClient.email || camsRaw.email || '';
+                                    const rawStatusCode = String(camsRaw.status || selectedClient.kraStatusCode || selectedClient.kraStatus || '').trim();
+                                    const hasKycData = Boolean(selectedClient.camsKraData);
+
+                                    // Map to standard SEBI / CAMS KRA status code table:
+                                    // 07 -> KYC VALIDATED
+                                    // 02 -> KYC REGISTERED
+                                    // 01 -> UNDER PROCESS
+                                    // 03 -> ON HOLD
+                                    // 04 -> KYC REJECTED
+                                    // 05 -> NOT AVAILABLE
+                                    // 06 -> DEACTIVATED
+                                    const kraConfig = getKraConfig(rawStatusCode);
+                                    const isTrulyVerified = kraConfig.isVerified;
+
+                                    const kraAgency = camsRaw.kraInfo || selectedClient.camsKraData?.panSummary?.otherKraCode || 'CAMS KRA';
+                                    const kraAppNo = camsRaw.appNo || '';
+                                    const kraAddress = selectedClient.address || [camsRaw.corAddress1, camsRaw.corAddress2, camsRaw.corCity, camsRaw.corPincode].filter(Boolean).join(', ') || selectedClient.profile?.addressLine1 || '';
+                                    const kraPdfUrl = selectedClient.camsKraPdfUrl
+                                      ? (selectedClient.camsKraPdfUrl.startsWith('http') ? selectedClient.camsKraPdfUrl : `${api.getBaseUrl()}${selectedClient.camsKraPdfUrl}`)
+                                      : `${api.getBaseUrl()}/api/v1/admin/cams-kra/pdf/${selectedClient._id || selectedClient.id}`;
+
+                                    // ── STATE 1: SEBI KRA Fully Verified (07: KYC VALIDATED / 02: KYC REGISTERED) ──
+                                    if (hasKycData && isTrulyVerified && !camsEditMode) {
+                                      return (
+                                        <div className="glassmorphism p-5 rounded-2xl border border-emerald-400/40 dark:border-emerald-500/30 space-y-4 bg-gradient-to-br from-emerald-50/60 via-teal-50/40 to-blue-50/50 dark:from-emerald-950/20 dark:via-teal-950/15 dark:to-blue-950/20 shadow-sm">
+                                          {/* Header */}
+                                          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-emerald-200/60 dark:border-emerald-500/20 pb-3">
+                                            <div className="flex items-center gap-2.5">
+                                              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md shadow-emerald-500/20 text-base">
+                                                ✓
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2">
+                                                  <h4 className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                                                    CAMS KRA — {kraConfig.label} ({kraConfig.code})
+                                                  </h4>
+                                                  <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-600 flex items-center gap-1">
+                                                    <Check className="w-2.5 h-2.5" /> {kraConfig.label} ({kraConfig.code})
+                                                  </span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                                  Live verification confirmed via {kraAgency} • {kraConfig.desc}
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            <button
+                                              onClick={() => setCamsEditMode(true)}
+                                              className="px-2.5 py-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 bg-white/80 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg hover:border-blue-400 transition flex items-center gap-1.5 shadow-sm"
+                                              title="Re-verify or edit PAN/DOB"
+                                            >
+                                              <RefreshCw className="w-3 h-3" /> Re-Verify / Re-Sync
+                                            </button>
+                                          </div>
+
+                                          {/* Verified Details Grid */}
+                                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">PAN Number</span>
+                                              <strong className="font-mono text-slate-900 dark:text-white text-xs tracking-wider">{kraPan || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Verified Name</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs truncate block" title={kraName}>{kraName || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Date of Birth</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs">{kraDob || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Gender</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs">{kraGender || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Father Name</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs truncate block" title={kraFather}>{kraFather || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Mobile</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs font-mono">{kraMobile || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Email</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs truncate block font-mono" title={kraEmail}>{kraEmail || '—'}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">KRA Agency</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs truncate block">{kraAgency} {kraAppNo ? `• #${kraAppNo}` : ''}</strong>
+                                            </div>
+                                          </div>
+
+                                          {kraAddress && (
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-emerald-100 dark:border-emerald-500/10 text-xs shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block mb-0.5">Verified Address (KRA Records)</span>
+                                              <span className="text-slate-800 dark:text-slate-200">{kraAddress}</span>
+                                            </div>
+                                          )}
+
+                                          {/* Official Generated KRA PDF Vault Card */}
+                                          <div className="p-4 bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-slate-900 text-white rounded-xl shadow-lg border border-blue-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
+                                            <div className="flex items-center gap-3">
+                                              <div className="w-11 h-11 rounded-xl bg-red-500/20 border border-red-400/40 flex items-center justify-center flex-shrink-0 text-red-300">
+                                                <FileText className="w-6 h-6" />
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-xs font-bold text-white tracking-wide">Official SEBI KRA Verification Report (PDF)</span>
+                                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                                    Archived in Vault
+                                                  </span>
+                                                </div>
+                                                <p className="text-[11px] text-blue-200/80 mt-0.5">
+                                                  File: <span className="font-mono text-white font-medium">CAMS_KRA_KYC_{kraPan || 'CLIENT'}.pdf</span> • Stored in <strong className="text-blue-300">Client Vault / Folder 05 (KYC Documents)</strong>
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                              <a
+                                                href={kraPdfUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex-1 md:flex-none px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-md shadow-blue-500/30 flex items-center justify-center gap-2 transition"
+                                              >
+                                                <Eye className="w-4 h-4" /> View / Download PDF
+                                              </a>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setIsViewClientModalOpen(false);
+                                                  setActiveTab('vaults');
+                                                  window.location.hash = '#vaults';
+                                                  toast.success('Client Vault folder 05 (KYC Documents) me CAMS KRA PDF available hai');
+                                                }}
+                                                className="flex-1 md:flex-none px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition"
+                                              >
+                                                📁 Open in Vault
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+
+                                    // ── STATE 2: KYC Record Found But Not Validated (01: Under Process, 03: On Hold, 04: Rejected, 05: Not Available, 06: Deactivated) ──
+                                    if (hasKycData && !isTrulyVerified && !camsEditMode) {
+                                      const isRejected = kraConfig.code === '04';
+                                      const isUnderProcess = kraConfig.code === '01';
+                                      const isNotAvail = kraConfig.code === '05';
+                                      const cardGradient = isRejected
+                                        ? 'from-rose-50/70 via-red-50/40 to-orange-50/50 dark:from-rose-950/20 dark:via-red-950/15 dark:to-orange-950/20 border-rose-400/40 dark:border-rose-500/30'
+                                        : isUnderProcess
+                                          ? 'from-blue-50/70 via-indigo-50/40 to-sky-50/50 dark:from-blue-950/20 dark:via-indigo-950/15 dark:to-sky-950/20 border-blue-400/40 dark:border-blue-500/30'
+                                          : 'from-amber-50/70 via-yellow-50/40 to-orange-50/50 dark:from-amber-950/20 dark:via-yellow-950/15 dark:to-orange-950/20 border-amber-400/40 dark:border-amber-500/30';
+
+                                      const iconBg = isRejected ? 'bg-rose-500' : isUnderProcess ? 'bg-blue-600' : 'bg-amber-500';
+
+                                      return (
+                                        <div className={`glassmorphism p-5 rounded-2xl border space-y-4 bg-gradient-to-br shadow-sm ${cardGradient}`}>
+                                          {/* Header */}
+                                          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-200/60 dark:border-white/10 pb-3">
+                                            <div className="flex items-center gap-2.5">
+                                              <div className={`w-10 h-10 rounded-xl text-white flex items-center justify-center font-bold shadow-md text-base ${iconBg}`}>
+                                                {kraConfig.icon}
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2">
+                                                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                                                    CAMS KRA — {kraConfig.label} ({kraConfig.code})
+                                                  </h4>
+                                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold border flex items-center gap-1 ${kraConfig.badgeClass}`}>
+                                                    <span>{kraConfig.icon}</span> STATUS {kraConfig.code}: {kraConfig.label}
+                                                  </span>
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                                  Agency: {kraAgency} • Batch: {selectedClient.camsKraData?.panSummary?.otherKraBatch || 'Live'}
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            <button
+                                              onClick={() => setCamsEditMode(true)}
+                                              className="px-2.5 py-1 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 bg-white/80 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg hover:border-blue-400 transition flex items-center gap-1.5 shadow-sm"
+                                              title="Re-query or edit PAN"
+                                            >
+                                              <RefreshCw className="w-3 h-3" /> Re-Sync with CAMS KRA
+                                            </button>
+                                          </div>
+
+                                          {/* Notice Alert */}
+                                          <div className={`p-3 rounded-xl text-xs flex items-start gap-2.5 border ${
+                                            isRejected
+                                              ? 'bg-rose-100/70 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/50 text-rose-900 dark:text-rose-200'
+                                              : isUnderProcess
+                                                ? 'bg-blue-100/70 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/50 text-blue-900 dark:text-blue-200'
+                                                : 'bg-amber-100/70 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/50 text-amber-900 dark:text-amber-200'
+                                          }`}>
+                                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                            <div>
+                                              <strong>KRA Status "{kraConfig.code} — {kraConfig.label}":</strong> {kraConfig.desc}. {
+                                                isNotAvail
+                                                  ? 'KRA database me is PAN ka KYC record nahi mila. Client se documents le kar fresh CKYC / KRA registration karwayein.'
+                                                  : isUnderProcess
+                                                    ? 'KRA registry me processing poori hone par re-sync karein.'
+                                                    : 'Client dwara KRA portal par documents update karne ke baad yahan Re-Sync karein.'
+                                              }
+                                            </div>
+                                          </div>
+
+                                          {/* Summary Details Grid */}
+                                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-white/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">PAN Number</span>
+                                              <strong className="font-mono text-slate-900 dark:text-white text-xs tracking-wider">{kraPan}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-white/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Registry Status</span>
+                                              <strong className="text-xs font-mono">{kraConfig.code} — {kraConfig.label}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-white/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">KRA Agency</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs">{kraAgency}</strong>
+                                            </div>
+                                            <div className="p-2.5 bg-white/90 dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-white/10 shadow-xs">
+                                              <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase font-semibold tracking-wider block">Query Timestamp</span>
+                                              <strong className="text-slate-900 dark:text-white text-xs">{selectedClient.camsKraData?.panSummary?.responseDate || new Date().toLocaleString()}</strong>
+                                            </div>
+                                          </div>
+
+                                          {/* Official Generated KRA PDF Vault Card */}
+                                          <div className="p-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-950 text-white rounded-xl shadow-lg border border-slate-700/50 flex flex-col md:flex-row items-center justify-between gap-4">
+                                            <div className="flex items-center gap-3">
+                                              <div className="w-11 h-11 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center flex-shrink-0 text-amber-300">
+                                                <FileText className="w-6 h-6" />
+                                              </div>
+                                              <div>
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-xs font-bold text-white tracking-wide">Official KRA Query Audit Dossier (PDF)</span>
+                                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                                    Status {kraConfig.code} ({kraConfig.label}) Archived
+                                                  </span>
+                                                </div>
+                                                <p className="text-[11px] text-slate-300 mt-0.5">
+                                                  File: <span className="font-mono text-white font-medium">CAMS_KRA_KYC_{kraPan || 'CLIENT'}.pdf</span> • Stored in <strong className="text-blue-300">Client Vault / Folder 05 (KYC Documents)</strong>
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                              <a
+                                                href={kraPdfUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex-1 md:flex-none px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-md flex items-center justify-center gap-2 transition"
+                                              >
+                                                <Eye className="w-4 h-4" /> View / Download PDF
+                                              </a>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setIsViewClientModalOpen(false);
+                                                  setActiveTab('vaults');
+                                                  window.location.hash = '#vaults';
+                                                  toast.success('Client Vault folder 05 (KYC Documents) me KRA Audit PDF available hai');
+                                                }}
+                                                className="flex-1 md:flex-none px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition"
+                                              >
+                                                📁 Open in Vault
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+
+                                    // ── STATE 3: No KRA Data or In Edit Mode ──
+                                    return (
+                                      <div className="glassmorphism p-5 rounded-2xl border border-blue-400/30 dark:border-blue-500/20 space-y-4 bg-gradient-to-br from-blue-50/60 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/20 shadow-sm">
+                                        <div className="flex items-center justify-between flex-wrap gap-2">
+                                          <div className="flex items-center gap-2">
+                                            <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center flex-shrink-0 text-blue-600 dark:text-blue-400 font-bold">
+                                              🏢
+                                            </div>
+                                            <div>
+                                              <h4 className="text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                                                <span>CAMS KRA — Auto PAN Download & Verification</span>
+                                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-200/70 dark:bg-blue-800/50 text-blue-800 dark:text-blue-200 font-semibold">SEBI KRA API</span>
+                                              </h4>
+                                              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                                PAN aur DOB verify karein — live CAMS KRA se verified details fetch hongi, official PDF generate hoke Vault me save ho jayega.
+                                              </p>
+                                            </div>
+                                          </div>
+                                          {camsEditMode && (
+                                            <button
+                                              onClick={() => setCamsEditMode(false)}
+                                              className="text-[11px] text-slate-500 hover:text-slate-700 dark:hover:text-white px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 transition"
+                                            >
+                                              ✕ Cancel
+                                            </button>
+                                          )}
+                                        </div>
+
+                                        {/* Input Fields */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
+                                              PAN Number <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                              type="text"
+                                              placeholder="e.g. ABCDE1234F"
+                                              value={camsPanInput}
+                                              maxLength={10}
+                                              onChange={e => {
+                                                setCamsPanInput(e.target.value.toUpperCase().trim());
+                                                setFetchCamsError('');
+                                              }}
+                                              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-300 dark:border-blue-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-mono tracking-wider font-bold"
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
+                                              Date of Birth (DOB) <span className="text-slate-400 font-normal lowercase">(optional / format: YYYY-MM-DD)</span>
+                                            </label>
+                                            <input
+                                              type="text"
+                                              placeholder="DD-MM-YYYY or YYYY-MM-DD"
+                                              value={camsDobInput}
+                                              onChange={e => {
+                                                setCamsDobInput(e.target.value.trim());
+                                                setFetchCamsError('');
+                                              }}
+                                              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-300 dark:border-blue-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-mono"
+                                            />
+                                          </div>
+                                        </div>
+
+                                        {/* 1-Click Action Button */}
+                                        <button
+                                          disabled={fetchCamsLoading || !camsPanInput || camsPanInput.length !== 10}
+                                          onClick={async () => {
+                                            setFetchCamsLoading(true);
+                                            setFetchCamsError('');
+                                            try {
+                                              const res: any = await api.fetchCamsRecord({
+                                                pan: camsPanInput.trim(),
+                                                dob: camsDobInput.trim() || undefined,
+                                                clientId: selectedClient._id || selectedClient.id,
+                                                saveToClient: true
+                                              });
+                                              if (res?.success) {
+                                                toast.success('✅ CAMS KRA details verified & Official PDF saved to Client Vault!');
+                                                setCamsEditMode(false);
+                                                try {
+                                                  const updated: any = await api.getAdminClients();
+                                                  const found = (updated?.clients || updated?.data || []).find((c: any) =>
+                                                    String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
+                                                  );
+                                                  if (found) setSelectedClient(found);
+                                                  await loadData(true);
+                                                } catch { }
+                                              } else {
+                                                setFetchCamsError(res?.message || 'CAMS KRA fetch failed');
+                                                toast.error(res?.message || 'Failed to fetch from CAMS KRA');
+                                              }
+                                            } catch (err: any) {
+                                              const msg = err?.response?.data?.message || err?.message || 'Failed to communicate with CAMS KRA';
+                                              setFetchCamsError(msg);
+                                              toast.error(msg);
+                                            } finally {
+                                              setFetchCamsLoading(false);
+                                            }
+                                          }}
+                                          className="w-full py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 hover:from-blue-700 hover:via-indigo-700 hover:to-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition cursor-pointer"
+                                        >
+                                          {fetchCamsLoading ? (
+                                            <><Loader2 className="w-4 h-4 animate-spin" /> Verifying CAMS & Generating Vault PDF...</>
+                                          ) : (
+                                            <>⚡ Auto-Verify via CAMS KRA & Generate Vault PDF</>
+                                          )}
+                                        </button>
+
+                                        {/* Error alert */}
+                                        {fetchCamsError && (
+                                          <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20 rounded-lg text-xs text-red-700 dark:text-red-400">
+                                            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                            <div>
+                                              <strong>CAMS KRA Error:</strong> {fetchCamsError}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
 
                                   <div className="glassmorphism p-5 rounded-xl border border-violet-400/30 dark:border-violet-500/20 space-y-4 bg-violet-50/50 dark:bg-violet-900/5">
                                     <div className="flex items-center gap-2">
@@ -9241,24 +10018,41 @@ function AdminDashboardContent() {
 
                                     <div className="space-y-3">
                                       <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase block tracking-wider mt-4">KYC Proof Documents</span>
-                                      {selectedClient.documents && selectedClient.documents.length > 0 ? (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                          {selectedClient.documents.map((doc: any) => (
-                                            <div key={doc.id} className="p-3 bg-slate-100 dark:bg-slate-950/40 border border-slate-300 dark:border-white/5 rounded-lg flex items-center justify-between text-xs">
-                                              <div>
-                                                <strong className="text-slate-800 dark:text-slate-200 block font-mono">{doc.docType?.replace(/_/g, ' ')}</strong>
-                                                <span className="text-[10px] text-slate-500 dark:text-slate-500 block truncate max-w-[180px]">{doc.fileName}</span>
-                                              </div>
-                                              <div className="flex items-center space-x-2">
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${doc.status === 'VERIFIED' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>{doc.status}</span>
-                                                <a href={`${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white transition"><Eye className="h-3 w-3" /></a>
-                                              </div>
+                                      {(() => {
+                                        const docs = [...(selectedClient.documents || [])];
+                                        if (selectedClient.camsKraPdfUrl && !docs.some((d: any) => d.docType === 'CAMS_KRA_KYC_REPORT')) {
+                                          docs.unshift({
+                                            id: 'cams-kra-pdf',
+                                            docType: 'CAMS_KRA_KYC_REPORT',
+                                            fileName: `CAMS_KRA_KYC_${selectedClient.pan || 'REPORT'}.pdf`,
+                                            fileUrl: selectedClient.camsKraPdfUrl,
+                                            status: 'VERIFIED'
+                                          });
+                                        }
+                                        if (docs.length === 0) {
+                                          return (
+                                            <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">
+                                              No KYC proof documents uploaded by client.
                                             </div>
-                                          ))}
-                                        </div>
-                                      ) : (
-                                        <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No KYC proof documents uploaded by client.</div>
-                                      )}
+                                          );
+                                        }
+                                        return (
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            {docs.map((doc: any) => (
+                                              <div key={doc.id} className="p-3 bg-slate-100 dark:bg-slate-950/40 border border-slate-300 dark:border-white/5 rounded-lg flex items-center justify-between text-xs">
+                                                <div>
+                                                  <strong className="text-slate-800 dark:text-slate-200 block font-mono">{doc.docType?.replace(/_/g, ' ')}</strong>
+                                                  <span className="text-[10px] text-slate-500 dark:text-slate-500 block truncate max-w-[180px]">{doc.fileName}</span>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${doc.status === 'VERIFIED' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>{doc.status}</span>
+                                                  <a href={doc.fileUrl.startsWith('http') ? doc.fileUrl : `${api.getBaseUrl()}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="p-1 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white transition"><Eye className="h-3 w-3" /></a>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
 
@@ -9526,31 +10320,39 @@ function AdminDashboardContent() {
                             </div>
 
                             {/* Modal Footer */}
-                            <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 flex justify-end space-x-3 text-xs">
-                              {selectedClient.user?.deletedAt === null && (!isStaff || hasPermission('EDIT_CLIENTS')) && (
+                            <div className="px-6 sm:px-8 py-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                                <span>SEBI RA Compliance Master Dossier • Confidential</span>
+                              </div>
+
+                              <div className="flex items-center space-x-2.5 w-full sm:w-auto justify-end">
                                 <button
                                   onClick={() => {
                                     setIsViewClientModalOpen(false);
-                                    startEditClient(selectedClient);
+                                    setSelectedClient(null);
                                   }}
-                                  className="px-4 py-2 bg-primary-600 hover:bg-primary-500 rounded-xl font-bold text-white transition"
+                                  className="px-4 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold transition"
                                 >
-                                  Edit Client Details
+                                  Close Details
                                 </button>
-                              )}
-                              <button
-                                onClick={() => {
-                                  setIsViewClientModalOpen(false);
-                                  setSelectedClient(null);
-                                }}
-                                className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5 transition"
-                              >
-                                Close Details
-                              </button>
+                                {selectedClient.user?.deletedAt === null && (!isStaff || hasPermission('EDIT_CLIENTS')) && (
+                                  <button
+                                    onClick={() => {
+                                      setIsViewClientModalOpen(false);
+                                      startEditClient(selectedClient);
+                                    }}
+                                    className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 rounded-xl font-bold text-white shadow-md shadow-blue-500/25 transition flex items-center gap-1.5"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                    <span>Edit Client Details</span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      )}
+                      )})()}
                     </div>
                   )}
 
@@ -11017,9 +11819,10 @@ function AdminDashboardContent() {
                             </div>
                           )}
 
-                          {/* Digio KYC */}
+                          {/* Digio & CAMS KYC */}
                           {integrationTab === 'kyc' && (
-                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
+                            <div className="space-y-6">
+                              <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in">
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/60">
                                 <div>
                                   <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300">Digio KYC &amp; eSign Configuration</h3>
@@ -11123,6 +11926,151 @@ function AdminDashboardContent() {
                                   </div>
                                 )}
                               </div>
+                            </div>
+
+                            {/* CAMS KRA Settings Card */}
+                            <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6 animate-fade-in mt-6">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800/60">
+                                <div>
+                                  <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                                    <span>CAMS KRA Integration</span>
+                                    <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">SEBI Approved KRA</span>
+                                  </h3>
+                                  <p className="text-xs text-slate-500 mt-0.5">Configure CAMS KRA credentials (camskra.com) for automated PAN download, client KYC verification and record auto-fetch.</p>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider self-start sm:self-auto ${
+                                  camsClientCode && camsClientId && camsClientSecret
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800'
+                                    : 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-300 dark:border-amber-800'
+                                }`}>
+                                  {camsClientCode && camsClientId && camsClientSecret ? 'CONFIGURED' : 'NOT CONFIGURED'}
+                                </span>
+                              </div>
+
+                              {/* Warning if CAMS Client ID and Secret are identical */}
+                              {camsClientId && camsClientSecret && camsClientId.trim() === camsClientSecret.trim() && (
+                                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2.5">
+                                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+                                  <div>
+                                    <p className="font-bold">Dhyan Dein: CAMS Client ID aur Client Secret same hain!</p>
+                                    <p className="mt-0.5 opacity-90">Aapka CAMS Client ID (Username) aur Client Secret (Password) exact same value par set hai. CAMS KRA me Client Secret (Password) alag hota hai. Isi wajah se CAMS KRA server <strong>"No data found."</strong> return karta hai. Kripya apna sahi CAMS Client Secret yahan enter karein.</p>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                    CAMS Client Code (clientCode) <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={camsClientCode}
+                                    onChange={e => setCamsClientCode(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    placeholder="e.g. CAMS_CLIENT_CODE"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                    CAMS POS Code (poscode)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={camsPoscode}
+                                    onChange={e => setCamsPoscode(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    placeholder="e.g. CAMS_POSCODE"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                    CAMS Client ID (Basic Auth Username) <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={camsClientId}
+                                    onChange={e => setCamsClientId(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    placeholder="e.g. CAMS_CLIENT_ID"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                    CAMS Client Secret (Basic Auth Password) <span className="text-red-500">*</span>
+                                  </label>
+                                  <input
+                                    type="password"
+                                    value={camsClientSecret}
+                                    onChange={e => setCamsClientSecret(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    placeholder="Leave blank to keep unchanged"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Test Connection Button and Feedback */}
+                              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                <button
+                                  type="button"
+                                  disabled={testingCams || !camsClientCode || !camsClientId}
+                                  onClick={async () => {
+                                    setTestingCams(true);
+                                    setCamsTestResult(null);
+
+                                    if (camsClientId && camsClientSecret && camsClientId.trim() === camsClientSecret.trim()) {
+                                      const msg = 'CAMS Client ID aur Client Secret identical hain! CAMS KRA me Client Secret (Password) alag hota hai. Kripya apna sahi Client Secret enter karein.';
+                                      setCamsTestResult({ success: false, message: msg });
+                                      toast.error(msg);
+                                      setTestingCams(false);
+                                      return;
+                                    }
+
+                                    try {
+                                      const res: any = await api.testCamsKra({
+                                        camsClientCode,
+                                        camsClientId,
+                                        camsClientSecret,
+                                        camsPoscode
+                                      });
+                                      setCamsTestResult({
+                                        success: res.success,
+                                        message: res.message || (res.success ? 'CAMS KRA connection verified!' : 'Connection test failed')
+                                      });
+                                      if (res.success) {
+                                        toast.success('CAMS KRA API Token verified successfully!');
+                                      } else {
+                                        toast.error(res.message || 'CAMS KRA test failed');
+                                      }
+                                    } catch (err: any) {
+                                      const msg = err?.response?.data?.message || err?.message || 'Failed to communicate with CAMS KRA';
+                                      setCamsTestResult({
+                                        success: false,
+                                        message: msg
+                                      });
+                                      toast.error(msg);
+                                    } finally {
+                                      setTestingCams(false);
+                                    }
+                                  }}
+                                  className="bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 font-bold py-2 px-4 rounded-xl text-xs flex items-center gap-2 transition-all disabled:opacity-50"
+                                >
+                                  {testingCams ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                                  <span>{testingCams ? 'Testing CAMS KRA Token...' : '⚡ Test CAMS KRA Token'}</span>
+                                </button>
+
+                                {camsTestResult && (
+                                  <div className={`text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 ${
+                                    camsTestResult.success
+                                      ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                                      : 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
+                                  }`}>
+                                    {camsTestResult.success ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                                    <span>{camsTestResult.message}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                             </div>
                           )}
                         </div>
