@@ -148,7 +148,7 @@ export default function AdminResearchReports() {
       name: 'Plan Name',
       cell: (row: any) => <span className="text-slate-700 dark:text-slate-300 font-medium">{row.planName || '-'}</span>,
       sortable: true,
-      minWidth: '150px',
+      minWidth: '220px',
     },
     {
       name: 'Researcher Name',

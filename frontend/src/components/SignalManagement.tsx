@@ -5,24 +5,25 @@ const tableCustomStyles = {
   table: {
     style: {
       backgroundColor: 'transparent',
+      minWidth: '1000px',
     },
   },
   headRow: {
     style: {
-      backgroundColor: 'rgba(241, 245, 249, 0.5)',
-      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
-      minHeight: '44px',
+      backgroundColor: 'rgba(241, 245, 249, 0.7)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.6)',
+      minHeight: '46px',
     },
   },
   headCells: {
     style: {
-      fontSize: '10px',
+      fontSize: '11px',
       fontWeight: '700',
       textTransform: 'uppercase' as any,
       letterSpacing: '0.05em',
       color: 'rgb(71, 85, 105)',
-      paddingLeft: '16px',
-      paddingRight: '16px',
+      paddingLeft: '14px',
+      paddingRight: '14px',
     },
   },
   rows: {
@@ -31,17 +32,17 @@ const tableCustomStyles = {
       fontWeight: '500',
       color: 'rgb(51, 65, 85)',
       backgroundColor: 'transparent',
-      minHeight: '52px',
+      minHeight: '54px',
       borderBottomColor: 'rgba(203, 213, 225, 0.4)',
       '&:hover': {
-        backgroundColor: 'rgba(248, 250, 252, 0.5)',
+        backgroundColor: 'rgba(248, 250, 252, 0.6)',
       },
     },
   },
   cells: {
     style: {
-      paddingLeft: '16px',
-      paddingRight: '16px',
+      paddingLeft: '14px',
+      paddingRight: '14px',
     },
   },
 };
@@ -470,7 +471,7 @@ export default function SignalManagement({
     const cols: any[] = [
       {
         name: 'S.No',
-        width: '70px',
+        width: '65px',
         selector: (row: any, index?: number) => index !== undefined ? index + 1 : 0,
         cell: (row: any, index?: number) => (
           <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
@@ -480,11 +481,11 @@ export default function SignalManagement({
       },
       {
         name: 'Segment',
-        width: '130px',
+        minWidth: '120px',
         selector: (row: any) => row.segment,
         cell: (row: any) => (
-          <div className="flex items-center space-x-2">
-            <span className="bg-slate-100 dark:bg-white/5 px-2 py-1 rounded-md text-xs border border-slate-400 dark:border-white/10 whitespace-nowrap">{row.segment}</span>
+          <div className="flex items-center space-x-1.5">
+            <span className="bg-slate-100 dark:bg-white/5 px-2.5 py-1 rounded-md text-xs font-semibold border border-slate-300 dark:border-white/10 whitespace-nowrap">{row.segment}</span>
             {row.closeStatus === 'Avoid Signal' && (
               <div className="flex items-center space-x-1 whitespace-nowrap">
                 <span className="text-red-600 dark:text-red-500 font-bold text-xs">(Avoid)</span>
@@ -496,16 +497,16 @@ export default function SignalManagement({
       },
       {
         name: 'Symbol / Stock',
-        minWidth: '180px',
+        minWidth: '200px',
         selector: (row: any) => row.stock?.symbol || row.symbol || row.stockName || '',
         cell: (row: any) => (
-          <div className="flex flex-col py-1">
+          <div className="flex flex-col py-1.5 pr-2">
             <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap flex items-center gap-1.5">
               {row.stock?.symbol || row.symbol || 'N/A'}
               {row.strikePrice && <span className="text-xs font-semibold text-slate-500">({row.strikePrice} {row.optionType || ''})</span>}
             </span>
             {(row.stock?.name || row.stockName) && (
-              <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[200px]" title={row.stock?.name || row.stockName}>
+              <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[190px]" title={row.stock?.name || row.stockName}>
                 {row.stock?.name || row.stockName}
               </span>
             )}
@@ -514,23 +515,32 @@ export default function SignalManagement({
       },
       {
         name: 'Plan',
-        minWidth: '140px',
+        minWidth: '220px',
         selector: (row: any) => row.planName,
-        cell: (row: any) => <span className="text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.planName}</span>
+        cell: (row: any) => (
+          <div className="py-1.5 pr-3">
+            <span className="text-slate-700 dark:text-gray-300 font-medium text-xs whitespace-nowrap block" title={row.planName}>
+              {row.planName || 'N/A'}
+            </span>
+          </div>
+        )
       },
       {
         name: 'Entry Type',
-        width: '100px',
+        minWidth: '110px',
+        center: true,
         selector: (row: any) => row.callType,
         cell: (row: any) => (
-          <span className={`px-2 py-1 rounded-md text-[10px] font-bold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
-            {row.callType}
-          </span>
+          <div className="py-1 flex items-center justify-center">
+            <span className={`px-2.5 py-1 rounded-md text-[11px] font-extrabold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
+              {row.callType}
+            </span>
+          </div>
         )
       },
       {
         name: 'Entry Price',
-        width: '110px',
+        minWidth: '120px',
         selector: (row: any) => row.entryPrice,
         cell: (row: any) => <span className="font-semibold text-lime-700 dark:text-[#d4f23b] whitespace-nowrap">₹ {row.entryPrice}</span>
       }
@@ -539,7 +549,7 @@ export default function SignalManagement({
     if (signalStatusFilter === 'CLOSED') {
       cols.push({
         name: 'Exit Price',
-        width: '110px',
+        minWidth: '120px',
         selector: (row: any) => row.exitPrice,
         cell: (row: any) => <span className="font-semibold text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.exitPrice ? `₹ ${row.exitPrice}` : 'N/A'}</span>
       });
@@ -547,7 +557,7 @@ export default function SignalManagement({
 
     cols.push({
       name: 'Entry Date',
-      minWidth: '160px',
+      minWidth: '170px',
       selector: (row: any) => row.createdAt,
       cell: (row: any) => <span className="text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{new Date(row.createdAt).toLocaleString()}</span>
     });
@@ -555,7 +565,7 @@ export default function SignalManagement({
     if (signalStatusFilter === 'CLOSED') {
       cols.push({
         name: 'Exit Date',
-        minWidth: '160px',
+        minWidth: '170px',
         selector: (row: any) => row.closedAt,
         cell: (row: any) => <span className="text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{row.closedAt ? new Date(row.closedAt).toLocaleString() : 'N/A'}</span>
       });
@@ -564,7 +574,7 @@ export default function SignalManagement({
     if (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') {
       cols.push({
         name: 'Researcher',
-        minWidth: '140px',
+        minWidth: '160px',
         selector: (row: any) => row.createdByName,
         cell: (row: any) => <span className="whitespace-nowrap text-xs font-semibold text-slate-700 dark:text-slate-300">{row.createdByName || 'Unknown'}</span>
       });
@@ -572,7 +582,7 @@ export default function SignalManagement({
 
     cols.push({
       name: 'Action',
-      width: '180px',
+      minWidth: '180px',
       right: true,
       cell: (row: any) => (
         <div className="flex items-center justify-end space-x-2">
