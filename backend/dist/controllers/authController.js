@@ -68,7 +68,8 @@ const maskMobile = (mobile) => {
 };
 const login = async (req, res) => {
     const rawIdentifier = req.body.username || req.body.email || req.body.identifier;
-    const { password } = req.body;
+    const { password, portalType, loginType } = req.body;
+    const effectivePortal = String(portalType || loginType || '').toUpperCase();
     if (!rawIdentifier || !password) {
         return res.status(400).json({
             success: false,
@@ -78,14 +79,44 @@ const login = async (req, res) => {
     }
     try {
         const cleanId = String(rawIdentifier || '').toLowerCase().trim();
+        const isEmailFormat = cleanId.includes('@');
+        // If Staff/Admin login: Strictly disallow email logins!
+        if (effectivePortal === 'STAFF' || effectivePortal === 'ADMIN') {
+            if (isEmailFormat) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Staff members must log in using their assigned Username, not Email address.',
+                    errors: ['Email not allowed for staff login']
+                });
+            }
+        }
         const regexId = new RegExp(`^${cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
-        const userQuery = {
-            $or: [
-                { username: { $regex: regexId } },
-                { email: { $regex: regexId } },
-                { employeeCode: { $regex: regexId } }
-            ]
-        };
+        // Strict query isolation:
+        let userQuery;
+        if (effectivePortal === 'STAFF' || effectivePortal === 'ADMIN') {
+            userQuery = {
+                $or: [
+                    { username: { $regex: regexId } },
+                    { employeeCode: { $regex: regexId } }
+                ]
+            };
+        }
+        else if (effectivePortal === 'CLIENT') {
+            userQuery = {
+                $or: [
+                    { email: { $regex: regexId } }
+                ]
+            };
+        }
+        else {
+            userQuery = {
+                $or: [
+                    { username: { $regex: regexId } },
+                    { email: { $regex: regexId } },
+                    { employeeCode: { $regex: regexId } }
+                ]
+            };
+        }
         let user = await db_1.User.findOne(userQuery)
             .populate({
             path: 'role',
@@ -209,6 +240,25 @@ const login = async (req, res) => {
                 message: 'Invalid credentials',
                 errors: ['Password incorrect']
             });
+        }
+        // Enforce Portal Role Restrictions:
+        if (effectivePortal === 'CLIENT' || (!effectivePortal && isEmailFormat)) {
+            if (user.role?.name && user.role.name !== 'CLIENT') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'This login page is exclusively for Clients and Investors. Staff members cannot log in with email from here. Please use the Staff portal (/adminlogin) to log in with your Username.',
+                    errors: ['Staff login prohibited on client portal']
+                });
+            }
+        }
+        if (effectivePortal === 'STAFF' || effectivePortal === 'ADMIN') {
+            if (user.role?.name === 'CLIENT') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access restricted: This portal is for Staff and Administrators only. Please use the Client Login.',
+                    errors: ['Client login prohibited on staff portal']
+                });
+            }
         }
         const permissions = user.role?.permissions?.map((rp) => rp.permission?.code || rp.permissionCode).filter(Boolean) || [];
         const sessionId = crypto.randomUUID();
@@ -1187,6 +1237,12 @@ const requestLoginOtp = async (req, res) => {
                 message: 'No registered account found matching identifier.'
             });
         }
+        if (user.role?.name && user.role.name !== 'CLIENT') {
+            return res.status(403).json({
+                success: false,
+                message: 'OTP Login is only available for registered Clients. Staff members must log in at /adminlogin using their Username.'
+            });
+        }
         if (user.status !== 'ACTIVE' && user.status !== 'active') {
             return res.status(403).json({
                 success: false,
@@ -1332,6 +1388,12 @@ const loginWithOtp = async (req, res) => {
         }
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        if (user.role?.name && user.role.name !== 'CLIENT') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access restricted: Only clients can log in with OTP. Staff members must log in at /adminlogin using their Username.'
+            });
         }
         const cleanEmail = String(user.email || '').toLowerCase().trim();
         const cleanMobile = String(user.mobile || '').trim();
