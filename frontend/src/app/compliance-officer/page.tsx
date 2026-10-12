@@ -6966,8 +6966,14 @@ function AdminDashboardContent() {
                                     <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">KYC Verification Status</h4>
                                     <div className="flex items-center space-x-3 text-xs mb-2">
                                       <span className="text-slate-600 dark:text-slate-400">KYC Status:</span>
-                                      <span className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] border ${selectedClient.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
-                                        {selectedClient.status?.replace(/_/g, ' ')}
+                                      <span className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] border ${
+                                        ['VERIFIED', 'APPROVED', 'COMPLETED'].includes(selectedClient.kycStatus)
+                                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                          : ['REJECTED', 'FAILED'].includes(selectedClient.kycStatus)
+                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                                      }`}>
+                                        {(selectedClient.kycStatus || 'PENDING')?.replace(/_/g, ' ')}
                                       </span>
                                     </div>
 

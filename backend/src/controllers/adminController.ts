@@ -1182,6 +1182,7 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
           category: u.category || 'INDIVIDUAL',
           occupation: u.occupation || 'other',
           status: u.status || 'ACTIVE',
+          kycStatus: u.kycStatus || 'PENDING',
           kraVerified: false,
           createdById: u.createdById || null,
           createdAt: u.createdAt,
@@ -1307,6 +1308,7 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
         email: c.email || uObj?.email,
         mobile: c.mobile || uObj?.mobile,
         status: c.status || uObj?.status || 'ACTIVE',
+        kycStatus: c.kycStatus || uObj?.kycStatus || 'PENDING',
         user: uObj ? {
           ...uObj,
           id: String(uObj._id || uObj.id),
