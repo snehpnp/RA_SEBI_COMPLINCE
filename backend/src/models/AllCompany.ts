@@ -49,6 +49,11 @@ export interface IAllCompany extends Document {
   digioKycTemplateName?: string | null;
   digioEnvironment?: string | null;
   agreementContent?: string | null;
+  camsClientCode?: string | null;
+  camsClientId?: string | null;
+  camsClientSecret?: string | null;
+  camsPoscode?: string | null;
+  camsStatus?: string | null;
   activePaymentGateway?: string | null;
   paymentGatewayEnabled?: boolean;
   razorpayKeyId?: string | null;
@@ -129,6 +134,11 @@ export const AllCompanySchema = new Schema<IAllCompany>(
     digioKycTemplateName: { type: String, default: null },
     digioEnvironment: { type: String, default: 'SANDBOX' },
     agreementContent: { type: String, default: null },
+    camsClientCode: { type: String, default: null },
+    camsClientId: { type: String, default: null },
+    camsClientSecret: { type: String, default: null },
+    camsPoscode: { type: String, default: null },
+    camsStatus: { type: String, default: '1' },
     activePaymentGateway: { type: String, default: 'RAZORPAY' },
     paymentGatewayEnabled: { type: Boolean, default: true },
     razorpayKeyId: { type: String, default: null },

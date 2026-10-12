@@ -14,6 +14,8 @@ import {
 import { generateAgreementPdf } from '../services/pdfService';
 import { sendSignedAgreementEmail, sendTaxInvoiceEmail } from '../services/emailService';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
+import { getCamsCredentials, getPanDownload, extractCamsPanDetails, mapKraStatus } from '../services/camsKraService';
+import { generateCamsKraPdfBuffer, generateAndSaveCamsKraPdf } from '../services/camsKraPdfService';
 
 export const initiateKyc = async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -315,9 +317,10 @@ export const updateKycAgreementStatus = async (req: AuthenticatedRequest, res: R
     console.log('╚══════════════════════════════════════════════════════════════════╝\n');
 
     if (type === 'KYC' && (status === 'COMPLETED' || status === 'SUCCESS')) {
+      const existingClientForKyc = await dynamicDb.Client.findById(clientId).lean();
       const updateFields: Record<string, any> = {
         status: 'AGREEMENT_PENDING',
-        kraVerified: true,
+        kraVerified: Boolean(existingClientForKyc?.camsKraData && existingClientForKyc?.kraVerified),
         kycStatus: 'VERIFIED'
       };
       if (primaryName) {
@@ -750,8 +753,11 @@ export const fetchDigioRecord = async (req: AuthenticatedRequest, res: Response)
           (merged.panName && !isGeneric(merged.panName)) ? merged.panName :
           (merged.aadhaarName && !isGeneric(merged.aadhaarName)) ? merged.aadhaarName : null;
 
+        const existingClientForAgr = await dynamicDb.Client.findById(clientId).lean();
+        const clientHasKra = Boolean(existingClientForAgr?.camsKraData && existingClientForAgr?.kraVerified);
+
         // 1. Update Client record
-        const clientFields: Record<string, any> = { kraVerified: true };
+        const clientFields: Record<string, any> = { kraVerified: clientHasKra };
         if (kycRawData) { clientFields.digilockerData = kycRawData; clientFields.kycStatus = 'VERIFIED'; }
         if (primaryName) clientFields.name = primaryName;
         if (merged.aadhaarName && !isGeneric(merged.aadhaarName)) clientFields.aadhaarName = merged.aadhaarName;
@@ -768,7 +774,7 @@ export const fetchDigioRecord = async (req: AuthenticatedRequest, res: Response)
         await dynamicDb.Client.findByIdAndUpdate(clientId, { $set: clientFields });
 
         // 2. Update ClientProfile
-        const profileFields: Record<string, any> = { kraVerified: true };
+        const profileFields: Record<string, any> = { kraVerified: clientHasKra };
         if (kycRawData) { profileFields.isDigiLockerLocked = true; profileFields.digilockerData = kycRawData; }
         if (merged.panName    && !isGeneric(merged.panName))    profileFields.panName     = merged.panName;
         if (merged.aadhaarName&& !isGeneric(merged.aadhaarName))profileFields.aadhaarName = merged.aadhaarName;
@@ -916,5 +922,169 @@ export const fetchDigioRecord = async (req: AuthenticatedRequest, res: Response)
     return res.status(500).json({ success: false, message: error.message || 'Server error' });
   }
 };
+
+/**
+ * Fetch and optionally save client KYC details from CAMS KRA PANdownload API
+ */
+export const fetchCamsRecord = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { pan, dob, clientId, saveToClient } = req.body;
+    const cleanPan = (pan || '').trim().toUpperCase();
+
+    if (!cleanPan) {
+      return res.status(400).json({ success: false, message: 'PAN number is required' });
+    }
+
+    const tenantId = req.user?.tenantId;
+    const creds = await getCamsCredentials(tenantId);
+
+    if (!creds.camsClientCode || !creds.camsClientId || !creds.camsClientSecret) {
+      return res.status(400).json({
+        success: false,
+        message: 'CAMS KRA API credentials are not configured. Please configure them in Settings > Integrations > CAMS KRA.'
+      });
+    }
+
+    if (creds.camsClientId.trim() === creds.camsClientSecret.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'CAMS Client ID aur Client Secret identical hain! Settings > Integrations me jakar apna sahi CAMS Client Secret update karein.'
+      });
+    }
+
+    // Call CAMS KRA
+    const camsResponse = await getPanDownload(cleanPan, dob, creds);
+    if (!camsResponse.success || !camsResponse.data) {
+      const msg = camsResponse.message === 'No data found.'
+        ? 'CAMS KRA token error: "No data found." Kripya Settings > Integrations me CAMS Client Code, Client ID aur Client Secret verify karein.'
+        : (camsResponse.message || 'Failed to download PAN details from CAMS KRA');
+
+      return res.status(400).json({
+        success: false,
+        message: msg,
+        error: camsResponse.error,
+        data: camsResponse.data
+      });
+    }
+
+    const extracted = extractCamsPanDetails(camsResponse.data);
+
+    let savedToClient = false;
+    let clientSnapshot: any = null;
+
+    const targetClientId = clientId || (req.user?.role === 'CLIENT' ? req.user?.id : null);
+
+    if (targetClientId) {
+      let existingClient: any = null;
+      if (clientId) {
+        existingClient = await dynamicDb.Client.findById(clientId).lean();
+      } else {
+        existingClient = await dynamicDb.Client.findOne({ userId: req.user?.id }).lean();
+      }
+
+      if (existingClient) {
+        const cId = existingClient._id || existingClient.id;
+        if (saveToClient) {
+          const statusObj = mapKraStatus(extracted.rawRecord?.status || extracted.kraStatusCode || extracted.kraStatus);
+          const isTrulyVerified = statusObj.isVerified;
+          const formattedKraStatus = `${statusObj.label} (${statusObj.code})`;
+
+          const clientUpdates: Record<string, any> = {
+            kraVerified: isTrulyVerified,
+            camsKraData: camsResponse.data,
+            kraStatus: formattedKraStatus
+          };
+          if (extracted.name) {
+            clientUpdates.name = extracted.name;
+            clientUpdates.panName = extracted.name;
+          }
+          if (extracted.pan) clientUpdates.pan = extracted.pan;
+          if (extracted.dob) clientUpdates.dob = extracted.dob;
+          if (extracted.gender) clientUpdates.gender = extracted.gender;
+          if (extracted.fatherName) clientUpdates.fatherName = extracted.fatherName;
+          if (extracted.address) clientUpdates.address = extracted.address;
+          if (extracted.city) clientUpdates.city = extracted.city;
+          if (extracted.state) clientUpdates.state = extracted.state;
+          if (extracted.zipCode) clientUpdates.zipCode = extracted.zipCode;
+
+          await dynamicDb.Client.findByIdAndUpdate(cId, { $set: clientUpdates });
+
+          const profileUpdates: Record<string, any> = {
+            kraVerified: isTrulyVerified,
+            camsKraData: camsResponse.data,
+            kraStatus: formattedKraStatus
+          };
+          if (extracted.name) profileUpdates.panName = extracted.name;
+          if (extracted.dob) profileUpdates.dob = extracted.dob;
+          if (extracted.gender) profileUpdates.gender = extracted.gender;
+          if (extracted.fatherName) profileUpdates.fatherName = extracted.fatherName;
+          if (extracted.address) profileUpdates.addressLine1 = extracted.address;
+          if (extracted.city) profileUpdates.city = extracted.city;
+          if (extracted.state) profileUpdates.state = extracted.state;
+          if (extracted.zipCode) profileUpdates.zipCode = extracted.zipCode;
+
+          await dynamicDb.ClientProfile.findOneAndUpdate(
+            { clientId: cId },
+            { $set: profileUpdates },
+            { upsert: true }
+          );
+
+          savedToClient = true;
+
+          // Automatically generate official CAMS KRA KYC Verification PDF and archive to Client Vault
+          try {
+            const tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+            const clientForPdf = await dynamicDb.Client.findById(cId).lean();
+            const pdfRes = await generateAndSaveCamsKraPdf(clientForPdf, camsResponse.data, tenant);
+            if (pdfRes?.fileUrl) {
+              await dynamicDb.Client.findByIdAndUpdate(cId, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+              await dynamicDb.ClientProfile.findOneAndUpdate({ clientId: cId }, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+            }
+          } catch (pdfErr: any) {
+            console.warn('[CAMS KRA PDF Generation Error]:', pdfErr.message);
+          }
+        }
+
+        clientSnapshot = await dynamicDb.Client.findById(cId).lean();
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: savedToClient ? 'CAMS KRA details fetched and saved to client profile!' : 'CAMS KRA details fetched successfully!',
+      data: camsResponse.data,
+      extracted,
+      clientSnapshot,
+      pdfUrl: clientSnapshot?.camsKraPdfUrl || null,
+      savedToClient
+    });
+  } catch (err: any) {
+    console.error('[CAMS KRA Fetch Error]:', err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Internal server error while fetching CAMS KRA details'
+    });
+  }
+};
+
+export const getCamsKraPdf = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { clientId } = req.params;
+    const client: any = await dynamicDb.Client.findById(clientId).lean();
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+    if (!client.camsKraData) {
+      return res.status(400).json({ success: false, message: 'Client has no CAMS KRA data to generate report' });
+    }
+    const tenant = await dynamicDb.Tenant.findById(req.user?.tenantId || client.tenantId).lean();
+    const pdfBuffer = await generateCamsKraPdfBuffer(client, client.camsKraData, tenant);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="CAMS_KRA_KYC_${client.pan || 'REPORT'}.pdf"`);
+    return res.send(pdfBuffer);
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message || 'Error generating KRA PDF' });
+  }
+};
+
 
 

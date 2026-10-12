@@ -6,7 +6,7 @@ import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTen
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -19,7 +19,7 @@ import { getActiveClientSummary, getActiveClientsByDate, getActiveClientsByMonth
 import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCouponVisibility, applyCoupon, getClientCoupons } from '../controllers/couponController';
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
-import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord } from '../controllers/kycController';
+import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord, fetchCamsRecord, getCamsKraPdf } from '../controllers/kycController';
 import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
@@ -590,6 +590,34 @@ router.post(
   requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
   enforceTenantIsolation,
   fetchDigioRecord
+);
+router.post(
+  '/admin/test-cams-kra',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  testCamsKraConfig
+);
+router.post(
+  '/admin/cams-kra/fetch-pan',
+  authenticateJWT,
+  requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  fetchCamsRecord
+);
+router.post(
+  '/client/cams-kra/fetch-pan',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  enforceTenantIsolation,
+  fetchCamsRecord
+);
+router.get(
+  '/admin/cams-kra/pdf/:clientId',
+  authenticateJWT,
+  requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  getCamsKraPdf
 );
 
 // ==========================================

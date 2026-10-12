@@ -1175,6 +1175,20 @@ class ApiClient {
     });
   }
 
+  async testCamsKra(data: { camsClientCode?: string; camsClientId?: string; camsClientSecret?: string; camsPoscode?: string }) {
+    return this.request('/admin/test-cams-kra', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async fetchCamsRecord(data: { pan: string; dob?: string; clientId?: string; saveToClient?: boolean }) {
+    return this.request('/admin/cams-kra/fetch-pan', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // ── Researcher Signature & eSign & DSC ────────────────
   async getResearcherSignatureSettings() {
     return this.request('/researcher/signature-settings');

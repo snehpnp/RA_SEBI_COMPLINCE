@@ -11,6 +11,8 @@ import { logActivity } from '../services/activityService';
 import { sendWelcomeEmail, sendSignedAgreementEmail, sendTaxInvoiceEmail } from '../services/emailService';
 import { generateAgreementPdf, getTenantComplianceAttachments } from '../services/pdfService';
 import { createKycRequest, getKycStatus, getDocumentStatus, downloadDocument, extractAadhaarDetailsFromDigio } from '../services/digioService';
+import { getCamsCredentials, getPanDownload, extractCamsPanDetails } from '../services/camsKraService';
+import { generateAndSaveCamsKraPdf } from '../services/camsKraPdfService';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
 import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
 import querystring from 'querystring';
@@ -457,8 +459,34 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
     let extractedState: string | null = null;
     let extractedZipCode: string | null = null;
 
-    if (req.body.digioResponse) {
-      const extracted = extractAadhaarDetailsFromDigio(req.body.digioResponse);
+    let camsKraResponseData: any = null;
+    let extractedCams: any = null;
+    if (pan) {
+      try {
+        const camsCreds = await getCamsCredentials(tenantId);
+        if (camsCreds.camsClientCode && camsCreds.camsClientId && camsCreds.camsClientSecret) {
+          const camsPanRes = await getPanDownload(pan, extractedDob || client.dob || req.body.dob, camsCreds);
+          if (camsPanRes.success && camsPanRes.data) {
+            camsKraResponseData = camsPanRes.data;
+            extractedCams = extractCamsPanDetails(camsPanRes.data);
+            if (extractedCams.name && !verifiedPanName) verifiedPanName = extractedCams.name;
+            if (extractedCams.dob && !extractedDob) extractedDob = extractedCams.dob;
+            if (extractedCams.gender && !extractedGender) extractedGender = extractedCams.gender;
+            if (extractedCams.fatherName && !extractedFatherName) extractedFatherName = extractedCams.fatherName;
+            if (extractedCams.address && !extractedAddress) extractedAddress = extractedCams.address;
+            if (extractedCams.city && !extractedCity) extractedCity = extractedCams.city;
+            if (extractedCams.state && !extractedState) extractedState = extractedCams.state;
+            if (extractedCams.zipCode && !extractedZipCode) extractedZipCode = extractedCams.zipCode;
+            console.log('[CAMS KRA] Auto-verified data for PAN:', pan, 'Name:', extractedCams.name);
+          }
+        }
+      } catch (camsErr: any) {
+        console.warn('[CAMS KRA] Auto-fetch error during verifyKRA:', camsErr.message);
+      }
+    }
+
+    if (req.body.digioResponse || camsKraResponseData) {
+      const extracted: any = req.body.digioResponse ? (extractAadhaarDetailsFromDigio(req.body.digioResponse) || {}) : {};
       if (extracted?.aadhaarName) verifiedAadhaarName = extracted.aadhaarName;
       if (extracted?.panName) verifiedPanName = extracted.panName;
       if (extracted?.maskedAadhaar) verifiedMaskedAadhaar = extracted.maskedAadhaar;
@@ -482,7 +510,12 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       if (verifiedPanName) profileUpdates.panName = verifiedPanName;
       else if (verifiedAadhaarName) profileUpdates.panName = verifiedAadhaarName;
       if (verifiedAadhaarName) profileUpdates.aadhaarName = verifiedAadhaarName;
-      profileUpdates.digilockerData = req.body.digioResponse;
+      if (req.body.digioResponse) profileUpdates.digilockerData = req.body.digioResponse;
+      if (camsKraResponseData) {
+        profileUpdates.camsKraData = camsKraResponseData;
+        profileUpdates.kraStatus = extractedCams?.kraStatus || 'VERIFIED';
+        profileUpdates.kraVerified = true;
+      }
 
       await dynamicDb.ClientProfile.findOneAndUpdate(
         { clientId: client._id || client.id },
@@ -523,8 +556,9 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       ...(extractedState ? { state: extractedState } : {}),
       ...(extractedZipCode ? { zipCode: extractedZipCode } : {}),
       ...(req.body.digioResponse ? { digilockerData: req.body.digioResponse } : {}),
+      ...(camsKraResponseData ? { camsKraData: camsKraResponseData, kraStatus: extractedCams?.kraStatus || 'KYC REGISTERED' } : {}),
       status: nextStatus,
-      kraVerified: statusInput !== 'FAIL'
+      kraVerified: Boolean(camsKraResponseData && (camsKraResponseData.kycData || camsKraResponseData.PAN) && statusInput !== 'FAIL')
     };
 
     if (primaryName) {
@@ -538,6 +572,19 @@ export const verifyKRA = async (req: AuthenticatedRequest, res: Response) => {
       { $set: updateSet },
       { returnDocument: 'after', lean: true }
     );
+
+    if (camsKraResponseData) {
+      try {
+        const tenant = await dynamicDb.Tenant.findById(tenantId).lean();
+        const pdfRes = await generateAndSaveCamsKraPdf(updatedClient, camsKraResponseData, tenant);
+        if (pdfRes?.fileUrl) {
+          await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+          await dynamicDb.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+        }
+      } catch (pdfErr: any) {
+        console.warn('[CAMS KRA Auto-PDF Error]:', pdfErr.message);
+      }
+    }
 
     if (primaryName) {
       const nameParts = primaryName.split(' ');

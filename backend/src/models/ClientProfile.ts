@@ -21,8 +21,11 @@ export interface IClientProfile extends Document {
   investmentLimit?: number | null;
   investmentPeriod?: number | null; // in months
   kraVerified?: boolean;
+  kraStatus?: string | null;
   isDigiLockerLocked?: boolean;
   digilockerData?: any;
+  camsKraData?: any;
+  camsKraPdfUrl?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,8 +49,11 @@ export const ClientProfileSchema = new Schema<IClientProfile>(
     investmentLimit: { type: Number, default: null },
     investmentPeriod: { type: Number, default: null },
     kraVerified: { type: Boolean, default: false },
+    kraStatus: { type: String, default: null },
     isDigiLockerLocked: { type: Boolean, default: false },
-    digilockerData: { type: Schema.Types.Mixed, default: null }
+    digilockerData: { type: Schema.Types.Mixed, default: null },
+    camsKraData: { type: Schema.Types.Mixed, default: null },
+    camsKraPdfUrl: { type: String, default: null }
   },
   { ...baseSchemaOptions, collection: 'ClientProfile' }
 );
