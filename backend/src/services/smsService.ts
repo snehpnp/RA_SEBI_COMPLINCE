@@ -7,10 +7,19 @@ import dynamicDb from '../config/db';
 export interface SmsSendOptions {
   tenantId?: string | null;
   mobile: string;
-  templateType: 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM' | string;
-  variables?: Record<string, string>; // e.g. { otp: '123456', var: '123456' }
+  templateType?: 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'TRADE_SIGNAL' | 'CUSTOM' | string;
+  segment?: string; // 'CASH' | 'FUTURE' | 'OPTION'
+  action?: string; // 'BUY' | 'SELL' | 'TARGET' | 'STOPLOSS'
+  variables?: Record<string, any>; // e.g. { otp: '123456', stock: 'RELIANCE', price: '2500' }
+  orderedVariables?: (string | number)[]; // Sequential values for sequential DLT placeholders
   customMessage?: string;
   dltTemplateId?: string;
+  overrideCredentials?: {
+    username?: string;
+    password?: string;
+    senderId?: string;
+    entityId?: string;
+  };
 }
 
 /**
@@ -75,7 +84,18 @@ export async function ensureDefaultSmsTemplates(tenantId?: string | null) {
  * Sends an SMS using the tenant's configured SMSJust gateway and active DLT template.
  */
 export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
-  const { tenantId, mobile, templateType, variables = {}, customMessage, dltTemplateId } = options;
+  const {
+    tenantId,
+    mobile,
+    templateType,
+    segment,
+    action,
+    variables = {},
+    orderedVariables = [],
+    customMessage,
+    dltTemplateId,
+    overrideCredentials
+  } = options;
 
   try {
     const cleanMobile = normalizeIndianMobile(mobile);
@@ -92,12 +112,12 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
       tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
     }
 
-    if (!tenant) {
+    if (!tenant && !overrideCredentials) {
       return { success: false, reason: 'CREDENTIALS_MISSING', message: 'Tenant configuration not found' };
     }
 
-    // 2. Check if SMS Gateway is enabled
-    if (!tenant.smsGatewayEnabled) {
+    // 2. Check if SMS Gateway is enabled (bypassed if explicitly testing with override credentials)
+    if (!overrideCredentials && tenant && !tenant.smsGatewayEnabled) {
       return {
         success: false,
         reason: 'SMS_GATEWAY_DISABLED',
@@ -105,7 +125,11 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
       };
     }
 
-    const { smsUsername, smsPassword, smsSenderId, smsEntityId } = tenant;
+    const smsUsername = (overrideCredentials?.username || tenant?.smsUsername || '').trim();
+    const smsPassword = (overrideCredentials?.password || tenant?.smsPassword || '').trim();
+    const smsSenderId = (overrideCredentials?.senderId || tenant?.smsSenderId || '').trim();
+    const smsEntityId = (overrideCredentials?.entityId !== undefined ? overrideCredentials?.entityId : tenant?.smsEntityId || '').trim();
+
     if (!smsUsername || !smsPassword || !smsSenderId) {
       return {
         success: false,
@@ -119,25 +143,51 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
     let finalDltTempId = dltTemplateId || '';
 
     if (!finalMessage || !finalDltTempId) {
-      await ensureDefaultSmsTemplates(tenant._id?.toString());
+      await ensureDefaultSmsTemplates(tenant?._id?.toString());
       const tenantFilter = [
-        ...(tenant._id ? [{ tenantId: tenant._id }] : []),
+        ...(tenant?._id ? [{ tenantId: tenant._id }] : []),
         { tenantId: null },
         { tenantId: { $exists: false } }
       ];
 
-      const template: any = await dynamicDb.SmsTemplate.findOne({
-        $and: [
-          { $or: tenantFilter },
-          { $or: [{ type: templateType }, { category: templateType }] }
-        ]
-      }).lean();
+      let template: any = null;
+
+      // A. If segment and action are specified, look for matching active TRADE_SIGNAL template
+      if (segment && action) {
+        const seg = segment.trim().toUpperCase();
+        const act = action.trim().toUpperCase();
+        const triggerCombo = `${seg}_${act}`;
+
+        template = await dynamicDb.SmsTemplate.findOne({
+          $and: [
+            { $or: tenantFilter },
+            { status: 'ACTIVE' },
+            {
+              $or: [
+                { applicableCombinations: triggerCombo },
+                { applicableSegments: seg, applicableActions: act }
+              ]
+            }
+          ]
+        }).lean();
+      }
+
+      // B. Fallback to templateType / category lookup if not resolved
+      if (!template && templateType) {
+        template = await dynamicDb.SmsTemplate.findOne({
+          $and: [
+            { $or: tenantFilter },
+            { $or: [{ type: templateType }, { category: templateType }] }
+          ]
+        }).lean();
+      }
 
       if (!template) {
+        const identifier = segment && action ? `${segment} ${action}` : (templateType || 'UNKNOWN');
         return {
           success: false,
           reason: 'TEMPLATE_INACTIVE',
-          message: `SMS Template "${templateType}" not configured`
+          message: `SMS Template "${identifier}" not configured or inactive`
         };
       }
 
@@ -156,41 +206,73 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
     }
 
     // 4. Replace placeholders with variable values
-    // Supports {#var#}, {#alp#}, {OTP}, {otp}, etc.
-    const otpValue = variables.otp || variables.var || variables.code || '';
-    if (otpValue) {
-      finalMessage = finalMessage
-        .replace(/\{#var#\}/gi, otpValue)
-        .replace(/\{#alp#\}/gi, otpValue)
-        .replace(/\{OTP\}/gi, otpValue)
-        .replace(/\{otp\}/gi, otpValue)
-        .replace(/\{code\}/gi, otpValue);
+    // A. Sequential replacement for orderedVariables (e.g. {#var#}, {#alp#}, {#num#}, {#val#})
+    if (Array.isArray(orderedVariables) && orderedVariables.length > 0) {
+      let vIdx = 0;
+      finalMessage = finalMessage.replace(/\{#(var|alp|num|val)#\}/gi, (match) => {
+        if (vIdx < orderedVariables.length && orderedVariables[vIdx] !== undefined) {
+          return String(orderedVariables[vIdx++]);
+        }
+        return match;
+      });
     }
 
+    // B. Support common OTP/verification replacements
+    const otpValue = variables.otp || variables.var || variables.code || variables.num || variables.alp || '';
+    if (otpValue) {
+      finalMessage = finalMessage
+        .replace(/\{#var#\}/gi, String(otpValue))
+        .replace(/\{#alp#\}/gi, String(otpValue))
+        .replace(/\{#num#\}/gi, String(otpValue))
+        .replace(/\{#val#\}/gi, String(otpValue))
+        .replace(/\{#otp#\}/gi, String(otpValue))
+        .replace(/\{OTP\}/gi, String(otpValue))
+        .replace(/\{otp\}/gi, String(otpValue))
+        .replace(/\{code\}/gi, String(otpValue))
+        .replace(/\{num\}/gi, String(otpValue))
+        .replace(/\{var\}/gi, String(otpValue))
+        .replace(/\{alp\}/gi, String(otpValue));
+    }
+
+    // C. Named variables replacement (e.g. {#stock#}, {stock}, {#price#}, etc.)
     for (const [key, val] of Object.entries(variables)) {
-      finalMessage = finalMessage.replace(new RegExp(`\\{${key}\\}`, 'gi'), val);
+      if (val !== undefined && val !== null) {
+        finalMessage = finalMessage
+          .replace(new RegExp(`\\{#${key}#\\}`, 'gi'), String(val))
+          .replace(new RegExp(`\\{${key}\\}`, 'gi'), String(val));
+      }
     }
 
     // 5. Construct SMSJust API Query
     const params = new URLSearchParams({
-      username: smsUsername.trim(),
-      pass: smsPassword.trim(),
-      senderid: smsSenderId.trim(),
+      username: smsUsername,
+      pass: smsPassword,
+      senderid: smsSenderId,
       dest_mobileno: cleanMobile,
       msgtype: 'TXT',
       response: 'Y',
-      entityid: (smsEntityId || '').trim(),
+      entityid: smsEntityId,
       dlttempid: finalDltTempId.trim(),
       message: finalMessage
     });
 
     const requestUrl = `${SMSJUST_BASE_URL}?${params.toString()}`;
-    console.log(`[SMS Service] Sending SMS to ${cleanMobile} via SMSJust (DLT: ${finalDltTempId})...`);
+    console.log(`[SMS Service] Sending SMS to ${cleanMobile} via SMSJust (Sender: ${smsSenderId}, DLT: ${finalDltTempId})...`);
 
     const response = await axios.get(requestUrl, { timeout: 10000 });
-    const responseData = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    const responseData = typeof response.data === 'string' ? response.data.trim() : JSON.stringify(response.data);
 
     console.log(`[SMS Service] Response: ${responseData}`);
+
+    const isError = /^ES\d+/i.test(responseData) || /^ERR/i.test(responseData) || /failed|invalid/i.test(responseData);
+    if (isError) {
+      return {
+        success: false,
+        reason: 'HTTP_ERROR',
+        message: `SMS Gateway Error: ${responseData}`,
+        rawResponse: responseData
+      };
+    }
 
     return {
       success: true,

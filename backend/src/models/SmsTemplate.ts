@@ -6,7 +6,11 @@ export interface ISmsTemplate extends Document {
   id: string;
   tenantId?: Types.ObjectId | null;
   name: string;
-  type: string; // 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'
+  type: string; // 'TRADE_SIGNAL' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'
+  category: string; // 'TRADE_SIGNAL' | 'AUTH_OTP' | 'CUSTOM'
+  applicableSegments: string[]; // e.g. ['CASH', 'FUTURE', 'OPTION']
+  applicableActions: string[]; // e.g. ['BUY', 'SELL', 'TARGET', 'STOPLOSS']
+  applicableCombinations: string[]; // e.g. ['CASH_BUY', 'CASH_SELL']
   dltTemplateId: string;
   message: string;
   status: 'ACTIVE' | 'INACTIVE';
@@ -20,7 +24,11 @@ export const SmsTemplateSchema = new Schema<ISmsTemplate>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
     name: { type: String, required: true, trim: true },
-    type: { type: String, required: true, trim: true, default: 'CUSTOM' },
+    type: { type: String, required: true, trim: true, default: 'TRADE_SIGNAL' },
+    category: { type: String, default: 'TRADE_SIGNAL', trim: true },
+    applicableSegments: { type: [String], default: [] },
+    applicableActions: { type: [String], default: [] },
+    applicableCombinations: { type: [String], default: [] },
     dltTemplateId: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     status: { type: String, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },
@@ -32,6 +40,7 @@ export const SmsTemplateSchema = new Schema<ISmsTemplate>(
 
 SmsTemplateSchema.index({ tenantId: 1, type: 1 });
 SmsTemplateSchema.index({ tenantId: 1, status: 1 });
+SmsTemplateSchema.index({ tenantId: 1, applicableCombinations: 1 });
 
 export const SmsTemplate =
   mongoose.models.SmsTemplate ||

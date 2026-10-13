@@ -1350,6 +1350,9 @@ class ApiClient {
     name: string;
     dltTemplateId: string;
     category?: string;
+    applicableSegments?: string[];
+    applicableActions?: string[];
+    applicableCombinations?: string[];
     content: string;
     description?: string;
     isActive?: boolean;
@@ -1364,6 +1367,9 @@ class ApiClient {
     name?: string;
     dltTemplateId?: string;
     category?: string;
+    applicableSegments?: string[];
+    applicableActions?: string[];
+    applicableCombinations?: string[];
     content?: string;
     description?: string;
     isActive?: boolean;
@@ -1386,7 +1392,16 @@ class ApiClient {
     });
   }
 
-  async testSmsGateway(data: { destMobile: string; message?: string; dltTemplateId?: string }) {
+  async testSmsGateway(data: {
+    mobile?: string;
+    destMobile?: string;
+    message?: string;
+    dltTemplateId?: string;
+    username?: string;
+    password?: string;
+    senderId?: string;
+    entityId?: string;
+  }) {
     return this.request('/admin/sms/test', {
       method: 'POST',
       body: JSON.stringify(data)

@@ -2125,7 +2125,12 @@ function AdminDashboardContent() {
   const handleSaveSettings = async () => {
     try {
       if (gstEnabled && (!orgGst || orgGst.trim().length < 15)) {
-        toast.error('GST is enabled. A valid 15-digit Company GSTIN is mandatory.');
+        toast.error('GST is enabled. A valid 15-character Company GSTIN is mandatory.');
+        const gstInput = document.getElementById('company-gstin-input');
+        if (gstInput) {
+          gstInput.focus();
+          gstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
         return;
       }
 
@@ -2230,9 +2235,21 @@ function AdminDashboardContent() {
   // ── GST TOGGLE FLOW WITH CONFIRMATION & DIRECT PERSISTENCE ──
   const handleTriggerGstToggle = (targetState: boolean) => {
     if (targetState === gstEnabled) return;
-    if (targetState === true && (!orgGst || orgGst.trim().length < 15)) {
-      toast.error('Please enter a valid 15-character Company GSTIN before enabling GST.');
-      return;
+    if (targetState === true) {
+      if (!orgGst || orgGst.trim().length < 15) {
+        setGstEnabled(true);
+        toast('GST Mode activated. Please enter your 15-character Company GSTIN below and click Save Settings.', {
+          icon: 'ℹ️'
+        });
+        setTimeout(() => {
+          const gstInput = document.getElementById('company-gstin-input');
+          if (gstInput) {
+            gstInput.focus();
+            gstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+        return;
+      }
     }
     setPendingGstTargetState(targetState);
     setIsGstConfirmModalOpen(true);
@@ -11144,21 +11161,20 @@ function AdminDashboardContent() {
                                   GST Calculation Method {gstEnabled && <span className="text-rose-500">*</span>}
                                 </label>
                                 <select
-                                  disabled={!gstEnabled}
                                   value={gstCalculationType}
                                   onChange={e => setGstCalculationType(e.target.value)}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition cursor-pointer"
                                 >
                                   <option value="EXCLUSIVE">Amount + GST (Exclusive - 18% added on top)</option>
                                   <option value="INCLUSIVE">Amount Including GST (Inclusive - 18% extracted)</option>
                                 </select>
                                 <p className="text-[10px] text-slate-500 mt-1">
-                                  {gstEnabled ? 'Applies 18% GST (CGST/SGST or IGST)' : 'Disabled (0% tax applies)'}
+                                  {gstEnabled ? 'Applies 18% GST (CGST/SGST or IGST)' : 'Default method (applies when GST is enabled)'}
                                 </p>
                               </div>
                               <div>
                                 <div className="flex items-center justify-between mb-2">
-                                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">
+                                  <label htmlFor="company-gstin-input" className="block text-sm font-bold text-slate-700 dark:text-slate-300">
                                     Company GSTIN Number
                                   </label>
                                   {gstEnabled ? (
@@ -11167,26 +11183,26 @@ function AdminDashboardContent() {
                                     </span>
                                   ) : (
                                     <span className="text-[10px] font-medium text-slate-400">
-                                      Optional / Hidden
+                                      Optional (Applied on Enable)
                                     </span>
                                   )}
                                 </div>
                                 <input
+                                  id="company-gstin-input"
                                   type="text"
                                   value={orgGst}
-                                  onChange={e => setOrgGst(e.target.value)}
-                                  placeholder={gstEnabled ? 'e.g. 22AAAAA1111A1Z1 (Mandatory)' : 'GST disabled (won\'t be printed)'}
-                                  disabled={!gstEnabled}
+                                  onChange={e => setOrgGst(e.target.value.toUpperCase())}
+                                  placeholder="e.g. 22AAAAA1111A1Z1 (15 Characters)"
                                   className={`w-full bg-white dark:bg-slate-900 border rounded-xl py-3 px-4 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition uppercase ${
                                     gstEnabled && (!orgGst || orgGst.trim().length < 15)
-                                      ? 'border-amber-400 dark:border-amber-600'
+                                      ? 'border-amber-400 dark:border-amber-600 ring-2 ring-amber-400/20'
                                       : 'border-slate-400 dark:border-white/10'
-                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                  }`}
                                 />
                                 <p className="text-[10px] text-slate-500 mt-1">
                                   {gstEnabled
                                     ? 'Must be exactly 15 alphanumeric characters.'
-                                    : 'When GST is disabled, GSTIN will NOT be printed on invoice PDFs.'}
+                                    : 'Enter your 15-character GSTIN. When GST is disabled, GSTIN will NOT be printed on invoice PDFs.'}
                                 </p>
                               </div>
                               <div className="md:col-span-2">

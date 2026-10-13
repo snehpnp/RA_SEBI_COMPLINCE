@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck,
   Lock,
@@ -21,17 +21,24 @@ import {
   X,
   MessageSquare,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '@/services/api';
+
+export const AVAILABLE_SEGMENTS = ['CASH', 'FUTURE', 'OPTION'] as const;
+export const AVAILABLE_ACTIONS = ['BUY', 'SELL', 'TARGET', 'STOPLOSS'] as const;
 
 export interface SmsTemplateItem {
   id: string;
   _id?: string;
   name: string;
   dltTemplateId: string;
-  category: 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM';
+  category: 'TRADE_SIGNAL' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM';
+  applicableSegments?: string[];
+  applicableActions?: string[];
+  applicableCombinations?: string[];
   content: string;
   description?: string;
   isActive: boolean;
@@ -89,11 +96,37 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   const [editingTemplate, setEditingTemplate] = useState<SmsTemplateItem | null>(null);
   const [tplName, setTplName] = useState('');
   const [tplDltId, setTplDltId] = useState('');
-  const [tplCategory, setTplCategory] = useState<'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'>('LOGIN_2FA');
+  const [tplCategory, setTplCategory] = useState<'TRADE_SIGNAL' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'>('TRADE_SIGNAL');
+  const [tplSelectedCombos, setTplSelectedCombos] = useState<string[]>([]);
   const [tplContent, setTplContent] = useState('');
   const [tplDescription, setTplDescription] = useState('');
   const [tplIsActive, setTplIsActive] = useState(true);
   const [savingTemplate, setSavingTemplate] = useState(false);
+
+  // Claimed combinations map (from other active templates) for collision prevention
+  const claimedCombinationsMap = useMemo(() => {
+    const map: Record<string, { templateName: string; templateId: string }> = {};
+    templates.forEach(t => {
+      if (!t.isActive) return;
+      const currentEditId = editingTemplate ? (editingTemplate.id || (editingTemplate as any)._id) : null;
+      const tId = t.id || (t as any)._id;
+      if (currentEditId && tId === currentEditId) return;
+
+      if (t.category === 'TRADE_SIGNAL') {
+        const combos = Array.isArray(t.applicableCombinations) && t.applicableCombinations.length > 0
+          ? t.applicableCombinations
+          : (t.applicableSegments || []).flatMap(s => (t.applicableActions || []).map(a => `${s}_${a}`));
+
+        combos.forEach(combo => {
+          map[combo.toUpperCase()] = {
+            templateName: t.name,
+            templateId: tId
+          };
+        });
+      }
+    });
+    return map;
+  }, [templates, editingTemplate]);
 
   // Sync state from tenantData props
   useEffect(() => {
@@ -168,8 +201,9 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
     setEditingTemplate(null);
     setTplName('');
     setTplDltId('');
-    setTplCategory('LOGIN_2FA');
-    setTplContent('Infoline Equity Research, {#alp#}{#alp#} .TRADE WITH PROPER STOPLOSS AND TARGET. https://infolineequity.com/ - info@infolineequity.com');
+    setTplCategory('TRADE_SIGNAL');
+    setTplSelectedCombos([]);
+    setTplContent('');
     setTplDescription('');
     setTplIsActive(true);
     setTemplateModalOpen(true);
@@ -180,10 +214,21 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
     setTplName(tpl.name);
     setTplDltId(tpl.dltTemplateId);
     setTplCategory(tpl.category);
+    const existingCombos = Array.isArray(tpl.applicableCombinations) && tpl.applicableCombinations.length > 0
+      ? tpl.applicableCombinations
+      : (tpl.applicableSegments || []).flatMap(s => (tpl.applicableActions || []).map(a => `${s}_${a}`));
+    setTplSelectedCombos(existingCombos);
     setTplContent(tpl.content);
     setTplDescription(tpl.description || '');
     setTplIsActive(tpl.isActive);
     setTemplateModalOpen(true);
+  };
+
+  // Toggle specific segment-action combination
+  const toggleCombo = (comboKey: string) => {
+    setTplSelectedCombos(prev =>
+      prev.includes(comboKey) ? prev.filter(c => c !== comboKey) : [...prev, comboKey]
+    );
   };
 
   // Save Template (Create or Update)
@@ -202,12 +247,42 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       return;
     }
 
+    if (tplCategory === 'TRADE_SIGNAL') {
+      if (tplSelectedCombos.length === 0) {
+        toast.error('Please select at least one Segment & Action trigger for this Trade Signal template.');
+        return;
+      }
+
+      // Pre-validation for active conflicts
+      if (tplIsActive) {
+        for (const combo of tplSelectedCombos) {
+          const upper = combo.toUpperCase();
+          if (claimedCombinationsMap[upper]) {
+            const owner = claimedCombinationsMap[upper].templateName;
+            const [seg, act] = combo.split('_');
+            toast.error(`Trigger [${seg} - ${act}] is already assigned to active template "${owner}".`);
+            return;
+          }
+        }
+      }
+    }
+
     setSavingTemplate(true);
     try {
+      const applicableSegments = tplCategory === 'TRADE_SIGNAL'
+        ? Array.from(new Set(tplSelectedCombos.map(c => c.split('_')[0])))
+        : [];
+      const applicableActions = tplCategory === 'TRADE_SIGNAL'
+        ? Array.from(new Set(tplSelectedCombos.map(c => c.split('_')[1])))
+        : [];
+
       const payload = {
         name: tplName.trim(),
         dltTemplateId: tplDltId.trim(),
         category: tplCategory,
+        applicableSegments,
+        applicableActions,
+        applicableCombinations: tplCategory === 'TRADE_SIGNAL' ? tplSelectedCombos : [],
         content: tplContent.trim(),
         description: tplDescription.trim(),
         isActive: tplIsActive
@@ -288,10 +363,15 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
     setTestingSms(true);
     setTestResult(null);
     try {
-      const res = await api.testSmsGateway({
+      const res: any = await api.testSmsGateway({
+        mobile: cleanMobile.slice(-10),
         destMobile: cleanMobile.slice(-10),
         message: testMessage.trim() || undefined,
-        dltTemplateId: testDltId.trim() || undefined
+        dltTemplateId: testDltId.trim() || undefined,
+        username: smsUsername.trim() || undefined,
+        password: smsPassword.trim() || undefined,
+        senderId: smsSenderId.trim() || undefined,
+        entityId: smsEntityId.trim() || undefined
       });
 
       if (res.success) {
@@ -773,6 +853,18 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
               className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-white font-mono placeholder-slate-400 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
             />
           </div>
+
+          <div className="md:col-span-2 flex items-center justify-end pt-2">
+            <button
+              type="button"
+              onClick={handleSaveSecuritySettings}
+              disabled={savingSettings}
+              className="inline-flex items-center space-x-2 px-5 py-2 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-md shadow-primary-500/20 transition cursor-pointer"
+            >
+              {savingSettings ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              <span>{savingSettings ? 'Saving...' : 'Save Gateway Settings'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -841,17 +933,43 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                         )}
                       </td>
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            tpl.category === 'LOGIN_2FA'
-                              ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300'
-                              : tpl.category === 'REGISTRATION_OTP'
-                              ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          {tpl.category}
-                        </span>
+                        {tpl.category === 'TRADE_SIGNAL' ? (
+                          <div className="space-y-1">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1">
+                              <Zap className="h-2.5 w-2.5" />
+                              TRADE SIGNAL
+                            </span>
+                            <div className="flex flex-col gap-0.5 mt-1">
+                              {AVAILABLE_SEGMENTS.map(seg => {
+                                const combos = Array.isArray(tpl.applicableCombinations) && tpl.applicableCombinations.length > 0
+                                  ? tpl.applicableCombinations
+                                  : (tpl.applicableSegments || []).flatMap(s => (tpl.applicableActions || []).map(a => `${s}_${a}`));
+                                const segCombos = combos.filter(c => c.toUpperCase().startsWith(`${seg}_`));
+                                if (segCombos.length === 0) return null;
+                                return (
+                                  <div key={seg} className="flex items-center gap-1 text-[10px]">
+                                    <span className="font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1 rounded text-[9px]">{seg}:</span>
+                                    <span className="text-slate-600 dark:text-slate-400 font-medium">
+                                      {segCombos.map(c => c.split('_')[1]).join(', ')}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              tpl.category === 'LOGIN_2FA'
+                                ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300'
+                                : tpl.category === 'REGISTRATION_OTP'
+                                ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            {tpl.category}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-400">
                         {tpl.dltTemplateId}
@@ -911,11 +1029,16 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       {/* MODAL: ADD / EDIT SMS TEMPLATE */}
       {templateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white dark:bg-[#0F172A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 space-y-5">
+          <div className="bg-white dark:bg-[#0F172A] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <h4 className="text-base font-bold text-slate-800 dark:text-white">
-                {editingTemplate ? 'Edit SMS Template' : 'Add DLT SMS Template'}
-              </h4>
+              <div>
+                <h4 className="text-base font-bold text-slate-800 dark:text-white">
+                  {editingTemplate ? 'Edit SMS Template' : 'Add DLT SMS Template'}
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configure DLT-approved templates and specify trigger rules with duplicate prevention.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setTemplateModalOpen(false)}
@@ -934,7 +1057,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                   type="text"
                   value={tplName}
                   onChange={e => setTplName(e.target.value)}
-                  placeholder="e.g. Client 2FA Login OTP"
+                  placeholder="e.g. Intraday Cash Buy Alert"
                   required
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-primary-500"
                 />
@@ -962,14 +1085,148 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                   <select
                     value={tplCategory}
                     onChange={e => setTplCategory(e.target.value as any)}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-primary-500"
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-primary-500 font-semibold"
                   >
+                    <option value="TRADE_SIGNAL">Trade Signal (BUY, SELL, TARGET, STOPLOSS)</option>
                     <option value="LOGIN_2FA">Client Login 2FA OTP</option>
                     <option value="REGISTRATION_OTP">Registration OTP</option>
                     <option value="CUSTOM">Custom Notification</option>
                   </select>
                 </div>
               </div>
+
+              {/* TRADE SIGNAL TRIGGER SELECTION MATRIX */}
+              {tplCategory === 'TRADE_SIGNAL' && (
+                <div className="bg-slate-50 dark:bg-slate-900/60 rounded-xl p-4 border border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                        <Zap className="h-4 w-4 text-amber-500" />
+                        Segment & Action Trigger Grid (Duplicate Lock Guard)
+                      </span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Choose triggers for this template. Combinations already assigned to other active templates are locked.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allAvailable: string[] = [];
+                          for (const seg of AVAILABLE_SEGMENTS) {
+                            for (const act of AVAILABLE_ACTIONS) {
+                              const key = `${seg}_${act}`;
+                              if (!claimedCombinationsMap[key]) {
+                                allAvailable.push(key);
+                              }
+                            }
+                          }
+                          setTplSelectedCombos(allAvailable);
+                        }}
+                        className="text-[10px] text-primary-600 hover:text-primary-700 dark:text-primary-400 font-semibold underline"
+                      >
+                        Select All Available
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-700">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setTplSelectedCombos([])}
+                        className="text-[10px] text-slate-500 hover:text-slate-700 dark:text-slate-400 font-semibold underline"
+                      >
+                        Clear All
+                      </button>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                        {tplSelectedCombos.length} Selected
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Grid Table */}
+                  <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120]">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[10px] uppercase bg-slate-50 dark:bg-slate-900/50 text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                          <th className="py-2 px-3 text-left font-bold">Segment</th>
+                          {AVAILABLE_ACTIONS.map(action => (
+                            <th key={action} className="py-2 px-3 text-center font-bold">
+                              {action}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                        {AVAILABLE_SEGMENTS.map(segment => (
+                          <tr key={segment} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+                            <td className="py-2.5 px-3 font-bold text-slate-800 dark:text-white">
+                              {segment}
+                            </td>
+                            {AVAILABLE_ACTIONS.map(action => {
+                              const comboKey = `${segment}_${action}`;
+                              const isClaimedByOther = !!claimedCombinationsMap[comboKey];
+                              const isSelected = tplSelectedCombos.includes(comboKey);
+                              const claimedOwner = claimedCombinationsMap[comboKey]?.templateName;
+
+                              if (isClaimedByOther) {
+                                return (
+                                  <td key={action} className="py-2.5 px-2 text-center">
+                                    <div
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700/60 cursor-not-allowed select-none"
+                                      title={`Already assigned to active template: "${claimedOwner}"`}
+                                    >
+                                      <Lock className="h-2.5 w-2.5 text-amber-500 flex-shrink-0" />
+                                      <span className="font-semibold">{action}</span>
+                                      <span className="text-[9px] text-slate-400 max-w-[80px] truncate hidden sm:inline" title={claimedOwner}>
+                                        ({claimedOwner})
+                                      </span>
+                                    </div>
+                                  </td>
+                                );
+                              }
+
+                              return (
+                                <td key={action} className="py-2.5 px-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCombo(comboKey)}
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
+                                      isSelected
+                                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-sm'
+                                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-500 hover:text-emerald-600'
+                                    }`}
+                                  >
+                                    {isSelected ? (
+                                      <Check className="h-3 w-3 stroke-[2.5]" />
+                                    ) : (
+                                      <Plus className="h-3 w-3 opacity-60" />
+                                    )}
+                                    <span>{action}</span>
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-500 dark:text-slate-400 pt-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="w-2.5 h-2.5 rounded bg-emerald-600 inline-block"></span>
+                      Selected for this template
+                    </span>
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="w-2.5 h-2.5 rounded bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 inline-block"></span>
+                      Available to assign
+                    </span>
+                    <span className="flex items-center gap-1.5 font-medium text-amber-600 dark:text-amber-400">
+                      <Lock className="h-3 w-3" />
+                      Locked (In use by another active template)
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -979,12 +1236,24 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                   rows={3}
                   value={tplContent}
                   onChange={e => setTplContent(e.target.value)}
-                  placeholder="Infoline Equity Research, {#alp#}{#alp#} .TRADE WITH PROPER STOPLOSS AND TARGET..."
+                  placeholder={
+                    tplCategory === 'TRADE_SIGNAL'
+                      ? "Infoline Research: {#stock#} {#action#} at ₹{#price#}, Target: ₹{#target#}, SL: ₹{#sl#}. https://infolineequity.com"
+                      : "Infoline Equity Research, {#alp#}{#alp#} .TRADE WITH PROPER STOPLOSS AND TARGET. https://infolineequity.com/ - info@infolineequity.com"
+                  }
                   required
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 dark:text-white focus:outline-none focus:border-primary-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Use DLT approved variables: <code className="text-primary-500">{"{#alp#}{#alp#}"}</code> or <code className="text-primary-500">{"{#var#}"}</code> or <code className="text-primary-500">{"{OTP}"}</code> where the 6-digit code will be inserted.
+                  {tplCategory === 'TRADE_SIGNAL' ? (
+                    <>
+                      Available variables: <code className="text-primary-500">{"{#stock#}"}</code>, <code className="text-primary-500">{"{#action#}"}</code>, <code className="text-primary-500">{"{#price#}"}</code>, <code className="text-primary-500">{"{#target#}"}</code>, <code className="text-primary-500">{"{#sl#}"}</code> or sequential <code className="text-primary-500">{"{#var#}"}</code> / <code className="text-primary-500">{"{#alp#}"}</code>.
+                    </>
+                  ) : (
+                    <>
+                      Use DLT approved variables: <code className="text-primary-500">{"{#alp#}{#alp#}"}</code> or <code className="text-primary-500">{"{#var#}"}</code> or <code className="text-primary-500">{"{OTP}"}</code> where the 6-digit code will be inserted.
+                    </>
+                  )}
                 </p>
               </div>
 

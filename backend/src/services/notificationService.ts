@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import dynamicDb from '../config/db';
+import { sendSms } from './smsService';
 
 export interface BroadcastNotificationOptions {
   tenantId: any;
@@ -122,6 +123,56 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
           userId: recipientId
         }
       });
+
+      // Dispatch automated SMS if template is configured for this (Segment, Action)
+      try {
+        const destMobile = client.mobile || user?.mobile;
+        const tradeSegment = data?.segment ? String(data.segment).trim().toUpperCase() : '';
+
+        let tradeAction = '';
+        if (type === 'signal' || data?.action === 'NEW_TRADE') {
+          tradeAction = (data?.callType || 'BUY').trim().toUpperCase();
+        } else if (type === 'update' || data?.action === 'TRADE_UPDATE') {
+          const cStatus = (data?.closeStatus || '').toUpperCase();
+          if (cStatus.includes('SL') || cStatus.includes('STOPLOSS')) {
+            tradeAction = 'STOPLOSS';
+          } else {
+            tradeAction = 'TARGET';
+          }
+        }
+
+        if (destMobile && tradeSegment && tradeAction) {
+          sendSms({
+            tenantId: tenantId || sub.tenantId || client.tenantId,
+            mobile: destMobile,
+            templateType: 'TRADE_SIGNAL',
+            segment: tradeSegment,
+            action: tradeAction,
+            variables: {
+              stock: data?.stockSymbol || '',
+              symbol: data?.stockSymbol || '',
+              action: tradeAction,
+              segment: tradeSegment,
+              price: data?.entryPrice || data?.exitPrice || '',
+              entry: data?.entryPrice || '',
+              exit: data?.exitPrice || '',
+              target: data?.target1 || '',
+              stoploss: data?.stoploss || '',
+              sl: data?.stoploss || ''
+            },
+            orderedVariables: [
+              data?.stockSymbol || '',
+              data?.entryPrice || data?.exitPrice || '',
+              data?.target1 || '',
+              data?.stoploss || ''
+            ]
+          }).catch(smsErr => {
+            console.warn('[Notification Service] SMS dispatch notice:', smsErr?.message);
+          });
+        }
+      } catch (smsCatchErr: any) {
+        console.warn('[Notification Service] SMS send attempt error:', smsCatchErr?.message);
+      }
     }
 
     // 2. Also log an ADMIN notification so admin header and dashboard see the activity

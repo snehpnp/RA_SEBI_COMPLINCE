@@ -13,7 +13,9 @@ export const centralConnection = mongoose.createConnection(
   {
     dbName: defaultDbName,
     maxPoolSize: 20,
-    serverSelectionTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 45000,
+    connectTimeoutMS: 45000,
+    socketTimeoutMS: 45000,
   }
 );
 

@@ -289,7 +289,7 @@ export const login = async (req: Request, res: Response) => {
             tenantId: activeTenantId,
             mobile: user.mobile,
             templateType: 'LOGIN_2FA',
-            variables: { otp: smsOtp, var: smsOtp }
+            variables: { otp: smsOtp, var: smsOtp, num: smsOtp, code: smsOtp, alp: smsOtp }
           })
             .then((smsRes) => {
               smsDispatched = smsRes.success;
@@ -954,12 +954,21 @@ export const requestOtp = async (req: Request, res: Response) => {
       console.log(`[OTP] Generated Mobile OTP for ${mobile10}: ${otp}`);
 
       let resolvedTenantId = tenantId;
-      await sendSms({
+      const smsResult = await sendSms({
         tenantId: resolvedTenantId,
         mobile: mobile10,
         templateType: 'REGISTRATION_OTP',
-        variables: { otp, var: otp }
-      }).catch((e: any) => console.warn('[OTP] sendSms warning:', e.message));
+        variables: { otp, var: otp, num: otp, code: otp, alp: otp }
+      });
+
+      if (!smsResult.success) {
+        console.error('[OTP] SMS delivery failed:', smsResult.message);
+        return res.status(400).json({
+          success: false,
+          type: 'MOBILE',
+          message: smsResult.message || 'Failed to dispatch SMS OTP. Please check your SMS gateway configuration.'
+        });
+      }
 
       return res.json({
         success: true,
@@ -1226,7 +1235,7 @@ export const resend2FAOtp = async (req: Request, res: Response) => {
           tenantId: decoded.tenantId,
           mobile: user.mobile,
           templateType: 'LOGIN_2FA',
-          variables: { otp: newSmsOtp, var: newSmsOtp }
+          variables: { otp: newSmsOtp, var: newSmsOtp, num: newSmsOtp, code: newSmsOtp, alp: newSmsOtp }
         });
       }
 
@@ -1410,7 +1419,7 @@ export const requestLoginOtp = async (req: Request, res: Response) => {
           tenantId: activeTenantId,
           mobile: cleanMobile,
           templateType: 'LOGIN_2FA',
-          variables: { otp, var: otp }
+          variables: { otp, var: otp, num: otp, code: otp, alp: otp }
         });
         smsDispatched = smsRes.success;
       } catch (e: any) {
@@ -1443,6 +1452,13 @@ export const requestLoginOtp = async (req: Request, res: Response) => {
           });
         }
       } catch (logErr) {}
+    }
+
+    if (!isEmail && !smsDispatched) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to dispatch SMS OTP. Please verify your SMS gateway configuration and sender ID.'
+      });
     }
 
     return res.status(200).json({

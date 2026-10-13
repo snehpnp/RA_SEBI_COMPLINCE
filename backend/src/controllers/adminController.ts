@@ -4359,6 +4359,49 @@ export const resetClientKyc = async (req: any, res: any) => {
  * GET /admin/sms-templates
  * Fetch all SMS templates for the tenant
  */
+/**
+ * Helper to check for trigger combination conflicts across active SMS templates.
+ */
+function checkTemplateConflict(
+  proposedCombos: string[],
+  activeTemplates: any[],
+  excludeTemplateId?: string
+): { hasConflict: boolean; conflictingCombination?: string; conflictingTemplateName?: string } {
+  const normProposed = proposedCombos.map(c => c.trim().toUpperCase());
+  for (const activeTpl of activeTemplates) {
+    const actId = activeTpl._id?.toString() || activeTpl.id;
+    if (excludeTemplateId && actId === excludeTemplateId.toString()) {
+      continue;
+    }
+    const cat = (activeTpl.category || activeTpl.type || '').toUpperCase();
+    if (cat !== 'TRADE_SIGNAL') {
+      continue;
+    }
+
+    let existingCombos: string[] = [];
+    if (Array.isArray(activeTpl.applicableCombinations) && activeTpl.applicableCombinations.length > 0) {
+      existingCombos = activeTpl.applicableCombinations.map((c: string) => c.trim().toUpperCase());
+    } else if (Array.isArray(activeTpl.applicableSegments) && Array.isArray(activeTpl.applicableActions)) {
+      for (const seg of activeTpl.applicableSegments) {
+        for (const act of activeTpl.applicableActions) {
+          existingCombos.push(`${seg.trim().toUpperCase()}_${act.trim().toUpperCase()}`);
+        }
+      }
+    }
+
+    for (const combo of normProposed) {
+      if (existingCombos.includes(combo)) {
+        return {
+          hasConflict: true,
+          conflictingCombination: combo,
+          conflictingTemplateName: activeTpl.name || 'Another Template'
+        };
+      }
+    }
+  }
+  return { hasConflict: false };
+}
+
 export const getSmsTemplates = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.user?.tenantId;
@@ -4372,16 +4415,27 @@ export const getSmsTemplates = async (req: AuthenticatedRequest, res: Response) 
       .sort({ createdAt: 1 })
       .lean();
 
-    const formatted = templates.map((t: any) => ({
-      ...t,
-      id: t._id?.toString() || t.id,
-      category: t.type || t.category || 'CUSTOM',
-      type: t.type || t.category || 'CUSTOM',
-      content: t.message || t.content || '',
-      message: t.message || t.content || '',
-      isActive: t.status === 'ACTIVE' || t.isActive === true,
-      status: t.status || (t.isActive ? 'ACTIVE' : 'INACTIVE')
-    }));
+    const formatted = templates.map((t: any) => {
+      const segs = Array.isArray(t.applicableSegments) ? t.applicableSegments : [];
+      const acts = Array.isArray(t.applicableActions) ? t.applicableActions : [];
+      const combos = Array.isArray(t.applicableCombinations) && t.applicableCombinations.length > 0
+        ? t.applicableCombinations
+        : segs.flatMap((s: string) => acts.map((a: string) => `${s}_${a}`));
+
+      return {
+        ...t,
+        id: t._id?.toString() || t.id,
+        category: t.category || t.type || 'CUSTOM',
+        type: t.type || t.category || 'CUSTOM',
+        applicableSegments: segs,
+        applicableActions: acts,
+        applicableCombinations: combos,
+        content: t.message || t.content || '',
+        message: t.message || t.content || '',
+        isActive: t.status === 'ACTIVE' || t.isActive === true,
+        status: t.status || (t.isActive ? 'ACTIVE' : 'INACTIVE')
+      };
+    });
 
     return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {
@@ -4399,18 +4453,59 @@ export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response
     const tenantId = req.user?.tenantId;
     const name = (req.body.name || '').trim();
     const dltTemplateId = (req.body.dltTemplateId || '').trim();
-    const effectiveType = (req.body.type || req.body.category || 'CUSTOM').trim().toUpperCase();
+    const effectiveCategory = (req.body.category || req.body.type || 'CUSTOM').trim().toUpperCase();
+    const effectiveType = effectiveCategory;
     const effectiveMessage = (req.body.message || req.body.content || '').trim();
     const effectiveStatus = req.body.status || (req.body.isActive === false ? 'INACTIVE' : 'ACTIVE');
+    const applicableSegments: string[] = Array.isArray(req.body.applicableSegments)
+      ? req.body.applicableSegments.map((s: string) => s.trim().toUpperCase())
+      : [];
+    const applicableActions: string[] = Array.isArray(req.body.applicableActions)
+      ? req.body.applicableActions.map((a: string) => a.trim().toUpperCase())
+      : [];
+
+    let applicableCombinations: string[] = Array.isArray(req.body.applicableCombinations) && req.body.applicableCombinations.length > 0
+      ? req.body.applicableCombinations.map((c: string) => c.trim().toUpperCase())
+      : applicableSegments.flatMap((s: string) => applicableActions.map((a: string) => `${s}_${a}`));
 
     if (!name || !dltTemplateId || !effectiveMessage) {
       return res.status(400).json({ success: false, message: 'Template name, DLT Template ID, and message are required' });
+    }
+
+    // Trade Signal validation & conflict guard
+    if (effectiveCategory === 'TRADE_SIGNAL') {
+      if (applicableCombinations.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please select at least one Segment and one Action combination for Trade Signal templates.'
+        });
+      }
+
+      if (effectiveStatus === 'ACTIVE') {
+        const tenantFilter = tenantId
+          ? { tenantId, status: 'ACTIVE' }
+          : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }], status: 'ACTIVE' };
+        const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter).lean();
+
+        const conflictCheck = checkTemplateConflict(applicableCombinations, activeTemplates);
+        if (conflictCheck.hasConflict) {
+          const parts = conflictCheck.conflictingCombination?.split('_') || [];
+          return res.status(400).json({
+            success: false,
+            message: `Conflict: Trigger combination [${parts[0]} - ${parts[1]}] is already assigned to active template "${conflictCheck.conflictingTemplateName}". Each trigger combination can only be used by one active template.`
+          });
+        }
+      }
     }
 
     const template = await dynamicDb.SmsTemplate.create({
       tenantId: tenantId || null,
       name,
       type: effectiveType,
+      category: effectiveCategory,
+      applicableSegments,
+      applicableActions,
+      applicableCombinations,
       dltTemplateId,
       message: effectiveMessage,
       status: effectiveStatus,
@@ -4422,7 +4517,10 @@ export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response
     const formatted = {
       ...tObj,
       id: tObj._id?.toString() || tObj.id,
-      category: tObj.type,
+      category: tObj.category || tObj.type,
+      applicableSegments: tObj.applicableSegments || [],
+      applicableActions: tObj.applicableActions || [],
+      applicableCombinations: tObj.applicableCombinations || [],
       content: tObj.message,
       isActive: tObj.status === 'ACTIVE'
     };
@@ -4441,17 +4539,66 @@ export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response
 export const updateSmsTemplate = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const tenantId = req.user?.tenantId;
     const template = await dynamicDb.SmsTemplate.findById(id);
     if (!template) {
       return res.status(404).json({ success: false, message: 'SMS template not found' });
     }
 
     if (req.body.name) template.name = req.body.name.trim();
-    if (req.body.type || req.body.category) template.type = (req.body.type || req.body.category).trim().toUpperCase();
+    if (req.body.type || req.body.category) {
+      const cat = (req.body.category || req.body.type).trim().toUpperCase();
+      template.category = cat;
+      template.type = cat;
+    }
     if (req.body.dltTemplateId) template.dltTemplateId = req.body.dltTemplateId.trim();
     if (req.body.message || req.body.content) template.message = (req.body.message || req.body.content).trim();
     if (req.body.status) template.status = req.body.status;
     if (typeof req.body.isActive === 'boolean') template.status = req.body.isActive ? 'ACTIVE' : 'INACTIVE';
+
+    if (req.body.applicableSegments !== undefined) {
+      template.applicableSegments = Array.isArray(req.body.applicableSegments)
+        ? req.body.applicableSegments.map((s: string) => s.trim().toUpperCase())
+        : [];
+    }
+    if (req.body.applicableActions !== undefined) {
+      template.applicableActions = Array.isArray(req.body.applicableActions)
+        ? req.body.applicableActions.map((a: string) => a.trim().toUpperCase())
+        : [];
+    }
+    if (req.body.applicableCombinations !== undefined) {
+      template.applicableCombinations = Array.isArray(req.body.applicableCombinations)
+        ? req.body.applicableCombinations.map((c: string) => c.trim().toUpperCase())
+        : [];
+    } else if (req.body.applicableSegments !== undefined || req.body.applicableActions !== undefined) {
+      template.applicableCombinations = template.applicableSegments.flatMap((s: string) =>
+        template.applicableActions.map((a: string) => `${s}_${a}`)
+      );
+    }
+
+    // Trade Signal conflict validation on update
+    if (template.category === 'TRADE_SIGNAL' && template.status === 'ACTIVE') {
+      if ((template.applicableCombinations || []).length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please select at least one Segment and Action combination for Trade Signal templates.'
+        });
+      }
+
+      const tenantFilter = tenantId
+        ? { tenantId, status: 'ACTIVE' }
+        : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }], status: 'ACTIVE' };
+      const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter).lean();
+
+      const conflictCheck = checkTemplateConflict(template.applicableCombinations, activeTemplates, id);
+      if (conflictCheck.hasConflict) {
+        const parts = conflictCheck.conflictingCombination?.split('_') || [];
+        return res.status(400).json({
+          success: false,
+          message: `Conflict: Trigger combination [${parts[0]} - ${parts[1]}] is already assigned to active template "${conflictCheck.conflictingTemplateName}". Each trigger combination can only be assigned to one active template.`
+        });
+      }
+    }
 
     await template.save();
 
@@ -4459,7 +4606,10 @@ export const updateSmsTemplate = async (req: AuthenticatedRequest, res: Response
     const formatted = {
       ...tObj,
       id: tObj._id?.toString() || tObj.id,
-      category: tObj.type,
+      category: tObj.category || tObj.type,
+      applicableSegments: tObj.applicableSegments || [],
+      applicableActions: tObj.applicableActions || [],
+      applicableCombinations: tObj.applicableCombinations || [],
       content: tObj.message,
       isActive: tObj.status === 'ACTIVE'
     };
@@ -4473,24 +4623,51 @@ export const updateSmsTemplate = async (req: AuthenticatedRequest, res: Response
 
 /**
  * POST /admin/sms-templates/:id/status
- * Toggle status between ACTIVE and INACTIVE
+ * Toggle status between ACTIVE and INACTIVE with conflict prevention
  */
 export const toggleSmsTemplateStatus = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const tenantId = req.user?.tenantId;
     const template = await dynamicDb.SmsTemplate.findById(id);
     if (!template) {
       return res.status(404).json({ success: false, message: 'SMS template not found' });
     }
 
-    template.status = template.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const nextStatus = template.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+
+    // If activating a TRADE_SIGNAL template, check if any of its combinations are already active elsewhere
+    if (nextStatus === 'ACTIVE' && template.category === 'TRADE_SIGNAL') {
+      const combos = Array.isArray(template.applicableCombinations) && template.applicableCombinations.length > 0
+        ? template.applicableCombinations
+        : (template.applicableSegments || []).flatMap((s: string) => (template.applicableActions || []).map((a: string) => `${s}_${a}`));
+
+      const tenantFilter = tenantId
+        ? { tenantId, status: 'ACTIVE' }
+        : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }], status: 'ACTIVE' };
+      const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter).lean();
+
+      const conflictCheck = checkTemplateConflict(combos, activeTemplates, id);
+      if (conflictCheck.hasConflict) {
+        const parts = conflictCheck.conflictingCombination?.split('_') || [];
+        return res.status(400).json({
+          success: false,
+          message: `Cannot activate template: Trigger combination [${parts[0]} - ${parts[1]}] is currently assigned to another active template "${conflictCheck.conflictingTemplateName}". Please deactivate that template first.`
+        });
+      }
+    }
+
+    template.status = nextStatus;
     await template.save();
 
     const tObj = template.toObject ? template.toObject() : template;
     const formatted = {
       ...tObj,
       id: tObj._id?.toString() || tObj.id,
-      category: tObj.type,
+      category: tObj.category || tObj.type,
+      applicableSegments: tObj.applicableSegments || [],
+      applicableActions: tObj.applicableActions || [],
+      applicableCombinations: tObj.applicableCombinations || [],
       content: tObj.message,
       isActive: template.status === 'ACTIVE',
       status: template.status
@@ -4535,25 +4712,32 @@ export const deleteSmsTemplate = async (req: AuthenticatedRequest, res: Response
 export const testSmsGateway = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.user?.tenantId;
-    const { mobile, message, dltTemplateId } = req.body;
+    const { mobile, destMobile, message, dltTemplateId, username, password, senderId, entityId } = req.body;
+    const targetMobile = (mobile || destMobile || req.body.dest_mobileno || '').toString().trim();
 
-    if (!mobile) {
+    if (!targetMobile) {
       return res.status(400).json({ success: false, message: 'Mobile number is required for testing' });
     }
 
     const result = await sendSms({
       tenantId,
-      mobile,
+      mobile: targetMobile,
       templateType: 'LOGIN_2FA',
-      variables: { otp: '123456', var: '123456' },
+      variables: { otp: '123456', var: '123456', num: '123456', alp: '123456', code: '123456' },
       customMessage: message,
-      dltTemplateId
+      dltTemplateId,
+      overrideCredentials: (username && senderId) ? {
+        username,
+        password,
+        senderId,
+        entityId
+      } : undefined
     });
 
     if (result.success) {
       return res.status(200).json({ success: true, message: 'Test SMS sent successfully', details: result });
     } else {
-      return res.status(400).json({ success: false, message: result.message || 'Failed to send test SMS', reason: result.reason });
+      return res.status(400).json({ success: false, message: result.message || 'Failed to send test SMS', reason: result.reason, details: result });
     }
   } catch (error: any) {
     console.error('Error testing SMS gateway:', error);
