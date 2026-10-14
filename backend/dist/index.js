@@ -30,7 +30,7 @@ app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: false // Allow serving files to external domains locally
 }));
 app.use((0, cors_1.default)({
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: true,
     credentials: true
 }));
 app.use(express_1.default.json({ limit: '50mb' }));

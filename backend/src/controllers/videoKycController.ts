@@ -45,6 +45,48 @@ function generateOtp(): string {
 }
 
 /**
+ * Helper to dynamically resolve frontend base URL matching request host / domain
+ */
+export function resolveFrontendBaseUrl(req: Request): string {
+  // 1. If explicit origin passed in request body
+  if (req.body && req.body.origin && typeof req.body.origin === 'string') {
+    return req.body.origin.replace(/\/$/, '');
+  }
+
+  // 2. If origin header present and not localhost
+  const originHeader = req.headers.origin;
+  if (originHeader && typeof originHeader === 'string' && !originHeader.includes('localhost') && !originHeader.includes('127.0.0.1')) {
+    return originHeader.replace(/\/$/, '');
+  }
+
+  // 3. If referer header present and not localhost
+  const refererHeader = req.headers.referer;
+  if (refererHeader && typeof refererHeader === 'string') {
+    try {
+      const u = new URL(refererHeader);
+      if (!u.origin.includes('localhost') && !u.origin.includes('127.0.0.1')) {
+        return u.origin.replace(/\/$/, '');
+      }
+    } catch {}
+  }
+
+  // 4. If host header present and not localhost
+  const host = req.headers.host;
+  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+    const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
+    return `${proto}://${host}`.replace(/\/$/, '');
+  }
+
+  // 5. Environment variable if set and not localhost
+  if (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost')) {
+    return process.env.FRONTEND_URL.replace(/\/$/, '');
+  }
+
+  // 6. Fallback
+  return (originHeader as string) || process.env.FRONTEND_URL || 'http://localhost:3000';
+}
+
+/**
  * 1. Create or Request Video KYC Session
  * Can be called by Admin (initiates session, optionally modifies consent text)
  * or by Client (if tenant allows clientVideoKycRequestEnabled).
@@ -265,7 +307,7 @@ export async function createVideoKycSession(req: Request, res: Response) {
     }
 
     // Determine Frontend Base URL for Invite Link
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = resolveFrontendBaseUrl(req);
     const videoKycUrl = `${frontendUrl}/video-kyc/${sessionId}?role=client`;
 
     // Send Email to Client if they have a valid email
@@ -453,7 +495,7 @@ export async function resendVideoKycOtp(req: Request, res: Response) {
 
     const tenant = await dynamicDb.Tenant.findById(session.tenantId);
     const companyName = tenant?.companyName || 'Research Analyst Services';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = resolveFrontendBaseUrl(req);
     const videoKycUrl = `${frontendUrl}/video-kyc/${sessionId}?role=client`;
     const clientName = client.name || `${client.firstName || ''} ${client.lastName || ''}`.trim() || 'Client';
 

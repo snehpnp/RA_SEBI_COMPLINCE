@@ -29,8 +29,9 @@ import {
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import api from '../../../services/api';
+import { base_ra_url } from '../../../utils/config';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://localhost:5000';
+const BACKEND_URL = base_ra_url || process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://localhost:5000';
 
 export default function VideoKycRoomPage() {
   const params = useParams();

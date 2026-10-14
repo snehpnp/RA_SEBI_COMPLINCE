@@ -363,7 +363,8 @@ export default function VideoKycDesk() {
         clientId: selectedClientForInvite,
         customConsentText: perClientConsentText,
         scheduleType: inviteScheduleType,
-        scheduledAt: inviteScheduleType === 'SCHEDULED' ? inviteScheduledAt : null
+        scheduledAt: inviteScheduleType === 'SCHEDULED' ? inviteScheduledAt : null,
+        origin: typeof window !== 'undefined' ? window.location.origin : undefined
       });
 
       if (res?.success) {
@@ -1185,35 +1186,93 @@ export default function VideoKycDesk() {
                   An email with the link and code has been sent. You can also share the link directly:
                 </p>
 
-                <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono break-all text-left space-y-2">
-                  <div>
-                    <span className="text-slate-500">Client Invite Link:</span><br />
-                    <a href={createdSessionResult.videoKycUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline">
-                      {createdSessionResult.videoKycUrl}
-                    </a>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Verification OTP:</span>{' '}
-                    <span className="text-emerald-400 font-bold">{createdSessionResult.otpCode}</span>
-                  </div>
-                </div>
+                {(() => {
+                  const sid = createdSessionResult.session?.sessionId || createdSessionResult.sessionId || '';
+                  const clientUrl = (typeof window !== 'undefined' && sid)
+                    ? `${window.location.origin}/video-kyc/${sid}?role=client`
+                    : createdSessionResult.videoKycUrl;
+                  const adminUrl = (typeof window !== 'undefined' && sid)
+                    ? `${window.location.origin}/video-kyc/${sid}?role=admin`
+                    : (createdSessionResult.videoKycUrl || '').replace('?role=client', '?role=admin');
 
-                <div className="flex gap-3 pt-2">
-                  <a
-                    href={`${(createdSessionResult.videoKycUrl || '').replace('?role=client', '')}?role=admin`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-blue-600/30"
-                  >
-                    🚀 Enter Room as Admin Now
-                  </a>
-                  <button
-                    onClick={() => setInviteModalOpen(false)}
-                    className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
-                  >
-                    Done
-                  </button>
-                </div>
+                  return (
+                    <>
+                      <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 font-mono break-all text-left space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-slate-400 font-sans font-bold text-[11px]">Client Verification Link:</span>
+                            {copiedLink && <span className="text-emerald-400 text-[10px] font-sans font-bold">Copied!</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={clientUrl}
+                              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-blue-300 select-all"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(clientUrl, 'LINK')}
+                              className="py-1.5 px-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0"
+                              title="Copy Link"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                              {copiedLink ? 'Copied' : 'Copy'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                          <div>
+                            <span className="text-slate-400 font-sans font-bold text-[11px]">Session OTP:</span>{' '}
+                            <span className="text-emerald-400 font-bold text-sm tracking-wider">{createdSessionResult.otpCode}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(createdSessionResult.otpCode, 'OTP')}
+                            className="py-1 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] font-semibold transition flex items-center gap-1"
+                          >
+                            <Copy className="w-3 h-3" /> {copiedOtp ? 'Copied' : 'Copy OTP'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const dummySession: any = {
+                              sessionId: sid,
+                              otpCode: createdSessionResult.otpCode,
+                              clientId: currentSelectedClient,
+                              scheduledAt: createdSessionResult.scheduledAt || createdSessionResult.session?.scheduledAt
+                            };
+                            openWhatsAppShare(dummySession);
+                          }}
+                          className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-1.5"
+                        >
+                          <MessageSquare className="w-4 h-4" /> Share WhatsApp
+                        </button>
+
+                        <a
+                          href={adminUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-blue-600/30 flex items-center justify-center gap-1.5"
+                        >
+                          <Play className="w-4 h-4" /> Enter Room
+                        </a>
+
+                        <button
+                          onClick={() => setInviteModalOpen(false)}
+                          className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               <div className="space-y-4">
