@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone } from 'lucide-react';
+import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -38,9 +38,11 @@ import CouponsManager from '../../components/CouponsManager';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import OccupationsManager from '../../components/admin/OccupationsManager';
 import SecuritySettingsTab from '../../components/admin/SecuritySettingsTab';
+import EmailTemplatesManager from '../../components/admin/EmailTemplatesManager';
 import ClientTimelineModal from '../../components/admin/ClientTimelineModal';
 import ClientVaultExplorer from '../../components/admin/vault/ClientVaultExplorer';
 import ComplianceCalendarModal from '../../components/compliance/ComplianceCalendarModal';
+import VideoKycDesk from '../../components/admin/VideoKycDesk';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -264,11 +266,19 @@ const NAV_CONFIG: NavModule[] = [
     moduleLabel: 'Resources & Documents',
     moduleDesc: 'Download templates, formats, and other resources',
   },
+  {
+    tab: 'video_kyc',
+    label: 'Video KYC & IPV',
+    icon: 'Video',
+    accessKey: 'ACCESS_COMPLIANCE',
+    moduleLabel: 'Video KYC & IPV Desk',
+    moduleDesc: 'Conduct and review live 2-way SEBI Video KYC sessions with recording compression and consent logging',
+  },
 ];
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video
 };
 
 // =============================================================================
@@ -301,10 +311,23 @@ function calculateSegmentExpiries(subscriptions: any[]): { [key: string]: Date |
     .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
   validSubs.forEach((sub: any) => {
-    if (!sub.plan?.researchSegments || !sub.plan?.durationMonths) return;
-    const segs = sub.plan.researchSegments.split(',');
-    const durationMs = sub.plan.durationMonths * 30 * 24 * 60 * 60 * 1000;
+    const researchSegments = sub.plan?.researchSegments || sub.planSegments || '';
+    if (!researchSegments) return;
+    
+    const segs = Array.isArray(researchSegments) ? researchSegments : researchSegments.split(',');
     const purchaseDate = new Date(sub.startDate);
+    
+    // Duration in ms: calculate from endDate if available, or durationMonths fallback
+    let durationMs = 0;
+    if (sub.endDate && sub.startDate) {
+      durationMs = Math.max(0, new Date(sub.endDate).getTime() - purchaseDate.getTime());
+    }
+    if (durationMs <= 0 && sub.plan?.durationMonths) {
+      durationMs = sub.plan.durationMonths * 30 * 24 * 60 * 60 * 1000;
+    }
+    if (durationMs <= 0) {
+      durationMs = 30 * 24 * 60 * 60 * 1000; // default 1 month
+    }
 
     segs.forEach((seg: string) => {
       const key = getSegmentKey(seg);
@@ -322,6 +345,64 @@ function calculateSegmentExpiries(subscriptions: any[]): { [key: string]: Date |
   });
 
   return expiries;
+}
+
+// Computes overall plan status and active/expired segment chips for a client
+function getClientPlanAndSegmentStatus(row: any): {
+  planStatus: 'ACTIVE' | 'EXPIRED' | 'NO_PLAN';
+  activePlanName?: string;
+  expiryDate?: Date | null;
+  segments: { key: string; label: string; isActive: boolean; expiry: Date | null }[];
+} {
+  const subs = row.subscriptions || [];
+  if (!subs || subs.length === 0) {
+    return {
+      planStatus: 'NO_PLAN',
+      segments: []
+    };
+  }
+
+  const now = new Date();
+  const segmentExpiries = calculateSegmentExpiries(subs);
+  
+  // Available segments in this client's history
+  const allKnownKeys = ['Cash', 'Future', 'Option', 'Commodity'];
+  const relevantSegments: { key: string; label: string; isActive: boolean; expiry: Date | null }[] = [];
+
+  allKnownKeys.forEach(key => {
+    const exp = segmentExpiries[key];
+    if (exp) {
+      const isActive = exp >= now;
+      relevantSegments.push({
+        key,
+        label: key.toUpperCase(),
+        isActive,
+        expiry: exp
+      });
+    }
+  });
+
+  // Check if any subscription or segment is active right now
+  const hasActiveSegment = relevantSegments.some(s => s.isActive);
+  const activeSub = subs.find((s: any) => s.status !== 'CANCELLED' && new Date(s.endDate) >= now);
+
+  if (activeSub || hasActiveSegment) {
+    return {
+      planStatus: 'ACTIVE',
+      activePlanName: activeSub?.plan?.name || subs[0]?.plan?.name || 'Active Plan',
+      expiryDate: activeSub?.endDate ? new Date(activeSub.endDate) : null,
+      segments: relevantSegments
+    };
+  }
+
+  // If client had subscriptions but all are past expiry
+  const latestSub = subs.sort((a: any, b: any) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())[0];
+  return {
+    planStatus: 'EXPIRED',
+    activePlanName: latestSub?.plan?.name || 'Expired Plan',
+    expiryDate: latestSub?.endDate ? new Date(latestSub.endDate) : null,
+    segments: relevantSegments
+  };
 }
 
 // Dynamically compute display status: if DB says ACTIVE but endDate passed, show EXPIRED
@@ -428,7 +509,14 @@ function AdminDashboardContent() {
   const [profileConfirmPassword, setProfileConfirmPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
-  const [completeness, setCompleteness] = useState<number>(0);
+  const [completeness, setCompleteness] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('tenant_completeness');
+      if (cached !== null) return Number(cached);
+    }
+    return 100;
+  });
+  const [isCompletenessLoading, setIsCompletenessLoading] = useState<boolean>(true);
   const [wizardStep, setWizardStep] = useState<number>(1);
   const [wizardDetails, setWizardDetails] = useState<any>({
     organization: false,
@@ -443,10 +531,10 @@ function AdminDashboardContent() {
   const activeTabRef = useRef<string>('dashboard');
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const [dashboardStats, setDashboardStats] = useState({ staffCount: 0, clientCount: 0, researchCount: 0, planCount: 0 });
-  const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'reports' | 'policies' | 'billing' | 'security' | 'occupations'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'email-templates' | 'reports' | 'policies' | 'billing' | 'security' | 'occupations'>('general');
   const [tenantDetails, setTenantDetails] = useState<any>(null);
   const [availableOccupations, setAvailableOccupations] = useState<any[]>([]);
-  const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'kyc'>('payments');
+  const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'email-templates' | 'kyc'>('payments');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState<boolean>(false);
@@ -1204,12 +1292,12 @@ function AdminDashboardContent() {
       },
       {
         id: 'welcome_email',
-        name: 'Welcome Email Custom Text',
-        description: 'Introductory guidance text sent in automated welcome onboarding emails to newly registered clients.',
-        completed: hasWelcomeEmail,
-        tab: 'policies' as const,
+        name: 'Client Welcome Email Template',
+        description: 'Automated welcome onboarding email sent to newly registered clients with portal credentials and dynamic variables.',
+        completed: true,
+        tab: 'email-templates' as const,
         subTab: null,
-        badgeText: hasWelcomeEmail ? 'Email Text Configured' : 'Text Missing'
+        badgeText: 'Email Template Ready'
       },
       {
         id: 'disclaimer',
@@ -1517,11 +1605,14 @@ function AdminDashboardContent() {
     try {
       const tab = activeTabRef.current;
 
-      if (initStep || tab === 'settings') {
+      if (initStep || tab === 'settings' || tab === 'dashboard') {
         try {
           const comp = await api.getProfileCompleteness();
           if (comp.success) {
             setCompleteness(comp.data.score);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('tenant_completeness', String(comp.data.score));
+            }
             setWizardDetails(comp.data.details);
 
             const t = comp.data.data;
@@ -1613,7 +1704,11 @@ function AdminDashboardContent() {
               else setWizardStep(1);
             }
           }
-        } catch (err: any) { console.error('Failed to load profile completeness:', err); }
+        } catch (err: any) { 
+          console.error('Failed to load profile completeness:', err); 
+        } finally {
+          setIsCompletenessLoading(false);
+        }
 
         try {
           const rolesReq = await api.getRoles();
@@ -3381,8 +3476,8 @@ function AdminDashboardContent() {
   };
 
 
-  // Profile Wizard Check
-  const isProfileComplete = completeness >= 80;
+  // Profile Wizard Check: complete if score >= 80 or company details (address) already configured
+  const isProfileComplete = completeness >= 80 || Boolean(tenantDetails?.address || user?.tenant?.address || (typeof window !== 'undefined' && localStorage.getItem('tenant_completeness') && Number(localStorage.getItem('tenant_completeness')) >= 80));
 
   const renderPermissionCheckbox = (code: string, title: string, desc: string, dependencyCode?: string) => {
     const isChecked = selectedRole?.permissions?.includes(code) || false;
@@ -4519,21 +4614,75 @@ function AdminDashboardContent() {
       )
     },
     {
-      name: 'Status',
-      width: '130px',
-      selector: (row: any) => row.user?.status,
+      name: 'Plan Status',
+      width: '135px',
       cell: (row: any) => {
+        const { planStatus, activePlanName, expiryDate } = getClientPlanAndSegmentStatus(row);
         const isDeleted = row.user?.deletedAt !== null && row.user?.deletedAt !== undefined;
+
         return (
-          <div>
-            <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase border ${row.user?.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : row.user?.status === 'PENDING_APPROVAL' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'}`}>
-              {row.user?.status}
-            </span>
-            {isDeleted && row.user?.deletedBy && (
-              <div className="text-[9px] font-bold uppercase text-rose-600 dark:text-rose-400 mt-1">
-                Deleted by: {row.user.deletedBy}
-              </div>
+          <div className="flex flex-col gap-1 items-start">
+            {planStatus === 'ACTIVE' && (
+              <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                ACTIVE
+              </span>
             )}
+            {planStatus === 'EXPIRED' && (
+              <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                EXPIRED
+              </span>
+            )}
+            {planStatus === 'NO_PLAN' && (
+              <span className="px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-slate-500/10 text-slate-500 dark:text-slate-400 border border-slate-500/20">
+                NO PLAN
+              </span>
+            )}
+            {activePlanName && (
+              <span className="text-[10px] text-slate-600 dark:text-slate-400 font-semibold truncate max-w-[125px]" title={activePlanName}>
+                {activePlanName}
+              </span>
+            )}
+            {expiryDate && (
+              <span className="text-[9px] text-slate-500 dark:text-slate-500 font-mono">
+                Exp: {new Date(expiryDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+              </span>
+            )}
+            {isDeleted && (
+              <span className="text-[8px] font-bold uppercase text-rose-500">Deleted User</span>
+            )}
+          </div>
+        );
+      }
+    },
+    {
+      name: 'Segments',
+      width: '185px',
+      cell: (row: any) => {
+        const { segments } = getClientPlanAndSegmentStatus(row);
+        if (!segments || segments.length === 0) {
+          return <span className="text-slate-400 dark:text-slate-500 text-[10px] italic">—</span>;
+        }
+
+        return (
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {segments.map((seg) => {
+              const expStr = seg.expiry ? new Date(seg.expiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+              return (
+                <span
+                  key={seg.key}
+                  title={`${seg.label}: ${seg.isActive ? 'Active until' : 'Expired on'} ${expStr}`}
+                  className={`px-2 py-0.5 rounded-md text-[9px] font-bold tracking-wider uppercase border transition-all ${
+                    seg.isActive
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 shadow-xs'
+                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                  }`}
+                >
+                  {seg.label}
+                </span>
+              );
+            })}
           </div>
         );
       }
@@ -5008,7 +5157,7 @@ function AdminDashboardContent() {
               {/* ====================================================
             PROFILE COMPLETENESS WIZARD (Only for ADMIN, if completeness < 80%)
            ==================================================== */}
-              {!isProfileComplete && ['ADMIN', 'RESEARCHER'].includes(user.role) && !user?.isImpersonated && (
+              {!isProfileComplete && !isCompletenessLoading && !tenantDetails?.address && !user?.tenant?.address && ['ADMIN', 'RESEARCHER'].includes(user.role) && !user?.isImpersonated && (
                 <div className="max-w-3xl mx-auto space-y-8 mt-6">
                   <div className="p-6 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 rounded-2xl text-xs space-y-2">
                     <h3 className="font-bold text-sm">Action Required: Profile Wizard Completeness is below 80%</h3>
@@ -10620,6 +10769,7 @@ function AdminDashboardContent() {
                           { id: 'policies', label: 'Documents & Policies', icon: FileText },
                           { id: 'billing', label: 'Banking & Invoicing', icon: Landmark },
                           { id: 'integrations', label: 'Integrations', icon: LayoutGrid },
+                          { id: 'email-templates', label: 'Email Templates', icon: Mail },
                           { id: 'security', label: 'Security & SMS', icon: ShieldCheck },
                           { id: 'occupations', label: 'Manage Occupations', icon: Briefcase }
                         ].map(tab => (
@@ -11055,22 +11205,32 @@ function AdminDashboardContent() {
                                 </div>
                               </div>
 
-                              <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
-                                  {ClassicEditor ? (
-                                    <CKEditor
-                                      editor={ClassicEditor as any}
-                                      data={welcomeEmailText}
-                                      onChange={(event: any, editor: any) => {
-                                        const data = editor.getData();
-                                        setWelcomeEmailText(data);
-                                      }}
-                                    />
-                                  ) : (
-                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
-                                  )}
+                              {/* Welcome Email link to Email Templates (Centralized management) */}
+                              <div className="p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/10 border border-blue-200/80 dark:border-blue-900/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 shrink-0">
+                                    <Mail className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                                      <span>Welcome Onboarding Email</span>
+                                      <span className="text-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold px-2 py-0.5 rounded-full">
+                                        Email Templates Engine
+                                      </span>
+                                    </h4>
+                                    <p className="text-xs text-slate-500 mt-0.5">
+                                      Welcome email subject, credentials layout, and dynamic variables are now centrally configured in the <strong>Email Templates</strong> tab.
+                                    </p>
+                                  </div>
                                 </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSettingsTab('email-templates')}
+                                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-sm whitespace-nowrap self-start sm:self-auto flex items-center gap-1.5"
+                                >
+                                  <span>Manage Welcome Email</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </button>
                               </div>
 
                               <div>
@@ -11359,6 +11519,7 @@ function AdminDashboardContent() {
                             {[
                               { id: 'payments', label: 'Payment Gateways', icon: CreditCard },
                               { id: 'email', label: 'Email & SMTP', icon: User },
+                              { id: 'email-templates', label: 'Email Templates', icon: Mail },
                               { id: 'kyc', label: 'Digio KYC & eSign', icon: FileCheck }
                             ].map(tab => (
                               <button
@@ -11841,6 +12002,13 @@ function AdminDashboardContent() {
                             </div>
                           )}
 
+                          {/* Email Templates Engine */}
+                          {integrationTab === 'email-templates' && (
+                            <div className="animate-fade-in">
+                              <EmailTemplatesManager />
+                            </div>
+                          )}
+
                           {/* Digio & CAMS KYC */}
                           {integrationTab === 'kyc' && (
                             <div className="space-y-6">
@@ -12098,6 +12266,12 @@ function AdminDashboardContent() {
                         </div>
                       )}
 
+                      {settingsTab === 'email-templates' && (
+                        <div className="animate-fade-in">
+                          <EmailTemplatesManager />
+                        </div>
+                      )}
+
                       {settingsTab === 'security' && (
                         <SecuritySettingsTab
                           tenantData={tenantDetails || user?.tenant}
@@ -12112,7 +12286,7 @@ function AdminDashboardContent() {
                       )}
 
                       {/* Save Settings Footer */}
-                      {settingsTab !== 'occupations' && settingsTab !== 'security' && (
+                      {settingsTab !== 'occupations' && settingsTab !== 'security' && settingsTab !== 'email-templates' && (
                         <div className="mt-8 p-6 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/60 rounded-2xl flex items-center justify-between shadow-xl shadow-slate-200/20 dark:shadow-none animate-fade-in">
                           <div>
                             <h4 className="font-bold text-slate-800 dark:text-slate-200">Save Your Changes</h4>
@@ -13603,6 +13777,11 @@ function AdminDashboardContent() {
                   </div>
                 );
               })()}
+
+              {/* Video KYC & IPV Desk */}
+              {activeTab === 'video_kyc' && (
+                <VideoKycDesk />
+              )}
 
               {/* NON-ADMIN CLIENT VIEWS */}
               {activeTab === 'complaintDataView' && (

@@ -6,7 +6,7 @@ import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTen
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -66,6 +66,18 @@ import {
   useDailyAadhaarSign,
   saveDscSignedReport
 } from '../controllers/researcherSignatureController';
+import {
+  createVideoKycSession,
+  startEarlySession,
+  getSessionDetails,
+  verifyVideoKycOtp,
+  resendVideoKycOtp,
+  listVideoKycSessions,
+  uploadRecording,
+  reviewSession,
+  getVideoKycSettings,
+  updateVideoKycSettings
+} from '../controllers/videoKycController';
 
 const router = Router();
 
@@ -90,7 +102,7 @@ const getUploadRoot = () => {
 };
 
 const uploadRoot = getUploadRoot();
-const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings'];
+const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings', 'video-kyc'];
 folders.forEach(f => {
   const dir = path.join(uploadRoot, f);
   if (!fs.existsSync(dir)) {
@@ -103,7 +115,8 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const root = getUploadRoot();
     let folder = 'policies';
-    if (req.path.includes('manual')) folder = 'payments';
+    if (req.path.includes('video-kyc') || req.path.includes('video_kyc')) folder = 'video-kyc';
+    else if (req.path.includes('manual')) folder = 'payments';
     else if (req.path.includes('recording') || req.path.includes('audio') || req.path.includes('vault')) folder = 'recordings';
     else if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist')) folder = 'compliance';
     else if (req.path.includes('kyc')) folder = 'kyc';
@@ -132,22 +145,27 @@ const fileFilter = (req: any, file: any, cb: any) => {
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'text/csv',
-    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac'
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac',
+    'video/webm', 'video/mp4', 'video/ogg', 'video/x-matroska'
   ];
   const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac'];
+  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac', '.mp4'];
 
   if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Only PDF, Word, Excel, Image, and Audio recording files are allowed!'), false);
+    cb(new Error('Only PDF, Word, Excel, Image, Video, and Audio recording files are allowed!'), false);
   }
 };
 
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 50 * 1024 * 1024 } // Max 50MB (supports call recordings)
+  limits: {
+    fileSize: 100 * 1024 * 1024, // Max 100MB for video/audio recordings
+    fieldSize: 50 * 1024 * 1024,  // Max 50MB for base64 snapshots & form fields (prevents 'Field value too long')
+    fields: 100
+  }
 });
 
 // ----------------------------------------------------
@@ -453,6 +471,7 @@ router.put(
 );
 router.get('/admin/email-templates', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), getEmailTemplates);
 router.put('/admin/email-templates/:type', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), updateEmailTemplate);
+router.post('/admin/email-templates/:type/reset', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), resetEmailTemplate);
 router.post('/admin/test-smtp', authenticateJWT, requireRoles(['ADMIN']), testSmtp);
 router.post('/admin/test-smtp-connection', authenticateJWT, requireRoles(['ADMIN']), testSmtpConnection);
 router.post('/admin/verify-payment-gateway', authenticateJWT, requireRoles(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), verifyPaymentGateway);
@@ -1709,6 +1728,35 @@ router.get(
   '/locations/states',
   getStates
 );
+
+// ----------------------------------------------------
+// VIDEO KYC & IPV (V-CIP) ENDPOINTS
+// ----------------------------------------------------
+router.post('/video-kyc/create-session', authenticateJWT, createVideoKycSession);
+router.post('/video-kyc/start-early/:sessionId', authenticateJWT, startEarlySession);
+router.get('/video-kyc/sessions', authenticateJWT, listVideoKycSessions);
+router.get('/video-kyc/session/:sessionId', getSessionDetails); // Accessible by session participants
+router.post('/video-kyc/verify-otp', verifyVideoKycOtp); // 4-digit OTP verification for client
+router.post('/video-kyc/resend-otp', resendVideoKycOtp); // Resend fresh OTP to client registered email
+router.post(
+  '/video-kyc/upload/:sessionId',
+  (req, res, next) => {
+    upload.single('recording')(req, res, (err: any) => {
+      if (err) {
+        console.error('❌ [VIDEO-KYC MULTER ERROR]:', err);
+        return res.status(400).json({
+          success: false,
+          message: err?.message || 'File upload error during Video KYC upload.'
+        });
+      }
+      next();
+    });
+  },
+  uploadRecording
+);
+router.post('/video-kyc/review/:sessionId', authenticateJWT, reviewSession);
+router.get('/video-kyc/settings', authenticateJWT, getVideoKycSettings);
+router.put('/video-kyc/settings', authenticateJWT, updateVideoKycSettings);
 
 // ----------------------------------------------------
 // GENERIC DOWNLOAD (Bypasses Nginx Static Block)

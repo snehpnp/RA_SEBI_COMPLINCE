@@ -102,5 +102,6 @@ export const Occupation = createDynamicModelProxy('Occupation');
 export const SmsTemplate = createDynamicModelProxy('SmsTemplate');
 export const ClientCallRecording = createDynamicModelProxy('ClientCallRecording');
 export const Faq = createDynamicModelProxy('Faq');
+export const VideoKycSession = createDynamicModelProxy('VideoKycSession');
 
 export default dynamicDb;

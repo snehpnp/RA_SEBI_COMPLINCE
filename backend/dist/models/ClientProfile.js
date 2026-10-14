@@ -54,8 +54,11 @@ exports.ClientProfileSchema = new mongoose_1.Schema({
     investmentLimit: { type: Number, default: null },
     investmentPeriod: { type: Number, default: null },
     kraVerified: { type: Boolean, default: false },
+    kraStatus: { type: String, default: null },
     isDigiLockerLocked: { type: Boolean, default: false },
-    digilockerData: { type: mongoose_1.Schema.Types.Mixed, default: null }
+    digilockerData: { type: mongoose_1.Schema.Types.Mixed, default: null },
+    camsKraData: { type: mongoose_1.Schema.Types.Mixed, default: null },
+    camsKraPdfUrl: { type: String, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'ClientProfile' });
 exports.ClientProfileSchema.virtual('client', {
     ref: 'Client',

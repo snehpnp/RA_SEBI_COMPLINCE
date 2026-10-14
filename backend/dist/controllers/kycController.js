@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchDigioRecord = exports.updateKycAgreementStatus = exports.initiateAgreementEsign = exports.initiateKyc = void 0;
+exports.getCamsKraPdf = exports.fetchCamsRecord = exports.fetchDigioRecord = exports.updateKycAgreementStatus = exports.initiateAgreementEsign = exports.initiateKyc = void 0;
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const db_1 = __importDefault(require("../config/db"));
@@ -11,6 +11,8 @@ const digioService_1 = require("../services/digioService");
 const pdfService_1 = require("../services/pdfService");
 const emailService_1 = require("../services/emailService");
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
+const camsKraService_1 = require("../services/camsKraService");
+const camsKraPdfService_1 = require("../services/camsKraPdfService");
 const initiateKyc = async (req, res) => {
     try {
         const userId = req.user.id;
@@ -305,9 +307,10 @@ const updateKycAgreementStatus = async (req, res) => {
         console.log('║ Pincode                :', verifiedZipCode || '—');
         console.log('╚══════════════════════════════════════════════════════════════════╝\n');
         if (type === 'KYC' && (status === 'COMPLETED' || status === 'SUCCESS')) {
+            const existingClientForKyc = await db_1.default.Client.findById(clientId).lean();
             const updateFields = {
                 status: 'AGREEMENT_PENDING',
-                kraVerified: true,
+                kraVerified: Boolean(existingClientForKyc?.camsKraData && existingClientForKyc?.kraVerified),
                 kycStatus: 'VERIFIED'
             };
             if (primaryName) {
@@ -744,8 +747,10 @@ const fetchDigioRecord = async (req, res) => {
             try {
                 const primaryName = (merged.panName && !isGeneric(merged.panName)) ? merged.panName :
                     (merged.aadhaarName && !isGeneric(merged.aadhaarName)) ? merged.aadhaarName : null;
+                const existingClientForAgr = await db_1.default.Client.findById(clientId).lean();
+                const clientHasKra = Boolean(existingClientForAgr?.camsKraData && existingClientForAgr?.kraVerified);
                 // 1. Update Client record
-                const clientFields = { kraVerified: true };
+                const clientFields = { kraVerified: clientHasKra };
                 if (kycRawData) {
                     clientFields.digilockerData = kycRawData;
                     clientFields.kycStatus = 'VERIFIED';
@@ -776,7 +781,7 @@ const fetchDigioRecord = async (req, res) => {
                     clientFields.zipCode = merged.zipCode;
                 await db_1.default.Client.findByIdAndUpdate(clientId, { $set: clientFields });
                 // 2. Update ClientProfile
-                const profileFields = { kraVerified: true };
+                const profileFields = { kraVerified: clientHasKra };
                 if (kycRawData) {
                     profileFields.isDigiLockerLocked = true;
                     profileFields.digilockerData = kycRawData;
@@ -933,3 +938,163 @@ const fetchDigioRecord = async (req, res) => {
     }
 };
 exports.fetchDigioRecord = fetchDigioRecord;
+/**
+ * Fetch and optionally save client KYC details from CAMS KRA PANdownload API
+ */
+const fetchCamsRecord = async (req, res) => {
+    try {
+        const { pan, dob, clientId, saveToClient } = req.body;
+        const cleanPan = (pan || '').trim().toUpperCase();
+        if (!cleanPan) {
+            return res.status(400).json({ success: false, message: 'PAN number is required' });
+        }
+        const tenantId = req.user?.tenantId;
+        const creds = await (0, camsKraService_1.getCamsCredentials)(tenantId);
+        if (!creds.camsClientCode || !creds.camsClientId || !creds.camsClientSecret) {
+            return res.status(400).json({
+                success: false,
+                message: 'CAMS KRA API credentials are not configured. Please configure them in Settings > Integrations > CAMS KRA.'
+            });
+        }
+        if (creds.camsClientId.trim() === creds.camsClientSecret.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'CAMS Client ID aur Client Secret identical hain! Settings > Integrations me jakar apna sahi CAMS Client Secret update karein.'
+            });
+        }
+        // Call CAMS KRA
+        const camsResponse = await (0, camsKraService_1.getPanDownload)(cleanPan, dob, creds);
+        if (!camsResponse.success || !camsResponse.data) {
+            const msg = camsResponse.message === 'No data found.'
+                ? 'CAMS KRA token error: "No data found." Kripya Settings > Integrations me CAMS Client Code, Client ID aur Client Secret verify karein.'
+                : (camsResponse.message || 'Failed to download PAN details from CAMS KRA');
+            return res.status(400).json({
+                success: false,
+                message: msg,
+                error: camsResponse.error,
+                data: camsResponse.data
+            });
+        }
+        const extracted = (0, camsKraService_1.extractCamsPanDetails)(camsResponse.data);
+        let savedToClient = false;
+        let clientSnapshot = null;
+        const targetClientId = clientId || (req.user?.role === 'CLIENT' ? req.user?.id : null);
+        if (targetClientId) {
+            let existingClient = null;
+            if (clientId) {
+                existingClient = await db_1.default.Client.findById(clientId).lean();
+            }
+            else {
+                existingClient = await db_1.default.Client.findOne({ userId: req.user?.id }).lean();
+            }
+            if (existingClient) {
+                const cId = existingClient._id || existingClient.id;
+                if (saveToClient) {
+                    const statusObj = (0, camsKraService_1.mapKraStatus)(extracted.rawRecord?.status || extracted.kraStatusCode || extracted.kraStatus);
+                    const isTrulyVerified = statusObj.isVerified;
+                    const formattedKraStatus = `${statusObj.label} (${statusObj.code})`;
+                    const clientUpdates = {
+                        kraVerified: isTrulyVerified,
+                        camsKraData: camsResponse.data,
+                        kraStatus: formattedKraStatus
+                    };
+                    if (extracted.name) {
+                        clientUpdates.name = extracted.name;
+                        clientUpdates.panName = extracted.name;
+                    }
+                    if (extracted.pan)
+                        clientUpdates.pan = extracted.pan;
+                    if (extracted.dob)
+                        clientUpdates.dob = extracted.dob;
+                    if (extracted.gender)
+                        clientUpdates.gender = extracted.gender;
+                    if (extracted.fatherName)
+                        clientUpdates.fatherName = extracted.fatherName;
+                    if (extracted.address)
+                        clientUpdates.address = extracted.address;
+                    if (extracted.city)
+                        clientUpdates.city = extracted.city;
+                    if (extracted.state)
+                        clientUpdates.state = extracted.state;
+                    if (extracted.zipCode)
+                        clientUpdates.zipCode = extracted.zipCode;
+                    await db_1.default.Client.findByIdAndUpdate(cId, { $set: clientUpdates });
+                    const profileUpdates = {
+                        kraVerified: isTrulyVerified,
+                        camsKraData: camsResponse.data,
+                        kraStatus: formattedKraStatus
+                    };
+                    if (extracted.name)
+                        profileUpdates.panName = extracted.name;
+                    if (extracted.dob)
+                        profileUpdates.dob = extracted.dob;
+                    if (extracted.gender)
+                        profileUpdates.gender = extracted.gender;
+                    if (extracted.fatherName)
+                        profileUpdates.fatherName = extracted.fatherName;
+                    if (extracted.address)
+                        profileUpdates.addressLine1 = extracted.address;
+                    if (extracted.city)
+                        profileUpdates.city = extracted.city;
+                    if (extracted.state)
+                        profileUpdates.state = extracted.state;
+                    if (extracted.zipCode)
+                        profileUpdates.zipCode = extracted.zipCode;
+                    await db_1.default.ClientProfile.findOneAndUpdate({ clientId: cId }, { $set: profileUpdates }, { upsert: true });
+                    savedToClient = true;
+                    // Automatically generate official CAMS KRA KYC Verification PDF and archive to Client Vault
+                    try {
+                        const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+                        const clientForPdf = await db_1.default.Client.findById(cId).lean();
+                        const pdfRes = await (0, camsKraPdfService_1.generateAndSaveCamsKraPdf)(clientForPdf, camsResponse.data, tenant);
+                        if (pdfRes?.fileUrl) {
+                            await db_1.default.Client.findByIdAndUpdate(cId, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+                            await db_1.default.ClientProfile.findOneAndUpdate({ clientId: cId }, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+                        }
+                    }
+                    catch (pdfErr) {
+                        console.warn('[CAMS KRA PDF Generation Error]:', pdfErr.message);
+                    }
+                }
+                clientSnapshot = await db_1.default.Client.findById(cId).lean();
+            }
+        }
+        return res.json({
+            success: true,
+            message: savedToClient ? 'CAMS KRA details fetched and saved to client profile!' : 'CAMS KRA details fetched successfully!',
+            data: camsResponse.data,
+            extracted,
+            clientSnapshot,
+            pdfUrl: clientSnapshot?.camsKraPdfUrl || null,
+            savedToClient
+        });
+    }
+    catch (err) {
+        console.error('[CAMS KRA Fetch Error]:', err);
+        return res.status(500).json({
+            success: false,
+            message: err.message || 'Internal server error while fetching CAMS KRA details'
+        });
+    }
+};
+exports.fetchCamsRecord = fetchCamsRecord;
+const getCamsKraPdf = async (req, res) => {
+    try {
+        const { clientId } = req.params;
+        const client = await db_1.default.Client.findById(clientId).lean();
+        if (!client)
+            return res.status(404).json({ success: false, message: 'Client not found' });
+        if (!client.camsKraData) {
+            return res.status(400).json({ success: false, message: 'Client has no CAMS KRA data to generate report' });
+        }
+        const tenant = await db_1.default.Tenant.findById(req.user?.tenantId || client.tenantId).lean();
+        const pdfBuffer = await (0, camsKraPdfService_1.generateCamsKraPdfBuffer)(client, client.camsKraData, tenant);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="CAMS_KRA_KYC_${client.pan || 'REPORT'}.pdf"`);
+        return res.send(pdfBuffer);
+    }
+    catch (err) {
+        return res.status(500).json({ success: false, message: err.message || 'Error generating KRA PDF' });
+    }
+};
+exports.getCamsKraPdf = getCamsKraPdf;

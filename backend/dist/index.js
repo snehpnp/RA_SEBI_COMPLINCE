@@ -11,6 +11,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('UNHANDLED REJECTION:', reason);
 });
 const express_1 = __importDefault(require("express"));
+const http_1 = __importDefault(require("http"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const path_1 = __importDefault(require("path"));
@@ -20,7 +21,9 @@ const db_1 = require("./config/db");
 const cronService_1 = require("./services/cronService");
 const complianceController_1 = require("./controllers/complianceController");
 const third_party_api_1 = require("./third-party-api");
+const videoKycSocket_1 = require("./services/videoKycSocket");
 const app = (0, express_1.default)();
+const httpServer = http_1.default.createServer(app);
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
 // Security Middlewares
 app.use((0, helmet_1.default)({
@@ -178,8 +181,10 @@ node_cron_1.default.schedule('0 0 * * *', async () => {
         console.error('❌ [COMPLIANCE CRON] Error running automated daily compliance cron:', error?.message);
     }
 });
+// Initialize Video KYC WebSocket Signaling
+(0, videoKycSocket_1.initVideoKycSocket)(httpServer);
 // Start Server
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`RAGCP Express Server (with Video KYC WebSockets) is running on http://0.0.0.0:${PORT}`);
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
 });

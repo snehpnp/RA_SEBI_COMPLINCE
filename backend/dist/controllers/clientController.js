@@ -48,6 +48,8 @@ const activityService_1 = require("../services/activityService");
 const emailService_1 = require("../services/emailService");
 const pdfService_1 = require("../services/pdfService");
 const digioService_1 = require("../services/digioService");
+const camsKraService_1 = require("../services/camsKraService");
+const camsKraPdfService_1 = require("../services/camsKraPdfService");
 const invoiceGenerator_1 = require("../services/invoiceGenerator");
 const ccavenue_1 = require("../utils/ccavenue");
 const querystring_1 = __importDefault(require("querystring"));
@@ -432,8 +434,42 @@ const verifyKRA = async (req, res) => {
         let extractedCity = null;
         let extractedState = null;
         let extractedZipCode = null;
-        if (req.body.digioResponse) {
-            const extracted = (0, digioService_1.extractAadhaarDetailsFromDigio)(req.body.digioResponse);
+        let camsKraResponseData = null;
+        let extractedCams = null;
+        if (pan) {
+            try {
+                const camsCreds = await (0, camsKraService_1.getCamsCredentials)(tenantId);
+                if (camsCreds.camsClientCode && camsCreds.camsClientId && camsCreds.camsClientSecret) {
+                    const camsPanRes = await (0, camsKraService_1.getPanDownload)(pan, extractedDob || client.dob || req.body.dob, camsCreds);
+                    if (camsPanRes.success && camsPanRes.data) {
+                        camsKraResponseData = camsPanRes.data;
+                        extractedCams = (0, camsKraService_1.extractCamsPanDetails)(camsPanRes.data);
+                        if (extractedCams.name && !verifiedPanName)
+                            verifiedPanName = extractedCams.name;
+                        if (extractedCams.dob && !extractedDob)
+                            extractedDob = extractedCams.dob;
+                        if (extractedCams.gender && !extractedGender)
+                            extractedGender = extractedCams.gender;
+                        if (extractedCams.fatherName && !extractedFatherName)
+                            extractedFatherName = extractedCams.fatherName;
+                        if (extractedCams.address && !extractedAddress)
+                            extractedAddress = extractedCams.address;
+                        if (extractedCams.city && !extractedCity)
+                            extractedCity = extractedCams.city;
+                        if (extractedCams.state && !extractedState)
+                            extractedState = extractedCams.state;
+                        if (extractedCams.zipCode && !extractedZipCode)
+                            extractedZipCode = extractedCams.zipCode;
+                        console.log('[CAMS KRA] Auto-verified data for PAN:', pan, 'Name:', extractedCams.name);
+                    }
+                }
+            }
+            catch (camsErr) {
+                console.warn('[CAMS KRA] Auto-fetch error during verifyKRA:', camsErr.message);
+            }
+        }
+        if (req.body.digioResponse || camsKraResponseData) {
+            const extracted = req.body.digioResponse ? ((0, digioService_1.extractAadhaarDetailsFromDigio)(req.body.digioResponse) || {}) : {};
             if (extracted?.aadhaarName)
                 verifiedAadhaarName = extracted.aadhaarName;
             if (extracted?.panName)
@@ -477,7 +513,13 @@ const verifyKRA = async (req, res) => {
                 profileUpdates.panName = verifiedAadhaarName;
             if (verifiedAadhaarName)
                 profileUpdates.aadhaarName = verifiedAadhaarName;
-            profileUpdates.digilockerData = req.body.digioResponse;
+            if (req.body.digioResponse)
+                profileUpdates.digilockerData = req.body.digioResponse;
+            if (camsKraResponseData) {
+                profileUpdates.camsKraData = camsKraResponseData;
+                profileUpdates.kraStatus = extractedCams?.kraStatus || 'VERIFIED';
+                profileUpdates.kraVerified = true;
+            }
             await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: profileUpdates }, { upsert: true });
         }
         const primaryName = verifiedPanName || verifiedAadhaarName || '';
@@ -510,8 +552,9 @@ const verifyKRA = async (req, res) => {
             ...(extractedState ? { state: extractedState } : {}),
             ...(extractedZipCode ? { zipCode: extractedZipCode } : {}),
             ...(req.body.digioResponse ? { digilockerData: req.body.digioResponse } : {}),
+            ...(camsKraResponseData ? { camsKraData: camsKraResponseData, kraStatus: extractedCams?.kraStatus || 'KYC REGISTERED' } : {}),
             status: nextStatus,
-            kraVerified: statusInput !== 'FAIL'
+            kraVerified: Boolean(camsKraResponseData && (camsKraResponseData.kycData || camsKraResponseData.PAN) && statusInput !== 'FAIL')
         };
         if (primaryName) {
             updateSet.name = primaryName;
@@ -520,6 +563,19 @@ const verifyKRA = async (req, res) => {
                 updateSet.aadhaarName = verifiedAadhaarName;
         }
         const updatedClient = await db_1.default.Client.findByIdAndUpdate(client._id || client.id, { $set: updateSet }, { returnDocument: 'after', lean: true });
+        if (camsKraResponseData) {
+            try {
+                const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+                const pdfRes = await (0, camsKraPdfService_1.generateAndSaveCamsKraPdf)(updatedClient, camsKraResponseData, tenant);
+                if (pdfRes?.fileUrl) {
+                    await db_1.default.Client.findByIdAndUpdate(client._id || client.id, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+                    await db_1.default.ClientProfile.findOneAndUpdate({ clientId: client._id || client.id }, { $set: { camsKraPdfUrl: pdfRes.fileUrl } });
+                }
+            }
+            catch (pdfErr) {
+                console.warn('[CAMS KRA Auto-PDF Error]:', pdfErr.message);
+            }
+        }
         if (primaryName) {
             const nameParts = primaryName.split(' ');
             const firstName = nameParts[0] || '';

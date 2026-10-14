@@ -1341,6 +1341,24 @@ class ApiClient {
     });
   }
 
+  // Dynamic Email Templates
+  async getEmailTemplates() {
+    return this.request('/admin/email-templates');
+  }
+
+  async updateEmailTemplate(type: string, data: { subject: string; body: string }) {
+    return this.request(`/admin/email-templates/${encodeURIComponent(type)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async resetEmailTemplate(type: string) {
+    return this.request(`/admin/email-templates/${encodeURIComponent(type)}/reset`, {
+      method: 'POST'
+    });
+  }
+
   // SMS Gateway & Templates
   async getSmsTemplates() {
     return this.request('/admin/sms-templates');
@@ -1496,6 +1514,86 @@ class ApiClient {
     if (params?.limit) q.append('limit', String(params.limit));
     const qs = q.toString() ? `?${q.toString()}` : '';
     return this.request(`/admin/clients/${clientId}/timeline${qs}`);
+  }
+
+  // Video KYC Methods
+  async createVideoKycSession(payload: { clientId?: string; customConsentText?: string; scheduleType?: 'INSTANT' | 'SCHEDULED'; scheduledAt?: string | null }) {
+    return this.request('/video-kyc/create-session', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async startEarlyVideoKycSession(sessionId: string) {
+    return this.request(`/video-kyc/start-early/${sessionId}`, {
+      method: 'POST'
+    });
+  }
+
+  async getVideoKycSession(sessionId: string) {
+    return this.request(`/video-kyc/session/${sessionId}`);
+  }
+
+  async verifyVideoKycOtp(sessionId: string, otpCode: string) {
+    return this.request('/video-kyc/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, otpCode })
+    });
+  }
+
+  async resendVideoKycOtp(sessionId: string) {
+    return this.request('/video-kyc/resend-otp', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId })
+    });
+  }
+
+  async listVideoKycSessions(params?: { status?: string; clientId?: string; page?: number; limit?: number }) {
+    const q = new URLSearchParams();
+    if (params?.status) q.append('status', params.status);
+    if (params?.clientId) q.append('clientId', params.clientId);
+    if (params?.page) q.append('page', String(params.page));
+    if (params?.limit) q.append('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return this.request(`/video-kyc/sessions${qs}`);
+  }
+
+  async uploadVideoKycRecording(sessionId: string, formData: FormData) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+    const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : '';
+    const res = await fetch(`${API_BASE_URL}/video-kyc/upload/${sessionId}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'x-tenant-id': tenantId || ''
+      },
+      body: formData
+    });
+    return res.json();
+  }
+
+  async reviewVideoKycSession(sessionId: string, payload: { status: 'APPROVED' | 'REJECTED'; rejectionReason?: string; adminNotes?: string }) {
+    return this.request(`/video-kyc/review/${sessionId}`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getVideoKycSettings() {
+    return this.request('/video-kyc/settings');
+  }
+
+  async updateVideoKycSettings(payload: { 
+    videoKycEnabled?: boolean; 
+    clientVideoKycRequestEnabled?: boolean; 
+    videoKycAgreementRule?: 'ALL' | 'SIGNED_ONLY' | 'PENDING_ONLY';
+    videoKycPlanRule?: 'ALL' | 'ACTIVE_ONLY' | 'EXPIRED_ONLY';
+    globalVideoKycConsentText?: string; 
+  }) {
+    return this.request('/video-kyc/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
   }
 }
 

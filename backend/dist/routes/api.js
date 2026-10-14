@@ -39,6 +39,7 @@ const clientTimelineController_1 = require("../controllers/clientTimelineControl
 const clientVaultController_1 = require("../controllers/clientVaultController");
 const faqController_1 = require("../controllers/faqController");
 const researcherSignatureController_1 = require("../controllers/researcherSignatureController");
+const videoKycController_1 = require("../controllers/videoKycController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -64,7 +65,7 @@ const getUploadRoot = () => {
     return defaultDir;
 };
 const uploadRoot = getUploadRoot();
-const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings'];
+const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings', 'video-kyc'];
 folders.forEach(f => {
     const dir = path_1.default.join(uploadRoot, f);
     if (!fs_1.default.existsSync(dir)) {
@@ -79,7 +80,9 @@ const storage = multer_1.default.diskStorage({
     destination: (req, file, cb) => {
         const root = getUploadRoot();
         let folder = 'policies';
-        if (req.path.includes('manual'))
+        if (req.path.includes('video-kyc') || req.path.includes('video_kyc'))
+            folder = 'video-kyc';
+        else if (req.path.includes('manual'))
             folder = 'payments';
         else if (req.path.includes('recording') || req.path.includes('audio') || req.path.includes('vault'))
             folder = 'recordings';
@@ -118,21 +121,26 @@ const fileFilter = (req, file, cb) => {
         'application/vnd.ms-excel',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'text/csv',
-        'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac'
+        'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac',
+        'video/webm', 'video/mp4', 'video/ogg', 'video/x-matroska'
     ];
     const ext = path_1.default.extname(file.originalname).toLowerCase();
-    const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac'];
+    const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac', '.mp4'];
     if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
         cb(null, true);
     }
     else {
-        cb(new Error('Only PDF, Word, Excel, Image, and Audio recording files are allowed!'), false);
+        cb(new Error('Only PDF, Word, Excel, Image, Video, and Audio recording files are allowed!'), false);
     }
 };
 const upload = (0, multer_1.default)({
     storage,
     fileFilter,
-    limits: { fileSize: 50 * 1024 * 1024 } // Max 50MB (supports call recordings)
+    limits: {
+        fileSize: 100 * 1024 * 1024, // Max 100MB for video/audio recordings
+        fieldSize: 50 * 1024 * 1024, // Max 50MB for base64 snapshots & form fields (prevents 'Field value too long')
+        fields: 100
+    }
 });
 // ----------------------------------------------------
 // AUTHENTICATION
@@ -234,6 +242,7 @@ router.put('/admin/settings', auth_1.authenticateJWT, (0, auth_1.requirePermissi
 ]), adminController_1.updateTenantSettings);
 router.get('/admin/email-templates', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.getEmailTemplates);
 router.put('/admin/email-templates/:type', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.updateEmailTemplate);
+router.post('/admin/email-templates/:type/reset', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'PRINCIPAL_OFFICER']), adminController_1.resetEmailTemplate);
 router.post('/admin/test-smtp', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), adminController_1.testSmtp);
 router.post('/admin/test-smtp-connection', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), systemSettingController_1.testSmtpConnection);
 router.post('/admin/verify-payment-gateway', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), adminController_1.verifyPaymentGateway);
@@ -275,6 +284,10 @@ router.delete('/admin/sms-templates/:id', auth_1.authenticateJWT, (0, auth_1.req
 router.post('/admin/sms/test', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testSmsGateway);
 router.post('/admin/test-digio', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testDigioConfig);
 router.post('/admin/digio/fetch-by-id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchDigioRecord);
+router.post('/admin/test-cams-kra', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testCamsKraConfig);
+router.post('/admin/cams-kra/fetch-pan', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchCamsRecord);
+router.post('/client/cams-kra/fetch-pan', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, kycController_1.fetchCamsRecord);
+router.get('/admin/cams-kra/pdf/:clientId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.getCamsKraPdf);
 // ==========================================
 router.get('/admin/profile-completeness', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, adminController_1.getProfileCompleteness);
 // Active Client History endpoints
@@ -502,6 +515,30 @@ router.get('/resources', auth_1.authenticateJWT, resourceController_1.getResourc
 // LOCATIONS MANAGEMENT
 // ----------------------------------------------------
 router.get('/locations/states', locationController_1.getStates);
+// ----------------------------------------------------
+// VIDEO KYC & IPV (V-CIP) ENDPOINTS
+// ----------------------------------------------------
+router.post('/video-kyc/create-session', auth_1.authenticateJWT, videoKycController_1.createVideoKycSession);
+router.post('/video-kyc/start-early/:sessionId', auth_1.authenticateJWT, videoKycController_1.startEarlySession);
+router.get('/video-kyc/sessions', auth_1.authenticateJWT, videoKycController_1.listVideoKycSessions);
+router.get('/video-kyc/session/:sessionId', videoKycController_1.getSessionDetails); // Accessible by session participants
+router.post('/video-kyc/verify-otp', videoKycController_1.verifyVideoKycOtp); // 4-digit OTP verification for client
+router.post('/video-kyc/resend-otp', videoKycController_1.resendVideoKycOtp); // Resend fresh OTP to client registered email
+router.post('/video-kyc/upload/:sessionId', (req, res, next) => {
+    upload.single('recording')(req, res, (err) => {
+        if (err) {
+            console.error('❌ [VIDEO-KYC MULTER ERROR]:', err);
+            return res.status(400).json({
+                success: false,
+                message: err?.message || 'File upload error during Video KYC upload.'
+            });
+        }
+        next();
+    });
+}, videoKycController_1.uploadRecording);
+router.post('/video-kyc/review/:sessionId', auth_1.authenticateJWT, videoKycController_1.reviewSession);
+router.get('/video-kyc/settings', auth_1.authenticateJWT, videoKycController_1.getVideoKycSettings);
+router.put('/video-kyc/settings', auth_1.authenticateJWT, videoKycController_1.updateVideoKycSettings);
 // ----------------------------------------------------
 // GENERIC DOWNLOAD (Bypasses Nginx Static Block)
 // ----------------------------------------------------

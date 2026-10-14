@@ -482,6 +482,8 @@ const closeSignal = async (req, res) => {
                 data: {
                     signalId: id,
                     stockSymbol,
+                    segment: signal.segment,
+                    callType: signal.callType,
                     closeStatus,
                     exitPrice,
                     closeRemark,

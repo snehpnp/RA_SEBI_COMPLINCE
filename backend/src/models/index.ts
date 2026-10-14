@@ -51,6 +51,7 @@ import { Occupation, OccupationSchema, IOccupation } from './Occupation';
 import { SmsTemplate, SmsTemplateSchema, ISmsTemplate } from './SmsTemplate';
 import { ClientCallRecording, ClientCallRecordingSchema, IClientCallRecording } from './ClientCallRecording';
 import { Faq, FaqSchema, IFaq } from './Faq';
+import { VideoKycSession, VideoKycSessionSchema, IVideoKycSession } from './VideoKycSession';
 
 // Re-export all models and interfaces
 export {
@@ -103,7 +104,8 @@ export {
   EmailTemplate, EmailTemplateSchema, IEmailTemplate,
   EmailVerification, EmailVerificationSchema, IEmailVerification,
   SystemSetting, SystemSettingSchema, ISystemSetting,
-  AdminPermission, AdminPermissionSchema, IAdminPermission
+  AdminPermission, AdminPermissionSchema, IAdminPermission,
+  VideoKycSession, VideoKycSessionSchema, IVideoKycSession
 };
 
 /**
@@ -213,6 +215,8 @@ export interface ITenantModels {
   clientCallRecording: Model<IClientCallRecording>;
   Faq: Model<IFaq>;
   faq: Model<IFaq>;
+  VideoKycSession: Model<IVideoKycSession>;
+  videoKycSession: Model<IVideoKycSession>;
 
   [key: string]: any;
 }
@@ -271,7 +275,8 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     Occupation: (connection.models.Occupation || connection.model<IOccupation>('Occupation', OccupationSchema, 'Occupation')) as Model<IOccupation>,
     SmsTemplate: (connection.models.SmsTemplate || connection.model<ISmsTemplate>('SmsTemplate', SmsTemplateSchema, 'SmsTemplate')) as Model<ISmsTemplate>,
     ClientCallRecording: (connection.models.ClientCallRecording || connection.model<IClientCallRecording>('ClientCallRecording', ClientCallRecordingSchema, 'ClientCallRecording')) as Model<IClientCallRecording>,
-    Faq: (connection.models.Faq || connection.model<IFaq>('Faq', FaqSchema, 'Faq')) as Model<IFaq>
+    Faq: (connection.models.Faq || connection.model<IFaq>('Faq', FaqSchema, 'Faq')) as Model<IFaq>,
+    VideoKycSession: (connection.models.VideoKycSession || connection.model<IVideoKycSession>('VideoKycSession', VideoKycSessionSchema, 'VideoKycSession')) as Model<IVideoKycSession>
   };
 
   return {
@@ -325,6 +330,7 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     occupation: models.Occupation,
     smsTemplate: models.SmsTemplate,
     clientCallRecording: models.ClientCallRecording,
-    faq: models.Faq
+    faq: models.Faq,
+    videoKycSession: models.VideoKycSession
   };
 }

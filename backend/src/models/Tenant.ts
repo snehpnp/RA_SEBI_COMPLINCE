@@ -91,6 +91,11 @@ export interface ITenant extends Document {
   client2FAEnabled?: boolean;
   twoFactorChannel?: 'EMAIL' | 'SMS' | 'BOTH';
   signupVerificationMode?: 'EMAIL_ONLY' | 'MOBILE_ONLY' | 'BOTH';
+  videoKycEnabled?: boolean;
+  clientVideoKycRequestEnabled?: boolean;
+  videoKycAgreementRule?: 'ALL' | 'SIGNED_ONLY' | 'PENDING_ONLY';
+  videoKycPlanRule?: 'ALL' | 'ACTIVE_ONLY' | 'EXPIRED_ONLY';
+  globalVideoKycConsentText?: string | null;
   lockedTradesPreviewCount?: number;
   showOpenTradePotential?: boolean;
   showLockedTradePotential?: boolean;
@@ -194,6 +199,14 @@ export const TenantSchema = new Schema<ITenant>(
     client2FAEnabled: { type: Boolean, default: false },
     twoFactorChannel: { type: String, enum: ['EMAIL', 'SMS', 'BOTH'], default: 'EMAIL' },
     signupVerificationMode: { type: String, enum: ['EMAIL_ONLY', 'MOBILE_ONLY', 'BOTH'], default: 'EMAIL_ONLY' },
+    videoKycEnabled: { type: Boolean, default: true },
+    clientVideoKycRequestEnabled: { type: Boolean, default: true },
+    videoKycAgreementRule: { type: String, enum: ['ALL', 'SIGNED_ONLY', 'PENDING_ONLY'], default: 'ALL' },
+    videoKycPlanRule: { type: String, enum: ['ALL', 'ACTIVE_ONLY', 'EXPIRED_ONLY'], default: 'ALL' },
+    globalVideoKycConsentText: {
+      type: String,
+      default: 'I, {{clientName}}, confirm that I have voluntarily subscribed to the research services of {{companyName}}. I have reviewed and signed the SEBI Research Analyst Service Agreement and confirm that my PAN card is {{pan}}.'
+    },
     lockedTradesPreviewCount: { type: Number, default: 5 },
     showOpenTradePotential: { type: Boolean, default: true },
     showLockedTradePotential: { type: Boolean, default: true },

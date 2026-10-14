@@ -60,9 +60,14 @@ exports.ClientSchema = new mongoose_1.Schema({
     kycStatus: { type: String, default: 'PENDING' },
     agreementSigned: { type: Boolean, default: false },
     kraVerified: { type: Boolean, default: false },
+    kraStatus: { type: String, default: null },
     digilockerData: { type: mongoose_1.Schema.Types.Mixed, default: null },
+    camsKraData: { type: mongoose_1.Schema.Types.Mixed, default: null },
+    camsKraPdfUrl: { type: String, default: null },
     signatureUrl: { type: String, default: null },
     signedAt: { type: Date, default: null },
+    videoKycStatus: { type: String, enum: ['NOT_REQUIRED', 'PENDING', 'IN_PROGRESS', 'APPROVED', 'REJECTED'], default: 'PENDING' },
+    videoKycSessionId: { type: String, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Client', autoIndex: false });
 exports.ClientSchema.index({ pan: 1 }, { unique: true, partialFilterExpression: { pan: { $type: 'string', $gt: '' } }, name: 'pan_unique_partial' });

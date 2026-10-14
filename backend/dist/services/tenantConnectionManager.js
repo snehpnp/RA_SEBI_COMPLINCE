@@ -13,7 +13,9 @@ const defaultCentralUrl = (process.env.DATABASE_URL && process.env.DATABASE_URL.
 exports.centralConnection = mongoose_1.default.createConnection(defaultCentralUrl, {
     dbName: defaultDbName,
     maxPoolSize: 20,
-    serverSelectionTimeoutMS: 10000,
+    serverSelectionTimeoutMS: 45000,
+    connectTimeoutMS: 45000,
+    socketTimeoutMS: 45000,
 });
 exports.centralConnection.on('connected', () => {
     console.log(`✅ [DB] Connected to MongoDB: ${defaultDbName}`);

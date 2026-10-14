@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PaymentSchema = exports.Payment = exports.ConsentHistorySchema = exports.ConsentHistory = exports.ConsentSchema = exports.Consent = exports.AgreementHistorySchema = exports.AgreementHistory = exports.AgreementSchema = exports.Agreement = exports.CouponSchema = exports.Coupon = exports.SubscriptionSchema = exports.Subscription = exports.PlanSchema = exports.Plan = exports.PlanCategorySchema = exports.PlanCategory = exports.ClientIdentityHistorySchema = exports.ClientIdentityHistory = exports.ClientDocumentSchema = exports.ClientDocument = exports.ClientProfileSchema = exports.ClientProfile = exports.ClientSchema = exports.Client = exports.PersonAssociatedSchema = exports.PersonAssociated = exports.StaffSchema = exports.Staff = exports.RolePermissionSchema = exports.RolePermission = exports.PermissionSchema = exports.Permission = exports.RoleSchema = exports.Role = exports.UserSchema = exports.User = exports.AllCompanySchema = exports.AllCompany = exports.TenantSchema = exports.Tenant = exports.SmsTemplateSchema = exports.SmsTemplate = exports.OccupationSchema = exports.Occupation = exports.ClientCallRecordingSchema = exports.ClientCallRecording = exports.FaqSchema = exports.Faq = void 0;
 exports.AdminPermissionSchema = exports.AdminPermission = exports.SystemSettingSchema = exports.SystemSetting = exports.EmailVerificationSchema = exports.EmailVerification = exports.EmailTemplateSchema = exports.EmailTemplate = exports.CustomPageSchema = exports.CustomPage = exports.StateSchema = exports.State = exports.TenantDocumentHistorySchema = exports.TenantDocumentHistory = exports.ResourceSchema = exports.Resource = exports.ComplaintMonthlyReportSchema = exports.ComplaintMonthlyReport = exports.ComplaintSchema = exports.Complaint = exports.PenaltySchema = exports.Penalty = exports.ComplianceAuditHistorySchema = exports.ComplianceAuditHistory = exports.ComplianceAuditSchema = exports.ComplianceAudit = exports.ComplianceRequirementSchema = exports.ComplianceRequirement = exports.SignalMessageSchema = exports.SignalMessage = exports.SignalSchema = exports.Signal = exports.StockSchema = exports.Stock = exports.TicketMessageSchema = exports.TicketMessage = exports.SupportTicketSchema = exports.SupportTicket = exports.NotificationLogSchema = exports.NotificationLog = exports.ActivityLogSchema = exports.ActivityLog = exports.AuditLogSchema = exports.AuditLog = exports.ComplianceAlertSchema = exports.ComplianceAlert = exports.ResearchAnalyticsSchema = exports.ResearchAnalytics = exports.ResearchReportSchema = exports.ResearchReport = void 0;
+exports.VideoKycSessionSchema = exports.VideoKycSession = void 0;
 exports.registerTenantModels = registerTenantModels;
 // Import all Schemas & Models
 const Tenant_1 = require("./Tenant");
@@ -154,6 +155,9 @@ Object.defineProperty(exports, "ClientCallRecordingSchema", { enumerable: true, 
 const Faq_1 = require("./Faq");
 Object.defineProperty(exports, "Faq", { enumerable: true, get: function () { return Faq_1.Faq; } });
 Object.defineProperty(exports, "FaqSchema", { enumerable: true, get: function () { return Faq_1.FaqSchema; } });
+const VideoKycSession_1 = require("./VideoKycSession");
+Object.defineProperty(exports, "VideoKycSession", { enumerable: true, get: function () { return VideoKycSession_1.VideoKycSession; } });
+Object.defineProperty(exports, "VideoKycSessionSchema", { enumerable: true, get: function () { return VideoKycSession_1.VideoKycSessionSchema; } });
 /**
  * Helper to register all schemas onto a dynamic Mongoose connection instance
  */
@@ -208,7 +212,8 @@ function registerTenantModels(connection) {
         Occupation: (connection.models.Occupation || connection.model('Occupation', Occupation_1.OccupationSchema, 'Occupation')),
         SmsTemplate: (connection.models.SmsTemplate || connection.model('SmsTemplate', SmsTemplate_1.SmsTemplateSchema, 'SmsTemplate')),
         ClientCallRecording: (connection.models.ClientCallRecording || connection.model('ClientCallRecording', ClientCallRecording_1.ClientCallRecordingSchema, 'ClientCallRecording')),
-        Faq: (connection.models.Faq || connection.model('Faq', Faq_1.FaqSchema, 'Faq'))
+        Faq: (connection.models.Faq || connection.model('Faq', Faq_1.FaqSchema, 'Faq')),
+        VideoKycSession: (connection.models.VideoKycSession || connection.model('VideoKycSession', VideoKycSession_1.VideoKycSessionSchema, 'VideoKycSession'))
     };
     return {
         ...models,
@@ -261,6 +266,7 @@ function registerTenantModels(connection) {
         occupation: models.Occupation,
         smsTemplate: models.SmsTemplate,
         clientCallRecording: models.ClientCallRecording,
-        faq: models.Faq
+        faq: models.Faq,
+        videoKycSession: models.VideoKycSession
     };
 }

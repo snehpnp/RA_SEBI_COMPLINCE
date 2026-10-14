@@ -152,13 +152,20 @@ export default function Dashboard({
   };
   const kyc = getKycDisplay();
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
   return (
     <div className="space-y-6 font-sans text-premium-text animate-in fade-in duration-500">
       
       {/* Greeting & Quick Stats */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-premium-text">Good Morning, {userName} 👋</h1>
+          <h1 className="text-2xl font-bold text-premium-text">{getGreeting()}, {userName} 👋</h1>
           <p className="text-premium-text/60 text-sm mt-1">Here is what's happening with your account today.</p>
         </div>
         <div className="flex gap-3">

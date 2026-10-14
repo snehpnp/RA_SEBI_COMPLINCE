@@ -8,6 +8,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
@@ -17,8 +18,10 @@ import { centralConnection, Tenant, Client, ComplianceAlert } from './config/db'
 import { initCronJobs } from './services/cronService';
 import { checkComplianceForTenant } from './controllers/complianceController';
 import { thirdPartyRoutes, getThirdPartyClients } from './third-party-api';
+import { initVideoKycSocket } from './services/videoKycSocket';
 
 const app = express();
+const httpServer = http.createServer(app);
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
 
 // Security Middlewares
@@ -200,8 +203,11 @@ cron.schedule('0 0 * * *', async () => {
   }
 });
 
+// Initialize Video KYC WebSocket Signaling
+initVideoKycSocket(httpServer);
+
 // Start Server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`RAGCP Express Server is running on http://0.0.0.0:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`RAGCP Express Server (with Video KYC WebSockets) is running on http://0.0.0.0:${PORT}`);
   initCronJobs(); // Initialize penalty engine
 });

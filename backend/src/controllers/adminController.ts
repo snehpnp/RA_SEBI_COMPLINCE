@@ -17,6 +17,7 @@ import { sendSms, ensureDefaultSmsTemplates } from '../services/smsService';
 import { testDigioConnection } from '../services/digioService';
 import { getCamsCredentials, getCamsToken } from '../services/camsKraService';
 import { logActivity } from '../services/activityService';
+import { DEFAULT_EMAIL_TEMPLATES } from '../utils/defaultEmailTemplates';
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return email;
@@ -1253,6 +1254,13 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
       alertMap.get(cId)!.push(al);
     }
 
+    // Approved Video KYC Sessions
+    const approvedKycSessions: any[] = await dynamicDb.VideoKycSession.find({
+      tenantId,
+      status: 'APPROVED'
+    }).select('clientId').lean();
+    const approvedKycClientIds = new Set(approvedKycSessions.map((s: any) => String(s.clientId)));
+
     // Creators
     const creatorIds = [...new Set(combinedClients.map((c: any) => c.createdById).filter(Boolean))] as string[];
     const creatorUsers = creatorIds.length > 0 ? await dynamicDb.User.find({
@@ -1301,6 +1309,15 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
 
       const userDisplayName = uObj ? `${uObj.firstName || ''} ${uObj.lastName || ''}`.trim() || uObj.email : c.name;
 
+      const isVideoKycApproved = approvedKycClientIds.has(cIdStr) || 
+                                 approvedKycClientIds.has(uIdStr) || 
+                                 c.videoKycStatus === 'APPROVED' || 
+                                 uObj?.videoKycStatus === 'APPROVED';
+
+      const effectiveVideoKycStatus = isVideoKycApproved 
+        ? 'APPROVED' 
+        : (c.videoKycStatus || uObj?.videoKycStatus || 'PENDING');
+
       return {
         ...c,
         id: cIdStr,
@@ -1309,6 +1326,7 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
         mobile: c.mobile || uObj?.mobile,
         status: c.status || uObj?.status || 'ACTIVE',
         kycStatus: c.kycStatus || uObj?.kycStatus || 'PENDING',
+        videoKycStatus: effectiveVideoKycStatus,
         user: uObj ? {
           ...uObj,
           id: String(uObj._id || uObj.id),
@@ -3518,8 +3536,33 @@ export const getEmailTemplates = async (req: AuthenticatedRequest, res: Response
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
 
   try {
-    const templates = await dynamicDb.EmailTemplate.find({ tenantId }).lean();
-    return res.status(200).json({ success: true, data: templates });
+    const existing = await dynamicDb.EmailTemplate.find({ tenantId }).lean();
+    const existingMap = new Map<string, any>();
+    for (const item of existing) {
+      existingMap.set(item.type, item);
+      // Legacy 'WELCOME' backwards compatibility
+      if (item.type === 'WELCOME' && !existingMap.has('WELCOME_CLIENT')) {
+        existingMap.set('WELCOME_CLIENT', item);
+      }
+    }
+
+    const merged = DEFAULT_EMAIL_TEMPLATES.map(def => {
+      const found = existingMap.get(def.type);
+      return {
+        type: def.type,
+        name: def.name,
+        description: def.description,
+        subject: found?.subject || def.subject,
+        body: found?.body || def.body,
+        variables: def.variables,
+        variableLabels: def.variableLabels,
+        sampleVariables: def.sampleVariables,
+        isCustomized: Boolean(found && (found.subject !== def.subject || found.body !== def.body)),
+        updatedAt: found?.updatedAt || null
+      };
+    });
+
+    return res.status(200).json({ success: true, data: merged });
   } catch (err: any) {
     return res.status(500).json({ success: false, errors: [err.message] });
   }
@@ -3532,17 +3575,76 @@ export const updateEmailTemplate = async (req: AuthenticatedRequest, res: Respon
   const { type } = req.params;
   const { subject, body } = req.body;
 
+  if (!subject || !subject.trim()) {
+    return res.status(400).json({ success: false, message: 'Email subject is required' });
+  }
+  if (!body || !body.trim()) {
+    return res.status(400).json({ success: false, message: 'Email body content is required' });
+  }
+
   try {
+    const def = DEFAULT_EMAIL_TEMPLATES.find(d => d.type === type);
     const updated = await dynamicDb.EmailTemplate.findOneAndUpdate(
       { tenantId, type },
       {
-        $set: { subject, body },
+        $set: {
+          subject: subject.trim(),
+          body: body.trim(),
+          name: def?.name,
+          description: def?.description,
+          variables: def?.variables || []
+        },
         $setOnInsert: { tenantId, type }
       },
       { upsert: true, returnDocument: 'after', lean: true }
     );
+
+    // If type is WELCOME_CLIENT, also keep legacy WELCOME synced
+    if (type === 'WELCOME_CLIENT') {
+      await dynamicDb.EmailTemplate.updateOne(
+        { tenantId, type: 'WELCOME' },
+        { $set: { subject: subject.trim(), body: body.trim() } }
+      ).catch(() => {});
+    }
+
     syncTenantToRemote(tenantId, { reason: 'EMAIL_TEMPLATE_UPDATE' }).catch(() => { });
-    return res.status(200).json({ success: true, data: updated, message: 'Template updated successfully' });
+    return res.status(200).json({ success: true, data: updated, message: 'Email template updated successfully' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, errors: [err.message] });
+  }
+};
+
+export const resetEmailTemplate = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
+
+  const { type } = req.params;
+  const def = DEFAULT_EMAIL_TEMPLATES.find(d => d.type === type);
+  if (!def) {
+    return res.status(404).json({ success: false, message: 'Default template not found for this type' });
+  }
+
+  try {
+    await dynamicDb.EmailTemplate.deleteOne({ tenantId, type });
+    if (type === 'WELCOME_CLIENT') {
+      await dynamicDb.EmailTemplate.deleteOne({ tenantId, type: 'WELCOME' });
+    }
+    syncTenantToRemote(tenantId, { reason: 'EMAIL_TEMPLATE_RESET' }).catch(() => { });
+    return res.status(200).json({
+      success: true,
+      message: 'Template restored to default successfully',
+      data: {
+        type: def.type,
+        name: def.name,
+        description: def.description,
+        subject: def.subject,
+        body: def.body,
+        variables: def.variables,
+        variableLabels: def.variableLabels,
+        sampleVariables: def.sampleVariables,
+        isCustomized: false
+      }
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, errors: [err.message] });
   }
@@ -4485,7 +4587,7 @@ export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response
         const tenantFilter = tenantId
           ? { tenantId, status: 'ACTIVE' }
           : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }], status: 'ACTIVE' };
-        const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter).lean();
+        const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter as any).lean();
 
         const conflictCheck = checkTemplateConflict(applicableCombinations, activeTemplates);
         if (conflictCheck.hasConflict) {
@@ -4588,7 +4690,7 @@ export const updateSmsTemplate = async (req: AuthenticatedRequest, res: Response
       const tenantFilter = tenantId
         ? { tenantId, status: 'ACTIVE' }
         : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }], status: 'ACTIVE' };
-      const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter).lean();
+      const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter as any).lean();
 
       const conflictCheck = checkTemplateConflict(template.applicableCombinations, activeTemplates, id);
       if (conflictCheck.hasConflict) {
@@ -4645,7 +4747,7 @@ export const toggleSmsTemplateStatus = async (req: AuthenticatedRequest, res: Re
       const tenantFilter = tenantId
         ? { tenantId, status: 'ACTIVE' }
         : { $or: [{ tenantId: null }, { tenantId: { $exists: false } }], status: 'ACTIVE' };
-      const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter).lean();
+      const activeTemplates = await dynamicDb.SmsTemplate.find(tenantFilter as any).lean();
 
       const conflictCheck = checkTemplateConflict(combos, activeTemplates, id);
       if (conflictCheck.hasConflict) {

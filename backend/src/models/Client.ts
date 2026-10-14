@@ -26,6 +26,9 @@ export interface IClient extends Document {
   status: string;
   kycStatus?: string | null;
   agreementSigned?: boolean;
+  agreementStatus?: string | null;
+  videoKycStatus?: string | null;
+  videoKycSessionId?: string | null;
   kraVerified: boolean;
   kraStatus?: string | null;
   digilockerData?: any;
@@ -69,6 +72,8 @@ export const ClientSchema = new Schema<IClient>(
     camsKraPdfUrl: { type: String, default: null },
     signatureUrl: { type: String, default: null },
     signedAt: { type: Date, default: null },
+    videoKycStatus: { type: String, enum: ['NOT_REQUIRED', 'PENDING', 'IN_PROGRESS', 'APPROVED', 'REJECTED'], default: 'PENDING' },
+    videoKycSessionId: { type: String, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null }
   },
   { ...baseSchemaOptions, collection: 'Client', autoIndex: false }

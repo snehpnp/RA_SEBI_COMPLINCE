@@ -39,8 +39,11 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.EmailTemplateSchema = new mongoose_1.Schema({
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', required: true },
     type: { type: String, required: true },
+    name: { type: String },
+    description: { type: String },
     subject: { type: String, required: true },
-    body: { type: String, required: true }
+    body: { type: String, required: true },
+    variables: [{ type: String }]
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'EmailTemplate' });
 exports.EmailTemplateSchema.index({ tenantId: 1, type: 1 }, { unique: true });
 exports.EmailTemplateSchema.virtual('tenant', {
