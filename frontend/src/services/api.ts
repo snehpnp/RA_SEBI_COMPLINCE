@@ -1507,6 +1507,73 @@ class ApiClient {
     window.URL.revokeObjectURL(url);
   }
 
+  async downloadFileFromUrl(fileUrl?: string | null, fallbackFilename?: string) {
+    if (!fileUrl) return;
+    try {
+      const fullUrl = fileUrl.startsWith('http')
+        ? fileUrl
+        : `${API_BASE_URL.replace(/\/api\/v1\/?$/, '')}${fileUrl.startsWith('/') ? fileUrl : '/' + fileUrl}`;
+      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : '';
+      const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : '';
+
+      const response = await fetch(fullUrl, {
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          ...(tenantId ? { 'x-tenant-id': tenantId } : {})
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Download failed with status ${response.status}`);
+      }
+
+      const disposition = response.headers.get('content-disposition');
+      let filename = fallbackFilename;
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+
+      if (!filename) {
+        filename = fileUrl.split('/').pop()?.split('?')[0] || 'download';
+      }
+
+      // Ensure proper extension
+      if (!filename.includes('.')) {
+        const ct = response.headers.get('content-type') || '';
+        if (ct.includes('png')) filename += '.png';
+        else if (ct.includes('jpeg') || ct.includes('jpg')) filename += '.jpg';
+        else if (ct.includes('webm')) filename += '.webm';
+        else if (ct.includes('mp4')) filename += '.mp4';
+        else if (ct.includes('pdf')) filename += '.pdf';
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 1000);
+    } catch (err) {
+      console.warn('Direct fetch download failed, attempting direct anchor download:', err);
+      const fullUrl = fileUrl.startsWith('http')
+        ? fileUrl
+        : `${API_BASE_URL.replace(/\/api\/v1\/?$/, '')}${fileUrl.startsWith('/') ? fileUrl : '/' + fileUrl}`;
+      const a = document.createElement('a');
+      a.href = fullUrl;
+      a.download = fallbackFilename || fileUrl.split('/').pop()?.split('?')[0] || 'download';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 1000);
+    }
+  }
+
   async getClientTimeline(clientId: string, params?: { category?: string; search?: string; limit?: number }) {
     const q = new URLSearchParams();
     if (params?.category) q.append('category', params.category);

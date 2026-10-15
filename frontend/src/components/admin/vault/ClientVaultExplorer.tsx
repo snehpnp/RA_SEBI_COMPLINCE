@@ -377,12 +377,24 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
     }
   };
 
+  // Direct file download handler (Forces save to disk for videos, images, docs)
+  const handleDownloadDirectFile = async (fileUrl: string, title?: string) => {
+    try {
+      const filename = title || fileUrl.split('/').pop()?.split('?')[0] || 'KYC_Document';
+      toast.loading(`Downloading ${filename}...`, { id: 'direct-dl' });
+      await api.downloadFileFromUrl(fileUrl, filename);
+      toast.success('Downloaded successfully!', { id: 'direct-dl' });
+    } catch (err: any) {
+      toast.error('Download failed: ' + (err.message || 'Error'), { id: 'direct-dl' });
+    }
+  };
+
   // Download research report PDF
   const handleDownloadResearchReport = async (reportId: string, title?: string, fileUrl?: string) => {
     if (!selectedClientId) return;
     try {
       if (fileUrl && (fileUrl.startsWith('http') || fileUrl.startsWith('/uploads'))) {
-        window.open(fileUrl, '_blank');
+        await handleDownloadDirectFile(fileUrl, title || `Research_Report_${reportId}.pdf`);
         return;
       }
       toast.loading('Generating & downloading Research Report PDF...', { id: 'rep-download' });
@@ -2118,48 +2130,71 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                   </div>
 
                   {/* 3. Additional Uploaded KYC Documents if any */}
-                  {(vaultDetails.folders.kycDocuments?.data || []).map((item: any, idx: number) => (
-                    <div
-                      key={item._id || idx}
-                      onClick={() => {
-                        if (item.fileUrl) {
-                          window.open(item.fileUrl.startsWith('http') ? item.fileUrl : `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${item.fileUrl}`, '_blank');
-                        } else {
-                          handleDownloadFolder('05_KYC_Documents');
-                        }
-                      }}
-                      className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-3 hover:border-cyan-300 transition cursor-pointer"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-[180px]">
-                            {item.title || item.fileName || item.docType || 'KYC Proof File'}
-                          </div>
-                          <div className="text-[10px] text-slate-400 mt-1">
-                            {item.uploadedAt || item.createdAt ? new Date(item.uploadedAt || item.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Archived'}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
+                  {(vaultDetails.folders.kycDocuments?.data || []).map((item: any, idx: number) => {
+                    const itemName = item.title || item.fileName || item.docType || 'KYC Proof File';
+                    return (
+                      <div
+                        key={item._id || idx}
+                        onClick={() => {
                           if (item.fileUrl) {
-                            window.open(item.fileUrl.startsWith('http') ? item.fileUrl : `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${item.fileUrl}`, '_blank');
+                            handleDownloadDirectFile(item.fileUrl, itemName);
                           } else {
                             handleDownloadFolder('05_KYC_Documents');
                           }
                         }}
-                        className="p-2 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-950/50 rounded-lg transition"
-                        title="Download / View"
+                        className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex items-start justify-between gap-3 hover:border-cyan-300 transition cursor-pointer group"
                       >
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-[180px]">
+                              {itemName}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">
+                              {item.uploadedAt || item.createdAt ? new Date(item.uploadedAt || item.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Archived'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          {/* Preview in browser button */}
+                          {item.fileUrl && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const fullUrl = item.fileUrl.startsWith('http') ? item.fileUrl : `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${item.fileUrl}`;
+                                window.open(fullUrl, '_blank');
+                              }}
+                              className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition"
+                              title="Preview in Browser"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </button>
+                          )}
+
+                          {/* Direct Download button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (item.fileUrl) {
+                                handleDownloadDirectFile(item.fileUrl, itemName);
+                              } else {
+                                handleDownloadFolder('05_KYC_Documents');
+                              }
+                            }}
+                            className="p-2 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-950/50 rounded-lg transition"
+                            title="Download to Computer"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

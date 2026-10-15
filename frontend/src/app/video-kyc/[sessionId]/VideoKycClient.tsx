@@ -787,6 +787,17 @@ export default function VideoKycRoomPage() {
     try {
       const videoAspect = video.videoWidth / video.videoHeight;
       const targetAspect = w / h;
+
+      // Handle mobile portrait feed: contain centered so head/face and PAN are never cropped
+      if (videoAspect < 1.0) {
+        const fitW = h * videoAspect;
+        const fitX = x + (w - fitW) / 2;
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(x, y, w, h);
+        ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, fitX, y, fitW, h);
+        return;
+      }
+
       let sx = 0, sy = 0, sWidth = video.videoWidth, sHeight = video.videoHeight;
       if (videoAspect > targetAspect) {
         sWidth = video.videoHeight * targetAspect;
@@ -1630,55 +1641,56 @@ export default function VideoKycRoomPage() {
   // RENDER: Live Two-Way Video KYC Call Room
   // ---------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col">
+    <div className="h-screen max-h-screen overflow-hidden bg-slate-950 text-white flex flex-col">
       {/* Header Bar */}
-      <header className="h-16 border-b border-slate-800/80 px-6 flex items-center justify-between bg-slate-900/60 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
-            <Radio className="w-5 h-5 animate-pulse text-red-500" />
+      <header className="h-14 shrink-0 border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between bg-slate-900/80 backdrop-blur-md z-30">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 flex items-center justify-center">
+            <Radio className="w-4 h-4 animate-pulse text-red-500" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+            <h1 className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
               SEBI Video KYC & IPV Room
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
                 {isAdmin ? 'ADMIN / COMPLIANCE' : 'CLIENT CALL'}
               </span>
             </h1>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[10px] text-slate-400">
               Session: <span className="font-mono text-slate-300">{sessionId}</span>
             </p>
           </div>
         </div>
 
         {/* Live Status Indicators */}
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-3 text-xs">
           {geoData?.latitude && (
-            <div className="hidden sm:flex items-center gap-1.5 text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
+            <div className="hidden sm:flex items-center gap-1.5 text-slate-400 bg-slate-800/60 px-2.5 py-1 rounded-lg border border-slate-700/60 text-[11px]">
               <MapPin className="w-3.5 h-3.5 text-emerald-400" />
               <span>{geoData.latitude.toFixed(2)}, {geoData.longitude?.toFixed(2)}</span>
             </div>
           )}
 
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs">
             <Clock className="w-3.5 h-3.5 text-amber-400" />
             <span className="font-mono font-bold text-amber-300">{formatTimer(recordingSeconds)}</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${remoteConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span className="text-xs text-slate-300 font-medium">
-              {remoteConnected ? `${remoteUserName} Online` : 'Waiting for other party...'}
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${remoteConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className="text-xs text-slate-300 font-medium hidden xs:inline">
+              {remoteConnected ? `${remoteUserName} Online` : 'Waiting for connection...'}
             </span>
           </div>
         </div>
       </header>
 
-      {/* Main Video Viewport & Consent Overlay */}
-      <div className="flex-1 p-4 grid grid-cols-1 lg:grid-cols-4 gap-4 max-w-7xl mx-auto w-full">
-        {/* Left 3 Cols: Video Feeds */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
-          <div className="relative flex-1 min-h-[420px] bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
-            {/* Primary Feed: Remote User */}
+      {/* Main Video Viewport & Controls */}
+      <div className="flex-1 min-h-0 p-2.5 sm:p-3 grid grid-cols-1 lg:grid-cols-4 gap-2.5 max-w-[1600px] mx-auto w-full overflow-hidden">
+        {/* Left 3 Cols: Video Feeds + Compact Consent */}
+        <div className="lg:col-span-3 flex flex-col h-full min-h-0 gap-2 overflow-hidden">
+          {/* Main Video Stage */}
+          <div className="relative flex-1 min-h-0 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+            {/* Primary Feed: Remote User (object-contain so portrait/landscape is 100% visible without cropping or scrolling) */}
             <video
               ref={remoteVideoRef}
               autoPlay
@@ -1691,28 +1703,28 @@ export default function VideoKycRoomPage() {
               onCanPlay={(e) => {
                 e.currentTarget.play().catch(() => {});
               }}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain bg-slate-950"
             />
 
             {/* Live Recording Indicator Badge */}
-            <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+            <div className="absolute top-3 left-3 z-20 flex items-center gap-2">
               {isRecording ? (
-                <div className="bg-red-600/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg backdrop-blur border border-red-400/40">
-                  <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
+                <div className="bg-red-600/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg backdrop-blur border border-red-400/40">
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                   <span>REC {formatTimer(recordingSeconds)}</span>
                 </div>
               ) : (
-                <div className="bg-amber-600/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg backdrop-blur border border-amber-400/40">
-                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                <div className="bg-amber-600/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-lg backdrop-blur border border-amber-400/40">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
                   <span>STANDBY</span>
                 </div>
               )}
             </div>
 
             {!remoteConnected && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 text-center p-6">
-                <RefreshCw className="w-10 h-10 text-blue-500 animate-spin mb-3" />
-                <h3 className="text-base font-semibold text-slate-200">
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/90 text-center p-6 z-10">
+                <RefreshCw className="w-9 h-9 text-blue-500 animate-spin mb-3" />
+                <h3 className="text-sm font-semibold text-slate-200">
                   {isAdmin ? 'Waiting for Client to connect...' : 'Waiting for Compliance Officer to join...'}
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm">
@@ -1722,7 +1734,7 @@ export default function VideoKycRoomPage() {
             )}
 
             {/* Picture-in-Picture: Local User Feed */}
-            <div className="absolute bottom-4 right-4 w-44 sm:w-56 h-32 sm:h-40 bg-slate-950 rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-10">
+            <div className="absolute bottom-3 right-3 w-36 sm:w-44 md:w-48 h-24 sm:h-28 md:h-32 bg-slate-950 rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-20">
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -1733,63 +1745,63 @@ export default function VideoKycRoomPage() {
                 }}
                 className="w-full h-full object-cover"
               />
-              <div className="absolute top-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[10px] text-slate-200 font-medium">
+              <div className="absolute top-1.5 left-1.5 bg-black/70 px-1.5 py-0.5 rounded text-[9px] text-slate-200 font-medium">
                 You ({isAdmin ? 'Admin' : 'Client'})
               </div>
               {!isAdmin && (
-                <div className="absolute bottom-2 right-2 bg-emerald-600/80 px-1.5 py-0.5 rounded text-[9px] text-white flex items-center gap-1 font-bold">
-                  <Lock className="w-2.5 h-2.5" /> LOCKED ON
+                <div className="absolute bottom-1.5 right-1.5 bg-emerald-600/80 px-1.5 py-0.5 rounded text-[8px] text-white flex items-center gap-1 font-bold">
+                  <Lock className="w-2 h-2" /> LOCKED ON
                 </div>
               )}
             </div>
 
             {/* Instruction Floating Banner */}
             {adminInstruction && (
-              <div className="absolute top-4 left-4 right-4 bg-indigo-600/90 backdrop-blur-md border border-indigo-400 text-white px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-3 animate-bounce">
-                <Sparkles className="w-5 h-5 text-amber-300 shrink-0" />
-                <div className="text-xs font-semibold">
-                  Officer Instruction: <span className="font-bold underline">{adminInstruction}</span>
+              <div className="absolute top-3 left-16 right-3 bg-indigo-600/90 backdrop-blur-md border border-indigo-400 text-white px-3 py-1.5 rounded-xl shadow-xl flex items-center gap-2 z-20">
+                <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                <div className="text-[11px] font-semibold truncate">
+                  Instruction: <span className="font-bold underline">{adminInstruction}</span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Consent Statement Card (Prominent & Mandatory for Client to Read) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
-                <FileText className="w-4 h-4" /> SEBI REGULATORY CONSENT STATEMENT
+          {/* Compact Consent Statement Bar (Always visible below video without overflow) */}
+          <div className="shrink-0 bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 shadow-lg">
+            <div className="flex items-center justify-between mb-1 text-xs">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400">
+                <FileText className="w-3.5 h-3.5" /> SEBI REGULATORY CONSENT STATEMENT
               </div>
-              <span className="text-[11px] px-2 py-0.5 bg-amber-500/10 text-amber-300 rounded-full border border-amber-500/30">
-                Please Read Aloud On Camera
+              <span className="text-[10px] px-2 py-0.5 bg-amber-500/10 text-amber-300 rounded-full border border-amber-500/30 font-medium">
+                Client Reads Aloud On Camera
               </span>
             </div>
-            <div className="p-3.5 bg-amber-950/20 border border-amber-500/20 rounded-xl text-sm text-slate-200 leading-relaxed font-medium">
+            <div className="p-2 bg-amber-950/20 border border-amber-500/20 rounded-lg text-xs text-slate-200 leading-relaxed font-medium max-h-14 overflow-y-auto">
               "{sessionData?.consentText}"
             </div>
           </div>
         </div>
 
         {/* Right 1 Col: Control Panel & Verification Toolbar */}
-        <div className="flex flex-col gap-4">
+        <div className="h-full min-h-0 flex flex-col gap-2 overflow-hidden">
           {/* Client Details & Security Code */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-blue-400" /> Participant Details
+          <div className="shrink-0 bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md">
+            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-400" /> Participant Details
             </h3>
 
-            <div className="text-xs space-y-2 pt-1 border-t border-slate-800">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Client Name:</span>
-                <span className="font-semibold text-slate-100">{sessionData?.clientId?.name || 'Client'}</span>
+            <div className="text-xs space-y-1 pt-1 border-t border-slate-800">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">Client Name:</span>
+                <span className="font-semibold text-slate-100 truncate max-w-[150px]">{sessionData?.clientId?.name || 'Client'}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Client PAN:</span>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">Client PAN:</span>
                 <span className="font-mono font-bold text-blue-400">{sessionData?.clientId?.pan || 'N/A'}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Verification OTP:</span>
-                <span className="font-mono font-black text-emerald-400 text-sm tracking-wider">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">Verification OTP:</span>
+                <span className="font-mono font-black text-emerald-400 text-xs tracking-wider">
                   {sessionData?.otpCode}
                 </span>
               </div>
@@ -1798,9 +1810,10 @@ export default function VideoKycRoomPage() {
 
           {/* ADMIN ONLY CONTROLS */}
           {isAdmin ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex-1 flex flex-col justify-between space-y-4">
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+            <div className="flex-1 min-h-0 bg-slate-900 border border-slate-800 rounded-xl flex flex-col shadow-md overflow-hidden">
+              {/* Scrollable Tools Body */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+                <h3 className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">
                   Compliance Officer Tools
                 </h3>
 
@@ -1808,7 +1821,7 @@ export default function VideoKycRoomPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={toggleAdminMic}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
                       adminMicMuted ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
                     }`}
                   >
@@ -1818,7 +1831,7 @@ export default function VideoKycRoomPage() {
 
                   <button
                     onClick={toggleAdminCam}
-                    className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+                    className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
                       adminCamDisabled ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
                     }`}
                   >
@@ -1828,24 +1841,24 @@ export default function VideoKycRoomPage() {
                 </div>
 
                 {/* Instant Officer Commands */}
-                <div className="space-y-2">
-                  <span className="text-[11px] text-slate-400 font-medium">Quick Prompts to Client:</span>
-                  <div className="grid grid-cols-1 gap-1.5">
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-slate-400 font-medium">Quick Prompts to Client:</span>
+                  <div className="grid grid-cols-1 gap-1">
                     <button
                       onClick={() => sendInstruction('Please hold the FRONT of your original PAN card clearly to the camera.')}
-                      className="py-1.5 px-3 bg-slate-800/80 hover:bg-slate-700/80 text-left rounded-lg text-xs text-slate-200 transition"
+                      className="py-1 px-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-left rounded-lg text-[11px] text-slate-200 transition"
                     >
                       🪪 Show PAN (Front)
                     </button>
                     <button
                       onClick={() => sendInstruction('Please hold the BACK of your original PAN card clearly to the camera.')}
-                      className="py-1.5 px-3 bg-slate-800/80 hover:bg-slate-700/80 text-left rounded-lg text-xs text-slate-200 transition"
+                      className="py-1 px-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-left rounded-lg text-[11px] text-slate-200 transition"
                     >
                       🔄 Show PAN (Back)
                     </button>
                     <button
                       onClick={() => sendInstruction('Please read the Consent Statement shown on your screen aloud.')}
-                      className="py-1.5 px-3 bg-slate-800/80 hover:bg-slate-700/80 text-left rounded-lg text-xs text-slate-200 transition"
+                      className="py-1 px-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-left rounded-lg text-[11px] text-slate-200 transition"
                     >
                       🗣️ Read Consent Statement
                     </button>
@@ -1853,23 +1866,23 @@ export default function VideoKycRoomPage() {
                 </div>
 
                 {/* Capture Snapshots */}
-                <div className="space-y-2 pt-2 border-t border-slate-800">
+                <div className="space-y-1.5 pt-2 border-t border-slate-800">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-slate-400 font-medium">Evidence Snapshots:</span>
-                    <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                    <span className="text-[10px] text-slate-400 font-medium">Evidence Snapshots:</span>
+                    <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full font-bold">
                       {snapshotGallery.length} Taken
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => captureAndSendSnapshot('PAN')}
-                      className="py-2 px-2.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition"
+                      className="py-1.5 px-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition"
                     >
                       <Camera className="w-3.5 h-3.5" /> Snap PAN
                     </button>
                     <button
                       onClick={() => captureAndSendSnapshot('FACE')}
-                      className="py-2 px-2.5 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition"
+                      className="py-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition"
                     >
                       <User className="w-3.5 h-3.5" /> Snap Face
                     </button>
@@ -1877,20 +1890,20 @@ export default function VideoKycRoomPage() {
 
                   {/* Multiple Snapshots Gallery */}
                   {snapshotGallery.length > 0 && (
-                    <div className="pt-2">
-                      <div className="text-[10px] text-slate-400 mb-1 flex justify-between">
+                    <div className="pt-1.5">
+                      <div className="text-[9px] text-slate-400 mb-1 flex justify-between">
                         <span>Captured Gallery ({snapshotGallery.length}):</span>
-                        <span className="text-[9px] text-emerald-400 font-medium">Auto-saving to Vault</span>
+                        <span className="text-[8px] text-emerald-400 font-medium">Auto-saving to Vault</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-1 bg-slate-950/80 rounded-lg border border-slate-800">
+                      <div className="grid grid-cols-3 gap-1.5 max-h-24 overflow-y-auto p-1 bg-slate-950/80 rounded-lg border border-slate-800">
                         {snapshotGallery.map((snap, idx) => (
                           <div key={idx} className="relative group rounded overflow-hidden border border-slate-800 bg-black aspect-video flex items-center justify-center">
                             <img src={snap.base64} alt={snap.label} className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-1 text-[8px] text-white">
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-0.5 text-[7px] text-white">
                               <span className="font-bold truncate">{snap.type}</span>
-                              <span className="text-slate-400 text-[7px]">{snap.time}</span>
+                              <span className="text-slate-400 text-[6px]">{snap.time}</span>
                             </div>
-                            <span className="absolute top-0.5 right-0.5 bg-slate-900/90 text-[8px] px-1 rounded font-bold text-slate-300">
+                            <span className="absolute top-0.5 right-0.5 bg-slate-900/90 text-[7px] px-1 rounded font-bold text-slate-300">
                               #{snapshotGallery.length - idx}
                             </span>
                           </div>
@@ -1901,39 +1914,38 @@ export default function VideoKycRoomPage() {
                 </div>
 
                 {/* Automated Recording Status Indicator */}
-                <div className="pt-2">
+                <div className="pt-1">
                   {isRecording ? (
-                    <div className="p-3 bg-red-950/40 border border-red-500/40 rounded-xl flex items-center justify-between text-xs text-red-300 shadow-inner">
-                      <span className="flex items-center gap-2 font-bold">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                        Auto-Recording Live ({formatTimer(recordingSeconds)})
+                    <div className="p-2 bg-red-950/40 border border-red-500/40 rounded-lg flex items-center justify-between text-[11px] text-red-300 shadow-inner">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        Auto-Recording ({formatTimer(recordingSeconds)})
                       </span>
-                      <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full border border-red-500/30 uppercase tracking-wider font-mono">
+                      <span className="text-[9px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded-full border border-red-500/30 uppercase tracking-wider font-mono">
                         SEBI AUDIT
                       </span>
                     </div>
                   ) : (
-                    <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center gap-2.5 text-xs text-slate-400">
-                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                      <span>Recording Standby: Auto-starts when client connects</span>
+                    <div className="p-2 bg-slate-950/70 border border-slate-800 rounded-lg flex items-center gap-2 text-[11px] text-slate-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                      <span>Standby: Auto-starts on client join</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Action Buttons: Cancel vs Finish & Save */}
-              <div className="space-y-2 pt-2 border-t border-slate-800">
+              {/* Pinned Action Buttons: Always visible at bottom without scroll */}
+              <div className="shrink-0 p-2.5 bg-slate-900 border-t border-slate-800 space-y-1.5">
                 {remoteConnected ? (
-                  /* CLIENT IS CONNECTED -> Show Finish & Save Recording + Secondary Cancel */
                   <>
                     <button
                       onClick={handleAdminEndAndUpload}
                       disabled={uploading}
-                      className="w-full py-3.5 px-4 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
+                      className="w-full py-2.5 px-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold rounded-lg text-xs transition shadow-md shadow-red-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
                     >
                       {uploading ? (
                         <>
-                          <RefreshCw className="w-4 h-4 animate-spin" /> Compressing & Saving...
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Compressing & Saving...
                         </>
                       ) : (
                         <>
@@ -1946,23 +1958,22 @@ export default function VideoKycRoomPage() {
                       type="button"
                       disabled={uploading}
                       onClick={handleCancelAndExit}
-                      className="w-full py-2 px-3 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl text-[11px] font-medium transition flex items-center justify-center gap-1.5"
+                      className="w-full py-1.5 px-2 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-medium transition flex items-center justify-center gap-1"
                     >
-                      <XCircle className="w-3.5 h-3.5" /> Exit Session (Without Saving)
+                      <XCircle className="w-3 h-3" /> Exit Session (Without Saving)
                     </button>
                   </>
                 ) : (
-                  /* CLIENT NOT CONNECTED YET -> Show ONLY Cancel & Exit Room (Can Rejoin Later) */
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <button
                       type="button"
                       onClick={handleCancelAndExit}
-                      className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-semibold rounded-xl text-xs transition border border-slate-700 flex items-center justify-center gap-2 shadow-sm"
+                      className="w-full py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-semibold rounded-lg text-xs transition border border-slate-700 flex items-center justify-center gap-1.5 shadow-sm"
                     >
-                      <XCircle className="w-4 h-4 text-slate-400" /> Cancel & Exit Room
+                      <XCircle className="w-3.5 h-3.5 text-slate-400" /> Cancel & Exit Room
                     </button>
-                    <p className="text-[10px] text-slate-500 text-center leading-relaxed">
-                      Session remains active. You and the client can rejoin anytime.
+                    <p className="text-[9px] text-slate-500 text-center leading-tight">
+                      Session remains active. You and client can rejoin.
                     </p>
                   </div>
                 )}
@@ -1970,28 +1981,28 @@ export default function VideoKycRoomPage() {
             </div>
           ) : (
             /* CLIENT VIEW (Controls Locked) */
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex-1 flex flex-col justify-between">
-              <div className="space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex-1 flex flex-col justify-between">
+              <div className="space-y-3">
                 <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
                   <Lock className="w-4 h-4" /> Client Controls Locked
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
                   As per SEBI guidelines, your microphone and camera cannot be turned off during the video KYC session.
                 </p>
-                <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-300 space-y-1.5">
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                    <CheckCircle className="w-3.5 h-3.5" /> Camera Active
+                <div className="p-2.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-slate-300 space-y-1.5">
+                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-[11px]">
+                    <CheckCircle className="w-3 h-3" /> Camera Active
                   </div>
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                    <CheckCircle className="w-3.5 h-3.5" /> Audio Stream Active
+                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-[11px]">
+                    <CheckCircle className="w-3 h-3" /> Audio Stream Active
                   </div>
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                    <CheckCircle className="w-3.5 h-3.5" /> Geotagging & IP Tracking Active
+                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-[11px]">
+                    <CheckCircle className="w-3 h-3" /> Geotagging & IP Tracking Active
                   </div>
                 </div>
               </div>
 
-              <div className="p-3 bg-blue-950/30 border border-blue-500/20 rounded-xl text-[11px] text-blue-300 text-center">
+              <div className="p-2.5 bg-blue-950/30 border border-blue-500/20 rounded-lg text-[10px] text-blue-300 text-center">
                 The compliance officer will conclude this session once your verification is complete.
               </div>
             </div>

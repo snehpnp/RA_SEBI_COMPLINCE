@@ -30,8 +30,10 @@ import {
   Copy,
   Share2,
   MessageSquare,
-  Calendar
+  Calendar,
+  Download
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '../../services/api';
 
 interface VideoKycSessionItem {
@@ -85,6 +87,7 @@ export default function VideoKycDesk() {
   // Sessions Table States
   const [sessions, setSessions] = useState<VideoKycSessionItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -237,14 +240,18 @@ export default function VideoKycDesk() {
   const fetchSessions = async () => {
     try {
       setLoading(true);
+      setFetchError(null);
       const res: any = await api.listVideoKycSessions({
         status: statusFilter === 'ALL' ? undefined : statusFilter
       });
       if (res?.success && res?.data?.sessions) {
         setSessions(res.data.sessions);
+      } else if (res?.success === false) {
+        setFetchError(res?.message || 'Failed to fetch sessions.');
       }
     } catch (err: any) {
       console.error('Failed to fetch Video KYC sessions:', err);
+      setFetchError(err?.message || 'Unable to connect to server. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -566,6 +573,16 @@ export default function VideoKycDesk() {
               <div className="py-16 text-center text-slate-400 text-xs flex flex-col items-center justify-center">
                 <RefreshCw className="w-6 h-6 animate-spin text-blue-500 mb-2" />
                 Loading sessions...
+              </div>
+            ) : fetchError ? (
+              <div className="py-16 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3">
+                <div className="text-rose-400 font-medium">{fetchError}</div>
+                <button
+                  onClick={fetchSessions}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-2 transition shadow-md"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Retry
+                </button>
               </div>
             ) : filteredSessions.length === 0 ? (
               <div className="py-16 text-center text-slate-500 text-xs">
@@ -975,7 +992,25 @@ export default function VideoKycDesk() {
             {/* Video Player */}
             {selectedSession.videoUrl ? (
               <div className="space-y-2">
-                <span className="text-xs font-bold text-slate-300">Compressed Video Recording:</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300">Compressed Video Recording:</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!selectedSession.videoUrl) return;
+                      try {
+                        toast.loading('Downloading video recording...', { id: 'vkyc-vid-dl' });
+                        await api.downloadFileFromUrl(selectedSession.videoUrl, `Video_KYC_${selectedSession.sessionId || 'Recording'}.webm`);
+                        toast.success('Video downloaded successfully!', { id: 'vkyc-vid-dl' });
+                      } catch {
+                        toast.error('Failed to download video file', { id: 'vkyc-vid-dl' });
+                      }
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1.5 transition"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download Video File
+                  </button>
+                </div>
                 <div className="bg-black rounded-xl overflow-hidden aspect-video border border-slate-800 flex items-center justify-center">
                   <video
                     src={selectedSession.videoUrl.startsWith('http') ? selectedSession.videoUrl : `${api.getBaseUrl()}${selectedSession.videoUrl}`}
@@ -1015,14 +1050,23 @@ export default function VideoKycDesk() {
                         <div className="bg-black rounded-lg overflow-hidden aspect-video border border-slate-800/80 flex items-center justify-center">
                           <img src={snapUrl} alt={snap.label || 'Snap'} className="w-full h-full object-contain" />
                         </div>
-                        <a
-                          href={snapUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[10px] text-blue-400 hover:underline block text-center pt-0.5"
-                        >
-                          View Full Size ↗
-                        </a>
+                        <div className="flex items-center justify-center gap-3 pt-1 text-[10px]">
+                          <a
+                            href={snapUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-400 hover:underline"
+                          >
+                            View ↗
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => api.downloadFileFromUrl(snapUrl, `${snap.label || 'Snapshot'}_${sIdx + 1}.jpg`)}
+                            className="text-emerald-400 hover:underline flex items-center gap-0.5"
+                          >
+                            <Download className="w-3 h-3" /> Download
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -1030,7 +1074,22 @@ export default function VideoKycDesk() {
               ) : (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <span className="text-xs font-bold text-slate-300">PAN Card Snapshot:</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300">PAN Card Snapshot:</span>
+                      {selectedSession.panSnapshotUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedSession.panSnapshotUrl) {
+                              api.downloadFileFromUrl(selectedSession.panSnapshotUrl, 'PAN_Snapshot.jpg');
+                            }
+                          }}
+                          className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" /> Download
+                        </button>
+                      )}
+                    </div>
                     <div className="mt-1 bg-slate-950 rounded-xl overflow-hidden aspect-video border border-slate-800 flex items-center justify-center">
                       {selectedSession.panSnapshotUrl ? (
                         <img
@@ -1045,7 +1104,22 @@ export default function VideoKycDesk() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-bold text-slate-300">Client Face Snapshot:</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300">Client Face Snapshot:</span>
+                      {selectedSession.clientFaceSnapshotUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedSession.clientFaceSnapshotUrl) {
+                              api.downloadFileFromUrl(selectedSession.clientFaceSnapshotUrl, 'Client_Face_Snapshot.jpg');
+                            }
+                          }}
+                          className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" /> Download
+                        </button>
+                      )}
+                    </div>
                     <div className="mt-1 bg-slate-950 rounded-xl overflow-hidden aspect-video border border-slate-800 flex items-center justify-center">
                       {selectedSession.clientFaceSnapshotUrl ? (
                         <img
