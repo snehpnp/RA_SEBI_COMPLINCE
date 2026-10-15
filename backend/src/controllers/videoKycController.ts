@@ -652,6 +652,10 @@ export async function uploadRecording(req: Request, res: Response) {
     }
 
     session.snapshots = snapshotsList;
+    if (req.body.isInterrupted === 'true' || req.body.disconnectReason) {
+      const reason = req.body.disconnectReason || 'Participant disconnected / tab closed';
+      session.adminNotes = session.adminNotes ? `${session.adminNotes} (Auto-Saved: ${reason})` : `(Auto-Saved on Disconnect: ${reason})`;
+    }
     session.status = 'COMPLETED';
     await session.save();
 

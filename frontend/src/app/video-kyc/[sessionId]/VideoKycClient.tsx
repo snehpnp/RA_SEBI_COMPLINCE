@@ -25,7 +25,8 @@ import {
   Sparkles,
   Calendar,
   KeyRound,
-  Mail
+  Mail,
+  ShieldAlert
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import api from '../../../services/api';
@@ -121,6 +122,22 @@ export default function VideoKycRoomPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // Anti-Duplicate Session State
+  const [sessionAlreadyActiveError, setSessionAlreadyActiveError] = useState<string | null>(null);
+
+  // Reload & Tab Close Prevention: Warn user if live call or recording is ongoing
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if ((isRecording || remoteConnected) && !sessionCompleted) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isRecording, remoteConnected, sessionCompleted]);
+
   // MediaRecorder for Video Recording
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -133,6 +150,7 @@ export default function VideoKycRoomPage() {
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const compositeAnimIdRef = useRef<number | null>(null);
   const audioContextRef = useRef<any>(null);
+  const autoSaveInterruptedRecordingRef = useRef<((reason: string) => Promise<void>) | null>(null);
 
   useEffect(() => {
     adminCamDisabledRef.current = adminCamDisabled;
@@ -641,15 +659,27 @@ export default function VideoKycRoomPage() {
       setAdminInstruction(data.instruction);
     });
 
+    // Socket: Duplicate connection rejected
+    socket.on('session-already-active', (data: any) => {
+      console.warn('⚠️ [Video KYC] Duplicate connection rejected by server:', data);
+      setSessionAlreadyActiveError(data.message || 'An active session connection is already open in another window or device.');
+      stopMediaAndRecording();
+    });
+
     // Socket: Session ended
     socket.on('session-ended', (data: any) => {
       setSessionCompleted(true);
       stopMediaAndRecording();
     });
 
-    // Socket: User left
-    socket.on('user-left', () => {
+    // Socket: User left (Auto-Save if client disconnects abruptly while recording)
+    socket.on('user-left', async () => {
       setRemoteConnected(false);
+      if (isAdminRef.current && isRecording && !sessionCompleted && autoSaveInterruptedRecordingRef.current) {
+        console.log('🚨 [Auto-Save Triggered] Remote user left during active recording. Finalizing video...');
+        setSnapshotToast('⚠️ Client disconnected. Auto-saving recording to vault...');
+        await autoSaveInterruptedRecordingRef.current('Client disconnected from room');
+      }
     });
   };
 
@@ -861,11 +891,11 @@ export default function VideoKycRoomPage() {
         // Check if Admin camera is turned off
         const isCamOff = adminCamDisabledRef.current;
 
-        // MAIN STAGE: CLIENT (Full widescreen presentation matching the live UI)
-        const mainX = 16;
-        const mainY = 54;
-        const mainW = 1248;
-        const mainH = 604;
+        // MAIN STAGE: CLIENT (Compact presentation matching the live UI)
+        const mainX = 24;
+        const mainY = 56;
+        const mainW = 1232;
+        const mainH = 590;
         const mainR = 14;
 
         // Draw Client video with rounded corners
@@ -896,10 +926,10 @@ export default function VideoKycRoomPage() {
         // PICTURE-IN-PICTURE (PiP): COMPLIANCE OFFICER
         // Rendered cleanly in the bottom-right corner with proper aspect ratio, matching live UI
         if (!isCamOff) {
-          const pipW = 280;
-          const pipH = 175;
-          const pipX = mainX + mainW - pipW - 16; // 1264 - 280 - 16 = 968
-          const pipY = mainY + mainH - pipH - 16; // 658 - 175 - 16 = 467
+          const pipW = 260;
+          const pipH = 160;
+          const pipX = mainX + mainW - pipW - 16;
+          const pipY = mainY + mainH - pipH - 16;
           const pipR = 12;
 
           // Shadow for PiP elevation
@@ -1088,6 +1118,82 @@ export default function VideoKycRoomPage() {
     router.push(isAdmin ? '/admin' : '/client');
   };
 
+  // 6a. Auto-Save Recording if Call is Disconnected or Interrupted
+  const autoSaveInterruptedRecording = async (reason: string) => {
+    if (!isAdminRef.current || uploading) return;
+
+    try {
+      setUploading(true);
+      setSnapshotToast(`⏳ Auto-saving video to server vault (${reason})...`);
+
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.requestData(); } catch {}
+        try { mediaRecorderRef.current.stop(); } catch {}
+      }
+      if (timerRef.current) clearInterval(timerRef.current);
+
+      await new Promise(r => setTimeout(r, 1200));
+
+      let blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      if (blob.size === 0) {
+        console.warn('Auto-save: Blob size 0, generating stream fallback...');
+        const activeVideo = (remoteVideoRef.current && remoteVideoRef.current.videoWidth > 0 ? remoteVideoRef.current : localVideoRef.current);
+        if (activeVideo && (activeVideo as any).captureStream) {
+          try {
+            const fallbackStream = (activeVideo as any).captureStream(15);
+            const fallbackChunks: Blob[] = [];
+            const tempRec = new MediaRecorder(fallbackStream);
+            tempRec.ondataavailable = (e) => { if (e.data && e.data.size > 0) fallbackChunks.push(e.data); };
+            tempRec.start();
+            await new Promise(res => setTimeout(res, 800));
+            tempRec.stop();
+            await new Promise(res => setTimeout(res, 200));
+            if (fallbackChunks.length > 0) {
+              blob = new Blob(fallbackChunks, { type: 'video/webm' });
+            }
+          } catch {}
+        }
+      }
+
+      if (blob.size > 0) {
+        const formData = new FormData();
+        formData.append('recording', blob, `${sessionId}_autosaved.webm`);
+        formData.append('durationSeconds', String(recordingSeconds || 1));
+        formData.append('isInterrupted', 'true');
+        formData.append('disconnectReason', reason);
+        if (geoData) {
+          formData.append('geoData', JSON.stringify(geoData));
+        }
+        if (capturedPanSnapshot) {
+          formData.append('panSnapshot', capturedPanSnapshot);
+        }
+        if (capturedFaceSnapshot) {
+          formData.append('clientFaceSnapshot', capturedFaceSnapshot);
+        }
+        if (snapshotGallery && snapshotGallery.length > 0) {
+          formData.append('snapshots', JSON.stringify(snapshotGallery.slice(0, 10)));
+        }
+
+        console.log(`📤 [Video KYC Auto-Save] Uploading ${blob.size} bytes due to: ${reason}`);
+        const res = await api.uploadVideoKycRecording(sessionId, formData);
+        if (res?.success) {
+          setUploadSuccess(true);
+          setSessionCompleted(true);
+          stopMediaAndRecording();
+          setSnapshotToast(`✅ Recording of ${recordingSeconds}s auto-saved safely to server.`);
+        }
+      }
+    } catch (err: any) {
+      console.error('Auto-save upload failed:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  useEffect(() => {
+    autoSaveInterruptedRecordingRef.current = autoSaveInterruptedRecording;
+  });
+
   // 6. Admin Ends & Submits Recording to Server Disk
   const handleAdminEndAndUpload = async () => {
     if (!isAdmin || uploading) return;
@@ -1260,6 +1366,44 @@ export default function VideoKycRoomPage() {
           <button
             onClick={() => router.push('/')}
             className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl text-sm transition"
+          >
+            Return to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER: Duplicate Session Connection Blocked
+  // ---------------------------------------------------------------------------
+  if (sessionAlreadyActiveError) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-6">
+        <div className="max-w-md w-full bg-slate-900 border border-amber-500/40 rounded-2xl p-8 text-center shadow-2xl space-y-5 animate-in fade-in">
+          <div className="w-16 h-16 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+            <Lock className="w-8 h-8" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
+              SEBI Security Policy
+            </span>
+            <h2 className="text-xl font-bold text-slate-100 mt-3">Duplicate Session Blocked</h2>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              {sessionAlreadyActiveError}
+            </p>
+          </div>
+          <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-400 text-left space-y-1.5">
+            <div className="flex items-center gap-1.5 font-semibold text-slate-300 text-xs">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" /> Single Connection Enforcement:
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              To prevent unauthorized recording tampering and duplicate WebRTC streams, each session link only allows one active participant per role. If you refreshed or re-opened this tab, please close duplicate windows.
+            </p>
+          </div>
+          <button
+            onClick={() => router.push(isAdmin ? '/admin' : '/client')}
+            className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-xl text-xs transition"
           >
             Return to Dashboard
           </button>
@@ -1685,11 +1829,11 @@ export default function VideoKycRoomPage() {
       </header>
 
       {/* Main Video Viewport & Controls */}
-      <div className="flex-1 min-h-0 p-2.5 sm:p-3 grid grid-cols-1 lg:grid-cols-4 gap-2.5 max-w-[1600px] mx-auto w-full overflow-hidden">
-        {/* Left 3 Cols: Video Feeds + Compact Consent */}
-        <div className="lg:col-span-3 flex flex-col h-full min-h-0 gap-2 overflow-hidden">
-          {/* Main Video Stage */}
-          <div className="relative flex-1 min-h-0 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+      <div className="flex-1 min-h-0 p-2 sm:p-3 grid grid-cols-1 lg:grid-cols-12 gap-3 max-w-[1500px] mx-auto w-full overflow-hidden items-stretch">
+        {/* Left 7 Cols: Video Feeds + Compact Consent */}
+        <div className="lg:col-span-7 xl:col-span-7 flex flex-col h-full min-h-0 gap-2 overflow-hidden justify-between">
+          {/* Main Video Stage (Compact 16:9, max-h-[58vh] centered) */}
+          <div className="relative w-full flex-1 max-h-[58vh] bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
             {/* Primary Feed: Remote User (object-contain so portrait/landscape is 100% visible without cropping or scrolling) */}
             <video
               ref={remoteVideoRef}
@@ -1734,7 +1878,7 @@ export default function VideoKycRoomPage() {
             )}
 
             {/* Picture-in-Picture: Local User Feed */}
-            <div className="absolute bottom-3 right-3 w-36 sm:w-44 md:w-48 h-24 sm:h-28 md:h-32 bg-slate-950 rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-20">
+            <div className="absolute bottom-3 right-3 w-32 sm:w-36 md:w-40 h-20 sm:h-24 md:h-28 bg-slate-950 rounded-xl overflow-hidden border-2 border-slate-700 shadow-2xl z-20">
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -1782,8 +1926,8 @@ export default function VideoKycRoomPage() {
           </div>
         </div>
 
-        {/* Right 1 Col: Control Panel & Verification Toolbar */}
-        <div className="h-full min-h-0 flex flex-col gap-2 overflow-hidden">
+        {/* Right 5 Cols: Control Panel & Verification Toolbar */}
+        <div className="lg:col-span-5 xl:col-span-5 h-full min-h-0 flex flex-col gap-2 overflow-hidden">
           {/* Client Details & Security Code */}
           <div className="shrink-0 bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md">
             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-2">

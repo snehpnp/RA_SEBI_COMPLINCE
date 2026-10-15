@@ -45,6 +45,18 @@ export function initVideoKycSocket(httpServer: HttpServer) {
       }
 
       const room = activeRooms.get(sessionId)!;
+
+      // Reject duplicate connections for the same role (one Client, one Admin only)
+      const existingParticipantWithRole = Array.from(room.values()).find(p => p.role === role && p.socketId !== socket.id);
+      if (existingParticipantWithRole) {
+        console.warn(`⚠️ [VIDEO-KYC] Blocked duplicate connection for role: ${role} in session: ${sessionId}`);
+        socket.emit('session-already-active', {
+          role,
+          message: `An active ${role === 'ADMIN' ? 'Compliance Officer' : 'Client'} connection is already active in another browser tab or device. Multiple simultaneous connections are not permitted under SEBI compliance.`
+        });
+        return;
+      }
+
       room.set(socket.id, { socketId: socket.id, role, name, userId });
 
       console.log(`👤 [VIDEO-KYC] ${role} (${name || socket.id}) joined room: ${sessionId}. Room total: ${room.size}`);
