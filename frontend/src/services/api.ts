@@ -1517,7 +1517,7 @@ class ApiClient {
   }
 
   // Video KYC Methods
-  async createVideoKycSession(payload: { clientId?: string; customConsentText?: string; scheduleType?: 'INSTANT' | 'SCHEDULED'; scheduledAt?: string | null }) {
+  async createVideoKycSession(payload: { clientId?: string; customConsentText?: string; scheduleType?: 'INSTANT' | 'SCHEDULED'; scheduledAt?: string | null; origin?: string }) {
     return this.request('/video-kyc/create-session', {
       method: 'POST',
       body: JSON.stringify(payload)

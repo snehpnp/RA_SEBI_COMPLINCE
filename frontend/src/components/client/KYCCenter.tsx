@@ -673,7 +673,7 @@ export default function KYCCenter({ onTriggerOnboarding }: { onTriggerOnboarding
                   </button>
                 ) : (
                   <a
-                    href={`/video-kyc/${videoKycSession.sessionId}`}
+                    href={`/video-kyc/?sessionId=${videoKycSession.sessionId}&role=client`}
                     target="_blank"
                     rel="noreferrer"
                     className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-2.5 px-6 rounded-xl text-xs transition shadow-md shadow-blue-500/20 flex items-center gap-2"
