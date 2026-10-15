@@ -739,6 +739,28 @@ export default function VideoKycRoomPage() {
     }
   };
 
+  // Helper to draw rounded rectangle path
+  const drawRoundedRect = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number
+  ) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+  };
+
   // Helper to draw video with aspect cover fit into canvas rect
   const drawVideoCover = (
     ctx: CanvasRenderingContext2D,
@@ -780,7 +802,7 @@ export default function VideoKycRoomPage() {
     }
   };
 
-  // 5. Dual-Party Composite Recording Engine (Side-by-Side: Client & Officer)
+  // 5. Dual-Party Composite Recording Engine (UI Layout: Full Client + PiP Compliance Officer)
   const startRecording = () => {
     if (!isAdmin) return;
 
@@ -828,57 +850,92 @@ export default function VideoKycRoomPage() {
         // Check if Admin camera is turned off
         const isCamOff = adminCamDisabledRef.current;
 
+        // MAIN STAGE: CLIENT (Full widescreen presentation matching the live UI)
+        const mainX = 16;
+        const mainY = 54;
+        const mainW = 1248;
+        const mainH = 604;
+        const mainR = 14;
+
+        // Draw Client video with rounded corners
+        ctx.save();
+        drawRoundedRect(ctx, mainX, mainY, mainW, mainH, mainR);
+        ctx.clip();
+        drawVideoCover(ctx, remoteVideoRef.current, mainX, mainY, mainW, mainH, `Waiting for ${clientDisplayName}'s video...`);
+        ctx.restore();
+
+        // Main Client Screen Border
+        ctx.save();
+        ctx.strokeStyle = '#2563eb';
+        ctx.lineWidth = 2;
+        drawRoundedRect(ctx, mainX, mainY, mainW, mainH, mainR);
+        ctx.stroke();
+        ctx.restore();
+
+        // Client Header Label (Top-Left inside video)
+        ctx.save();
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        drawRoundedRect(ctx, mainX + 12, mainY + 12, 230, 32, 8);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(`👤 Client: ${clientDisplayName}`, mainX + 22, mainY + 33);
+        ctx.restore();
+
+        // PICTURE-IN-PICTURE (PiP): COMPLIANCE OFFICER
+        // Rendered cleanly in the bottom-right corner with proper aspect ratio, matching live UI
         if (!isCamOff) {
-          // SIDE-BY-SIDE SPLIT SCREEN:
-          // Left Box: CLIENT (x: 16, y: 54, w: 616, h: 604)
-          drawVideoCover(ctx, remoteVideoRef.current, 16, 54, 616, 604, `Waiting for ${clientDisplayName}'s video...`);
+          const pipW = 280;
+          const pipH = 175;
+          const pipX = mainX + mainW - pipW - 16; // 1264 - 280 - 16 = 968
+          const pipY = mainY + mainH - pipH - 16; // 658 - 175 - 16 = 467
+          const pipR = 12;
 
-          // Client Header Label
+          // Shadow for PiP elevation
+          ctx.save();
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+          ctx.shadowBlur = 14;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 4;
+          ctx.fillStyle = '#020617';
+          drawRoundedRect(ctx, pipX, pipY, pipW, pipH, pipR);
+          ctx.fill();
+          ctx.restore();
+
+          // Clip and draw Compliance Officer video
+          ctx.save();
+          drawRoundedRect(ctx, pipX, pipY, pipW, pipH, pipR);
+          ctx.clip();
+          drawVideoCover(ctx, localVideoRef.current, pipX, pipY, pipW, pipH, 'Compliance Officer');
+          ctx.restore();
+
+          // PiP Border (Emerald accent for auditor)
+          ctx.save();
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 2.5;
+          drawRoundedRect(ctx, pipX, pipY, pipW, pipH, pipR);
+          ctx.stroke();
+          ctx.restore();
+
+          // PiP Label Tag (Top-Left inside PiP)
+          ctx.save();
           ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(16, 54, 616, 32);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText(`👤 Client: ${clientDisplayName}`, 28, 75);
-
-          // Left Box Border
-          ctx.strokeStyle = '#2563eb';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(16, 54, 616, 604);
-
-          // Right Box: COMPLIANCE OFFICER / ADMIN (x: 648, y: 54, w: 616, h: 604)
-          drawVideoCover(ctx, localVideoRef.current, 648, 54, 616, 604, 'Compliance Officer Camera');
-
-          // Admin Header Label
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(648, 54, 616, 32);
+          drawRoundedRect(ctx, pipX + 8, pipY + 8, 160, 22, 6);
+          ctx.fill();
           ctx.fillStyle = '#10b981';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText('🛡️ Compliance Officer (Authorized Auditor)', 660, 75);
-
-          // Right Box Border
-          ctx.strokeStyle = '#059669';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(648, 54, 616, 604);
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText('🛡️ Compliance Officer', pipX + 16, pipY + 23);
+          ctx.restore();
         } else {
-          // FULL SCREEN CLIENT (When Admin has disabled camera)
-          drawVideoCover(ctx, remoteVideoRef.current, 16, 54, 1248, 604, `Waiting for ${clientDisplayName}'s video...`);
-
-          // Client Header Label
+          // Officer Camera Disabled pill
+          ctx.save();
           ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-          ctx.fillRect(16, 54, 1248, 32);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 13px sans-serif';
-          ctx.fillText(`👤 Client: ${clientDisplayName}`, 28, 75);
-
+          drawRoundedRect(ctx, mainX + mainW - 250, mainY + mainH - 42, 234, 26, 6);
+          ctx.fill();
           ctx.fillStyle = '#94a3b8';
           ctx.font = 'italic 11px sans-serif';
-          ctx.textAlign = 'right';
-          ctx.fillText('🛡️ Compliance Officer Camera: Disabled', 1250, 75);
-          ctx.textAlign = 'left';
-
-          ctx.strokeStyle = '#2563eb';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(16, 54, 1248, 604);
+          ctx.fillText('🛡️ Officer Camera: Disabled', mainX + mainW - 238, mainY + mainH - 25);
+          ctx.restore();
         }
 
         // Bottom Footer Bar
