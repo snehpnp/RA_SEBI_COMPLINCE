@@ -27,7 +27,7 @@ export const getVideoKycUploadDir = () => {
   for (const c of candidates) {
     if (fs.existsSync(c)) {
       root = c;
-      break;
+      break; 
     }
   }
   const dir = path.join(root, 'video-kyc');

@@ -1337,7 +1337,7 @@ class ApiClient {
 
   async deleteOccupation(id: string) {
     return this.request(`/admin/occupations/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE' 
     });
   }
 
