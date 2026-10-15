@@ -120,17 +120,15 @@ export async function createVideoKycSession(req: Request, res: Response) {
     }
 
     const isAdmin = user && ['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE', 'STAFF'].includes(user.role);
-    const initiatedBy = isAdmin ? 'ADMIN' : 'CLIENT';
-
-    // If initiated by client, check if tenant allows client requests
-    if (!isAdmin && tenant.clientVideoKycRequestEnabled === false) {
+    if (!isAdmin) {
       return res.status(403).json({
         success: false,
-        message: 'Client-initiated Video KYC request is disabled by Admin. Please wait for the compliance officer to initiate.'
+        message: 'Video KYC verification sessions can only be initiated by the Compliance Officer / Admin.'
       });
     }
+    const initiatedBy = 'ADMIN';
 
-    const targetClientId = isAdmin ? clientId : (user.clientId || user.id);
+    const targetClientId = clientId;
     if (!targetClientId) {
       return res.status(400).json({ success: false, message: 'Target client ID is required.' });
     }
