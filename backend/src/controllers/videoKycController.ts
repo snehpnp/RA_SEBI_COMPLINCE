@@ -59,7 +59,15 @@ export function resolveFrontendBaseUrl(req: Request): string {
     return originHeader.replace(/\/$/, '');
   }
 
-  // 3. If referer header present and not localhost
+  // 3. If x-forwarded-host present (from Nginx / Reverse Proxy)
+  const fwdHost = (req.headers['x-forwarded-host'] as string);
+  if (fwdHost && !fwdHost.includes('localhost') && !fwdHost.includes('127.0.0.1')) {
+    const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
+    const cleanHost = fwdHost.split(',')[0].trim();
+    return `${proto}://${cleanHost}`.replace(/\/$/, '');
+  }
+
+  // 4. If referer header present and not localhost
   const refererHeader = req.headers.referer;
   if (refererHeader && typeof refererHeader === 'string') {
     try {
@@ -82,8 +90,8 @@ export function resolveFrontendBaseUrl(req: Request): string {
     return process.env.FRONTEND_URL.replace(/\/$/, '');
   }
 
-  // 6. Fallback
-  return (originHeader as string) || process.env.FRONTEND_URL || 'http://localhost:3000';
+  // 6. Safe Fallback
+  return (originHeader as string) || process.env.FRONTEND_URL || 'https://client.pnpuniverse.com';
 }
 
 /**
@@ -308,7 +316,7 @@ export async function createVideoKycSession(req: Request, res: Response) {
 
     // Determine Frontend Base URL for Invite Link
     const frontendUrl = resolveFrontendBaseUrl(req);
-    const videoKycUrl = `${frontendUrl}/video-kyc/${sessionId}?role=client`;
+    const videoKycUrl = `${frontendUrl}/video-kyc/?sessionId=${sessionId}&role=client`;
 
     // Send Email to Client if they have a valid email
     if (client.email) {
@@ -496,7 +504,7 @@ export async function resendVideoKycOtp(req: Request, res: Response) {
     const tenant = await dynamicDb.Tenant.findById(session.tenantId);
     const companyName = tenant?.companyName || 'Research Analyst Services';
     const frontendUrl = resolveFrontendBaseUrl(req);
-    const videoKycUrl = `${frontendUrl}/video-kyc/${sessionId}?role=client`;
+    const videoKycUrl = `${frontendUrl}/video-kyc/?sessionId=${sessionId}&role=client`;
     const clientName = client.name || `${client.firstName || ''} ${client.lastName || ''}`.trim() || 'Client';
 
     await sendVideoKycInviteEmail(

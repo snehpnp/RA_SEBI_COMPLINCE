@@ -133,9 +133,9 @@ export default function VideoKycDesk() {
 
   const getClientInviteUrl = (session: VideoKycSessionItem) => {
     if (typeof window !== 'undefined') {
-      return `${window.location.origin}/video-kyc/${session.sessionId}?role=client`;
+      return `${window.location.origin}/video-kyc/?sessionId=${session.sessionId}&role=client`;
     }
-    return `http://localhost:3000/video-kyc/${session.sessionId}?role=client`;
+    return `/video-kyc/?sessionId=${session.sessionId}&role=client`;
   };
 
   const copyToClipboard = (text: string, type: 'LINK' | 'OTP' | 'WA') => {
@@ -691,7 +691,7 @@ export default function VideoKycDesk() {
                               {/* Join Room Button (Only for Pending / Active sessions) */}
                               {['REQUESTED', 'SCHEDULED', 'IN_PROGRESS'].includes(session.status) && (
                                 <a
-                                  href={`/video-kyc/${session.sessionId}?role=admin`}
+                                  href={`/video-kyc/?sessionId=${session.sessionId}&role=admin`}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="py-1 px-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
@@ -1190,11 +1190,11 @@ export default function VideoKycDesk() {
                 {(() => {
                   const sid = createdSessionResult.session?.sessionId || createdSessionResult.sessionId || '';
                   const clientUrl = (typeof window !== 'undefined' && sid)
-                    ? `${window.location.origin}/video-kyc/${sid}?role=client`
+                    ? `${window.location.origin}/video-kyc/?sessionId=${sid}&role=client`
                     : createdSessionResult.videoKycUrl;
                   const adminUrl = (typeof window !== 'undefined' && sid)
-                    ? `${window.location.origin}/video-kyc/${sid}?role=admin`
-                    : (createdSessionResult.videoKycUrl || '').replace('?role=client', '?role=admin');
+                    ? `${window.location.origin}/video-kyc/?sessionId=${sid}&role=admin`
+                    : (createdSessionResult.videoKycUrl || '').replace('role=client', 'role=admin');
 
                   return (
                     <>
@@ -1833,7 +1833,7 @@ export default function VideoKycDesk() {
 
               {['REQUESTED', 'SCHEDULED', 'IN_PROGRESS'].includes(viewDetailsSession.status) && (
                 <a
-                  href={`/video-kyc/${viewDetailsSession.sessionId}?role=admin`}
+                  href={`/video-kyc/?sessionId=${viewDetailsSession.sessionId}&role=admin`}
                   target="_blank"
                   rel="noreferrer"
                   className="py-2 px-5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-lg shadow-blue-900/40"

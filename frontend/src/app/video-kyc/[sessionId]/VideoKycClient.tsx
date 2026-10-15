@@ -255,12 +255,32 @@ export default function VideoKycRoomPage() {
 
   // 1. Fetch Session Info & Current User
   useEffect(() => {
-    if (!sessionId) return;
+    let activeSessionId = sessionId;
+    if (!activeSessionId && typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search).get('sessionId');
+      if (sp) {
+        activeSessionId = sp;
+        setSessionId(sp);
+      } else {
+        const parts = window.location.pathname.split('/').filter(Boolean);
+        const idx = parts.indexOf('video-kyc');
+        if (idx !== -1 && parts[idx + 1] && parts[idx + 1] !== 'session' && parts[idx + 1] !== 'room') {
+          activeSessionId = decodeURIComponent(parts[idx + 1]);
+          setSessionId(activeSessionId);
+        }
+      }
+    }
+
+    if (!activeSessionId) {
+      setLoading(false);
+      setErrorMsg('No Video KYC Session ID provided. Please open using a valid verification link.');
+      return;
+    }
 
     const loadSession = async () => {
       try {
         setLoading(true);
-        const res: any = await api.getVideoKycSession(sessionId);
+        const res: any = await api.getVideoKycSession(activeSessionId);
         if (res?.success && res?.data) {
           setSessionData(res.data.session);
           setTenantData(res.data.tenant);
@@ -409,7 +429,12 @@ export default function VideoKycRoomPage() {
     const role = isAdminRef.current ? 'ADMIN' : 'CLIENT';
     const userName = isAdminRef.current ? 'Compliance Officer' : sessionData?.clientId?.name || 'Client';
 
-    const socket = io(`${BACKEND_URL}/video-kyc`, {
+    const isProduction = typeof window !== 'undefined' && window.location.hostname !== 'localhost';
+    const socketOrigin = isProduction ? window.location.origin : (BACKEND_URL.replace(/\/video-kyc$/, ''));
+    const socketPath = isProduction ? '/backend/socket.io' : '/socket.io';
+
+    const socket = io(`${socketOrigin}/video-kyc`, {
+      path: socketPath,
       transports: ['websocket', 'polling']
     });
     socketRef.current = socket;
