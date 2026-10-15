@@ -114,6 +114,7 @@ export default function VideoKycDesk() {
   const [perClientConsentText, setPerClientConsentText] = useState('');
   const [sendingInvite, setSendingInvite] = useState(false);
   const [createdSessionResult, setCreatedSessionResult] = useState<any>(null);
+  console.log("Created Session Result:", createdSessionResult);
 
   // View Details & Share Modal State
   const [viewDetailsSession, setViewDetailsSession] = useState<VideoKycSessionItem | null>(null);
