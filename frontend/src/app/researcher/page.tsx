@@ -12,7 +12,7 @@ import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy, Send, Monitor } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -21,6 +21,7 @@ import ComplaintReportAdmin from '../../components/admin/ComplaintReportAdmin';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
 import AdminResearchReports from '../../components/admin/AdminResearchReports';
+import TradeDeliveryReports from '../../components/admin/TradeDeliveryReports';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import CustomPageView from '../../components/client/CustomPageView';
 import Legal from '../../components/client/Legal';
@@ -112,6 +113,14 @@ const NAV_CONFIG: NavModule[] = [
     moduleLabel: 'Research Reports',
     moduleDesc: 'Manage and upload PDF research reports',
   },
+  {
+    tab: 'delivery-reports',
+    label: 'Delivery Reports',
+    icon: 'Send',
+    accessKey: 'ACCESS_RESEARCH',
+    moduleLabel: 'Delivery Reports',
+    moduleDesc: 'Audit multi-channel delivery logs across Telegram, SMS, and Panel alerts',
+  },
 
   {
     tab: 'signature_settings',
@@ -125,7 +134,7 @@ const NAV_CONFIG: NavModule[] = [
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, Send, Smartphone, Monitor
 };
 
 // =============================================================================
@@ -265,6 +274,7 @@ function AdminDashboardContent() {
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
+  const [isDeliveryReportsExpanded, setIsDeliveryReportsExpanded] = useState(false);
   const [roles, setRoles] = useState<any[]>([]);
   const [selectedRole, setSelectedRole] = useState<any | null>(null);
   const [savingPermissions, setSavingPermissions] = useState(false);
@@ -2811,6 +2821,73 @@ function AdminDashboardContent() {
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
               const Icon = ICON_MAP[mod.icon] || Layers;
 
+              if (mod.tab === 'delivery-reports') {
+                const isDeliveryActive = activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_');
+                return (
+                  <div key={mod.tab} className="pt-1">
+                    <button
+                      onClick={() => {
+                        if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                        setIsDeliveryReportsExpanded(!isDeliveryReportsExpanded);
+                        if (!isDeliveryActive) {
+                          setActiveTab('deliveryReports_all');
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                        isDeliveryActive
+                          ? 'bg-white/20 text-white font-semibold shadow-inner'
+                          : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
+                      } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                      title={isSidebarCollapsed ? mod.label : undefined}
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <Icon className={`w-5 h-5 transition-colors ${isDeliveryActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'} shrink-0`} />
+                        {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
+                      </div>
+                      {!isSidebarCollapsed && (
+                        <div className={`transition-transform duration-200 ${isDeliveryReportsExpanded ? 'rotate-90' : ''}`}>
+                          <ChevronRight className="w-4 h-4" />
+                        </div>
+                      )}
+                    </button>
+
+                    {!isSidebarCollapsed && isDeliveryReportsExpanded && (
+                      <div className="pl-12 pr-4 space-y-1 mt-1">
+                        {[
+                          { id: 'deliveryReports_all', label: 'Delivery Report (All Type)', icon: Layers },
+                          { id: 'deliveryReports_telegram', label: 'Telegram Delivery Report', icon: Send },
+                          { id: 'deliveryReports_sms', label: 'Text Msg (SMS)', icon: Smartphone },
+                          { id: 'deliveryReports_inapp', label: 'Panel Notifications', icon: Monitor }
+                        ].map(subItem => {
+                          const SubIcon = subItem.icon;
+                          const isSubActive = activeTab === subItem.id || (activeTab === 'delivery-reports' && subItem.id === 'deliveryReports_all');
+                          return (
+                            <button
+                              key={subItem.id}
+                              onClick={() => {
+                                setActiveTab(subItem.id);
+                                setIsMobileMenuOpen(false);
+                              }}
+                              className={`w-full text-left py-2 px-3 rounded-lg text-xs transition-colors flex items-center justify-between gap-2 ${
+                                isSubActive
+                                  ? 'bg-[#d4f23b] text-black font-extrabold shadow-sm'
+                                  : 'text-blue-100 dark:text-white/70 hover:text-white hover:bg-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">{subItem.label}</span>
+                              </div>
+                              {isSubActive && <span className="w-1.5 h-1.5 rounded-full bg-black shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               if (mod.tab === 'customPages') {
                 return (
                   <div key={mod.tab} className="pt-2">
@@ -2921,7 +2998,14 @@ function AdminDashboardContent() {
               </button>
               <div>
                 <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
-                  {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Researcher Portal'}
+                  {(() => {
+                    if (!activeTab) return 'Researcher Portal';
+                    if (activeTab === 'deliveryReports_all' || activeTab === 'delivery-reports') return 'Multi-Channel Delivery Reports';
+                    if (activeTab === 'deliveryReports_telegram') return 'Telegram Delivery Reports';
+                    if (activeTab === 'deliveryReports_sms') return 'Text Message (SMS) Delivery Reports';
+                    if (activeTab === 'deliveryReports_inapp') return 'Panel Notification Delivery Reports';
+                    return activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                  })()}
                 </h1>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
                   {user?.tenant?.companyName ? `${user.tenant.companyName} Research Workspace` : 'Research Analyst Portal'}
@@ -7151,6 +7235,28 @@ function AdminDashboardContent() {
                     <AdminResearchReports />
                   )}
 
+                  {/* ====================================================
+          MULTI-CHANNEL DELIVERY REPORTS TAB
+         ==================================================== */}
+                  {(activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_')) && (
+                    <div className="mx-6 space-y-6 animate-fade-in">
+                      <TradeDeliveryReports
+                        key={activeTab}
+                        initialChannel={
+                          activeTab === 'deliveryReports_telegram' ? 'TELEGRAM' :
+                          activeTab === 'deliveryReports_sms' ? 'SMS' :
+                          activeTab === 'deliveryReports_inapp' ? 'INAPP' : 'ALL'
+                        }
+                        onChannelChange={(ch) => {
+                          if (ch === 'TELEGRAM') setActiveTab('deliveryReports_telegram');
+                          else if (ch === 'SMS') setActiveTab('deliveryReports_sms');
+                          else if (ch === 'INAPP') setActiveTab('deliveryReports_inapp');
+                          else setActiveTab('deliveryReports_all');
+                        }}
+                      />
+                    </div>
+                  )}
+
                   {activeTab === 'plans' && (
                     <div className="space-y-6">
                       <div className="flex space-x-4 border-b border-slate-400 dark:border-white/10 pb-4">
@@ -9160,7 +9266,7 @@ function AdminDashboardContent() {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wider">Client PAN</label>
-                        <input type="text" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500" />
+                        <input type="text" maxLength={10} placeholder="ABCDE1234F" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 uppercase font-mono" />
                       </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

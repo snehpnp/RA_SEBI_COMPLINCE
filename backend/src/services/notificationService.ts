@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import dynamicDb from '../config/db';
 import { sendSms } from './smsService';
+import { sendTelegramMessage, formatTradeTelegramMessage } from './telegramService';
 
 export interface BroadcastNotificationOptions {
   tenantId: any;
@@ -16,8 +17,14 @@ export interface BroadcastNotificationOptions {
 }
 
 /**
- * Broadcasts in-app notification to all clients holding an active subscription
- * to the specified plan(s), and also logs an ADMIN notification.
+ * Broadcasts trade notifications across:
+ * 1. In-App / Client Panel
+ * 2. Direct Telegram Bot DM (if enabled in Tenant Settings & Client Profile)
+ * 3. Direct SMS (if enabled in Tenant Settings & Client Profile)
+ *
+ * STRICT SUBSCRIPTION ENFORCEMENT:
+ * - Client MUST hold an ACTIVE subscription for the specified plan(s).
+ * - Expired subscriptions (endDate < now) NEVER receive trades.
  */
 export const broadcastSignalNotification = async (options: BroadcastNotificationOptions) => {
   const {
@@ -37,7 +44,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
 
     // Normalize planIds to array
     const normalizedPlanIds = (Array.isArray(planIds) ? planIds : [planIds])
-      .map((p: any) => p ? (p._id?.toString() || p.id || p.toString()) : null)
+      .map((p: any) => (p ? (p._id?.toString() || p.id || p.toString()) : null))
       .filter(Boolean);
 
     if (normalizedPlanIds.length === 0) return;
@@ -46,7 +53,28 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
       .map((id: string) => new mongoose.Types.ObjectId(id));
 
-    // 1. Find all active subscriptions for these plans (supporting both ObjectId & String)
+    // Fetch tenant configuration for Telegram & SMS flags
+    let tenantDoc: any = null;
+    if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+      tenantDoc = await dynamicDb.Tenant.findById(tenantId).lean();
+    }
+    if (!tenantDoc && tenantId) {
+      tenantDoc = await dynamicDb.Tenant.findOne({ $or: [{ id: tenantId }, { tenantId }] }).lean();
+    }
+    if (!tenantDoc) {
+      tenantDoc = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+    }
+
+    // Fetch primary plan name for notification formatting
+    let planName = 'Active Plan';
+    try {
+      const pDoc = await dynamicDb.Plan.findOne({
+        _id: { $in: [...validPlanObjectIds, ...normalizedPlanIds] }
+      }).lean();
+      if (pDoc?.name) planName = pDoc.name;
+    } catch {}
+
+    // 1. Find all active subscriptions for these plans
     const subQuery: any = {
       planId: { $in: [...validPlanObjectIds, ...normalizedPlanIds] },
       status: { $in: ['ACTIVE', 'active'] }
@@ -72,7 +100,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       })
       .lean();
 
-    // Filter out expired subscriptions if endDate exists
+    // STRICT EXPIRY FILTER: Filter out expired subscriptions if endDate exists
     const checkDate = signalCreatedAt || new Date();
     const eligibleSubs = subscriptions.filter((sub: any) => {
       if (!sub.endDate) return true;
@@ -80,6 +108,10 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
     });
 
     const notifiedRecipients = new Set<string>();
+
+    const isTenantTelegramEnabled = Boolean(tenantDoc?.telegramTradeEnabled);
+    const botToken = tenantDoc?.telegramBotToken;
+    const isTenantSmsEnabled = Boolean(tenantDoc?.smsTradeEnabled && tenantDoc?.smsGatewayEnabled);
 
     for (const sub of (eligibleSubs as any[])) {
       let client = (sub.clientId || sub.client) as any;
@@ -100,15 +132,22 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       const recipientId = user?._id?.toString() || user?.id || client.userId?.toString();
       const clientEmail = client.email || user?.email;
       const clientDbId = client._id?.toString() || client.id;
+      const clientName = client.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'Client';
+      const destMobile = client.mobile || user?.mobile;
 
-      // Avoid duplicates if client has multiple subscriptions
+      // Avoid duplicate processing if client has multiple concurrent subscriptions
       const uniqueKey = clientEmail || recipientId || clientDbId;
       if (!uniqueKey || notifiedRecipients.has(uniqueKey)) continue;
       notifiedRecipients.add(uniqueKey);
 
       const targetRecipient = clientEmail || recipientId || clientDbId;
+      const currentTenantId = tenantId || sub.tenantId || client.tenantId;
+
+      // ==========================================
+      // 1. IN-APP / PANEL NOTIFICATION
+      // ==========================================
       await dynamicDb.NotificationLog.create({
-        tenantId: tenantId || sub.tenantId || client.tenantId,
+        tenantId: currentTenantId,
         recipient: targetRecipient,
         channel: 'INAPP',
         title,
@@ -119,63 +158,266 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
         data: {
           ...data,
           clientId: clientDbId,
+          clientName,
           email: clientEmail,
-          userId: recipientId
+          mobile: destMobile,
+          userId: recipientId,
+          planId: sub.planId,
+          planName
         }
       });
 
-      // Dispatch automated SMS if template is configured for this (Segment, Action)
-      try {
-        const destMobile = client.mobile || user?.mobile;
-        const tradeSegment = data?.segment ? String(data.segment).trim().toUpperCase() : '';
+      // ==========================================
+      // 2. TELEGRAM BOT DIRECT 1-on-1 DISPATCH
+      // ==========================================
+      if (isTenantTelegramEnabled) {
+        const isClientTelegramEnabled = client.isTelegramTradeEnabled !== false;
+        const telegramChatId = client.telegramChatId;
 
-        let tradeAction = '';
-        if (type === 'signal' || data?.action === 'NEW_TRADE') {
-          tradeAction = (data?.callType || 'BUY').trim().toUpperCase();
-        } else if (type === 'update' || data?.action === 'TRADE_UPDATE') {
-          const cStatus = (data?.closeStatus || '').toUpperCase();
-          if (cStatus.includes('SL') || cStatus.includes('STOPLOSS')) {
-            tradeAction = 'STOPLOSS';
-          } else {
-            tradeAction = 'TARGET';
-          }
-        }
+        if (!isClientTelegramEnabled) {
+          await dynamicDb.NotificationLog.create({
+            tenantId: currentTenantId,
+            recipient: targetRecipient,
+            channel: 'TELEGRAM',
+            title,
+            message: 'Telegram trade dispatch is disabled for this client',
+            type,
+            isRead: false,
+            status: 'SKIPPED_CLIENT_DISABLED',
+            data: {
+              ...data,
+              clientId: clientDbId,
+              clientName,
+              email: clientEmail,
+              mobile: destMobile,
+              telegramChatId,
+              planId: sub.planId,
+              planName,
+              reason: 'Disabled in client profile'
+            }
+          });
+        } else if (!telegramChatId) {
+          await dynamicDb.NotificationLog.create({
+            tenantId: currentTenantId,
+            recipient: targetRecipient,
+            channel: 'TELEGRAM',
+            title,
+            message: 'Telegram Chat ID not linked in client profile',
+            type,
+            isRead: false,
+            status: 'FAILED',
+            data: {
+              ...data,
+              clientId: clientDbId,
+              clientName,
+              email: clientEmail,
+              mobile: destMobile,
+              telegramChatId: null,
+              planId: sub.planId,
+              planName,
+              reason: 'Telegram Chat ID missing'
+            }
+          });
+        } else if (!botToken) {
+          await dynamicDb.NotificationLog.create({
+            tenantId: currentTenantId,
+            recipient: targetRecipient,
+            channel: 'TELEGRAM',
+            title,
+            message: 'Telegram Bot Token is not configured in Admin Settings',
+            type,
+            isRead: false,
+            status: 'FAILED',
+            data: {
+              ...data,
+              clientId: clientDbId,
+              clientName,
+              email: clientEmail,
+              mobile: destMobile,
+              telegramChatId,
+              planId: sub.planId,
+              planName,
+              reason: 'Bot Token missing in Settings'
+            }
+          });
+        } else {
+          // Send 1-on-1 trade recommendation via Bot
+          const formattedTgMessage = formatTradeTelegramMessage(data, {
+            companyName: tenantDoc?.companyName,
+            sebiRegistration: tenantDoc?.sebiRegistration,
+            isUpdate: type === 'update' || data?.action === 'TRADE_UPDATE',
+            updateStatus: data?.closeStatus,
+            planName
+          });
 
-        if (destMobile && tradeSegment && tradeAction) {
-          sendSms({
-            tenantId: tenantId || sub.tenantId || client.tenantId,
-            mobile: destMobile,
-            templateType: 'TRADE_SIGNAL',
-            segment: tradeSegment,
-            action: tradeAction,
-            variables: {
-              stock: data?.stockSymbol || '',
-              symbol: data?.stockSymbol || '',
-              action: tradeAction,
-              segment: tradeSegment,
-              price: data?.entryPrice || data?.exitPrice || '',
-              entry: data?.entryPrice || '',
-              exit: data?.exitPrice || '',
-              target: data?.target1 || '',
-              stoploss: data?.stoploss || '',
-              sl: data?.stoploss || ''
-            },
-            orderedVariables: [
-              data?.stockSymbol || '',
-              data?.entryPrice || data?.exitPrice || '',
-              data?.target1 || '',
-              data?.stoploss || ''
-            ]
-          }).catch(smsErr => {
-            console.warn('[Notification Service] SMS dispatch notice:', smsErr?.message);
+          const tgRes = await sendTelegramMessage({
+            botToken,
+            chatId: telegramChatId,
+            text: formattedTgMessage
+          });
+
+          await dynamicDb.NotificationLog.create({
+            tenantId: currentTenantId,
+            recipient: targetRecipient,
+            channel: 'TELEGRAM',
+            title,
+            message: formattedTgMessage,
+            type,
+            isRead: false,
+            status: tgRes.success ? 'DELIVERED' : 'FAILED',
+            data: {
+              ...data,
+              clientId: clientDbId,
+              clientName,
+              email: clientEmail,
+              mobile: destMobile,
+              telegramChatId,
+              planId: sub.planId,
+              planName,
+              telegramMessageId: tgRes.messageId,
+              error: tgRes.error
+            }
           });
         }
-      } catch (smsCatchErr: any) {
-        console.warn('[Notification Service] SMS send attempt error:', smsCatchErr?.message);
+      }
+
+      // ==========================================
+      // 3. SMS DISPATCH
+      // ==========================================
+      if (isTenantSmsEnabled) {
+        const isClientSmsEnabled = client.isSmsTradeEnabled !== false;
+
+        if (!isClientSmsEnabled) {
+          await dynamicDb.NotificationLog.create({
+            tenantId: currentTenantId,
+            recipient: destMobile || targetRecipient,
+            channel: 'SMS',
+            title,
+            message: 'SMS trade dispatch is disabled for this client',
+            type,
+            isRead: false,
+            status: 'SKIPPED_CLIENT_DISABLED',
+            data: {
+              ...data,
+              clientId: clientDbId,
+              clientName,
+              mobile: destMobile,
+              planId: sub.planId,
+              planName,
+              reason: 'Disabled in client profile'
+            }
+          });
+        } else if (!destMobile) {
+          await dynamicDb.NotificationLog.create({
+            tenantId: currentTenantId,
+            recipient: 'NO_MOBILE',
+            channel: 'SMS',
+            title,
+            message: 'Client mobile number missing',
+            type,
+            isRead: false,
+            status: 'FAILED',
+            data: {
+              ...data,
+              clientId: clientDbId,
+              clientName,
+              mobile: null,
+              planId: sub.planId,
+              planName,
+              reason: 'Mobile number missing'
+            }
+          });
+        } else {
+          try {
+            const tradeSegment = data?.segment ? String(data.segment).trim().toUpperCase() : '';
+
+            let tradeAction = '';
+            if (type === 'signal' || data?.action === 'NEW_TRADE') {
+              tradeAction = (data?.callType || 'BUY').trim().toUpperCase();
+            } else if (type === 'update' || data?.action === 'TRADE_UPDATE') {
+              const cStatus = (data?.closeStatus || '').toUpperCase();
+              if (cStatus.includes('SL') || cStatus.includes('STOPLOSS')) {
+                tradeAction = 'STOPLOSS';
+              } else {
+                tradeAction = 'TARGET';
+              }
+            }
+
+            if (tradeSegment && tradeAction) {
+              const smsResult = await sendSms({
+                tenantId: currentTenantId,
+                mobile: destMobile,
+                templateType: 'TRADE_SIGNAL',
+                segment: tradeSegment,
+                action: tradeAction,
+                variables: {
+                  stock: data?.stockSymbol || '',
+                  symbol: data?.stockSymbol || '',
+                  action: tradeAction,
+                  segment: tradeSegment,
+                  price: data?.entryPrice || data?.exitPrice || '',
+                  entry: data?.entryPrice || '',
+                  exit: data?.exitPrice || '',
+                  target: data?.target1 || '',
+                  stoploss: data?.stoploss || '',
+                  sl: data?.stoploss || ''
+                },
+                orderedVariables: [
+                  data?.stockSymbol || '',
+                  data?.entryPrice || data?.exitPrice || '',
+                  data?.target1 || '',
+                  data?.stoploss || ''
+                ]
+              });
+
+              await dynamicDb.NotificationLog.create({
+                tenantId: currentTenantId,
+                recipient: destMobile,
+                channel: 'SMS',
+                title,
+                message: smsResult.message || `SMS dispatched for ${data?.stockSymbol}`,
+                type,
+                isRead: false,
+                status: smsResult.success ? 'DELIVERED' : 'FAILED',
+                data: {
+                  ...data,
+                  clientId: clientDbId,
+                  clientName,
+                  mobile: destMobile,
+                  planId: sub.planId,
+                  planName,
+                  rawResponse: smsResult.rawResponse,
+                  error: smsResult.success ? null : (smsResult.message || smsResult.reason)
+                }
+              });
+            }
+          } catch (smsCatchErr: any) {
+            console.warn('[Notification Service] SMS send attempt error:', smsCatchErr?.message);
+            await dynamicDb.NotificationLog.create({
+              tenantId: currentTenantId,
+              recipient: destMobile,
+              channel: 'SMS',
+              title,
+              message: 'SMS dispatch failed',
+              type,
+              isRead: false,
+              status: 'FAILED',
+              data: {
+                ...data,
+                clientId: clientDbId,
+                clientName,
+                mobile: destMobile,
+                planId: sub.planId,
+                planName,
+                error: smsCatchErr?.message
+              }
+            });
+          }
+        }
       }
     }
 
-    // 2. Also log an ADMIN notification so admin header and dashboard see the activity
+    // 4. Log an ADMIN notification so admin header and dashboard see the activity
     const finalAdminTitle = adminTitle || title;
     const finalAdminMessage = adminMessage || message;
 
@@ -195,7 +437,11 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       }
     });
 
-    console.log(`[Notification] Broadcasted "${title}" to ${notifiedRecipients.size} active clients and ADMIN.`);
+    console.log(
+      `[Notification] Broadcasted "${title}" to ${notifiedRecipients.size} active clients (Channels: INAPP${
+        isTenantTelegramEnabled ? ', TELEGRAM' : ''
+      }${isTenantSmsEnabled ? ', SMS' : ''}).`
+    );
   } catch (err: any) {
     console.error('[Notification] Error broadcasting signal notification:', err);
   }

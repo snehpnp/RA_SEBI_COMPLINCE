@@ -935,6 +935,31 @@ export const fetchCamsRecord = async (req: AuthenticatedRequest, res: Response) 
       return res.status(400).json({ success: false, message: 'PAN number is required' });
     }
 
+    const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+    if (!panRegex.test(cleanPan)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid PAN format. PAN must be exactly 10 alphanumeric characters (5 letters, 4 digits, 1 letter, e.g. ABCDE1234F).'
+      });
+    }
+
+    if (dob && typeof dob === 'string' && dob.trim()) {
+      const trimmedDob = dob.trim();
+      const parsedDate = new Date(trimmedDob);
+      if (isNaN(parsedDate.getTime()) || (!/^\d{4}-\d{2}-\d{2}$/.test(trimmedDob) && !/^\d{2}-\d{2}-\d{4}$/.test(trimmedDob))) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid Date of Birth format. Please select or enter a valid date in YYYY-MM-DD format.'
+        });
+      }
+      if (parsedDate > new Date()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Date of Birth cannot be in the future.'
+        });
+      }
+    }
+
     const tenantId = req.user?.tenantId;
     const creds = await getCamsCredentials(tenantId);
 

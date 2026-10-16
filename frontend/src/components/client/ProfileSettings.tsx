@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import { 
   User, Mail, Phone, Calendar, MapPin, Loader2, ShieldCheck, 
-  ShieldAlert, CreditCard, Lock, CheckCircle2, ArrowRight, Building2, Briefcase
+  ShieldAlert, CreditCard, Lock, CheckCircle2, ArrowRight, Building2, Briefcase,
+  Send, ExternalLink, Bell, Sparkles, HelpCircle
 } from 'lucide-react';
 import api from '../../services/api';
 import ChangePasswordBlock from '../ChangePasswordBlock';
@@ -17,6 +18,14 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isKycVerified, setIsKycVerified] = useState(false);
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [telegramUsername, setTelegramUsername] = useState('');
+  const [isTelegramTradeEnabled, setIsTelegramTradeEnabled] = useState(true);
+  const [botUsername, setBotUsername] = useState('');
+  const [telegramJoinRule, setTelegramJoinRule] = useState('ACTIVE_PLAN_ONLY');
+  const [clientId, setClientId] = useState('');
+  const [hasActivePlan, setHasActivePlan] = useState(false);
+  const [testingTelegram, setTestingTelegram] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -97,11 +106,42 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
           zipCode: profile.zipCode || client.zipCode || '',
           country: profile.country || 'India'
         });
+
+        setTelegramChatId(client.telegramChatId || '');
+        setTelegramUsername(client.telegramUsername || '');
+        setIsTelegramTradeEnabled(client.isTelegramTradeEnabled !== false);
+        setClientId(String(client.id || client._id || ''));
+        const bUser = client.user?.tenant?.telegramBotUsername || client.tenant?.telegramBotUsername || '';
+        setBotUsername(bUser ? bUser.replace(/^@/, '').trim() : '');
+        setTelegramJoinRule(client.user?.tenant?.telegramJoinRule || client.tenant?.telegramJoinRule || 'ACTIVE_PLAN_ONLY');
+
+        const active = client.subscriptions?.some(
+          (s: any) => s.status === 'ACTIVE' && (!s.endDate || new Date(s.endDate).getTime() >= Date.now())
+        );
+        setHasActivePlan(Boolean(active));
       }
+
+
     } catch (err) {
       toast.error('Failed to load profile data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTestTelegramPing = async () => {
+    try {
+      setTestingTelegram(true);
+      const res = await api.testClientTelegramPing();
+      if (res.success) {
+        toast.success(res.message || 'Test alert sent! Check your Telegram app.');
+      } else {
+        toast.error(res.message || 'Failed to send test alert.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Error sending test message.');
+    } finally {
+      setTestingTelegram(false);
     }
   };
 
@@ -119,11 +159,16 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
         state: formData.state,
         zipCode: formData.zipCode
       };
-      const res = await api.updateProfile(payload);
-      if (res.success) {
-        toast.success('Profile updated successfully');
+      const [res] = await Promise.all([
+        api.updateProfile(payload),
+        telegramChatId ? api.updateClientTelegram({
+          isTelegramTradeEnabled
+        }).catch(() => {}) : Promise.resolve(null)
+      ]);
+      if (res?.success) {
+        toast.success('Profile and delivery preferences updated successfully');
       } else {
-        toast.error(res.message || 'Update failed');
+        toast.error(res?.message || 'Update failed');
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Update failed');
@@ -500,7 +545,143 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
             </div>
           </div>
 
+          {/* SECTION 4: Live Trade Delivery Channels & Telegram Bot */}
+          <div>
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3 mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-sky-500/10 text-sky-500">
+                  <Send className="w-5 h-5 transform -translate-x-0.5 translate-y-0.5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    Telegram Trade Alerts &amp; Delivery Channel
+                    {telegramChatId && isTelegramTradeEnabled ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold">
+                        ACTIVE
+                      </span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold">
+                        NOT LINKED
+                      </span>
+                    )}
+                  </h2>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Receive live recommendations matching your active subscriptions directly in private Telegram chat
+                  </p>
+                </div>
+              </div>
+              {telegramChatId && (
+                <button
+                  type="button"
+                  disabled={testingTelegram}
+                  onClick={handleTestTelegramPing}
+                  className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {testingTelegram ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bell className="w-3.5 h-3.5" />}
+                  Send Test Alert
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {/* If already linked: permanent status card */}
+              {telegramChatId ? (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-600 dark:text-emerald-400 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                    <div>
+                      <span className="font-bold">Telegram Account Linked &amp; Active</span>
+                      <p className="text-[11px] opacity-80 font-mono mt-0.5">
+                        {telegramUsername ? `@${telegramUsername} • ` : ''}Chat ID: {telegramChatId}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-emerald-500/20 px-2.5 py-1 rounded-full font-bold">PERMANENT LINK</span>
+                </div>
+              ) : !hasActivePlan ? (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+                    <div>
+                      <span className="font-bold">Active Subscription Plan Required</span>
+                      <p className="text-[11px] opacity-80 mt-0.5">
+                        Telegram live trade alerts are exclusively available for clients with an active paid subscription plan.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (telegramJoinRule === 'KYC_AGREEMENT_VERIFIED' && !isKycVerified) ? (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+                    <span>SEBI Rule: Complete DigiLocker KYC &amp; Service Agreement first to unlock Telegram trade alerts.</span>
+                  </div>
+                  {onNavigateToKyc && (
+                    <button
+                      type="button"
+                      onClick={onNavigateToKyc}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs transition whitespace-nowrap"
+                    >
+                      Complete KYC
+                    </button>
+                  )}
+                </div>
+              ) : !botUsername ? (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500 flex items-center gap-2.5">
+                  <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+                  <span>Company Telegram Bot is not configured in Admin Settings yet. Once the administrator sets up the Bot, 1-click automatic connection will be activated here.</span>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-sky-500/10 via-blue-500/5 to-transparent border border-sky-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-sky-500" /> 1-Click Automatic Connection
+                    </p>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 max-w-md">
+                      Launch our official bot <b>@{botUsername}</b> and tap <b>START</b>. Your account connects automatically without typing Chat IDs.
+                    </p>
+                  </div>
+                  <a
+                    href={`https://t.me/${botUsername}?start=link_${clientId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 transition shadow-md shadow-sky-500/20 whitespace-nowrap"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>Open @{botUsername}</span>
+                    <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+                  </a>
+                </div>
+              )}
+
+
+              {/* Delivery Toggle (Only shown when already linked) */}
+              {telegramChatId && (
+                <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10">
+                  <div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Receive Live Recommendations via Telegram
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      When enabled, trade entry/exit and targets are dispatched to your private chat instantly
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isTelegramTradeEnabled}
+                      onChange={(e) => setIsTelegramTradeEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-500"></div>
+                  </label>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Form Actions */}
+
           <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-white/10">
             <button
               type="submit"

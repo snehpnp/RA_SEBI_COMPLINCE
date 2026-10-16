@@ -481,10 +481,11 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   }
 
-  // VALIDATIONS
+  try {
+    // VALIDATIONS
   const cleanUsername = String(username || '').trim().toLowerCase();
-  if (!cleanUsername || cleanUsername.length < 3) {
-    return res.status(400).json({ success: false, message: 'Staff username is required and must be at least 3 characters.' });
+  if (!cleanUsername || cleanUsername.length < 2) {
+    return res.status(400).json({ success: false, message: 'Staff username is required and must be at least 2 characters.' });
   }
   if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
     return res.status(400).json({ success: false, message: 'Staff username can only contain letters, numbers, dots, hyphens, and underscores.' });
@@ -509,30 +510,34 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
     else if (effectivePersonAssociatedType === 'MARKETING') effectiveRoleName = 'MARKETING';
   }
 
-  const isOther = effectivePersonAssociatedType === 'OTHER';
+    const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
+    if (!targetRole) {
+      return res.status(400).json({ success: false, message: `Role '${effectiveRoleName}' not found.` });
+    }
 
-  if (!isOther) {
-    if (!nismNumber || nismNumber.trim().length < 5) {
-      return res.status(400).json({ success: false, message: 'NISM Registration Number is required and must be at least 5 characters.' });
-    }
-    if (!nismValidity || new Date(nismValidity) <= new Date()) {
-      return res.status(400).json({ success: false, message: 'NISM validity expiry date is required and must be in the future.' });
-    }
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory.' });
-    }
-  } else {
-    if (nismNumber && nismNumber.trim().length > 0) {
-      if (nismNumber.trim().length < 5) {
-        return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
+    const roleRequiresNism = targetRole.requiresNism === true;
+
+    if (roleRequiresNism) {
+      if (!nismNumber || nismNumber.trim().length < 5) {
+        return res.status(400).json({ success: false, message: `NISM Registration Number is mandatory for role '${effectiveRoleName}' (min 5 characters).` });
       }
       if (!nismValidity || new Date(nismValidity) <= new Date()) {
-        return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
+        return res.status(400).json({ success: false, message: 'Valid future NISM expiry date is mandatory for this role.' });
+      }
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory for this role.' });
+      }
+    } else {
+      if (nismNumber && nismNumber.trim().length > 0) {
+        if (nismNumber.trim().length < 5) {
+          return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
+        }
+        if (!nismValidity || new Date(nismValidity) <= new Date()) {
+          return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
+        }
       }
     }
-  }
 
-  try {
     if (nismNumber && nismNumber.trim().length > 0) {
       const existingNism = await dynamicDb.Staff.findOne({
         nismNumber: nismNumber.trim()
@@ -556,11 +561,6 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose a different username.` });
     }
 
-    const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
-    if (!targetRole) {
-      return res.status(400).json({ success: false, message: `Role '${effectiveRoleName}' not found.` });
-    }
-
     const randomPassword = 'Staff@' + Math.floor(1000 + Math.random() * 9000);
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(randomPassword, salt);
@@ -574,6 +574,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       email,
       mobile,
       passwordHash,
+      tempPassword: randomPassword,
       status: 'ACTIVE'
     });
 
@@ -586,7 +587,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
       mobile,
       dob: dob ? new Date(dob) : null,
       joiningDate: joiningDate ? new Date(joiningDate) : null,
-      nismNumber,
+      nismNumber: roleRequiresNism || nismNumber ? nismNumber : null,
       nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : null,
       nismValidity: nismValidity ? new Date(nismValidity) : null,
       status: 'ACTIVE'
@@ -633,6 +634,7 @@ export const createStaff = async (req: AuthenticatedRequest, res: Response) => {
         tenantId,
         toEmail: email,
         name,
+        username: cleanUsername,
         password: randomPassword,
         role: roleName,
         loginUrl,
@@ -709,7 +711,8 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   }
 
-  // VALIDATIONS
+  try {
+    // VALIDATIONS
   if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
     return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
   }
@@ -729,31 +732,6 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     else if (effectivePersonAssociatedType === 'MARKETING') effectiveRoleName = 'MARKETING';
   }
 
-  const isOther = effectivePersonAssociatedType === 'OTHER';
-
-  if (!isOther) {
-    if (!nismNumber || nismNumber.trim().length < 5) {
-      return res.status(400).json({ success: false, message: 'NISM Registration Number is required and must be at least 5 characters.' });
-    }
-    if (!nismValidity || new Date(nismValidity) <= new Date()) {
-      return res.status(400).json({ success: false, message: 'NISM validity expiry date is required and must be in the future.' });
-    }
-    const currentStaff: any = await dynamicDb.Staff.findById(id).lean();
-    if (!currentStaff?.nismUpload && !req.file) {
-      return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory.' });
-    }
-  } else {
-    if (nismNumber && nismNumber.trim().length > 0) {
-      if (nismNumber.trim().length < 5) {
-        return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
-      }
-      if (!nismValidity || new Date(nismValidity) <= new Date()) {
-        return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
-      }
-    }
-  }
-
-  try {
     let staff: any = null;
     if (mongoose.Types.ObjectId.isValid(id)) {
       staff = await dynamicDb.Staff.findById(id).lean();
@@ -769,6 +747,30 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     }
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    }
+
+    const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
+    const roleRequiresNism = targetRole?.requiresNism === true;
+
+    if (roleRequiresNism) {
+      if (!nismNumber || nismNumber.trim().length < 5) {
+        return res.status(400).json({ success: false, message: `NISM Registration Number is mandatory for role '${effectiveRoleName}' (min 5 characters).` });
+      }
+      if (!nismValidity || new Date(nismValidity) <= new Date()) {
+        return res.status(400).json({ success: false, message: 'Valid future NISM expiry date is mandatory for this role.' });
+      }
+      if (!staff.nismUpload && !req.file) {
+        return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory for this role.' });
+      }
+    } else {
+      if (nismNumber && nismNumber.trim().length > 0) {
+        if (nismNumber.trim().length < 5) {
+          return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
+        }
+        if (!nismValidity || new Date(nismValidity) <= new Date()) {
+          return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
+        }
+      }
     }
 
     const staffId = staff._id;
@@ -794,8 +796,6 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       }
     }
 
-    const targetRole = await dynamicDb.Role.findOne({ name: effectiveRoleName }).lean();
-
     const updateUserData: any = {
       firstName: name.split(' ')[0],
       lastName: name.split(' ').slice(1).join(' ') || 'Staff',
@@ -808,21 +808,6 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
 
     const targetUserId = staff.userId || staffUser?._id;
 
-    if (username) {
-      const cleanUsername = String(username).trim().toLowerCase();
-      if (cleanUsername.length < 3 || !/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
-        return res.status(400).json({ success: false, message: 'Username must be at least 3 characters and contain only letters, numbers, dots, hyphens, and underscores.' });
-      }
-      const existingWithUsername = await dynamicDb.User.findOne({
-        username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-        ...(targetUserId ? { _id: { $ne: targetUserId } } : {})
-      }).lean();
-      if (existingWithUsername) {
-        return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose another.` });
-      }
-      updateUserData.username = cleanUsername;
-    }
-
     if (targetUserId) {
       await dynamicDb.User.findByIdAndUpdate(targetUserId, { $set: updateUserData });
     }
@@ -833,9 +818,8 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       mobile,
       dob: dob ? new Date(dob) : null,
       joiningDate: joiningDate ? new Date(joiningDate) : null,
-      nismNumber,
+      nismNumber: roleRequiresNism || nismNumber ? nismNumber : null,
       nismValidity: nismValidity ? new Date(nismValidity) : null,
-      ...(updateUserData.username ? { username: updateUserData.username } : {}),
       ...(targetUserId ? { userId: targetUserId } : {})
     };
 
@@ -1058,6 +1042,134 @@ export const restoreStaff = async (req: AuthenticatedRequest, res: Response) => 
     return res.status(200).json({
       success: true,
       message: 'Staff member restored successfully'
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+export const getStaffPassword = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+
+  const callerRole = req.user?.role;
+  if (callerRole !== 'ADMIN' && callerRole !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, message: 'Access denied: Only Administrators can view staff passwords.' });
+  }
+
+  try {
+    let staff: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+    }
+    if (!staff) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+          { employeeId: id }
+        ]
+      }).lean();
+    }
+    if (!staff) {
+      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    }
+
+    let user: any = null;
+    if (staff.userId) {
+      user = await dynamicDb.User.findById(staff.userId).lean();
+    }
+    if (!user && staff.email) {
+      user = await dynamicDb.User.findOne({ email: staff.email }).lean();
+    }
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Associated login account not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        username: user.username || staff.username || (user.email ? user.email.split('@')[0] : null),
+        email: user.email,
+        password: user.tempPassword || null
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+export const resendStaffCredentials = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  const { id } = req.params;
+
+  const callerRole = req.user?.role;
+  if (callerRole !== 'ADMIN' && callerRole !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, message: 'Access denied: Only Administrators can resend staff credentials.' });
+  }
+
+  try {
+    let staff: any = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+    }
+    if (!staff) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [
+          ...(mongoose.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+          { employeeId: id }
+        ]
+      }).lean();
+    }
+    if (!staff) {
+      return res.status(404).json({ success: false, message: 'Staff member not found.' });
+    }
+
+    let user: any = null;
+    if (staff.userId) {
+      user = await dynamicDb.User.findById(staff.userId);
+    }
+    if (!user && staff.email) {
+      user = await dynamicDb.User.findOne({ email: staff.email });
+    }
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Associated login account not found.' });
+    }
+
+    let passwordToSend = user.tempPassword;
+    if (!passwordToSend) {
+      passwordToSend = 'Staff@' + Math.floor(1000 + Math.random() * 9000);
+      const salt = await bcrypt.genSalt(10);
+      const passwordHash = await bcrypt.hash(passwordToSend, salt);
+      user.passwordHash = passwordHash;
+      user.tempPassword = passwordToSend;
+      await user.save();
+    }
+
+    const roleDoc: any = await dynamicDb.Role.findById(user.roleId).lean();
+    const roleName = roleDoc?.name || 'STAFF';
+
+    const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+    const tenant: any = tenantId ? await dynamicDb.Tenant.findById(tenantId).lean() : null;
+
+    const emailSent = await sendWelcomeEmail({
+      tenantId: tenantId ? String(tenantId) : '',
+      toEmail: user.email,
+      name: staff.name || `${user.firstName} ${user.lastName}`,
+      username: user.username || staff.username,
+      password: passwordToSend,
+      role: roleName,
+      loginUrl,
+      companyName: tenant?.companyName || 'RAGCP Platform'
+    });
+
+    if (!emailSent) {
+      return res.status(500).json({ success: false, message: 'Failed to send credentials email. Please verify SMTP settings.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Login credentials successfully sent to staff registered email (${user.email}).`
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
@@ -1602,7 +1714,11 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
     addressLine1,
     city,
     state,
-    zipCode
+    zipCode,
+    isTelegramTradeEnabled,
+    isSmsTradeEnabled,
+    telegramChatId,
+    telegramUsername
   } = req.body;
 
   if (!tenantId) {
@@ -1757,7 +1873,11 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
           pan: finalPan,
           aadhaar: finalAadhaar,
           category: category || 'INDIVIDUAL',
-          occupation
+          occupation,
+          ...(isTelegramTradeEnabled !== undefined ? { isTelegramTradeEnabled: isTelegramTradeEnabled === true || isTelegramTradeEnabled === 'true' } : {}),
+          ...(isSmsTradeEnabled !== undefined ? { isSmsTradeEnabled: isSmsTradeEnabled === true || isSmsTradeEnabled === 'true' } : {}),
+          ...(telegramChatId !== undefined ? { telegramChatId: telegramChatId ? String(telegramChatId).trim() : null } : {}),
+          ...(telegramUsername !== undefined ? { telegramUsername: telegramUsername ? String(telegramUsername).trim().replace(/^@/, '') : null } : {})
         }
       },
       { returnDocument: 'after', lean: true }
@@ -2589,8 +2709,11 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     passwordPolicy, client2FAEnabled, twoFactorChannel,
     signupVerificationMode, lockedTradesPreviewCount,
     showOpenTradePotential, showLockedTradePotential,
-    smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId
+    smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId,
+    telegramTradeEnabled, smsTradeEnabled, telegramBotToken, telegramBotUsername,
+    telegramJoinRule
   } = req.body;
+
   const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
   try {
@@ -2659,7 +2782,13 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (smsPassword !== undefined && smsPassword.trim() !== '') dataToUpdate.smsPassword = smsPassword.trim();
     if (smsSenderId !== undefined) dataToUpdate.smsSenderId = smsSenderId ? smsSenderId.trim() : null;
     if (smsEntityId !== undefined) dataToUpdate.smsEntityId = smsEntityId ? smsEntityId.trim() : null;
+    if (telegramTradeEnabled !== undefined) dataToUpdate.telegramTradeEnabled = telegramTradeEnabled === 'true' || telegramTradeEnabled === true;
+    if (smsTradeEnabled !== undefined) dataToUpdate.smsTradeEnabled = smsTradeEnabled === 'true' || smsTradeEnabled === true;
+    if (telegramBotToken !== undefined) dataToUpdate.telegramBotToken = telegramBotToken ? telegramBotToken.trim() : null;
+    if (telegramBotUsername !== undefined) dataToUpdate.telegramBotUsername = telegramBotUsername ? telegramBotUsername.trim().replace(/^@/, '') : null;
+    if (telegramJoinRule !== undefined) dataToUpdate.telegramJoinRule = ['ALL', 'KYC_AGREEMENT_VERIFIED', 'ACTIVE_PLAN_ONLY'].includes(telegramJoinRule) ? telegramJoinRule : 'ALL';
     if (themeColor) dataToUpdate.themeColor = themeColor;
+
     if (companyName) dataToUpdate.companyName = companyName;
     if (companyEmail) dataToUpdate.email = companyEmail;
     if (gstCalculationType) dataToUpdate.gstCalculationType = gstCalculationType;

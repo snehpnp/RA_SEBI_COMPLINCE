@@ -47,17 +47,6 @@ export const login = async (req: Request, res: Response) => {
     const cleanId = String(rawIdentifier || '').toLowerCase().trim();
     const isEmailFormat = cleanId.includes('@');
 
-    // If Staff/Admin login: Strictly disallow email logins!
-    if (effectivePortal === 'STAFF' || effectivePortal === 'ADMIN') {
-      if (isEmailFormat) {
-        return res.status(400).json({
-          success: false,
-          message: 'Staff members must log in using their assigned Username, not Email address.',
-          errors: ['Email not allowed for staff login']
-        });
-      }
-    }
-
     const regexId = new RegExp(`^${cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
     
     // Strict query isolation:
@@ -66,6 +55,7 @@ export const login = async (req: Request, res: Response) => {
       userQuery = {
         $or: [
           { username: { $regex: regexId } },
+          { email: { $regex: regexId } },
           { employeeCode: { $regex: regexId } }
         ]
       };
@@ -222,11 +212,11 @@ export const login = async (req: Request, res: Response) => {
     }
 
     // Enforce Portal Role Restrictions:
-    if (effectivePortal === 'CLIENT' || (!effectivePortal && isEmailFormat)) {
+    if (effectivePortal === 'CLIENT') {
       if (user.role?.name && user.role.name !== 'CLIENT') {
         return res.status(403).json({
           success: false,
-          message: 'This login page is exclusively for Clients and Investors. Staff members cannot log in with email from here. Please use the Staff portal (/adminlogin) to log in with your Username.',
+          message: 'This login page is exclusively for Clients and Investors. Staff members cannot log in from here. Please use the Staff portal (/adminlogin).',
           errors: ['Staff login prohibited on client portal']
         });
       }
@@ -266,13 +256,27 @@ export const login = async (req: Request, res: Response) => {
     }
 
     // ==============================================================
-    // TWO-STEP VERIFICATION (2FA) CHECK FOR CLIENTS
+    // TWO-STEP VERIFICATION (2FA) CHECK FOR CLIENTS & STAFF/ADMIN
     // ==============================================================
     const isClient = user?.role?.name === 'CLIENT';
-    const is2FAEnabled = isClient && (tenantInfo?.client2FAEnabled === true);
+    const role2FA = user?.role?.twoFactorAuth; // 'DISABLED' | 'EMAIL_OTP' | 'SMS_OTP' | 'BOTH'
+
+    let is2FAEnabled = false;
+    let channel: 'EMAIL' | 'SMS' | 'BOTH' = 'EMAIL';
+
+    if (isClient) {
+      is2FAEnabled = (tenantInfo?.client2FAEnabled === true);
+      channel = (tenantInfo?.twoFactorChannel || 'EMAIL') as any;
+    } else {
+      if (role2FA && role2FA !== 'DISABLED') {
+        is2FAEnabled = true;
+        if (role2FA === 'EMAIL_OTP') channel = 'EMAIL';
+        else if (role2FA === 'SMS_OTP') channel = 'SMS';
+        else if (role2FA === 'BOTH') channel = 'BOTH';
+      }
+    }
 
     if (is2FAEnabled) {
-      const channel = tenantInfo?.twoFactorChannel || 'EMAIL';
       const emailOtp = Math.floor(100000 + Math.random() * 900000).toString();
       const smsOtp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min validity
@@ -564,6 +568,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     await User.findByIdAndUpdate(user._id || user.id, {
       passwordHash,
+      tempPassword: newPassword,
       $inc: { tokenVersion: 1 },
       currentSessionId: null,
       sessionExpiresAt: null
@@ -571,6 +576,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     if (centralModels.User) {
       await centralModels.User.findByIdAndUpdate(user._id || user.id, {
         passwordHash,
+        tempPassword: newPassword,
         $inc: { tokenVersion: 1 },
         currentSessionId: null,
         sessionExpiresAt: null
@@ -666,6 +672,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 
     await User.findByIdAndUpdate(userId, {
       passwordHash,
+      tempPassword: newPassword,
       $inc: { tokenVersion: 1 },
       currentSessionId: null,
       sessionExpiresAt: null
@@ -830,6 +837,7 @@ export const changePassword = async (req: Request, res: Response) => {
 
     await User.findByIdAndUpdate(userId, {
       passwordHash: newHash,
+      tempPassword: newPassword,
       $inc: { tokenVersion: 1 },
       currentSessionId: null,
       sessionExpiresAt: null

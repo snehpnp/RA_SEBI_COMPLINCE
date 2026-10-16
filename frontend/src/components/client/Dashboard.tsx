@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp, Lock, CheckCircle2 } from 'lucide-react';
+import { Activity, ShieldCheck, CreditCard, RefreshCw, Bell, FileText, Download, Target, ChevronRight, Loader2, Clock, XCircle, AlertCircle, Newspaper, ExternalLink, TrendingUp, Lock, CheckCircle2, Send, Check, X, Smartphone, Sparkles, HelpCircle } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-hot-toast';
 
 export default function Dashboard({ 
   profile, 
@@ -27,6 +28,107 @@ export default function Dashboard({
   const [newsLoading, setNewsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  // Telegram Integration State
+  const [localProfile, setLocalProfile] = useState<any>(profile);
+
+  useEffect(() => {
+    if (profile) {
+      setLocalProfile(profile);
+    }
+  }, [profile]);
+
+  const botUsername = localProfile?.user?.tenant?.telegramBotUsername || localProfile?.tenant?.telegramBotUsername || '';
+  const cleanBotUsername = (botUsername || '').replace(/^@/, '').trim();
+  const isBotConfigured = Boolean(cleanBotUsername);
+  const clientId = String(localProfile?.id || localProfile?._id || '');
+  const telegramDeepLink = isBotConfigured ? `https://t.me/${cleanBotUsername}?start=link_${clientId}` : '#';
+
+  // Telegram Eligibility & Join Rule Check
+  const hasActivePlan = Boolean(
+    activeSub ||
+    localProfile?.subscriptions?.some(
+      (s: any) => s.status === 'ACTIVE' && (!s.endDate || new Date(s.endDate).getTime() >= Date.now())
+    )
+  );
+
+  const isKraVerified = Boolean(localProfile?.kraVerified === true || localProfile?.kycStatus === 'VERIFIED' || localProfile?.kycStatus === 'APPROVED');
+  const isAgreementSigned = localProfile?.agreements?.some(
+    (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
+  ) || !!localProfile?.agreementSigned;
+  const isFullyVerified = isKraVerified && isAgreementSigned;
+
+  const telegramJoinRule = localProfile?.user?.tenant?.telegramJoinRule || localProfile?.tenant?.telegramJoinRule || 'ACTIVE_PLAN_ONLY';
+  const isKycRuleSatisfied = (telegramJoinRule === 'ACTIVE_PLAN_ONLY' || telegramJoinRule === 'ALL') || isFullyVerified;
+  const canConnectTelegram = hasActivePlan && isKycRuleSatisfied;
+
+  // Silent profile check on window focus and polling to auto-detect Telegram connection on return
+  const checkTelegramStatus = async (showToastOnConnect = true) => {
+    try {
+      const res = await api.getClientProfile();
+      if (res?.success && res.data) {
+        const updated = res.data;
+        if (updated.telegramChatId && !localProfile?.telegramChatId && showToastOnConnect) {
+          toast.success(`🎉 Telegram connected successfully (@${updated.telegramUsername || 'Linked'})!`, { duration: 6000 });
+        }
+        setLocalProfile(updated);
+      }
+    } catch {
+      // background silent check
+    }
+  };
+
+  useEffect(() => {
+    // When client returns to window/tab after opening Telegram
+    const handleFocus = () => {
+      checkTelegramStatus(true);
+    };
+    window.addEventListener('focus', handleFocus);
+
+    // Auto-poll every 4 seconds if not yet connected and bot is configured
+    let pollInterval: any = null;
+    if (!localProfile?.telegramChatId && isBotConfigured) {
+      pollInterval = setInterval(() => {
+        checkTelegramStatus(true);
+      }, 4000);
+    }
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [localProfile?.telegramChatId, isBotConfigured]);
+
+  const handleTelegramCardClick = () => {
+    // If already connected, no action (link is permanent, button is not clickable again)
+    if (localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false) {
+      return;
+    }
+
+    // 1. Mandatory check: Must have an active paid subscription plan
+    if (!hasActivePlan) {
+      toast.error('Active Plan Required: Please purchase a subscription plan to connect Telegram trade alerts.');
+      setActiveTab('subscriptions');
+      return;
+    }
+
+    // 2. If join rule requires KYC & Agreement, redirect them to KYC center
+    if (!isKycRuleSatisfied) {
+      toast.error('SEBI Compliance Alert: Please complete DigiLocker KYC and Service Agreement first.');
+      setActiveTab('kyc');
+      return;
+    }
+
+    // 3. If bot is not configured yet, notify user without opening any form
+    if (!isBotConfigured) {
+      toast.error('Telegram Bot is not configured by the administrator yet.');
+      return;
+    }
+
+    // Direct 1-Click Redirect to Telegram Bot!
+    window.open(telegramDeepLink, '_blank');
+  };
+
 
   const fetchDashboardData = async (showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -136,12 +238,8 @@ export default function Dashboard({
     return () => clearInterval(intervalId);
   }, []);
 
-  // Derive KYC status from profile
-  const isKraVerified = Boolean(profile?.kraVerified === true || profile?.kycStatus === 'VERIFIED' || profile?.kycStatus === 'APPROVED');
-  const isAgreementSigned = profile?.agreements?.some(
-    (a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE'
-  ) || !!profile?.agreementSigned;
-  const kycStatus: string = profile?.status || 'PENDING_ONBOARDING';
+  // Derive KYC status display from verified state
+  const kycStatus: string = localProfile?.status || profile?.status || 'PENDING_ONBOARDING';
 
   const getKycDisplay = () => {
     if (isKraVerified && isAgreementSigned) return { label: 'Fully Verified', color: 'text-premium-success', bg: 'bg-premium-success/20', Icon: ShieldCheck };
@@ -178,12 +276,13 @@ export default function Dashboard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Card 1: KYC Status */}
         <div
           className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4 cursor-pointer hover:border-premium-primary/40 transition-colors"
           onClick={() => setActiveTab('kyc')}
         >
-          <div className={`w-12 h-12 rounded-full ${kyc.bg} flex items-center justify-center`}>
+          <div className={`w-12 h-12 rounded-full ${kyc.bg} flex items-center justify-center flex-shrink-0`}>
             <kyc.Icon className={`w-6 h-6 ${kyc.color}`} />
           </div>
           <div>
@@ -192,18 +291,19 @@ export default function Dashboard({
           </div>
         </div>
         
+        {/* Card 2: Subscription */}
         <div
           className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4 cursor-pointer hover:border-premium-primary/40 transition-colors"
           onClick={() => setActiveTab('subscriptions')}
         >
-          <div className="w-12 h-12 rounded-full bg-premium-primary/20 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-premium-primary/20 flex items-center justify-center flex-shrink-0">
             <CreditCard className="w-6 h-6 text-premium-primary" />
           </div>
           <div>
             <p className="text-sm text-premium-text/60">Subscription</p>
             {activeSub ? (
               <>
-                <p className="text-lg font-bold text-premium-text">{activeSub.plan?.name || 'Active Plan'}</p>
+                <p className="text-lg font-bold text-premium-text truncate max-w-[160px]">{activeSub.plan?.name || 'Active Plan'}</p>
                 <p className="text-xs text-premium-text/40 mt-0.5">
                   Expires: {new Date(activeSub.endDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                 </p>
@@ -214,8 +314,97 @@ export default function Dashboard({
           </div>
         </div>
 
-        
+        {/* Card 3: Telegram Trade Alerts */}
+        <div
+          className={`bg-premium-cards border p-6 rounded-3xl flex items-center justify-between gap-4 transition-all ${
+            localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false
+              ? 'border-sky-500/40 bg-gradient-to-br from-sky-500/[0.07] to-transparent shadow-sm cursor-default'
+              : !hasActivePlan
+                ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-br from-amber-500/[0.04] to-transparent cursor-pointer'
+                : !isKycRuleSatisfied
+                  ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-br from-amber-500/[0.04] to-transparent cursor-pointer'
+                  : !isBotConfigured
+                    ? 'border-slate-800 bg-gradient-to-br from-slate-800/40 to-transparent cursor-not-allowed opacity-75'
+                    : 'border-premium-border hover:border-sky-500/60 bg-gradient-to-br from-sky-500/[0.05] to-transparent cursor-pointer shadow-sm hover:shadow-sky-500/10'
+          }`}
+          onClick={handleTelegramCardClick}
+        >
+          <div className="flex items-center gap-4 min-w-0">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${
+              localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false
+                ? 'bg-sky-500/20 text-sky-400 ring-2 ring-sky-500/30'
+                : !hasActivePlan
+                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                  : !isKycRuleSatisfied
+                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    : !isBotConfigured
+                      ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                      : 'bg-slate-800 text-sky-400 border border-sky-500/20'
+            }`}>
+              <Send className="w-6 h-6 transform -translate-x-0.5 translate-y-0.5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-premium-text/60">Telegram Alerts</p>
+              {localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false ? (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-bold text-sky-400">Connected</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  </div>
+                  <p className="text-xs text-slate-300 font-mono truncate max-w-[150px] mt-0.5">
+                    {localProfile.telegramUsername ? `@${localProfile.telegramUsername}` : `ID: ${localProfile.telegramChatId}`}
+                  </p>
+                </div>
+              ) : !hasActivePlan ? (
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-amber-400">Plan Required</span>
+                  </div>
+                  <p className="text-xs text-sky-400 hover:underline font-medium mt-0.5 flex items-center gap-1">
+                    Buy Plan to Connect ⚡
+                  </p>
+                </div>
+              ) : !isKycRuleSatisfied ? (
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-amber-400">KYC Required</span>
+                  </div>
+                  <p className="text-xs text-amber-400/90 font-medium mt-0.5 flex items-center gap-1">
+                    Complete KYC to Join ⚡
+                  </p>
+                </div>
+              ) : !isBotConfigured ? (
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-slate-400">Setup Pending</span>
+                  </div>
+                  <p className="text-xs text-amber-400/80 font-medium mt-0.5">
+                    Bot setup pending by admin
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-sky-400">Not Linked</span>
+                  </div>
+                  <p className="text-xs text-sky-400 hover:text-sky-300 font-semibold mt-0.5 flex items-center gap-1">
+                    Connect Telegram Bot ⚡
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+          {localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false ? (
+            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full font-bold flex-shrink-0">
+              ACTIVE
+            </span>
+          ) : (
+            <ChevronRight className="w-5 h-5 text-premium-text/40 flex-shrink-0" />
+          )}
+        </div>
       </div>
+
+
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         

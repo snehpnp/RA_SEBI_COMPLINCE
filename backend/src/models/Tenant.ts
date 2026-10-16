@@ -104,6 +104,11 @@ export interface ITenant extends Document {
   smsPassword?: string | null;
   smsSenderId?: string | null;
   smsEntityId?: string | null;
+  telegramTradeEnabled?: boolean;
+  smsTradeEnabled?: boolean;
+  telegramBotToken?: string | null;
+  telegramBotUsername?: string | null;
+  telegramJoinRule?: 'ALL' | 'KYC_AGREEMENT_VERIFIED' | 'ACTIVE_PLAN_ONLY';
   createdById?: Types.ObjectId | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -215,6 +220,11 @@ export const TenantSchema = new Schema<ITenant>(
     smsPassword: { type: String, default: null },
     smsSenderId: { type: String, default: null },
     smsEntityId: { type: String, default: null },
+    telegramTradeEnabled: { type: Boolean, default: false },
+    smsTradeEnabled: { type: Boolean, default: false },
+    telegramBotToken: { type: String, default: null },
+    telegramBotUsername: { type: String, default: null },
+    telegramJoinRule: { type: String, enum: ['ALL', 'KYC_AGREEMENT_VERIFIED', 'ACTIVE_PLAN_ONLY'], default: 'ALL' },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
   },

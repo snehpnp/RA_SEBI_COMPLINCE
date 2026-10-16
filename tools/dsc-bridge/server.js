@@ -20,27 +20,30 @@ app.get('/ping', (req, res) => {
   });
 });
 
+// Helper: Detect certificates from Windows Personal store (Cert:\CurrentUser\My)
+const getDetectedCertNames = () => {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve([]);
+    const cmd = `powershell -NoProfile -Command "$now = Get-Date; $certs = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object { $_.NotAfter -gt $now -and $_.Subject -notmatch 'trust_' -and $_.Subject -notmatch '^CN=[0-9a-fA-F-]{36}' } | ForEach-Object { if ($_.Subject -match 'CN=([^,]+)') { $matches[1].Trim() } }; $certs"`;
+    exec(cmd, { timeout: 3000 }, (err, stdout) => {
+      if (err || !stdout) return resolve([]);
+      const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      resolve([...new Set(lines)]);
+    });
+  });
+};
+
 // 2. Token Detection status
-app.get('/token-status', (req, res) => {
-  // Check smart card service / personal store via Windows certutil
-  if (process.platform === 'win32') {
-    exec('certutil -scinfo -silent', (err, stdout, stderr) => {
-      const output = (stdout || '') + (stderr || '');
-      const hasSmartCard = output.toLowerCase().includes('card') || output.toLowerCase().includes('token') || output.toLowerCase().includes('reader');
-      res.json({
-        success: true,
-        detected: true, // Bridge is active and ready
-        smartCardServiceActive: true,
-        details: 'Hardware DSC Token Bridge active and listening for USB dongles.'
-      });
-    });
-  } else {
-    res.json({
-      success: true,
-      detected: true,
-      details: 'DSC Bridge active'
-    });
-  }
+app.get('/token-status', async (req, res) => {
+  const certs = await getDetectedCertNames();
+  res.json({
+    success: true,
+    detected: true, // Bridge is active and ready
+    certificates: certs,
+    detectedSignerName: certs[0] || null,
+    smartCardServiceActive: true,
+    details: 'Hardware DSC Token Bridge active and listening for USB dongles.'
+  });
 });
 
 // 3. Digitally sign PDF with Hardware Token PIN
@@ -56,7 +59,20 @@ app.post('/sign-pdf', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Valid DSC Token PIN is required (minimum 4 digits)' });
     }
 
-    const cleanSigner = signerName || 'SEBI Research Analyst';
+    const sanitizeForWinAnsi = (text) => {
+      if (!text) return '';
+      return String(text)
+        .replace(/[^\x20-\x7E]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    let resolvedSigner = signerName && String(signerName).trim();
+    if (!resolvedSigner) {
+      const certs = await getDetectedCertNames();
+      resolvedSigner = certs[0] || 'SEBI Research Analyst';
+    }
+    const cleanSigner = sanitizeForWinAnsi(resolvedSigner);
     const cleanPlacement = placement || 'BOTTOM_RIGHT';
     const cleanScope = signScope || 'ALL_PAGES';
 
@@ -69,7 +85,7 @@ app.post('/sign-pdf', async (req, res) => {
     const pagesToSign = cleanScope === 'LAST_PAGE' ? [pages[pages.length - 1]] : pages;
 
     const now = new Date();
-    const istTime = now.toLocaleString('en-IN', {
+    const rawTime = now.toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
       day: '2-digit',
       month: '2-digit',
@@ -79,6 +95,8 @@ app.post('/sign-pdf', async (req, res) => {
       second: '2-digit',
       hour12: true
     });
+    const istTime = sanitizeForWinAnsi(rawTime);
+    const cleanLocation = sanitizeForWinAnsi(location || 'India');
 
     const boxWidth = 180;
     const boxHeight = 48;
@@ -113,10 +131,24 @@ app.post('/sign-pdf', async (req, res) => {
         color: rgb(0.08, 0.58, 0.28)
       });
 
-      // Header Text
-      page.drawText('✓  DIGITALLY SIGNED (HARDWARE DSC)', {
-        x: x + 6,
-        y: y + boxHeight - 10,
+      // Vector checkmark (WinAnsi-safe vector graphic)
+      page.drawLine({
+        start: { x: x + 7, y: y + boxHeight - 7.5 },
+        end: { x: x + 9.5, y: y + boxHeight - 10 },
+        thickness: 1.3,
+        color: rgb(1, 1, 1)
+      });
+      page.drawLine({
+        start: { x: x + 9.5, y: y + boxHeight - 10 },
+        end: { x: x + 14, y: y + boxHeight - 5 },
+        thickness: 1.3,
+        color: rgb(1, 1, 1)
+      });
+
+      // Header Text (100% standard WinAnsi ASCII)
+      page.drawText('DIGITALLY SIGNED (HARDWARE DSC)', {
+        x: x + 18,
+        y: y + boxHeight - 9.5,
         size: 6.5,
         font: helveticaBold,
         color: rgb(1, 1, 1)
@@ -141,7 +173,7 @@ app.post('/sign-pdf', async (req, res) => {
       });
 
       // Date & Location
-      page.drawText(`Date: ${istTime} | ${location || 'India'}`, {
+      page.drawText(`Date: ${istTime} | ${cleanLocation}`, {
         x: x + 6,
         y: y + 7,
         size: 5.5,

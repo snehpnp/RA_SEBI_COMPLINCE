@@ -9279,7 +9279,7 @@ function AdminDashboardContent() {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wider">Client PAN</label>
-                        <input type="text" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500" />
+                        <input type="text" maxLength={10} placeholder="ABCDE1234F" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 uppercase font-mono" />
                       </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

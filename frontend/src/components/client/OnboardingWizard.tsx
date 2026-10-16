@@ -8,6 +8,7 @@ import api from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '../../contexts/BrandingContext';
 import ContactAdminModal from './ContactAdminModal';
+import { formatPan } from '../../utils/formatters';
 
 interface OnboardingWizardProps {
   profile: any;
@@ -260,17 +261,7 @@ export default function OnboardingWizard({ profile, onComplete, onClose }: Onboa
   };
 
   const handlePanChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    let formatted = '';
-    for (let i = 0; i < val.length; i++) {
-      if (i < 5 && /[A-Z]/.test(val[i])) {
-        formatted += val[i];
-      } else if (i >= 5 && i < 9 && /[0-9]/.test(val[i])) {
-        formatted += val[i];
-      } else if (i === 9 && /[A-Z]/.test(val[i])) {
-        formatted += val[i];
-      }
-    }
+    const formatted = formatPan(e.target.value);
     setPan(formatted);
     if (kraStatus !== 'idle') setKraStatus('idle');
   };

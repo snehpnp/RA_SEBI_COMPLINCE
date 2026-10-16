@@ -36,6 +36,10 @@ export interface IClient extends Document {
   camsKraPdfUrl?: string | null;
   signatureUrl?: string | null;
   signedAt?: Date | null;
+  isTelegramTradeEnabled?: boolean;
+  isSmsTradeEnabled?: boolean;
+  telegramChatId?: string | null;
+  telegramUsername?: string | null;
   createdById?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
@@ -74,6 +78,10 @@ export const ClientSchema = new Schema<IClient>(
     signedAt: { type: Date, default: null },
     videoKycStatus: { type: String, enum: ['NOT_REQUIRED', 'PENDING', 'IN_PROGRESS', 'APPROVED', 'REJECTED'], default: 'PENDING' },
     videoKycSessionId: { type: String, default: null },
+    isTelegramTradeEnabled: { type: Boolean, default: true },
+    isSmsTradeEnabled: { type: Boolean, default: true },
+    telegramChatId: { type: String, default: null },
+    telegramUsername: { type: String, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null }
   },
   { ...baseSchemaOptions, collection: 'Client', autoIndex: false }

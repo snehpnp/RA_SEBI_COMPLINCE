@@ -1,0 +1,405 @@
+import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import dynamicDb from '../config/db';
+import { testTelegramBot } from '../services/telegramService';
+import { AuthenticatedRequest } from '../middlewares/auth';
+
+/**
+ * Helper to build common query for delivery reports
+ */
+function buildReportQuery(tenantId: any, query: any, defaultChannel?: string) {
+  const where: any = {};
+
+  if (tenantId) {
+    const validTenantObjId = mongoose.Types.ObjectId.isValid(tenantId) ? new mongoose.Types.ObjectId(tenantId) : null;
+    where.$or = [
+      { tenantId: { $in: [tenantId, validTenantObjId].filter(Boolean) } },
+      { tenantId: null },
+      { tenantId: { $exists: false } }
+    ];
+  }
+
+  // Filter out pure ADMIN audit logs, keep only client dispatches
+  where.recipient = { $ne: 'ADMIN' };
+
+  const channel = (query.channel || defaultChannel || 'ALL').toUpperCase();
+  if (channel && channel !== 'ALL') {
+    where.channel = channel;
+  } else {
+    where.channel = { $in: ['INAPP', 'TELEGRAM', 'SMS'] };
+  }
+
+  if (query.status && query.status !== 'ALL') {
+    where.status = query.status.toUpperCase();
+  }
+
+  // Date Range Filtering
+  if (query.startDate || query.endDate) {
+    where.createdAt = {};
+    if (query.startDate) {
+      where.createdAt.$gte = new Date(query.startDate);
+    }
+    if (query.endDate) {
+      const eDate = new Date(query.endDate);
+      eDate.setHours(23, 59, 59, 999);
+      where.createdAt.$lte = eDate;
+    }
+  }
+
+  // Strictly filter for Trade Signals & Updates only (no plan assignment, payment receipts, or KYC notifications)
+  where.$and = where.$and || [];
+  where.$and.push({
+    $or: [
+      { type: { $in: ['signal', 'update'] } },
+      { 'data.action': { $in: ['NEW_TRADE', 'TRADE_UPDATE'] } },
+      { 'data.signalId': { $exists: true, $ne: null } },
+      { 'data.stockSymbol': { $exists: true, $ne: null } }
+    ]
+  });
+
+  // Client-wise Filtering
+  if (query.clientId && query.clientId !== 'ALL') {
+    const cId = String(query.clientId).trim();
+    const isObjId = mongoose.Types.ObjectId.isValid(cId);
+    where.$and.push({
+      $or: [
+        { 'data.clientId': cId },
+        { 'data.userId': cId },
+        { recipient: cId },
+        ...(isObjId ? [{ 'data.clientId': new mongoose.Types.ObjectId(cId) }] : [])
+      ]
+    });
+  }
+
+  // Search Filter
+  if (query.search && typeof query.search === 'string' && query.search.trim()) {
+    const s = query.search.trim();
+    const regex = new RegExp(s, 'i');
+    where.$and.push({
+      $or: [
+        { recipient: { $regex: regex } },
+        { title: { $regex: regex } },
+        { message: { $regex: regex } },
+        { 'data.stockSymbol': { $regex: regex } },
+        { 'data.clientName': { $regex: regex } },
+        { 'data.email': { $regex: regex } },
+        { 'data.mobile': { $regex: regex } },
+        { 'data.telegramChatId': { $regex: regex } },
+        { 'data.planName': { $regex: regex } }
+      ]
+    });
+  }
+
+  return where;
+}
+
+/**
+ * Helper to enrich and format notification log records with full subscriber,
+ * plan, and trade lifecycle details (Entry vs Exit, levels, profit/loss, sent message).
+ */
+async function enrichDeliveryRecords(records: any[]) {
+  if (!records || records.length === 0) return [];
+
+  const clientIdsToFind = new Set<string>();
+  const emailsToFind = new Set<string>();
+  const signalIdsToFind = new Set<string>();
+  const planIdsToFind = new Set<string>();
+
+  records.forEach(r => {
+    const d = r.data || {};
+    if (d.clientId) clientIdsToFind.add(String(d.clientId));
+    if (d.userId) clientIdsToFind.add(String(d.userId));
+    if (d.email) emailsToFind.add(String(d.email).toLowerCase());
+    if (r.recipient) {
+      if (r.recipient.includes('@')) {
+        emailsToFind.add(r.recipient.toLowerCase().trim());
+      } else if (mongoose.Types.ObjectId.isValid(r.recipient)) {
+        clientIdsToFind.add(r.recipient);
+      }
+    }
+    if (d.signalId && mongoose.Types.ObjectId.isValid(d.signalId)) {
+      signalIdsToFind.add(String(d.signalId));
+    }
+    if (d.planId && mongoose.Types.ObjectId.isValid(d.planId)) {
+      planIdsToFind.add(String(d.planId));
+    }
+  });
+
+  const validClientObjIds = Array.from(clientIdsToFind).filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id));
+  const validSignalObjIds = Array.from(signalIdsToFind).map(id => new mongoose.Types.ObjectId(id));
+  const validPlanObjIds = Array.from(planIdsToFind).map(id => new mongoose.Types.ObjectId(id));
+  const emailList = Array.from(emailsToFind);
+
+  const [clients, users, signals, plans] = await Promise.all([
+    dynamicDb.Client.find({
+      $or: [
+        ...(validClientObjIds.length > 0 ? [{ _id: { $in: validClientObjIds } }, { userId: { $in: validClientObjIds } }] : []),
+        ...(emailList.length > 0 ? [{ email: { $in: emailList } }] : [])
+      ]
+    }).lean(),
+    dynamicDb.User.find({
+      $or: [
+        ...(validClientObjIds.length > 0 ? [{ _id: { $in: validClientObjIds } }] : []),
+        ...(emailList.length > 0 ? [{ email: { $in: emailList } }] : [])
+      ]
+    }).lean(),
+    validSignalObjIds.length > 0 ? dynamicDb.Signal.find({ _id: { $in: validSignalObjIds } }).lean() : [],
+    validPlanObjIds.length > 0 ? dynamicDb.Plan.find({ _id: { $in: validPlanObjIds } }).lean() : []
+  ]);
+
+  const clientMap = new Map<string, any>();
+  clients.forEach((c: any) => {
+    if (c._id) clientMap.set(c._id.toString(), c);
+    if (c.userId) clientMap.set(c.userId.toString(), c);
+    if (c.email) clientMap.set(c.email.toLowerCase().trim(), c);
+  });
+
+  const userMap = new Map<string, any>();
+  users.forEach((u: any) => {
+    if (u._id) userMap.set(u._id.toString(), u);
+    if (u.email) userMap.set(u.email.toLowerCase().trim(), u);
+  });
+
+  const signalMap = new Map<string, any>();
+  signals.forEach((s: any) => {
+    if (s._id) signalMap.set(s._id.toString(), s);
+  });
+
+  const planMap = new Map<string, any>();
+  plans.forEach((p: any) => {
+    if (p._id) planMap.set(p._id.toString(), p);
+  });
+
+  return records.map(log => {
+    const d = log.data || {};
+    const recipientStr = (log.recipient || '').trim();
+    const recipientLower = recipientStr.toLowerCase();
+
+    const matchedClient = clientMap.get(d.clientId) || clientMap.get(d.userId) || clientMap.get(recipientStr) || clientMap.get(recipientLower);
+    const matchedUser = userMap.get(d.userId) || userMap.get(d.clientId) || userMap.get(recipientStr) || userMap.get(recipientLower);
+    const matchedSignal = d.signalId ? signalMap.get(String(d.signalId)) : null;
+    const matchedPlan = (d.planId ? planMap.get(String(d.planId)) : null) || (matchedSignal?.planId ? planMap.get(String(matchedSignal.planId)) : null);
+
+    const clientName = d.clientName || matchedClient?.name || (matchedUser ? `${matchedUser.firstName || ''} ${matchedUser.lastName || ''}`.trim() : null) || 'Client';
+    const clientEmail = d.email || matchedClient?.email || matchedUser?.email || (recipientStr.includes('@') ? recipientStr : null);
+    const clientMobile = d.mobile || matchedClient?.mobile || matchedUser?.mobile || (log.channel === 'SMS' && /^\+?\d{10,13}$/.test(recipientStr) ? recipientStr : null);
+    const planName = d.planName || matchedPlan?.name || 'Active Plan';
+    const telegramChatId = d.telegramChatId || matchedClient?.telegramChatId || null;
+
+    const isExit = d.action === 'TRADE_UPDATE' || log.type === 'update' || !!d.closeStatus || !!d.exitPrice || (matchedSignal && matchedSignal.status === 'CLOSED');
+    const tradeAction = isExit ? 'EXIT' : 'ENTRY';
+
+    return {
+      id: log._id?.toString() || log.id,
+      channel: log.channel,
+      status: log.status,
+      title: log.title,
+      message: log.message,
+      recipient: log.recipient,
+      stockSymbol: d.stockSymbol || d.symbol || matchedSignal?.symbol || 'N/A',
+      segment: d.segment || matchedSignal?.segment || 'CASH',
+      callType: d.callType || matchedSignal?.callType || 'BUY',
+      tradeAction,
+      action: isExit ? 'TRADE_UPDATE' : 'NEW_TRADE',
+      entryPrice: d.entryPrice ?? matchedSignal?.entryPrice ?? null,
+      target1: d.target1 ?? matchedSignal?.target1 ?? null,
+      target2: d.target2 ?? matchedSignal?.target2 ?? null,
+      target3: d.target3 ?? matchedSignal?.target3 ?? null,
+      stoploss: d.stoploss ?? matchedSignal?.stoploss ?? null,
+      exitPrice: d.exitPrice ?? matchedSignal?.exitPrice ?? null,
+      closeStatus: d.closeStatus ?? matchedSignal?.closeStatus ?? (isExit ? 'CLOSED' : 'OPEN'),
+      closeRemark: d.closeRemark ?? matchedSignal?.closeRemark ?? null,
+      clientName,
+      clientEmail,
+      clientMobile,
+      telegramChatId,
+      planId: d.planId || matchedSignal?.planId || null,
+      planName,
+      failureReason: d.error || d.reason || (log.status === 'FAILED' ? log.message : null),
+      telegramMessageId: d.telegramMessageId || null,
+      createdAt: log.createdAt,
+      updatedAt: log.updatedAt
+    };
+  });
+}
+
+/**
+ * GET /api/v1/signals/delivery-reports/master
+ * Retrieves combined delivery reports across all channels with KPI summaries.
+ */
+export const getMasterDeliveryReport = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const where = buildReportQuery(tenantId, req.query);
+
+    const [total, records, summaryStats] = await Promise.all([
+      dynamicDb.NotificationLog.countDocuments(where),
+      dynamicDb.NotificationLog.find(where)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      // Aggregate stats for all dispatches under current tenant
+      dynamicDb.NotificationLog.aggregate([
+        {
+          $match: {
+            recipient: { $ne: 'ADMIN' },
+            channel: { $in: ['INAPP', 'TELEGRAM', 'SMS'] },
+            $or: [
+              { type: { $in: ['signal', 'update'] } },
+              { 'data.action': { $in: ['NEW_TRADE', 'TRADE_UPDATE'] } },
+              { 'data.signalId': { $exists: true, $ne: null } },
+              { 'data.stockSymbol': { $exists: true, $ne: null } }
+            ],
+            ...(tenantId
+              ? {
+                  $or: [
+                    { tenantId: mongoose.Types.ObjectId.isValid(tenantId) ? new mongoose.Types.ObjectId(tenantId) : tenantId },
+                    { tenantId: null },
+                    { tenantId: { $exists: false } }
+                  ]
+                }
+              : {})
+          }
+        },
+        {
+          $group: {
+            _id: { channel: '$channel', status: '$status' },
+            count: { $sum: 1 }
+          }
+        }
+      ])
+    ]);
+
+    // Parse summary KPI metrics
+    const stats = {
+      totalDispatches: 0,
+      telegramDelivered: 0,
+      telegramFailed: 0,
+      smsDelivered: 0,
+      smsFailed: 0,
+      inAppSent: 0
+    };
+
+    summaryStats.forEach((item: any) => {
+      const ch = item._id?.channel;
+      const st = item._id?.status;
+      const count = item.count || 0;
+      stats.totalDispatches += count;
+
+      if (ch === 'TELEGRAM') {
+        if (st === 'DELIVERED') stats.telegramDelivered += count;
+        else if (st === 'FAILED' || st === 'SKIPPED_CLIENT_DISABLED') stats.telegramFailed += count;
+      } else if (ch === 'SMS') {
+        if (st === 'DELIVERED') stats.smsDelivered += count;
+        else if (st === 'FAILED' || st === 'SKIPPED_CLIENT_DISABLED') stats.smsFailed += count;
+      } else if (ch === 'INAPP') {
+        stats.inAppSent += count;
+      }
+    });
+
+    const enrichedData = await enrichDeliveryRecords(records);
+
+    return res.status(200).json({
+      success: true,
+      data: enrichedData,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      },
+      stats
+    });
+  } catch (error: any) {
+    console.error('Error fetching master delivery report:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to fetch delivery report' });
+  }
+};
+
+/**
+ * GET /api/v1/signals/delivery-reports/channel/:channel
+ * Specific channel report (TELEGRAM, SMS, INAPP)
+ */
+export const getChannelDeliveryReport = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const channelParam = (req.params.channel || '').toUpperCase();
+    const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const where = buildReportQuery(tenantId, req.query, channelParam);
+
+    const [total, records] = await Promise.all([
+      dynamicDb.NotificationLog.countDocuments(where),
+      dynamicDb.NotificationLog.find(where)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+    ]);
+
+    const enrichedData = await enrichDeliveryRecords(records);
+
+    return res.status(200).json({
+      success: true,
+      channel: channelParam,
+      data: enrichedData,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error: any) {
+    console.error(`Error fetching ${req.params.channel} delivery report:`, error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to fetch report' });
+  }
+};
+
+/**
+ * POST /api/v1/admin/telegram/test
+ * Tests the Telegram Bot Token against Telegram API.
+ */
+export const testTelegramBotConnection = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    let botToken = req.body?.botToken;
+
+    if (!botToken && tenantId) {
+      const tenantDoc: any = await dynamicDb.Tenant.findById(tenantId).lean();
+      botToken = tenantDoc?.telegramBotToken;
+    }
+
+    if (!botToken || typeof botToken !== 'string' || !botToken.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Telegram Bot Token is required to perform connection test.'
+      });
+    }
+
+    const testResult = await testTelegramBot(botToken.trim());
+
+    if (testResult.success && testResult.bot) {
+      return res.status(200).json({
+        success: true,
+        message: `Successfully connected to Telegram Bot: @${testResult.bot.username} (${testResult.bot.firstName})`,
+        bot: testResult.bot
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: testResult.error || 'Failed to authenticate with Telegram Bot API.'
+    });
+  } catch (error: any) {
+    console.error('Error testing Telegram bot connection:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Test connection error' });
+  }
+};

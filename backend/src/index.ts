@@ -19,6 +19,7 @@ import { initCronJobs } from './services/cronService';
 import { checkComplianceForTenant } from './controllers/complianceController';
 import { thirdPartyRoutes, getThirdPartyClients } from './third-party-api';
 import { initVideoKycSocket } from './services/videoKycSocket';
+import { initTelegramPoller } from './services/telegramPoller';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -210,4 +211,5 @@ initVideoKycSocket(httpServer);
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`RAGCP Express Server (with Video KYC WebSockets) is running on http://0.0.0.0:${PORT}`);
   initCronJobs(); // Initialize penalty engine
+  initTelegramPoller(); // Initialize Telegram auto-poller for 1-click client connects
 });

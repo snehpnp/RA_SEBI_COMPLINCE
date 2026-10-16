@@ -46,7 +46,7 @@ const tableCustomStyles = {
     },
   },
 };
-import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff } from 'lucide-react';
+import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send } from 'lucide-react';
 import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
@@ -54,6 +54,7 @@ import api from '../services/api';
 import MobilePreview from './MobilePreview';
 import ReportPreviewModal from './ReportPreviewModal';
 import UploadSignConfirmModal from './UploadSignConfirmModal';
+import TradeDeliveryReports from './admin/TradeDeliveryReports';
 import toast from 'react-hot-toast';
 
 export default function SignalManagement({
@@ -67,6 +68,7 @@ export default function SignalManagement({
   hasPermission?: (permCode: string) => boolean;
   showMobilePreview?: boolean;
 }) {
+  const [mainTab, setMainTab] = useState<'SIGNALS' | 'REPORTS'>('SIGNALS');
   const [view, setView] = useState<'TABLE' | 'CARD' | 'STRATEGY' | 'ADD'>('TABLE');
   const [signalStatusFilter, setSignalStatusFilter] = useState<'OPEN' | 'CLOSED'>('OPEN');
 
@@ -814,7 +816,7 @@ export default function SignalManagement({
           </div>
         )}
 
-        {view === 'ADD' && (
+        {mainTab === 'SIGNALS' && view === 'ADD' && (
           <div className="bg-white dark:bg-[#0f1523] p-6 rounded-lg border border-slate-300 dark:border-white/5 max-w-5xl">
             <form onSubmit={handleOpenConfirmModal}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">

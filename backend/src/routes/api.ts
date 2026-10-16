@@ -6,8 +6,9 @@ import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTen
 import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
-import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus } from '../controllers/clientController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead } from '../controllers/adminController';
+import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing } from '../controllers/clientController';
+import { handleTelegramWebhook, setTelegramWebhookEndpoint, getTelegramWebhookStatus } from '../controllers/telegramController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
 import { createTicket, listTickets, getTicket, replyTicket, listAdminTickets, getAdminTicket, replyAdminTicket, closeAdminTicket } from '../controllers/ticketController';
@@ -78,6 +79,11 @@ import {
   getVideoKycSettings,
   updateVideoKycSettings
 } from '../controllers/videoKycController';
+import {
+  getMasterDeliveryReport,
+  getChannelDeliveryReport,
+  testTelegramBotConnection
+} from '../controllers/deliveryReportController';
 
 const router = Router();
 
@@ -189,6 +195,8 @@ router.get('/public/clients', getThirdPartyClients);
 router.get('/clients', getThirdPartyClients);
 router.post('/public/request-otp', requestOtp);
 router.post('/public/verify-otp', verifyOtp);
+router.post('/public/telegram/webhook/:tokenOrTenant?', handleTelegramWebhook);
+router.post('/public/telegram/webhook', handleTelegramWebhook);
 // ----------------------------------------------------
 // PROFILE
 // ----------------------------------------------------
@@ -762,6 +770,20 @@ router.post(
   enforceTenantIsolation,
   restoreStaff
 );
+router.get(
+  '/admin/staff/:id/password',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  getStaffPassword
+);
+router.post(
+  '/admin/staff/:id/resend-password',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  resendStaffCredentials
+);
 router.post(
   '/admin/parse-nism-certificate',
   authenticateJWT,
@@ -1143,6 +1165,19 @@ router.put(
   requireRoles(['CLIENT']),
   updateClientProfile
 );
+router.put(
+  '/client/telegram',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  updateClientTelegramPreferences
+);
+router.post(
+  '/client/telegram/test-ping',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  testClientTelegramPing
+);
+
 router.delete(
   '/client/account',
   authenticateJWT,
@@ -1596,6 +1631,39 @@ router.post(
   enforceTenantIsolation,
   addSignalMessage
 );
+
+// TRADE SIGNAL MULTI-CHANNEL DELIVERY REPORTS
+router.get(
+  '/signals/delivery-reports/master',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getMasterDeliveryReport
+);
+router.get(
+  '/signals/delivery-reports/channel/:channel',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getChannelDeliveryReport
+);
+router.post(
+  '/admin/telegram/test',
+  authenticateJWT,
+  enforceTenantIsolation,
+  testTelegramBotConnection
+);
+router.post(
+  '/admin/telegram/set-webhook',
+  authenticateJWT,
+  enforceTenantIsolation,
+  setTelegramWebhookEndpoint
+);
+router.get(
+  '/admin/telegram/webhook-info',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getTelegramWebhookStatus
+);
+
 
 // ----------------------------------------------------
 // RESEARCHER SIGNATURE, AADHAAR ESIGN & DSC ROUTES

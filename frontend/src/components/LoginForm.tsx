@@ -128,11 +128,6 @@ export default function LoginForm({
     setErrorType(null);
 
     const cleanInput = email.trim();
-    if (isAdmin && cleanInput.includes('@')) {
-      setError('Staff members must enter their assigned Username, not Email address.');
-      setIsSubmitting(false);
-      return;
-    }
 
     try {
       const res = await api.login({
@@ -831,7 +826,7 @@ export default function LoginForm({
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                    {isAdmin ? 'Staff Username' : 'Email Address'}
+                    {isAdmin ? 'Staff Username or Email' : 'Email Address'}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
@@ -843,7 +838,7 @@ export default function LoginForm({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition"
-                      placeholder={isAdmin ? "Enter staff username (e.g. sneha_ra)" : "name@company.com"}
+                      placeholder={isAdmin ? "Enter username or email address" : "name@company.com"}
                       autoComplete={isAdmin ? "username" : "email"}
                     />
                   </div>

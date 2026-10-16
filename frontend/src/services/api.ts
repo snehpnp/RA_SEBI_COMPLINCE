@@ -538,6 +538,16 @@ class ApiClient {
     });
   }
 
+  async getStaffPassword(id: string) {
+    return this.request(`/admin/staff/${id}/password`);
+  }
+
+  async resendStaffPassword(id: string) {
+    return this.request(`/admin/staff/${id}/resend-password`, {
+      method: 'POST'
+    });
+  }
+
   // Admin Client Management
   async getAdminClients() {
     return this.request('/admin/clients');
@@ -684,6 +694,20 @@ class ApiClient {
       body: JSON.stringify(payload)
     });
   }
+
+  async updateClientTelegram(payload: { isTelegramTradeEnabled?: boolean; telegramChatId?: string; telegramUsername?: string }) {
+    return this.request('/client/telegram', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async testClientTelegramPing() {
+    return this.request('/client/telegram/test-ping', {
+      method: 'POST'
+    });
+  }
+
 
   async verifyKRA(payload: { pan: string; statusInput?: string; aadhaar?: string; digioResponse?: any }) {
     return this.request('/client/kyc/verify', {
@@ -1041,12 +1065,62 @@ class ApiClient {
     });
   }
 
+  // Multi-Channel Trade Delivery Reports & Telegram Bot
+  async getMasterDeliveryReport(params: {
+    page?: number;
+    limit?: number;
+    channel?: string;
+    status?: string;
+    search?: string;
+    clientId?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {}) {
+    const searchParams = new URLSearchParams();
+    if (params.page) searchParams.set('page', String(params.page));
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    if (params.channel) searchParams.set('channel', params.channel);
+    if (params.status) searchParams.set('status', params.status);
+    if (params.search) searchParams.set('search', params.search);
+    if (params.clientId) searchParams.set('clientId', params.clientId);
+    if (params.startDate) searchParams.set('startDate', params.startDate);
+    if (params.endDate) searchParams.set('endDate', params.endDate);
+    const qs = searchParams.toString();
+    return this.request(`/signals/delivery-reports/master${qs ? `?${qs}` : ''}`);
+  }
+
+  async getChannelDeliveryReport(channel: string, params: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+  } = {}) {
+    const searchParams = new URLSearchParams();
+    if (params.page) searchParams.set('page', String(params.page));
+    if (params.limit) searchParams.set('limit', String(params.limit));
+    if (params.status) searchParams.set('status', params.status);
+    if (params.search) searchParams.set('search', params.search);
+    if (params.startDate) searchParams.set('startDate', params.startDate);
+    if (params.endDate) searchParams.set('endDate', params.endDate);
+    const qs = searchParams.toString();
+    return this.request(`/signals/delivery-reports/channel/${channel}${qs ? `?${qs}` : ''}`);
+  }
+
+  async testTelegramBot(botToken?: string) {
+    return this.request('/admin/telegram/test', {
+      method: 'POST',
+      body: JSON.stringify({ botToken })
+    });
+  }
+
   // Roles & Access Control
   async getRoles() {
     return this.request('/admin/roles');
   }
 
-  async createRole(payload: { name: string; description: string }) {
+  async createRole(payload: { name: string; description: string; requiresNism?: boolean; twoFactorAuth?: 'DISABLED' | 'EMAIL_OTP' | 'SMS_OTP' | 'BOTH' }) {
     return this.request('/admin/roles', {
       method: 'POST',
       body: JSON.stringify(payload)
@@ -1060,7 +1134,7 @@ class ApiClient {
     });
   }
 
-  async updateRole(id: string, payload: { name?: string; description?: string; allowMultiDeviceLogin?: boolean }) {
+  async updateRole(id: string, payload: { name?: string; description?: string; allowMultiDeviceLogin?: boolean; requiresNism?: boolean; twoFactorAuth?: 'DISABLED' | 'EMAIL_OTP' | 'SMS_OTP' | 'BOTH' }) {
     return this.request(`/admin/roles/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload)

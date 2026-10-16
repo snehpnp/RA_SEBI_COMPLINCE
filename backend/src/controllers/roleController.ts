@@ -43,6 +43,8 @@ export const getRoles = async (req: AuthenticatedRequest, res: Response) => {
           name: role.name,
           description: role.description,
           allowMultiDeviceLogin: role.allowMultiDeviceLogin || false,
+          requiresNism: role.requiresNism || false,
+          twoFactorAuth: role.twoFactorAuth || 'DISABLED',
           permissions: permMap.get(idStr) || [],
           isAssigned: (userCountMap.get(idStr) || 0) > 0
         };
@@ -62,7 +64,7 @@ export const getRoles = async (req: AuthenticatedRequest, res: Response) => {
 };
 
 export const createRole = async (req: AuthenticatedRequest, res: Response) => {
-  const { name, description } = req.body;
+  const { name, description, requiresNism, twoFactorAuth } = req.body;
 
   if (!name || name.trim().length < 2) {
     return res.status(400).json({
@@ -88,7 +90,9 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
 
     const newRole = await dynamicDb.Role.create({
       name: formattedName,
-      description
+      description,
+      requiresNism: !!requiresNism,
+      twoFactorAuth: ['DISABLED', 'EMAIL_OTP', 'SMS_OTP', 'BOTH'].includes(twoFactorAuth) ? twoFactorAuth : 'DISABLED'
     });
 
     await logAudit({
@@ -109,6 +113,8 @@ export const createRole = async (req: AuthenticatedRequest, res: Response) => {
         id: String(newRole._id || newRole.id),
         name: newRole.name,
         description: newRole.description,
+        requiresNism: newRole.requiresNism || false,
+        twoFactorAuth: newRole.twoFactorAuth || 'DISABLED',
         permissions: []
       }
     });
@@ -210,7 +216,7 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
 
 export const updateRole = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { name, description, allowMultiDeviceLogin } = req.body;
+  const { name, description, allowMultiDeviceLogin, requiresNism, twoFactorAuth } = req.body;
 
   try {
     const role = await dynamicDb.Role.findById(id);
@@ -222,6 +228,14 @@ export const updateRole = async (req: AuthenticatedRequest, res: Response) => {
     const dataToUpdate: any = {};
     if (allowMultiDeviceLogin !== undefined) {
       dataToUpdate.allowMultiDeviceLogin = allowMultiDeviceLogin;
+    }
+    if (requiresNism !== undefined) {
+      dataToUpdate.requiresNism = !!requiresNism;
+    }
+    if (twoFactorAuth !== undefined) {
+      if (['DISABLED', 'EMAIL_OTP', 'SMS_OTP', 'BOTH'].includes(twoFactorAuth)) {
+        dataToUpdate.twoFactorAuth = twoFactorAuth;
+      }
     }
 
     if (name) {

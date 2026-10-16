@@ -1630,7 +1630,7 @@ function SuperAdminDashboardContent() {
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Company PAN *</label>
                         <div className="relative">
-                          <input type="text" required value={pan} onFocus={() => {
+                          <input type="text" required maxLength={10} value={pan} onFocus={() => {
                             if (duplicateFields.includes('PAN')) {
                               setDuplicateFields(duplicateFields.filter(f => f !== 'PAN'));
                             }
@@ -2101,7 +2101,7 @@ function SuperAdminDashboardContent() {
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">PAN</label>
-                    <input type="text" value={editData.pan} onChange={e => setEditData({ ...editData, pan: formatPan(e.target.value) })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
+                    <input type="text" maxLength={10} value={editData.pan} onChange={e => setEditData({ ...editData, pan: formatPan(e.target.value) })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white uppercase" />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Website</label>

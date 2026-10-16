@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video } from 'lucide-react';
+import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video, Send, RefreshCcw, XCircle, Monitor } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -23,6 +23,7 @@ import ComplaintReportAdmin from '../../components/admin/ComplaintReportAdmin';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
 import AdminResearchReports from '../../components/admin/AdminResearchReports';
+import TradeDeliveryReports from '../../components/admin/TradeDeliveryReports';
 import CustomPageView from '../../components/client/CustomPageView';
 import Legal from '../../components/client/Legal';
 import MobilePreview from '../../components/MobilePreview';
@@ -166,6 +167,17 @@ const NAV_CONFIG: NavModule[] = [
     ],
   },
   {
+    tab: 'delivery-reports',
+    label: 'Delivery Reports',
+    icon: 'Send',
+    accessKey: 'ACCESS_RESEARCH',
+    moduleLabel: 'Delivery Reports Desk',
+    moduleDesc: 'Audit multi-channel delivery logs across Telegram, SMS, and Client Panel alerts',
+    subPermissions: [
+      { code: 'VIEW_ALL_DELIVERIES', label: 'View Delivery Reports', desc: 'Allows viewing multi-channel dispatch delivery reports' }
+    ],
+  },
+  {
     tab: 'research-reports',
     label: 'Research Reports',
     icon: 'FileText',
@@ -278,7 +290,7 @@ const NAV_CONFIG: NavModule[] = [
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video, Send, Smartphone, Monitor
 };
 
 // =============================================================================
@@ -531,8 +543,16 @@ function AdminDashboardContent() {
   const activeTabRef = useRef<string>('dashboard');
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const [dashboardStats, setDashboardStats] = useState({ staffCount: 0, clientCount: 0, researchCount: 0, planCount: 0 });
-  const [settingsTab, setSettingsTab] = useState<'general' | 'integrations' | 'email-templates' | 'reports' | 'policies' | 'billing' | 'security' | 'occupations'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'trade-dispatch' | 'integrations' | 'email-templates' | 'reports' | 'policies' | 'billing' | 'security' | 'occupations'>('general');
   const [tenantDetails, setTenantDetails] = useState<any>(null);
+  const [telegramTradeEnabled, setTelegramTradeEnabled] = useState(false);
+  const [smsTradeEnabled, setSmsTradeEnabled] = useState(false);
+  const [telegramBotToken, setTelegramBotToken] = useState('');
+  const [telegramBotUsername, setTelegramBotUsername] = useState('');
+  const [telegramJoinRule, setTelegramJoinRule] = useState<'ALL' | 'KYC_AGREEMENT_VERIFIED' | 'ACTIVE_PLAN_ONLY'>('ACTIVE_PLAN_ONLY');
+  const [testingBot, setTestingBot] = useState(false);
+  const [savingTradeDispatch, setSavingTradeDispatch] = useState(false);
+  const [botTestResult, setBotTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [availableOccupations, setAvailableOccupations] = useState<any[]>([]);
   const [integrationTab, setIntegrationTab] = useState<'payments' | 'email' | 'email-templates' | 'kyc'>('payments');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -545,6 +565,7 @@ function AdminDashboardContent() {
   const [auditCurrentPage, setAuditCurrentPage] = useState<number>(1);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
+  const [isDeliveryReportsExpanded, setIsDeliveryReportsExpanded] = useState(false);
 
   // Admin Live Notifications for Researcher Actions
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
@@ -593,13 +614,20 @@ function AdminDashboardContent() {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDesc, setNewRoleDesc] = useState('');
+  const [newRoleRequiresNism, setNewRoleRequiresNism] = useState(false);
+  const [newRoleTwoFactorAuth, setNewRoleTwoFactorAuth] = useState<'DISABLED' | 'EMAIL_OTP' | 'SMS_OTP' | 'BOTH'>('DISABLED');
   const [roleModalLoading, setRoleModalLoading] = useState(false);
   const [isEditRoleModalOpen, setIsEditRoleModalOpen] = useState(false);
   const [editRoleName, setEditRoleName] = useState('');
   const [editRoleDesc, setEditRoleDesc] = useState('');
   const [editRoleId, setEditRoleId] = useState('');
+  const [editRoleRequiresNism, setEditRoleRequiresNism] = useState(false);
+  const [editRoleTwoFactorAuth, setEditRoleTwoFactorAuth] = useState<'DISABLED' | 'EMAIL_OTP' | 'SMS_OTP' | 'BOTH'>('DISABLED');
   const [editRoleModalLoading, setEditRoleModalLoading] = useState(false);
   const [permissionSearchQuery, setPermissionSearchQuery] = useState('');
+  const [revealedStaffPassword, setRevealedStaffPassword] = useState<string | null>(null);
+  const [isLoadingStaffPassword, setIsLoadingStaffPassword] = useState(false);
+  const [isResendingStaffPassword, setIsResendingStaffPassword] = useState(false);
 
   const hasPermission = (permCode: string) => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
@@ -686,11 +714,18 @@ function AdminDashboardContent() {
     }
     setRoleModalLoading(true);
     try {
-      const res = await api.createRole({ name: newRoleName, description: newRoleDesc });
+      const res = await api.createRole({
+        name: newRoleName,
+        description: newRoleDesc,
+        requiresNism: newRoleRequiresNism,
+        twoFactorAuth: newRoleTwoFactorAuth
+      });
       if (res.success) {
         setIsRoleModalOpen(false);
         setNewRoleName('');
         setNewRoleDesc('');
+        setNewRoleRequiresNism(false);
+        setNewRoleTwoFactorAuth('DISABLED');
         toast.success('Role created successfully.');
         await loadData();
       }
@@ -709,12 +744,19 @@ function AdminDashboardContent() {
     }
     setEditRoleModalLoading(true);
     try {
-      const res = await api.updateRole(editRoleId, { name: editRoleName, description: editRoleDesc });
+      const res = await api.updateRole(editRoleId, {
+        name: editRoleName,
+        description: editRoleDesc,
+        requiresNism: editRoleRequiresNism,
+        twoFactorAuth: editRoleTwoFactorAuth
+      });
       if (res.success) {
         setIsEditRoleModalOpen(false);
         setEditRoleName('');
         setEditRoleDesc('');
         setEditRoleId('');
+        setEditRoleRequiresNism(false);
+        setEditRoleTwoFactorAuth('DISABLED');
         toast.success('Role updated successfully.');
         await loadData();
       }
@@ -1081,8 +1123,18 @@ function AdminDashboardContent() {
   const [editClientCity, setEditClientCity] = useState('');
   const [editClientState, setEditClientState] = useState('');
   const [editClientZip, setEditClientZip] = useState('');
+  const [editClientIsTelegramTradeEnabled, setEditClientIsTelegramTradeEnabled] = useState(true);
+  const [editClientIsSmsTradeEnabled, setEditClientIsSmsTradeEnabled] = useState(true);
+  const [editClientTelegramChatId, setEditClientTelegramChatId] = useState('');
+  const [editClientTelegramUsername, setEditClientTelegramUsername] = useState('');
   const [editClientModalLoading, setEditClientModalLoading] = useState(false);
   const [clientDetailsTab, setClientDetailsTab] = useState<'profile' | 'kyc' | 'subscriptions' | 'communications' | 'timeline'>('profile');
+  const [viewClientIsTelegramTradeEnabled, setViewClientIsTelegramTradeEnabled] = useState(true);
+  const [viewClientIsSmsTradeEnabled, setViewClientIsSmsTradeEnabled] = useState(true);
+  const [viewClientTelegramChatId, setViewClientTelegramChatId] = useState('');
+  const [viewClientTelegramUsername, setViewClientTelegramUsername] = useState('');
+  const [savingClientChannels, setSavingClientChannels] = useState(false);
+  const [showManualDigioFetch, setShowManualDigioFetch] = useState(false);
   const [selectedTimelineClient, setSelectedTimelineClient] = useState<{ id: string; name: string } | null>(null);
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
   const [clientCommunications, setClientCommunications] = useState<any[]>([]);
@@ -1671,7 +1723,11 @@ function AdminDashboardContent() {
               if (t.upiId) setUpiId(t.upiId);
               if (t.upiPayeeName) setUpiPayeeName(t.upiPayeeName);
               if (t.upiQrImageUrl) setUpiQrImageUrl(t.upiQrImageUrl);
-              if (t.upiInstructions) setUpiInstructions(t.upiInstructions);
+              if (t.telegramTradeEnabled !== undefined) setTelegramTradeEnabled(Boolean(t.telegramTradeEnabled));
+              if (t.smsTradeEnabled !== undefined) setSmsTradeEnabled(Boolean(t.smsTradeEnabled));
+              if (t.telegramBotToken) setTelegramBotToken(t.telegramBotToken);
+              if (t.telegramBotUsername) setTelegramBotUsername(t.telegramBotUsername);
+              if (t.telegramJoinRule) setTelegramJoinRule(t.telegramJoinRule);
 
               if (t.agreementContent) setAgreementContent(t.agreementContent);
               if (t.welcomeEmailText) setWelcomeEmailText(t.welcomeEmailText);
@@ -2167,6 +2223,11 @@ function AdminDashboardContent() {
       setFetchCamsResult(null);
       setFetchCamsError('');
       setCamsEditMode(false);
+      setViewClientIsTelegramTradeEnabled(selectedClient.isTelegramTradeEnabled !== false);
+      setViewClientIsSmsTradeEnabled(selectedClient.isSmsTradeEnabled !== false);
+      setViewClientTelegramChatId(selectedClient.telegramChatId || '');
+      setViewClientTelegramUsername(selectedClient.telegramUsername || '');
+      setShowManualDigioFetch(false);
     }
     if (selectedClient && selectedClient.id) {
       api.getClientCommunicationsAdmin(selectedClient.id)
@@ -2292,6 +2353,13 @@ function AdminDashboardContent() {
 
       if (agreementContent) formData.append('agreementContent', agreementContent);
 
+      // Telegram & SMS Trade Dispatch Settings
+      formData.append('telegramTradeEnabled', String(telegramTradeEnabled));
+      formData.append('smsTradeEnabled', String(smsTradeEnabled));
+      if (telegramBotToken) formData.append('telegramBotToken', telegramBotToken.trim());
+      if (telegramBotUsername) formData.append('telegramBotUsername', telegramBotUsername.trim().replace(/^@/, ''));
+      formData.append('telegramJoinRule', telegramJoinRule);
+
       const data = await api.updateTenantSettings(formData);
       if (data.success) {
         toast.success('Settings and logo saved successfully!');
@@ -2313,6 +2381,11 @@ function AdminDashboardContent() {
           if (data.data.ccInvoiceEmail !== undefined) setCcInvoiceEmail(data.data.ccInvoiceEmail || '');
           if (data.data.ccAgreementEnabled !== undefined) setCcAgreementEnabled(Boolean(data.data.ccAgreementEnabled));
           if (data.data.ccAgreementEmail !== undefined) setCcAgreementEmail(data.data.ccAgreementEmail || '');
+          if (data.data.telegramTradeEnabled !== undefined) setTelegramTradeEnabled(Boolean(data.data.telegramTradeEnabled));
+          if (data.data.smsTradeEnabled !== undefined) setSmsTradeEnabled(Boolean(data.data.smsTradeEnabled));
+          if (data.data.telegramBotToken !== undefined) setTelegramBotToken(data.data.telegramBotToken || '');
+          if (data.data.telegramBotUsername !== undefined) setTelegramBotUsername(data.data.telegramBotUsername || '');
+          if (data.data.telegramJoinRule !== undefined) setTelegramJoinRule(data.data.telegramJoinRule || 'ACTIVE_PLAN_ONLY');
           setUser((prevUser: any) => {
             const updatedUser = { ...prevUser, tenant: data.data };
             localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -2440,6 +2513,57 @@ function AdminDashboardContent() {
       toast.error(err.message || 'Failed to update onboarding flow');
     } finally {
       setIsSavingKycFlowToggle(false);
+    }
+  };
+
+  const handleSaveTradeDispatchSettings = async () => {
+    setSavingTradeDispatch(true);
+    try {
+      const formData = new FormData();
+      formData.append('telegramTradeEnabled', String(telegramTradeEnabled));
+      formData.append('smsTradeEnabled', String(smsTradeEnabled));
+      formData.append('telegramBotToken', telegramBotToken.trim());
+      formData.append('telegramBotUsername', telegramBotUsername.trim().replace(/^@/, ''));
+      formData.append('telegramJoinRule', telegramJoinRule);
+
+      const res = await api.updateTenantSettings(formData);
+      if (res && res.success) {
+        toast.success('Trade Dispatch & Bot Settings saved successfully!');
+        loadData();
+      } else {
+        toast.error(res?.message || 'Failed to save Trade Dispatch settings');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Error saving settings');
+    } finally {
+      setSavingTradeDispatch(false);
+    }
+  };
+
+  const handleTestTelegramBot = async () => {
+    if (!telegramBotToken.trim()) {
+      toast.error('Please enter a Telegram Bot Token to test.');
+      return;
+    }
+    setTestingBot(true);
+    setBotTestResult(null);
+    try {
+      const res = await api.testTelegramBot(telegramBotToken.trim());
+      if (res.success) {
+        setBotTestResult({ success: true, message: res.message });
+        if (res.bot?.username) {
+          setTelegramBotUsername(res.bot.username);
+        }
+        toast.success(res.message);
+      } else {
+        setBotTestResult({ success: false, message: res.message || 'Bot connection failed' });
+        toast.error(res.message || 'Bot connection failed');
+      }
+    } catch (err: any) {
+      setBotTestResult({ success: false, message: err.message || 'Failed to connect to Telegram' });
+      toast.error(err.message || 'Failed to connect to Telegram');
+    } finally {
+      setTestingBot(false);
     }
   };
 
@@ -2747,13 +2871,15 @@ function AdminDashboardContent() {
         return;
       }
       const cleanUsername = (staffUsername || '').trim().toLowerCase();
-      if (!cleanUsername || cleanUsername.length < 3) {
-        toast('Staff username is required and must be at least 3 characters.');
-        return;
-      }
-      if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
-        toast('Username can only contain letters, numbers, underscores, dots, and hyphens.');
-        return;
+      if (!editingStaff) {
+        if (!cleanUsername || cleanUsername.length < 2) {
+          toast('Staff username is required and must be at least 2 characters.');
+          return;
+        }
+        if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+          toast('Username can only contain letters, numbers, underscores, dots, and hyphens.');
+          return;
+        }
       }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!staffEmail || !emailRegex.test(staffEmail)) {
@@ -2765,22 +2891,52 @@ function AdminDashboardContent() {
         setWizardErrors({ coMobile: 'Mobile number must be a valid 10-digit number.' });
         return;
       }
-      if (staffNism && staffNism.trim().length > 0) {
-        if (staffNism.trim().length < 5) {
-          toast('NISM Registration Number must be at least 5 characters.');
+      const selectedRoleObj = roles.find((r: any) => r.name === staffRole);
+      const roleRequiresNism = selectedRoleObj?.requiresNism === true;
+
+      if (roleRequiresNism) {
+        if (!staffNism || staffNism.trim().length < 5) {
+          toast.error(`NISM Registration Number is mandatory for role '${staffRole.replace(/_/g, ' ')}' (min 5 characters).`);
+          setIsSubmittingStaff(false);
           return;
         }
         if (isNismDuplicate) {
-          toast('Duplicate NISM Certificate Number. Please enter a unique number.');
+          toast.error('Duplicate NISM Certificate Number. Please enter a unique number.');
+          setIsSubmittingStaff(false);
           return;
         }
         if (!staffNismValidity || new Date(staffNismValidity) <= new Date()) {
-          toast('NISM validity expiry date must be in the future.');
+          toast.error('Valid future NISM expiry date is mandatory for this role.');
+          setIsSubmittingStaff(false);
           return;
         }
         if (!editingStaff && !staffNismFile) {
-          toast('Please upload the NISM Certificate document.');
+          toast.error('Please upload the mandatory NISM Certificate document.');
+          setIsSubmittingStaff(false);
           return;
+        }
+        if (editingStaff && !editingStaff.nismUpload && !staffNismFile) {
+          toast.error('Please upload the mandatory NISM Certificate document.');
+          setIsSubmittingStaff(false);
+          return;
+        }
+      } else {
+        if (staffNism && staffNism.trim().length > 0) {
+          if (staffNism.trim().length < 5) {
+            toast.error('NISM Registration Number must be at least 5 characters.');
+            setIsSubmittingStaff(false);
+            return;
+          }
+          if (isNismDuplicate) {
+            toast.error('Duplicate NISM Certificate Number. Please enter a unique number.');
+            setIsSubmittingStaff(false);
+            return;
+          }
+          if (!staffNismValidity || new Date(staffNismValidity) <= new Date()) {
+            toast.error('NISM validity expiry date must be in the future.');
+            setIsSubmittingStaff(false);
+            return;
+          }
         }
       }
 
@@ -3333,6 +3489,10 @@ function AdminDashboardContent() {
     setEditClientCity(cl.profile?.city || '');
     setEditClientState(cl.profile?.state || '');
     setEditClientZip(cl.profile?.zipCode || '');
+    setEditClientIsTelegramTradeEnabled(cl.isTelegramTradeEnabled !== false);
+    setEditClientIsSmsTradeEnabled(cl.isSmsTradeEnabled !== false);
+    setEditClientTelegramChatId(cl.telegramChatId || '');
+    setEditClientTelegramUsername(cl.telegramUsername || '');
     setIsEditClientModalOpen(true);
   };
 
@@ -3460,7 +3620,11 @@ function AdminDashboardContent() {
         addressLine1: editClientAddress || undefined,
         city: editClientCity || undefined,
         state: editClientState || undefined,
-        zipCode: editClientZip || undefined
+        zipCode: editClientZip || undefined,
+        isTelegramTradeEnabled: editClientIsTelegramTradeEnabled,
+        isSmsTradeEnabled: editClientIsSmsTradeEnabled,
+        telegramChatId: editClientTelegramChatId.trim() || null,
+        telegramUsername: editClientTelegramUsername.trim().replace(/^@/, '') || null
       };
       const r = await api.updateAdminClient(editingClient.id, payload);
       if (r.success) {
@@ -3472,6 +3636,37 @@ function AdminDashboardContent() {
       toast.error(e.message || 'Failed to update client.');
     } finally {
       setEditClientModalLoading(false);
+    }
+  };
+
+  const handleSaveClientTradeChannels = async () => {
+    if (!selectedClient) return;
+    setSavingClientChannels(true);
+    try {
+      const clientId = selectedClient._id || selectedClient.id;
+      const payload: any = {
+        isTelegramTradeEnabled: viewClientIsTelegramTradeEnabled,
+        isSmsTradeEnabled: viewClientIsSmsTradeEnabled,
+        telegramChatId: viewClientTelegramChatId.trim() || null,
+        telegramUsername: viewClientTelegramUsername.trim().replace(/^@/, '') || null
+      };
+      const res: any = await api.updateAdminClient(clientId, payload);
+      if (res && (res.success || res.client)) {
+        toast.success('Trade Delivery channels updated successfully!');
+        setSelectedClient((prev: any) => ({
+          ...prev,
+          ...payload
+        }));
+        setClients((prev: any[]) =>
+          prev.map(c => ((c._id || c.id) === clientId ? { ...c, ...payload } : c))
+        );
+      } else {
+        toast.error(res?.message || 'Failed to update delivery channels');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to update channels');
+    } finally {
+      setSavingClientChannels(false);
     }
   };
 
@@ -3699,24 +3894,35 @@ function AdminDashboardContent() {
     },
     {
       name: 'NISM Validity',
-      width: '140px',
+      width: '150px',
       selector: (row: any) => row.nismValidity,
-      cell: (row: any) => (
-        <div>
-          {row.nismValidity ? (
-            <span className="block">
-              {new Date(row.nismValidity).toDateString()}
-            </span>
-          ) : (
-            <span className="text-slate-600 block">N/A</span>
-          )}
-          {row.nismNumber && (
-            <span className="text-[10px] text-slate-500 dark:text-slate-500 font-mono block">
-              No: {row.nismNumber}
-            </span>
-          )}
-        </div>
-      )
+      cell: (row: any) => {
+        const roleName = row.user?.role?.name || row.roleName;
+        const roleObj = roles.find((r: any) => r.name === roleName);
+        const requiresNism = roleObj?.requiresNism || row.user?.role?.requiresNism;
+        const isMissing = requiresNism && (!row.nismNumber || !row.nismUpload);
+
+        return (
+          <div>
+            {isMissing ? (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                ⚠️ NISM Required
+              </span>
+            ) : row.nismValidity ? (
+              <span className="block text-xs">
+                {new Date(row.nismValidity).toDateString()}
+              </span>
+            ) : (
+              <span className="text-slate-500 text-xs block">N/A</span>
+            )}
+            {row.nismNumber && (
+              <span className="text-[10px] text-slate-500 dark:text-slate-500 font-mono block">
+                No: {row.nismNumber}
+              </span>
+            )}
+          </div>
+        );
+      }
     },
     {
       name: 'Status',
@@ -3781,7 +3987,7 @@ function AdminDashboardContent() {
         );
       }
     }
-  ], [setSelectedStaff, startEditStaff, handleToggleStaffStatus, handleDeleteStaff, handleRestoreStaff]);
+  ], [setSelectedStaff, startEditStaff, handleToggleStaffStatus, handleDeleteStaff, handleRestoreStaff, roles]);
 
   const paymentColumns = useMemo(() => [
     {
@@ -4688,6 +4894,80 @@ function AdminDashboardContent() {
       }
     },
     {
+      name: 'Trade Channels',
+      width: '185px',
+      cell: (row: any) => {
+        const isTgEnabled = row.isTelegramTradeEnabled !== false;
+        const hasTgChatId = Boolean(row.telegramChatId);
+        const isSmsEnabled = row.isSmsTradeEnabled !== false;
+        const hasMobile = Boolean(row.mobile || row.user?.mobile);
+
+        return (
+          <div className="flex flex-wrap gap-1 items-center">
+            {/* Telegram Badge */}
+            {isTgEnabled ? (
+              hasTgChatId ? (
+                <span
+                  title={`Telegram Active (Chat ID: ${row.telegramChatId})`}
+                  className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center gap-1"
+                >
+                  <Send className="w-2.5 h-2.5" /> TG
+                </span>
+              ) : (
+                <span
+                  title="Telegram Enabled but Chat ID not linked in profile"
+                  className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1"
+                >
+                  <Send className="w-2.5 h-2.5" /> TG (No ID)
+                </span>
+              )
+            ) : (
+              <span
+                title="Telegram Trade Dispatch Disabled for this client"
+                className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-500/10 text-slate-400 border border-slate-500/20"
+              >
+                TG Off
+              </span>
+            )}
+
+            {/* SMS Badge */}
+            {isSmsEnabled ? (
+              hasMobile ? (
+                <span
+                  title={`SMS Active (${row.mobile || row.user?.mobile})`}
+                  className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 flex items-center gap-1"
+                >
+                  <Smartphone className="w-2.5 h-2.5" /> SMS
+                </span>
+              ) : (
+                <span
+                  title="SMS Enabled but No Mobile"
+                  className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                >
+                  SMS (No No)
+                </span>
+              )
+            ) : (
+              <span
+                title="SMS Trade Dispatch Disabled for this client"
+                className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-500/10 text-slate-400 border border-slate-500/20"
+              >
+                SMS Off
+              </span>
+            )}
+
+            {/* Panel Badge */}
+            <span
+              title="In-App Client Panel Active"
+              className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+            >
+              Panel
+            </span>
+          </div>
+        );
+      }
+    },
+    {
       name: 'Added By / Source',
       width: '150px',
       cell: (row: any) => {
@@ -4881,6 +5161,73 @@ function AdminDashboardContent() {
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
               const Icon = ICON_MAP[mod.icon] || Layers;
 
+              if (mod.tab === 'delivery-reports') {
+                const isDeliveryActive = activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_');
+                return (
+                  <div key={mod.tab} className="pt-1">
+                    <button
+                      onClick={() => {
+                        if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                        setIsDeliveryReportsExpanded(!isDeliveryReportsExpanded);
+                        if (!isDeliveryActive) {
+                          setActiveTab('deliveryReports_all');
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                        isDeliveryActive
+                          ? 'bg-white/20 text-white font-semibold shadow-inner'
+                          : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
+                      } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                      title={isSidebarCollapsed ? mod.label : undefined}
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <Icon className={`w-5 h-5 transition-colors ${isDeliveryActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'} shrink-0`} />
+                        {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
+                      </div>
+                      {!isSidebarCollapsed && (
+                        <div className={`transition-transform duration-200 ${isDeliveryReportsExpanded ? 'rotate-90' : ''}`}>
+                          <ChevronRight className="w-4 h-4" />
+                        </div>
+                      )}
+                    </button>
+
+                    {!isSidebarCollapsed && isDeliveryReportsExpanded && (
+                      <div className="pl-12 pr-4 space-y-1 mt-1">
+                        {[
+                          { id: 'deliveryReports_all', label: 'Delivery Report (All Type)', icon: Layers },
+                          { id: 'deliveryReports_telegram', label: 'Telegram Delivery Report', icon: Send },
+                          { id: 'deliveryReports_sms', label: 'Text Msg (SMS)', icon: Smartphone },
+                          { id: 'deliveryReports_inapp', label: 'Panel Notifications', icon: Monitor }
+                        ].map(subItem => {
+                          const SubIcon = subItem.icon;
+                          const isSubActive = activeTab === subItem.id || (activeTab === 'delivery-reports' && subItem.id === 'deliveryReports_all');
+                          return (
+                            <button
+                              key={subItem.id}
+                              onClick={() => {
+                                setActiveTab(subItem.id);
+                                setIsMobileMenuOpen(false);
+                              }}
+                              className={`w-full text-left py-2 px-3 rounded-lg text-xs transition-colors flex items-center justify-between gap-2 ${
+                                isSubActive
+                                  ? 'bg-[#d4f23b] text-black font-extrabold shadow-sm'
+                                  : 'text-blue-100 dark:text-white/70 hover:text-white hover:bg-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">{subItem.label}</span>
+                              </div>
+                              {isSubActive && <span className="w-1.5 h-1.5 rounded-full bg-black shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
               if (mod.tab === 'customPages') {
                 return (
                   <div key={mod.tab} className="pt-2">
@@ -5006,7 +5353,14 @@ function AdminDashboardContent() {
               </button>
               <div>
                 <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
-                  {activeTab ? activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()) : 'Dashboard'}
+                  {(() => {
+                    if (!activeTab) return 'Dashboard';
+                    if (activeTab === 'deliveryReports_all' || activeTab === 'delivery-reports') return 'Multi-Channel Delivery Reports';
+                    if (activeTab === 'deliveryReports_telegram') return 'Telegram Delivery Reports';
+                    if (activeTab === 'deliveryReports_sms') return 'Text Message (SMS) Delivery Reports';
+                    if (activeTab === 'deliveryReports_inapp') return 'Panel Notification Delivery Reports';
+                    return activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                  })()}
                 </h1>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
                   {user?.tenant?.companyName ? `${user.tenant.companyName} Compliance Portal` : 'Research Analyst Governance & Compliance Platform'}
@@ -5838,6 +6192,42 @@ function AdminDashboardContent() {
                         </div>
                       </div>
 
+                      {/* NISM Compliance Alert Banner */}
+                      {(() => {
+                        const staffMissingNism = staff.filter((s: any) => {
+                          if (s.user?.deletedAt) return false;
+                          const roleName = s.user?.role?.name || s.roleName;
+                          const roleObj = roles.find((r: any) => r.name === roleName);
+                          const requiresNism = roleObj?.requiresNism || s.user?.role?.requiresNism;
+                          return requiresNism && (!s.nismNumber || !s.nismUpload);
+                        });
+
+                        if (staffMissingNism.length === 0) return null;
+
+                        return (
+                          <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm animate-in fade-in">
+                            <div className="flex items-start gap-3">
+                              <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                              <div>
+                                <p className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                                  NISM Compliance Alert: {staffMissingNism.length} staff member(s) missing mandatory NISM certification
+                                </p>
+                                <p className="text-[11px] text-amber-700 dark:text-amber-300/90 mt-0.5">
+                                  Role configuration requires NISM certification for: <span className="font-semibold">{staffMissingNism.map((s: any) => s.name).join(', ')}</span>. Please add their NISM number and certificate upload.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => startEditStaff(staffMissingNism[0])}
+                              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-sm whitespace-nowrap cursor-pointer transition shrink-0"
+                            >
+                              Add NISM Details →
+                            </button>
+                          </div>
+                        );
+                      })()}
+
                       {/* Staff directory table */}
                       <div className="rounded-2xl border border-slate-200 dark:border-slate-800/60 overflow-hidden w-full shadow-xl shadow-slate-200/20 dark:shadow-none bg-white dark:bg-[#0F172A]">
                         <div className="overflow-x-auto">
@@ -5895,11 +6285,15 @@ function AdminDashboardContent() {
                                   <input
                                     type="text"
                                     required
+                                    disabled={!!editingStaff}
                                     value={staffUsername}
                                     onChange={e => setStaffUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                                    className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    className={`w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono ${editingStaff ? 'opacity-60 cursor-not-allowed bg-slate-200 dark:bg-slate-800' : ''}`}
                                     placeholder="amit_sharma"
                                   />
+                                  {editingStaff && (
+                                    <p className="text-[10px] text-slate-500 mt-1">Username is permanent and cannot be modified.</p>
+                                  )}
                                 </div>
 
                                 <div>
@@ -5907,10 +6301,9 @@ function AdminDashboardContent() {
                                   <input
                                     type="email"
                                     required
-                                    disabled={!!editingStaff}
                                     value={staffEmail}
                                     onChange={e => setStaffEmail(e.target.value)}
-                                    className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs disabled:opacity-50"
+                                    className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs"
                                     placeholder="amit@company.com"
                                   />
                                 </div>
@@ -5993,94 +6386,109 @@ function AdminDashboardContent() {
                                 </div>
                               )}
 
-                              <div className="border-t border-slate-300 dark:border-white/5 pt-3 space-y-4">
-                                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">NISM Certification (If applicable)</span>
+                              {(() => {
+                                const selectedRoleObj = roles.find((r: any) => r.name === staffRole);
+                                const roleRequiresNism = selectedRoleObj?.requiresNism === true;
+                                if (!roleRequiresNism) return null;
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">NISM Certificate No</label>
-                                    <input
-                                      type="text"
-                                      value={staffNism}
-                                      onChange={e => setStaffNism(e.target.value)}
-                                      className={`w-full bg-slate-100 dark:bg-slate-950 border rounded-xl py-2 px-3 text-xs ${isNismDuplicate ? 'border-red-500 text-red-200' : 'border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300'
-                                        }`}
-                                      placeholder="NISM-8899"
-                                    />
-                                    {isNismDuplicate && (
-                                      <span className="text-red-600 dark:text-red-500 text-[10px] mt-1 block">
-                                        Duplicate NISM Certificate Number. Please enter a unique number.
+                                return (
+                                  <div className="border-t border-slate-300 dark:border-white/5 pt-3 space-y-4 animate-in fade-in">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">NISM Certification</span>
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                                        Mandatory for this Role *
                                       </span>
-                                    )}
-                                  </div>
-
-                                  <div>
-                                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">NISM Validity Expiry</label>
-                                    <input
-                                      type="date"
-                                      value={staffNismValidity}
-                                      onChange={e => setStaffNismValidity(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-600 dark:text-slate-400"
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Upload NISM Certificate Document <span className="text-slate-500 dark:text-slate-500">(PDF auto-fills details)</span></label>
-                                  <div className={`border border-dashed rounded-xl p-4 text-center transition relative ${isParsingStaffNism ? 'border-amber-500/30 bg-amber-500/5' : staffNismParsed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>
-                                    <input
-                                      type="file"
-                                      accept=".pdf,.png,.jpg,.jpeg"
-                                      onChange={handleStaffNismFileChange}
-                                      disabled={isParsingStaffNism}
-                                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                                    />
-                                    {isParsingStaffNism ? (
-                                      <>
-                                        <div className="h-5 w-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
-                                        <span className="text-[10px] text-amber-700 dark:text-amber-300 block">Reading NISM certificate...</span>
-                                      </>
-                                    ) : staffNismParsed ? (
-                                      <>
-                                        <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mx-auto mb-1" />
-                                        <span className="text-[10px] text-emerald-700 dark:text-emerald-300 block font-bold">✅ Auto-filled from PDF</span>
-                                        <span className="text-[9px] text-slate-600 dark:text-slate-400 block">{staffNismFile?.name}</span>
-                                      </>
-                                    ) : staffNismFile ? (
-                                      <>
-                                        <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-400 mx-auto mb-1" />
-                                        <span className="text-[10px] text-blue-700 dark:text-blue-300 block">{staffNismFile.name}</span>
-                                        <span className="text-[9px] text-slate-600 dark:text-slate-400 block">Please fill in details manually</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <UploadCloud className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mx-auto mb-1" />
-                                        <span className="text-[10px] text-slate-700 dark:text-slate-300 block">
-                                          Upload certificate PDF for auto-fill (or JPG/PNG)
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                  {nismParseMsg && (
-                                    <p className={`text-[10px] mt-1 ${nismParseMsg.startsWith('✅') ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                                      {nismParseMsg}
-                                    </p>
-                                  )}
-                                  {editingStaff?.nismUpload && (
-                                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 flex justify-between items-center">
-                                      <span>Current certificate:</span>
-                                      <a
-                                        href={`${api.getBaseUrl()}${editingStaff.nismUpload}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="underline hover:text-emerald-700 dark:text-emerald-300 font-bold"
-                                      >
-                                        View Certificate File
-                                      </a>
                                     </div>
-                                  )}
-                                </div>
-                              </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      <div>
+                                        <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">NISM Certificate No *</label>
+                                        <input
+                                          type="text"
+                                          required
+                                          value={staffNism}
+                                          onChange={e => setStaffNism(e.target.value)}
+                                          className={`w-full bg-slate-100 dark:bg-slate-950 border rounded-xl py-2 px-3 text-xs ${isNismDuplicate ? 'border-red-500 text-red-200' : 'border-slate-400 dark:border-white/10 text-slate-700 dark:text-slate-300'
+                                            }`}
+                                          placeholder="NISM-8899"
+                                        />
+                                        {isNismDuplicate && (
+                                          <span className="text-red-600 dark:text-red-500 text-[10px] mt-1 block">
+                                            Duplicate NISM Certificate Number. Please enter a unique number.
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div>
+                                        <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">NISM Validity Expiry *</label>
+                                        <input
+                                          type="date"
+                                          required
+                                          value={staffNismValidity}
+                                          onChange={e => setStaffNismValidity(e.target.value)}
+                                          className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-600 dark:text-slate-400"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Upload NISM Certificate Document * <span className="text-slate-500 dark:text-slate-500">(PDF auto-fills details)</span></label>
+                                      <div className={`border border-dashed rounded-xl p-4 text-center transition relative ${isParsingStaffNism ? 'border-amber-500/30 bg-amber-500/5' : staffNismParsed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>
+                                        <input
+                                          type="file"
+                                          accept=".pdf,.png,.jpg,.jpeg"
+                                          onChange={handleStaffNismFileChange}
+                                          disabled={isParsingStaffNism}
+                                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                        />
+                                        {isParsingStaffNism ? (
+                                          <>
+                                            <div className="h-5 w-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
+                                            <span className="text-[10px] text-amber-700 dark:text-amber-300 block">Reading NISM certificate...</span>
+                                          </>
+                                        ) : staffNismParsed ? (
+                                          <>
+                                            <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mx-auto mb-1" />
+                                            <span className="text-[10px] text-emerald-700 dark:text-emerald-300 block font-bold">✅ Auto-filled from PDF</span>
+                                            <span className="text-[9px] text-slate-600 dark:text-slate-400 block">{staffNismFile?.name}</span>
+                                          </>
+                                        ) : staffNismFile ? (
+                                          <>
+                                            <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-400 mx-auto mb-1" />
+                                            <span className="text-[10px] text-blue-700 dark:text-blue-300 block">{staffNismFile.name}</span>
+                                            <span className="text-[9px] text-slate-600 dark:text-slate-400 block">Please fill in details manually</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <UploadCloud className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mx-auto mb-1" />
+                                            <span className="text-[10px] text-slate-700 dark:text-slate-300 block">
+                                              Upload certificate PDF for auto-fill (or JPG/PNG)
+                                            </span>
+                                          </>
+                                        )}
+                                      </div>
+                                      {nismParseMsg && (
+                                        <p className={`text-[10px] mt-1 ${nismParseMsg.startsWith('✅') ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                          {nismParseMsg}
+                                        </p>
+                                      )}
+                                      {editingStaff?.nismUpload && (
+                                        <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 flex justify-between items-center">
+                                          <span>Current certificate:</span>
+                                          <a
+                                            href={`${api.getBaseUrl()}${editingStaff.nismUpload}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="underline hover:text-emerald-700 dark:text-emerald-300 font-bold"
+                                          >
+                                            View Certificate File
+                                          </a>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               <div className="flex space-x-3 pt-2 justify-end text-xs">
                                 <button
@@ -6183,7 +6591,10 @@ function AdminDashboardContent() {
                         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
                           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 space-y-6 relative max-h-[90vh] overflow-y-auto">
                             <button
-                              onClick={() => setSelectedStaff(null)}
+                              onClick={() => {
+                                setSelectedStaff(null);
+                                setRevealedStaffPassword(null);
+                              }}
                               className="absolute top-4 right-4 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white"
                             >
                               <X className="h-5 w-5" />
@@ -6245,6 +6656,98 @@ function AdminDashboardContent() {
                                   </>
                                 )}
                               </div>
+
+                              {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                                <div className="bg-blue-50/80 dark:bg-blue-950/40 p-4 rounded-xl border border-blue-200 dark:border-blue-900/60 space-y-3 text-xs">
+                                  <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-900/60 pb-2">
+                                    <span className="font-bold text-[10px] text-blue-800 dark:text-blue-300 uppercase tracking-wider flex items-center gap-1.5">
+                                      <Lock className="w-3.5 h-3.5" /> Staff Login Credentials (Admin Only)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={isResendingStaffPassword}
+                                      onClick={async () => {
+                                        setIsResendingStaffPassword(true);
+                                        try {
+                                          const res = await api.resendStaffPassword(selectedStaff.id);
+                                          if (res.success) {
+                                            toast.success(res.message || 'Login credentials sent to staff email!');
+                                          } else {
+                                            toast.error(res.message || 'Failed to resend credentials.');
+                                          }
+                                        } catch (err: any) {
+                                          toast.error(err.message || 'Failed to resend credentials.');
+                                        } finally {
+                                          setIsResendingStaffPassword(false);
+                                        }
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-[10px] transition disabled:opacity-50 cursor-pointer shadow-sm"
+                                      title="Send credentials directly to staff registered email"
+                                    >
+                                      {isResendingStaffPassword ? (
+                                        <>
+                                          <Loader2 className="w-3 h-3 animate-spin" />
+                                          <span>Sending...</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Mail className="w-3 h-3" />
+                                          <span>Resend Password</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+
+                                  <div className="flex justify-between items-center border-b border-blue-100 dark:border-blue-900/30 pb-2">
+                                    <span className="text-slate-600 dark:text-slate-400">Assigned Username</span>
+                                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                                      @{selectedStaff.username || selectedStaff.user?.username || '—'}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-slate-600 dark:text-slate-400">Current Login Password</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-slate-900 dark:text-white text-xs bg-white dark:bg-slate-900 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-800">
+                                        {revealedStaffPassword ? revealedStaffPassword : '••••••••••••'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={isLoadingStaffPassword}
+                                        onClick={async () => {
+                                          if (revealedStaffPassword) {
+                                            setRevealedStaffPassword(null);
+                                            return;
+                                          }
+                                          setIsLoadingStaffPassword(true);
+                                          try {
+                                            const res = await api.getStaffPassword(selectedStaff.id);
+                                            if (res.success && res.data?.password) {
+                                              setRevealedStaffPassword(res.data.password);
+                                            } else {
+                                              toast.error('No stored password found. Click "Resend Password" to generate and email credentials.');
+                                            }
+                                          } catch (err: any) {
+                                            toast.error(err.message || 'Failed to retrieve password');
+                                          } finally {
+                                            setIsLoadingStaffPassword(false);
+                                          }
+                                        }}
+                                        className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-white transition cursor-pointer"
+                                        title={revealedStaffPassword ? "Hide Password" : "View Password"}
+                                      >
+                                        {isLoadingStaffPassword ? (
+                                          <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                        ) : revealedStaffPassword ? (
+                                          <EyeOff className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+                                        ) : (
+                                          <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
 
                               <div className="bg-slate-100 dark:bg-slate-950 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-3 text-xs">
                                 <span className="font-bold text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wider block">NISM Certification</span>
@@ -6371,7 +6874,10 @@ function AdminDashboardContent() {
                               )}
                               <button
                                 type="button"
-                                onClick={() => setSelectedStaff(null)}
+                                onClick={() => {
+                                  setSelectedStaff(null);
+                                  setRevealedStaffPassword(null);
+                                }}
                                 className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-xl hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5"
                               >
                                 Close Details
@@ -8946,9 +9452,10 @@ function AdminDashboardContent() {
                                         maxLength={6}
                                       />
                                     </div>
-                                  </div>
                                 </div>
                               </div>
+                              </div>
+
 
                               {/* Footer */}
                               <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 flex space-x-3">
@@ -9366,6 +9873,156 @@ function AdminDashboardContent() {
                                           </div>
                                         </div>
                                       </div>
+                                    </div>
+                                  </div>
+
+                                  {/* ── Trade Delivery Channels & Bot Setup (View Client Modal) ── */}
+                                  <div className="bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-white/10 p-5 space-y-4 shadow-xs">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5 gap-2">
+                                      <div>
+                                        <h4 className="text-xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                                          <Send className="w-3.5 h-3.5" /> Trade Delivery Channels &amp; Bot Setup
+                                        </h4>
+                                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                          Manage live trade signal dispatch preferences and direct bot connectivity for this client.
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border flex items-center gap-1 ${
+                                          viewClientIsTelegramTradeEnabled && viewClientTelegramChatId
+                                            ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30'
+                                            : viewClientIsTelegramTradeEnabled
+                                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                            : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                                        }`}>
+                                          <Send className="w-2.5 h-2.5" />
+                                          {viewClientIsTelegramTradeEnabled ? (viewClientTelegramChatId ? 'TG Active' : 'TG (No Chat ID)') : 'TG Off'}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border flex items-center gap-1 ${
+                                          viewClientIsSmsTradeEnabled && (selectedClient.mobile || selectedClient.user?.mobile)
+                                            ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30'
+                                            : viewClientIsSmsTradeEnabled
+                                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                            : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                                        }`}>
+                                          <Smartphone className="w-2.5 h-2.5" />
+                                          {viewClientIsSmsTradeEnabled ? 'SMS Active' : 'SMS Off'}
+                                        </span>
+                                        <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/30 flex items-center gap-1">
+                                          <Monitor className="w-2.5 h-2.5" /> Panel Active
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {/* Telegram Direct Bot Delivery Card */}
+                                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-white/5 space-y-3">
+                                        <div className="flex items-center justify-between">
+                                          <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                              type="checkbox"
+                                              checked={viewClientIsTelegramTradeEnabled}
+                                              onChange={e => setViewClientIsTelegramTradeEnabled(e.target.checked)}
+                                              className="h-4 w-4 rounded accent-[#d4f23b] border-gray-300"
+                                            />
+                                            <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                                              <Send className="w-3.5 h-3.5 text-sky-500" /> Telegram Trade Delivery
+                                            </span>
+                                          </label>
+                                          <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
+                                            viewClientIsTelegramTradeEnabled
+                                              ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                                              : 'bg-slate-500/10 text-slate-500 border border-slate-500/20'
+                                          }`}>
+                                            {viewClientIsTelegramTradeEnabled ? 'ENABLED' : 'DISABLED'}
+                                          </span>
+                                        </div>
+
+                                        <div className="space-y-2 pt-1">
+                                          <div>
+                                            <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 font-semibold uppercase tracking-wider">
+                                              Telegram Chat ID <span className="text-rose-500">*</span>
+                                            </label>
+                                            <input
+                                              type="text"
+                                              value={viewClientTelegramChatId}
+                                              onChange={e => setViewClientTelegramChatId(e.target.value.trim())}
+                                              placeholder="e.g. 123456789"
+                                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-1.5 px-3 text-xs text-slate-900 dark:text-white font-mono focus:border-sky-500 focus:outline-none transition"
+                                            />
+                                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                              Company Bot se 1-on-1 direct DM trade bhejne ke liye numeric Chat ID enter karein.
+                                            </p>
+                                          </div>
+
+                                          <div>
+                                            <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 font-semibold uppercase tracking-wider">
+                                              Telegram Username (Optional)
+                                            </label>
+                                            <input
+                                              type="text"
+                                              value={viewClientTelegramUsername}
+                                              onChange={e => setViewClientTelegramUsername(e.target.value.trim())}
+                                              placeholder="@username"
+                                              className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg py-1.5 px-3 text-xs text-slate-900 dark:text-white focus:border-sky-500 focus:outline-none transition"
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* SMS Text Message Delivery Card */}
+                                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/80 dark:border-white/5 space-y-3 flex flex-col justify-between">
+                                        <div className="space-y-3">
+                                          <div className="flex items-center justify-between">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                              <input
+                                                type="checkbox"
+                                                checked={viewClientIsSmsTradeEnabled}
+                                                onChange={e => setViewClientIsSmsTradeEnabled(e.target.checked)}
+                                                className="h-4 w-4 rounded accent-[#d4f23b] border-gray-300"
+                                              />
+                                              <span className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                                                <Smartphone className="w-3.5 h-3.5 text-indigo-500" /> SMS Text Message Delivery
+                                              </span>
+                                            </label>
+                                            <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full ${
+                                              viewClientIsSmsTradeEnabled
+                                                ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                                                : 'bg-slate-500/10 text-slate-500 border border-slate-500/20'
+                                            }`}>
+                                              {viewClientIsSmsTradeEnabled ? 'ENABLED' : 'DISABLED'}
+                                            </span>
+                                          </div>
+
+                                          <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1 text-xs">
+                                            <span className="text-[10px] text-slate-500 uppercase font-semibold block">Registered Mobile Number</span>
+                                            <strong className="font-mono text-slate-900 dark:text-white">
+                                              {selectedClient.mobile?.replace(new RegExp(`_deleted_${selectedClient.id}$`), '') || selectedClient.mobile || selectedClient.user?.mobile || 'No mobile number found'}
+                                            </strong>
+                                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                                              Global SMS dispatch on hone par is mobile par DLT trade text alerts bheje jayenge.
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="p-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-[10px] text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
+                                          <Monitor className="w-3 h-3 text-violet-500 shrink-0" />
+                                          <span>In-App Web &amp; Client Panel feed active subscription par hamesha on rehti hai.</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Button */}
+                                    <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-white/5">
+                                      <button
+                                        type="button"
+                                        onClick={handleSaveClientTradeChannels}
+                                        disabled={savingClientChannels}
+                                        className="px-5 py-2.5 bg-[#d4f23b] text-black hover:bg-[#c3e031] font-bold rounded-xl text-xs transition shadow-md shadow-[#d4f23b]/20 flex items-center gap-2 disabled:opacity-50"
+                                      >
+                                        {savingClientChannels ? <RefreshCcw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                                        {savingClientChannels ? 'Saving Channel Settings...' : 'Save Channel Preferences'}
+                                      </button>
                                     </div>
                                   </div>
                                 </div>
@@ -9831,84 +10488,184 @@ function AdminDashboardContent() {
                                         </div>
 
                                         {/* Input Fields */}
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                          <div>
-                                            <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
-                                              PAN Number <span className="text-red-500">*</span>
-                                            </label>
-                                            <input
-                                              type="text"
-                                              placeholder="e.g. ABCDE1234F"
-                                              value={camsPanInput}
-                                              maxLength={10}
-                                              onChange={e => {
-                                                setCamsPanInput(e.target.value.toUpperCase().trim());
-                                                setFetchCamsError('');
-                                              }}
-                                              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-300 dark:border-blue-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-mono tracking-wider font-bold"
-                                            />
-                                          </div>
-                                          <div>
-                                            <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-1">
-                                              Date of Birth (DOB) <span className="text-slate-400 font-normal lowercase">(optional / format: YYYY-MM-DD)</span>
-                                            </label>
-                                            <input
-                                              type="text"
-                                              placeholder="DD-MM-YYYY or YYYY-MM-DD"
-                                              value={camsDobInput}
-                                              onChange={e => {
-                                                setCamsDobInput(e.target.value.trim());
-                                                setFetchCamsError('');
-                                              }}
-                                              className="w-full px-3 py-2 text-xs rounded-lg border border-blue-300 dark:border-blue-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 font-mono"
-                                            />
-                                          </div>
-                                        </div>
+                                        {(() => {
+                                          const isPanValid = camsPanInput.length === 10 && /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(camsPanInput);
+                                          const isPanIncomplete = camsPanInput.length > 0 && camsPanInput.length < 10;
 
-                                        {/* 1-Click Action Button */}
-                                        <button
-                                          disabled={fetchCamsLoading || !camsPanInput || camsPanInput.length !== 10}
-                                          onClick={async () => {
-                                            setFetchCamsLoading(true);
-                                            setFetchCamsError('');
-                                            try {
-                                              const res: any = await api.fetchCamsRecord({
-                                                pan: camsPanInput.trim(),
-                                                dob: camsDobInput.trim() || undefined,
-                                                clientId: selectedClient._id || selectedClient.id,
-                                                saveToClient: true
-                                              });
-                                              if (res?.success) {
-                                                toast.success('✅ CAMS KRA details verified & Official PDF saved to Client Vault!');
-                                                setCamsEditMode(false);
-                                                try {
-                                                  const updated: any = await api.getAdminClients();
-                                                  const found = (updated?.clients || updated?.data || []).find((c: any) =>
-                                                    String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
-                                                  );
-                                                  if (found) setSelectedClient(found);
-                                                  await loadData(true);
-                                                } catch { }
-                                              } else {
-                                                setFetchCamsError(res?.message || 'CAMS KRA fetch failed');
-                                                toast.error(res?.message || 'Failed to fetch from CAMS KRA');
-                                              }
-                                            } catch (err: any) {
-                                              const msg = err?.response?.data?.message || err?.message || 'Failed to communicate with CAMS KRA';
-                                              setFetchCamsError(msg);
-                                              toast.error(msg);
-                                            } finally {
-                                              setFetchCamsLoading(false);
-                                            }
-                                          }}
-                                          className="w-full py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 hover:from-blue-700 hover:via-indigo-700 hover:to-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-2 shadow-md shadow-blue-500/20 transition cursor-pointer"
-                                        >
-                                          {fetchCamsLoading ? (
-                                            <><Loader2 className="w-4 h-4 animate-spin" /> Verifying CAMS & Generating Vault PDF...</>
-                                          ) : (
-                                            <>⚡ Auto-Verify via CAMS KRA & Generate Vault PDF</>
-                                          )}
-                                        </button>
+                                          const isDobValid = !camsDobInput || (
+                                            /^\d{4}-\d{2}-\d{2}$/.test(camsDobInput) &&
+                                            !isNaN(new Date(camsDobInput).getTime()) &&
+                                            new Date(camsDobInput) <= new Date() &&
+                                            new Date(camsDobInput).getFullYear() >= 1920
+                                          );
+                                          const isDobFuture = Boolean(camsDobInput && new Date(camsDobInput) > new Date());
+
+                                          const canSubmit = isPanValid && isDobValid && !fetchCamsLoading;
+
+                                          return (
+                                            <>
+                                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                {/* PAN Input Field */}
+                                                <div>
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                                      PAN Number <span className="text-red-500">*</span>
+                                                    </label>
+                                                    <span className="text-[9px] font-mono font-bold text-slate-400">
+                                                      {camsPanInput.length}/10
+                                                    </span>
+                                                  </div>
+                                                  <input
+                                                    type="text"
+                                                    placeholder="ABCDE1234F"
+                                                    value={camsPanInput}
+                                                    maxLength={10}
+                                                    onChange={e => {
+                                                      const formatted = formatPan(e.target.value);
+                                                      setCamsPanInput(formatted);
+                                                      setFetchCamsError('');
+                                                    }}
+                                                    className={`w-full px-3 py-2 text-xs rounded-lg border font-mono tracking-widest font-extrabold transition-all uppercase ${
+                                                      isPanValid
+                                                        ? 'border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20'
+                                                        : 'border-slate-300 dark:border-white/10 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40'
+                                                    }`}
+                                                  />
+                                                  {/* Real-time PAN format guide */}
+                                                  <div className="mt-1 min-h-[16px]">
+                                                    {isPanValid && (
+                                                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                                        <span>✓</span> Valid PAN format (5 letters + 4 digits + 1 letter)
+                                                      </p>
+                                                    )}
+                                                    {isPanIncomplete && (
+                                                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                                        {10 - camsPanInput.length} character{10 - camsPanInput.length > 1 ? 's' : ''} remaining ({camsPanInput.length < 5 ? 'Letters [A-Z]' : camsPanInput.length < 9 ? 'Digits [0-9]' : 'Final Letter [A-Z]'})
+                                                      </p>
+                                                    )}
+                                                    {!camsPanInput && (
+                                                      <p className="text-[10px] text-slate-400">
+                                                        Enter 10-digit PAN (5 Letters + 4 Digits + 1 Letter)
+                                                      </p>
+                                                    )}
+                                                  </div>
+                                                </div>
+
+                                                {/* Date of Birth (DOB) Field */}
+                                                <div>
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <label className="block text-[10px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                                      Date of Birth (DOB) <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                                                    </label>
+                                                    {camsDobInput && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          setCamsDobInput('');
+                                                          setFetchCamsError('');
+                                                        }}
+                                                        className="text-[10px] text-rose-500 hover:text-rose-700 hover:underline"
+                                                      >
+                                                        Clear
+                                                      </button>
+                                                    )}
+                                                  </div>
+                                                  <input
+                                                    type="date"
+                                                    max={new Date().toISOString().split('T')[0]}
+                                                    min="1920-01-01"
+                                                    value={camsDobInput}
+                                                    onChange={e => {
+                                                      setCamsDobInput(e.target.value);
+                                                      setFetchCamsError('');
+                                                    }}
+                                                    className={`w-full px-3 py-2 text-xs rounded-lg border font-mono transition-all ${
+                                                      isDobFuture
+                                                        ? 'border-rose-500 bg-rose-50/20 text-rose-900 ring-2 ring-rose-500/20'
+                                                        : camsDobInput
+                                                        ? 'border-emerald-400 bg-emerald-50/20 dark:bg-emerald-950/20 text-slate-800 dark:text-slate-200'
+                                                        : 'border-blue-300 dark:border-blue-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500/40'
+                                                    }`}
+                                                  />
+                                                  {/* Real-time DOB guide */}
+                                                  <div className="mt-1 min-h-[16px]">
+                                                    {isDobFuture ? (
+                                                      <p className="text-[10px] text-rose-600 dark:text-rose-400 font-bold">
+                                                        ⚠ DOB cannot be a future date!
+                                                      </p>
+                                                    ) : camsDobInput && isDobValid ? (
+                                                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                                                        <span>✓</span> Selected: {new Date(camsDobInput).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                      </p>
+                                                    ) : (
+                                                      <p className="text-[10px] text-slate-400">
+                                                        Pick Date from calendar for exact KRA record match
+                                                      </p>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                              {/* 1-Click Action Button */}
+                                              <button
+                                                disabled={!canSubmit}
+                                                onClick={async () => {
+                                                  if (!isPanValid) {
+                                                    toast.error('Kripya valid 10-digit PAN format enter karein (e.g. ABCDE1234F)');
+                                                    return;
+                                                  }
+                                                  if (camsDobInput && !isDobValid) {
+                                                    toast.error('Kripya valid Date of Birth select karein');
+                                                    return;
+                                                  }
+                                                  setFetchCamsLoading(true);
+                                                  setFetchCamsError('');
+                                                  try {
+                                                    const res: any = await api.fetchCamsRecord({
+                                                      pan: camsPanInput.trim().toUpperCase(),
+                                                      dob: camsDobInput.trim() || undefined,
+                                                      clientId: selectedClient._id || selectedClient.id,
+                                                      saveToClient: true
+                                                    });
+                                                    if (res?.success) {
+                                                      toast.success('✅ CAMS KRA details verified & Official PDF saved to Client Vault!');
+                                                      setCamsEditMode(false);
+                                                      try {
+                                                        const updated: any = await api.getAdminClients();
+                                                        const found = (updated?.clients || updated?.data || []).find((c: any) =>
+                                                          String(c._id || c.id) === String(selectedClient._id || selectedClient.id)
+                                                        );
+                                                        if (found) setSelectedClient(found);
+                                                        await loadData(true);
+                                                      } catch { }
+                                                    } else {
+                                                      setFetchCamsError(res?.message || 'CAMS KRA fetch failed');
+                                                      toast.error(res?.message || 'Failed to fetch from CAMS KRA');
+                                                    }
+                                                  } catch (err: any) {
+                                                    const msg = err?.response?.data?.message || err?.message || 'Failed to communicate with CAMS KRA';
+                                                    setFetchCamsError(msg);
+                                                    toast.error(msg);
+                                                  } finally {
+                                                    setFetchCamsLoading(false);
+                                                  }
+                                                }}
+                                                className={`w-full py-2.5 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition cursor-pointer shadow-md ${
+                                                  canSubmit
+                                                    ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 hover:from-blue-700 hover:via-indigo-700 hover:to-emerald-700 text-white shadow-blue-500/20'
+                                                    : 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-700'
+                                                }`}
+                                                title={!isPanValid ? 'Enter valid 10-digit PAN (5 letters, 4 digits, 1 letter)' : ''}
+                                              >
+                                                {fetchCamsLoading ? (
+                                                  <><Loader2 className="w-4 h-4 animate-spin" /> Verifying CAMS &amp; Generating Vault PDF...</>
+                                                ) : (
+                                                  <>⚡ Auto-Verify via CAMS KRA &amp; Generate Vault PDF</>
+                                                )}
+                                              </button>
+                                            </>
+                                          );
+                                        })()}
 
                                         {/* Error alert */}
                                         {fetchCamsError && (
@@ -9923,55 +10680,141 @@ function AdminDashboardContent() {
                                     );
                                   })()}
 
-                                  <div className="glassmorphism p-5 rounded-xl border border-violet-400/30 dark:border-violet-500/20 space-y-4 bg-violet-50/50 dark:bg-violet-900/5">
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
-                                        <svg className="w-4 h-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4.879-4.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242z" /></svg>
-                                      </div>
-                                      <div>
-                                        <h4 className="text-xs font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">⭐ Fetch by Digio ID</h4>
-                                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Digio se KYC/eSign ID enter karo — details auto-fetch ho jayenge aur client profile update ho jayegi.</p>
-                                      </div>
-                                    </div>
+                                  {(() => {
+                                    const hasSignedAgreement = Boolean(
+                                      selectedClient.agreementSigned ||
+                                      (selectedClient.agreements && selectedClient.agreements.some((a: any) => a.status === 'SIGNED' || a.agreementUrl))
+                                    );
+                                    const signedAgreementRecord = (selectedClient.agreements || []).find((a: any) => a.status === 'SIGNED' || a.agreementUrl);
 
-                                    {/* Info note */}
-                                    <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-500/20 rounded-lg text-[10px] text-blue-700 dark:text-blue-300 space-y-1">
-                                      <div><strong>KYC ID</strong> (KYC...) → Aadhaar Name, PAN, DOB, Gender, Father Name, Address, City, State, ZIP</div>
-                                      <div><strong>eSign ID</strong> (DID...) → Agreement PDF download + Agreement record create</div>
-                                      <div className="text-blue-500 dark:text-blue-400">💡 Dono IDs enter karo for complete data. Ya sirf jo available ho.</div>
-                                    </div>
+                                    const isKycVerified = Boolean(
+                                      ['VERIFIED', 'APPROVED', 'COMPLETED'].includes(selectedClient.kycStatus) ||
+                                      selectedClient.camsKraData?.panSummary?.isKycValidated ||
+                                      selectedClient.kraStatusCode === '07'
+                                    );
 
-                                    {/* Dual input fields */}
-                                    <div className="grid grid-cols-1 gap-2">
-                                      <div className="flex gap-2 items-center">
-                                        <span className="text-[10px] font-bold text-slate-500 w-16 flex-shrink-0">KYC ID</span>
-                                        <input
-                                          type="text"
-                                          placeholder="KYC2024... (Aadhaar/PAN details)"
-                                          value={(() => { try { return JSON.parse(fetchDigioIdInput || '{}').kycId || ''; } catch { return /^KYC/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })()}
-                                          onChange={e => {
-                                            const esignPart = (() => { try { return JSON.parse(fetchDigioIdInput || '{}').esignId || ''; } catch { return /^DID/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })();
-                                            setFetchDigioIdInput(JSON.stringify({ kycId: e.target.value.trim(), esignId: esignPart }));
-                                            setFetchDigioResult(null); setFetchDigioError('');
-                                          }}
-                                          className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
-                                        />
-                                      </div>
-                                      <div className="flex gap-2 items-center">
-                                        <span className="text-[10px] font-bold text-slate-500 w-16 flex-shrink-0">eSign ID</span>
-                                        <input
-                                          type="text"
-                                          placeholder="DID2024... (eSign/Agreement)"
-                                          value={(() => { try { return JSON.parse(fetchDigioIdInput || '{}').esignId || ''; } catch { return /^DID/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })()}
-                                          onChange={e => {
-                                            const kycPart = (() => { try { return JSON.parse(fetchDigioIdInput || '{}').kycId || ''; } catch { return /^KYC/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })();
-                                            setFetchDigioIdInput(JSON.stringify({ kycId: kycPart, esignId: e.target.value.trim() }));
-                                            setFetchDigioResult(null); setFetchDigioError('');
-                                          }}
-                                          className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
-                                        />
-                                      </div>
-                                    </div>
+                                    const bothKycAndAgreementComplete = hasSignedAgreement && isKycVerified;
+
+                                    if (bothKycAndAgreementComplete && !showManualDigioFetch) {
+                                      return (
+                                        <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/60 dark:bg-emerald-900/10 flex items-center justify-between flex-wrap gap-3">
+                                          <div className="flex items-center gap-3">
+                                            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                                              <CheckCircle2 className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                              <h4 className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wide flex items-center gap-2">
+                                                <span>KYC &amp; Service Agreement Verified</span>
+                                                <span className="px-2 py-0.5 rounded-full text-[9px] bg-emerald-200 dark:bg-emerald-800/80 text-emerald-800 dark:text-emerald-200 font-extrabold">All Records Stored</span>
+                                              </h4>
+                                              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                                Client KYC verification complete &amp; signed Service Agreement (v{signedAgreementRecord?.version || '1'}) is already verified and archived on file.
+                                              </p>
+                                            </div>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => setShowManualDigioFetch(true)}
+                                            className="text-[10px] font-bold text-violet-600 dark:text-violet-400 hover:underline px-3 py-1.5 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-white dark:bg-slate-800 transition shadow-xs"
+                                          >
+                                            ⚙️ Manual Digio Re-fetch (Optional)
+                                          </button>
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <div className="glassmorphism p-5 rounded-xl border border-violet-400/30 dark:border-violet-500/20 space-y-4 bg-violet-50/50 dark:bg-violet-900/5">
+                                        <div className="flex items-center justify-between">
+                                          <div className="flex items-center gap-2">
+                                            <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
+                                              <svg className="w-4 h-4 text-violet-600 dark:text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4.879-4.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242z" /></svg>
+                                            </div>
+                                            <div>
+                                              <h4 className="text-xs font-bold text-violet-700 dark:text-violet-300 uppercase tracking-wider">⭐ Fetch by Digio ID</h4>
+                                              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Digio se KYC/eSign ID enter karo — details auto-fetch ho jayenge aur client profile update ho jayegi.</p>
+                                            </div>
+                                          </div>
+                                          {bothKycAndAgreementComplete && (
+                                            <button
+                                              type="button"
+                                              onClick={() => setShowManualDigioFetch(false)}
+                                              className="text-[10px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 transition"
+                                            >
+                                              ✕ Collapse
+                                            </button>
+                                          )}
+                                        </div>
+
+                                        {/* Info note */}
+                                        <div className="p-3 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-500/20 rounded-lg text-[10px] text-blue-700 dark:text-blue-300 space-y-1">
+                                          <div><strong>KYC ID</strong> (KYC...) → Aadhaar Name, PAN, DOB, Gender, Father Name, Address, City, State, ZIP</div>
+                                          <div><strong>eSign ID</strong> (DID...) → Agreement PDF download + Agreement record create</div>
+                                          <div className="text-blue-500 dark:text-blue-400">💡 Jo document pending ho sirf wahi ID enter karein.</div>
+                                        </div>
+
+                                        {/* Status Indicators & Input fields */}
+                                        <div className="grid grid-cols-1 gap-2.5">
+                                          {/* KYC Section */}
+                                          {isKycVerified ? (
+                                            <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                                              <span className="flex items-center gap-1.5 font-semibold text-[11px]">
+                                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                                KYC already verified ({selectedClient.kraStatusCode || selectedClient.kycStatus || 'Validated'}) — KYC ID fetch not required.
+                                              </span>
+                                            </div>
+                                          ) : (
+                                            <div className="flex gap-2 items-center">
+                                              <span className="text-[10px] font-bold text-slate-500 w-16 flex-shrink-0">KYC ID</span>
+                                              <input
+                                                type="text"
+                                                placeholder="KYC2024... (Aadhaar/PAN details)"
+                                                value={(() => { try { return JSON.parse(fetchDigioIdInput || '{}').kycId || ''; } catch { return /^KYC/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })()}
+                                                onChange={e => {
+                                                  const esignPart = (() => { try { return JSON.parse(fetchDigioIdInput || '{}').esignId || ''; } catch { return /^DID/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })();
+                                                  setFetchDigioIdInput(JSON.stringify({ kycId: e.target.value.trim(), esignId: esignPart }));
+                                                  setFetchDigioResult(null); setFetchDigioError('');
+                                                }}
+                                                className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
+                                              />
+                                            </div>
+                                          )}
+
+                                          {/* Agreement Section */}
+                                          {hasSignedAgreement ? (
+                                            <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 text-xs text-emerald-800 dark:text-emerald-300 flex items-center justify-between">
+                                              <span className="flex items-center gap-1.5 font-semibold text-[11px]">
+                                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                                Service Agreement already signed &amp; stored on file (v{signedAgreementRecord?.version || '1'}) — eSign ID fetch not required.
+                                              </span>
+                                              {signedAgreementRecord?.agreementUrl && (
+                                                <a
+                                                  href={api.getDownloadUrl(signedAgreementRecord.agreementUrl)}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  className="text-blue-600 dark:text-blue-400 hover:underline font-bold text-[10px] shrink-0 ml-2"
+                                                >
+                                                  View Agreement
+                                                </a>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <div className="flex gap-2 items-center">
+                                              <span className="text-[10px] font-bold text-slate-500 w-16 flex-shrink-0">eSign ID</span>
+                                              <input
+                                                type="text"
+                                                placeholder="DID2024... (eSign/Agreement)"
+                                                value={(() => { try { return JSON.parse(fetchDigioIdInput || '{}').esignId || ''; } catch { return /^DID/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })()}
+                                                onChange={e => {
+                                                  const kycPart = (() => { try { return JSON.parse(fetchDigioIdInput || '{}').kycId || ''; } catch { return /^KYC/i.test(fetchDigioIdInput) ? fetchDigioIdInput : ''; } })();
+                                                  setFetchDigioIdInput(JSON.stringify({ kycId: kycPart, esignId: e.target.value.trim() }));
+                                                  setFetchDigioResult(null); setFetchDigioError('');
+                                                }}
+                                                className="flex-1 px-3 py-2 text-xs rounded-lg border border-violet-300 dark:border-violet-500/30 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 font-mono"
+                                              />
+                                            </div>
+                                          )}
+                                        </div>
 
                                     <button
                                       disabled={fetchDigioLoading || (() => { try { const p = JSON.parse(fetchDigioIdInput || '{}'); return !p.kycId && !p.esignId; } catch { return !fetchDigioIdInput.trim(); } })()}
@@ -10171,6 +11014,8 @@ function AdminDashboardContent() {
                                       </div>
                                     )}
                                   </div>
+                                    );
+                                  })()}
 
                                   {/* Verification status and files */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
@@ -10546,6 +11391,28 @@ function AdminDashboardContent() {
                     <AdminResearchReports />
                   )}
 
+                  {/* ====================================================
+                    MULTI-CHANNEL DELIVERY REPORTS TAB
+                    ==================================================== */}
+                  {(activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_')) && (
+                    <div className="mx-6 space-y-6 animate-fade-in">
+                      <TradeDeliveryReports
+                        key={activeTab}
+                        initialChannel={
+                          activeTab === 'deliveryReports_telegram' ? 'TELEGRAM' :
+                          activeTab === 'deliveryReports_sms' ? 'SMS' :
+                          activeTab === 'deliveryReports_inapp' ? 'INAPP' : 'ALL'
+                        }
+                        onChannelChange={(ch) => {
+                          if (ch === 'TELEGRAM') setActiveTab('deliveryReports_telegram');
+                          else if (ch === 'SMS') setActiveTab('deliveryReports_sms');
+                          else if (ch === 'INAPP') setActiveTab('deliveryReports_inapp');
+                          else setActiveTab('deliveryReports_all');
+                        }}
+                      />
+                    </div>
+                  )}
+
                   {activeTab === 'plans' && (
                     <div className="space-y-6">
                       {!getPrerequisitesStatus().isAllComplete && (
@@ -10766,6 +11633,7 @@ function AdminDashboardContent() {
                       <div className="flex flex-wrap items-center gap-2 bg-slate-200/50 dark:bg-slate-800/50 p-1 rounded-xl w-full mb-6">
                         {[
                           { id: 'general', label: 'General Info', icon: Settings },
+                          { id: 'trade-dispatch', label: 'Trade Dispatch & Bot', icon: Send },
                           { id: 'policies', label: 'Documents & Policies', icon: FileText },
                           { id: 'billing', label: 'Banking & Invoicing', icon: Landmark },
                           { id: 'integrations', label: 'Integrations', icon: LayoutGrid },
@@ -10868,6 +11736,269 @@ function AdminDashboardContent() {
                                   </div>
                                 ))}
                               </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {settingsTab === 'trade-dispatch' && (
+                        <div className="space-y-6 animate-fade-in">
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-6">
+                            {/* Section Header */}
+                            <div className="border-b border-slate-200 dark:border-slate-800/60 pb-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-lime-500/10 text-lime-600 dark:text-[#d4f23b] flex items-center justify-center font-bold">
+                                  <Send className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h3 className="text-lg font-bold text-slate-800 dark:text-white">
+                                    Trade Signal Dispatch & Telegram Bot Settings
+                                  </h3>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Configure global channel dispatch rules and company Telegram Bot integration.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Info Callout */}
+                            <div className="p-4 rounded-xl bg-sky-500/10 border border-sky-500/20 text-xs text-sky-800 dark:text-sky-300 space-y-1">
+                              <p className="font-bold flex items-center gap-1.5">
+                                ℹ️ Global Channel Dispatch Policy
+                              </p>
+                              <p className="leading-relaxed text-[11px] text-sky-700 dark:text-sky-400">
+                                Trade recommendations and updates are strictly dispatched only to clients with an <b>active subscription</b> matching the trade's service plan. Expired subscriptions are blocked by the system.
+                                When a platform is enabled here, trades go to all eligible subscribers unless unchecked in an individual client's profile.
+                              </p>
+                            </div>
+
+                            {/* Global Delivery Toggles */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {/* Telegram Master Toggle */}
+                              <div className={`p-4 rounded-xl border transition-all ${
+                                telegramTradeEnabled
+                                  ? 'bg-sky-500/5 border-sky-500/30'
+                                  : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                              }`}>
+                                <label className="flex items-start gap-3 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={telegramTradeEnabled}
+                                    onChange={e => setTelegramTradeEnabled(e.target.checked)}
+                                    className="mt-1 h-5 w-5 rounded accent-[#d4f23b] border-gray-300"
+                                  />
+                                  <div>
+                                    <span className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                      <Send className="w-4 h-4 text-sky-500" />
+                                      Telegram Trade Delivery
+                                    </span>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                                      Send real-time trade signals and status updates directly to clients via Company Telegram Bot. If unchecked, no Telegram messages will be sent to any client.
+                                    </p>
+                                  </div>
+                                </label>
+                              </div>
+
+                              {/* SMS Master Toggle */}
+                              <div className={`p-4 rounded-xl border transition-all ${
+                                smsTradeEnabled
+                                  ? 'bg-indigo-500/5 border-indigo-500/30'
+                                  : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                              }`}>
+                                <label className="flex items-start gap-3 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={smsTradeEnabled}
+                                    onChange={e => setSmsTradeEnabled(e.target.checked)}
+                                    className="mt-1 h-5 w-5 rounded accent-[#d4f23b] border-gray-300"
+                                  />
+                                  <div>
+                                    <span className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                      <Smartphone className="w-4 h-4 text-indigo-500" />
+                                      SMS Text Message Delivery
+                                    </span>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                                      Send DLT-compliant SMS trade alerts to client mobile numbers. If unchecked, no SMS trade messages will be sent to any client.
+                                    </p>
+                                  </div>
+                                </label>
+                              </div>
+                            </div>
+
+                            {/* Telegram Bot Configuration */}
+                            <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-4">
+                              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                                <div>
+                                  <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <Send className="w-4 h-4 text-sky-500" />
+                                    Company Telegram Bot Configuration
+                                  </h4>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Obtain a token by creating a bot via <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sky-500 hover:underline">@BotFather</a> on Telegram.
+                                  </p>
+                                </div>
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  telegramTradeEnabled && telegramBotToken
+                                    ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                                    : 'bg-slate-500/10 text-slate-500 border border-slate-500/20'
+                                }`}>
+                                  {telegramTradeEnabled && telegramBotToken ? 'Configured' : 'Not Active'}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="col-span-2">
+                                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                                    Telegram Bot Token <span className="text-rose-500">*</span>
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="password"
+                                      value={telegramBotToken}
+                                      onChange={e => {
+                                        setTelegramBotToken(e.target.value.trim());
+                                        setBotTestResult(null);
+                                      }}
+                                      placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                                      className="flex-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-sky-500 transition"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handleTestTelegramBot}
+                                      disabled={testingBot || !telegramBotToken}
+                                      className="px-4 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-sm"
+                                    >
+                                      {testingBot ? (
+                                        <>
+                                          <RefreshCcw className="w-3.5 h-3.5 animate-spin" />
+                                          Testing...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <CheckCircle2 className="w-3.5 h-3.5" />
+                                          Test Connection
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                                    Telegram Bot Username (without @)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={telegramBotUsername}
+                                    onChange={e => setTelegramBotUsername(e.target.value.replace(/^@/, '').trim())}
+                                    placeholder="e.g. InfolineTradeBot"
+                                    className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-sky-500 transition"
+                                  />
+                                </div>
+
+                                <div className="flex items-end">
+                                  {telegramBotUsername && (
+                                    <a
+                                      href={`https://t.me/${telegramBotUsername}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-xs text-sky-500 hover:underline flex items-center gap-1 font-semibold pb-2"
+                                    >
+                                      Open Bot in Telegram: t.me/{telegramBotUsername}
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+
+                              {botTestResult && (
+                                <div className={`p-3.5 rounded-xl border text-xs flex items-center gap-2 ${
+                                  botTestResult.success
+                                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+                                    : 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30'
+                                }`}>
+                                  {botTestResult.success ? (
+                                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                                  ) : (
+                                    <XCircle className="w-4 h-4 shrink-0" />
+                                  )}
+                                  <span className="font-semibold">{botTestResult.message}</span>
+                                </div>
+                              )}
+
+                              {/* Telegram Join Eligibility Rule */}
+                              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider mb-1">
+                                    Client Telegram Join Rule (Button Visibility on Dashboard)
+                                  </label>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    Paid active plan is mandatory for trade alerts. Select whether subscribers can connect immediately or only after verified KYC &amp; Agreement:
+                                  </p>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                                  <label className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                                    telegramJoinRule === 'ACTIVE_PLAN_ONLY' || telegramJoinRule === 'ALL'
+                                      ? 'border-sky-500 bg-sky-500/10 text-slate-900 dark:text-white'
+                                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 text-slate-600 dark:text-slate-400'
+                                  }`}>
+                                    <input
+                                      type="radio"
+                                      name="telegramJoinRule"
+                                      value="ACTIVE_PLAN_ONLY"
+                                      checked={telegramJoinRule === 'ACTIVE_PLAN_ONLY' || telegramJoinRule === 'ALL'}
+                                      onChange={() => setTelegramJoinRule('ACTIVE_PLAN_ONLY')}
+                                      className="mt-1 accent-sky-500"
+                                    />
+                                    <div>
+                                      <p className="text-xs font-bold flex items-center gap-1.5">
+                                        <span>Active Paid Plan Holders</span>
+                                        <span className="text-[10px] bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded font-mono">Paid Only</span>
+                                      </p>
+                                      <p className="text-[11px] opacity-75 mt-0.5">
+                                        Only clients with an active paid subscription plan can connect (allowed even before completing KYC or Agreement).
+                                      </p>
+                                    </div>
+                                  </label>
+
+                                  <label className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                                    telegramJoinRule === 'KYC_AGREEMENT_VERIFIED'
+                                      ? 'border-sky-500 bg-sky-500/10 text-slate-900 dark:text-white'
+                                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 text-slate-600 dark:text-slate-400'
+                                  }`}>
+                                    <input
+                                      type="radio"
+                                      name="telegramJoinRule"
+                                      value="KYC_AGREEMENT_VERIFIED"
+                                      checked={telegramJoinRule === 'KYC_AGREEMENT_VERIFIED'}
+                                      onChange={() => setTelegramJoinRule('KYC_AGREEMENT_VERIFIED')}
+                                      className="mt-1 accent-sky-500"
+                                    />
+                                    <div>
+                                      <p className="text-xs font-bold flex items-center gap-1.5">
+                                        <span>Active Paid Plan + KYC &amp; Agreement</span>
+                                        <span className="text-[10px] bg-sky-500/20 text-sky-600 dark:text-sky-400 px-1.5 py-0.5 rounded font-mono">Strict SEBI</span>
+                                      </p>
+                                      <p className="text-[11px] opacity-75 mt-0.5">
+                                        Clients must have an active paid plan AND their DigiLocker KYC and Service Agreement must be verified before connecting.
+                                      </p>
+                                    </div>
+                                  </label>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Save Button */}
+
+                            <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-800">
+                              <button
+                                type="button"
+                                onClick={handleSaveTradeDispatchSettings}
+                                disabled={savingTradeDispatch}
+                                className="px-6 py-2.5 bg-[#d4f23b] text-black hover:bg-[#c3e031] font-extrabold rounded-xl text-xs transition shadow-md shadow-[#d4f23b]/20 flex items-center gap-2 disabled:opacity-50"
+                              >
+                                {savingTradeDispatch && <RefreshCcw className="w-3.5 h-3.5 animate-spin" />}
+                                {savingTradeDispatch ? 'Saving Settings...' : 'Save Trade Dispatch Settings'}
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -12481,6 +13612,8 @@ function AdminDashboardContent() {
                                           setEditRoleId(selectedRole.id);
                                           setEditRoleName(selectedRole.name);
                                           setEditRoleDesc(selectedRole.description || '');
+                                          setEditRoleRequiresNism(!!selectedRole.requiresNism);
+                                          setEditRoleTwoFactorAuth(selectedRole.twoFactorAuth || 'DISABLED');
                                           setIsEditRoleModalOpen(true);
                                         }}
                                         disabled={selectedRole.isAssigned}
@@ -12507,12 +13640,14 @@ function AdminDashboardContent() {
                                 )}
                               </div>
 
-                              {/* Login Device Constraint */}
+                              {/* Login & Compliance Settings */}
                               <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/40 space-y-4">
                                 <div className="border-b border-slate-200 dark:border-slate-800/60 pb-3">
-                                  <h4 className="font-bold text-xs uppercase tracking-wider text-primary-600 dark:text-primary-400">Login Settings</h4>
-                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Configure device login constraints for this role.</p>
+                                  <h4 className="font-bold text-xs uppercase tracking-wider text-primary-600 dark:text-primary-400">Role Security & Compliance Settings</h4>
+                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Configure device login constraints, NISM certification enforcement, and 2-Step verification.</p>
                                 </div>
+
+                                {/* Multi-Device Login */}
                                 <div className="flex items-center justify-between">
                                   <div className="pr-4">
                                     <p className="text-sm font-semibold">Allow Multi-Device Login</p>
@@ -12561,6 +13696,92 @@ function AdminDashboardContent() {
                                     />
                                     <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-primary-500"></div>
                                   </label>
+                                </div>
+
+                                {/* NISM Requirement Toggle */}
+                                <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-800/60 pt-4">
+                                  <div className="pr-4">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-semibold">Require NISM Certification</p>
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${selectedRole.requiresNism ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'}`}>
+                                        {selectedRole.requiresNism ? 'Required' : 'Not Required'}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-0.5">When enabled, staff assigned this role must submit NISM certificate number, validity date, and document upload.</p>
+                                  </div>
+                                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                    <input
+                                      type="checkbox"
+                                      className="sr-only peer"
+                                      checked={!!selectedRole.requiresNism}
+                                      onChange={async (e) => {
+                                        const newValue = e.target.checked;
+                                        const prevValue = selectedRole.requiresNism;
+                                        setSelectedRole({ ...selectedRole, requiresNism: newValue });
+                                        try {
+                                          const res = await api.updateRole(selectedRole.id, { requiresNism: newValue });
+                                          if (res.success) {
+                                            toast.success(`NISM certification requirement ${newValue ? 'enabled' : 'disabled'} for ${selectedRole.name}.`);
+                                            const rReq = await api.getRoles();
+                                            if (rReq.success) {
+                                              setRoles(rReq.data);
+                                              const updated = rReq.data.find((r: any) => r.id === selectedRole.id);
+                                              if (updated) setSelectedRole(updated);
+                                            }
+                                            loadData();
+                                          } else {
+                                            setSelectedRole({ ...selectedRole, requiresNism: prevValue });
+                                          }
+                                        } catch {
+                                          setSelectedRole({ ...selectedRole, requiresNism: prevValue });
+                                        }
+                                      }}
+                                    />
+                                    <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-amber-500"></div>
+                                  </label>
+                                </div>
+
+                                {/* Two-Step Verification (2FA) */}
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-t border-slate-200 dark:border-slate-800/60 pt-4 gap-3">
+                                  <div className="pr-4">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-semibold">Two-Step Verification (2FA)</p>
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${selectedRole.twoFactorAuth && selectedRole.twoFactorAuth !== 'DISABLED' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'}`}>
+                                        {selectedRole.twoFactorAuth || 'DISABLED'}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-0.5">Control whether staff/admin in this role must verify an OTP upon login.</p>
+                                  </div>
+                                  <select
+                                    value={selectedRole.twoFactorAuth || 'DISABLED'}
+                                    onChange={async (e) => {
+                                      const newValue = e.target.value as any;
+                                      const prevValue = selectedRole.twoFactorAuth;
+                                      setSelectedRole({ ...selectedRole, twoFactorAuth: newValue });
+                                      try {
+                                        const res = await api.updateRole(selectedRole.id, { twoFactorAuth: newValue });
+                                        if (res.success) {
+                                          toast.success(`Two-step verification set to ${newValue} for ${selectedRole.name}.`);
+                                          const rReq = await api.getRoles();
+                                          if (rReq.success) {
+                                            setRoles(rReq.data);
+                                            const updated = rReq.data.find((r: any) => r.id === selectedRole.id);
+                                            if (updated) setSelectedRole(updated);
+                                          }
+                                        } else {
+                                          setSelectedRole({ ...selectedRole, twoFactorAuth: prevValue });
+                                        }
+                                      } catch {
+                                        setSelectedRole({ ...selectedRole, twoFactorAuth: prevValue });
+                                      }
+                                    }}
+                                    className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-white shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="DISABLED">Disabled (Direct Login)</option>
+                                    <option value="EMAIL_OTP">Email OTP Verification</option>
+                                    <option value="SMS_OTP">Mobile SMS OTP Verification</option>
+                                    <option value="BOTH">Both (Email & SMS OTP)</option>
+                                  </select>
                                 </div>
                               </div>
 
@@ -12862,6 +14083,38 @@ function AdminDashboardContent() {
                             placeholder="Describe role responsibilities..."
                           />
                         </div>
+
+                        {/* NISM Requirement */}
+                        <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-white/10 rounded-xl">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Require NISM Certification</span>
+                            <span className="text-[11px] text-slate-500 block">Mandates NISM certificate & doc upload for staff</span>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={newRoleRequiresNism}
+                              onChange={e => setNewRoleRequiresNism(e.target.checked)}
+                            />
+                            <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-primary-500"></div>
+                          </label>
+                        </div>
+
+                        {/* Two-Step Verification */}
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Two-Step Verification (2FA)</label>
+                          <select
+                            value={newRoleTwoFactorAuth}
+                            onChange={e => setNewRoleTwoFactorAuth(e.target.value as any)}
+                            className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3.5 text-sm"
+                          >
+                            <option value="DISABLED">Disabled (Direct login with Username & Password)</option>
+                            <option value="EMAIL_OTP">Email OTP (Send OTP to registered email)</option>
+                            <option value="SMS_OTP">Mobile SMS OTP (Send OTP to registered mobile)</option>
+                            <option value="BOTH">Both (Require both Email & SMS OTP)</option>
+                          </select>
+                        </div>
                       </form>
                     </div>
                     <div className="p-6 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/50 flex justify-end space-x-3">
@@ -12904,6 +14157,38 @@ function AdminDashboardContent() {
                             className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm min-h-[80px]"
                             placeholder="Describe role responsibilities..."
                           />
+                        </div>
+
+                        {/* NISM Requirement */}
+                        <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-white/10 rounded-xl">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Require NISM Certification</span>
+                            <span className="text-[11px] text-slate-500 block">Mandates NISM certificate & doc upload for staff</span>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={editRoleRequiresNism}
+                              onChange={e => setEditRoleRequiresNism(e.target.checked)}
+                            />
+                            <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-primary-500"></div>
+                          </label>
+                        </div>
+
+                        {/* Two-Step Verification */}
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Two-Step Verification (2FA)</label>
+                          <select
+                            value={editRoleTwoFactorAuth}
+                            onChange={e => setEditRoleTwoFactorAuth(e.target.value as any)}
+                            className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3.5 text-sm"
+                          >
+                            <option value="DISABLED">Disabled (Direct login with Username & Password)</option>
+                            <option value="EMAIL_OTP">Email OTP (Send OTP to registered email)</option>
+                            <option value="SMS_OTP">Mobile SMS OTP (Send OTP to registered mobile)</option>
+                            <option value="BOTH">Both (Require both Email & SMS OTP)</option>
+                          </select>
                         </div>
                       </form>
                     </div>
@@ -14093,7 +15378,7 @@ function AdminDashboardContent() {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wider">Client PAN</label>
-                        <input type="text" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500" />
+                        <input type="text" maxLength={10} placeholder="ABCDE1234F" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 uppercase font-mono" />
                       </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

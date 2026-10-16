@@ -277,6 +277,8 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
   const [dscPinError, setDscPinError] = useState('');
   const [selectedPlacement, setSelectedPlacement] = useState<'BOTTOM_RIGHT' | 'BOTTOM_CENTER' | 'BOTTOM_LEFT'>('BOTTOM_RIGHT');
   const [selectedScope, setSelectedScope] = useState<'ALL_PAGES' | 'LAST_PAGE'>('ALL_PAGES');
+  const [dscSignerName, setDscSignerName] = useState('');
+  const [detectedCertificates, setDetectedCertificates] = useState<string[]>([]);
 
   // Load Researcher Signature Settings
   useEffect(() => {
@@ -577,16 +579,25 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
     setCheckingDscBridge(true);
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch('http://127.0.0.1:1620/ping', {
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch('http://127.0.0.1:1620/token-status', {
         method: 'GET',
         signal: controller.signal
       });
       clearTimeout(timeoutId);
       if (res.ok) {
+        const data = await res.json();
         setDscBridgeConnected(true);
         setDscPin('');
         setDscPinError('');
+        const certList: string[] = Array.isArray(data.certificates) ? data.certificates : [];
+        setDetectedCertificates(certList);
+        const autoName = data.detectedSignerName || certList[0] || '';
+        if (autoName) {
+          setDscSignerName(autoName);
+        } else if (!dscSignerName) {
+          setDscSignerName(user?.tenant?.ownerName || user?.tenant?.companyName || 'Authorized Signatory');
+        }
         setShowDscModal(true);
       } else {
         setDscBridgeConnected(false);
@@ -633,7 +644,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
           pin: dscPin,
           placement: selectedPlacement,
           signScope: selectedScope,
-          signerName: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Research Analyst',
+          signerName: dscSignerName.trim() || 'SEBI Research Analyst',
           reason: 'SEBI Research Report Digital Signature',
           location: user?.tenant?.city || 'India'
         })
@@ -1038,6 +1049,49 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 font-bold">
                     Connected
                   </span>
+                </div>
+
+                {/* Signer Name Field */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                      Signer Name (As per DSC Token)<span className="text-red-600 ml-1">*</span>
+                    </label>
+                    {detectedCertificates.length > 0 && (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" /> Auto-detected from Token
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={dscSignerName}
+                    onChange={(e) => setDscSignerName(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl p-3 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 font-bold"
+                    placeholder="e.g. Afzaal Khan"
+                  />
+                  {detectedCertificates.length > 1 && (
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-slate-400">Available certs:</span>
+                      {detectedCertificates.map((cert) => (
+                        <button
+                          key={cert}
+                          type="button"
+                          onClick={() => setDscSignerName(cert)}
+                          className={`text-[10px] px-2 py-0.5 rounded-full border transition font-semibold ${
+                            dscSignerName === cert
+                              ? 'bg-amber-500 text-white border-amber-600'
+                              : 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border-transparent hover:bg-amber-100'
+                          }`}
+                        >
+                          {cert}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                    This exact name will be stamped on the &quot;Digitally Signed by:&quot; seal on the PDF.
+                  </p>
                 </div>
 
                 <div>
