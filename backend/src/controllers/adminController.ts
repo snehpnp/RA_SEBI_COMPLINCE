@@ -1785,63 +1785,88 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
     let finalPan = pan;
     let finalAadhaar = aadhaar;
 
-    if (finalEmail && finalEmail.includes('*')) finalEmail = clientUser.email;
-    if (finalMobile && finalMobile.includes('*')) finalMobile = clientUser.mobile;
+    if (finalEmail && finalEmail.includes('*')) finalEmail = clientUser?.email || client?.email;
+    if (finalMobile && finalMobile.includes('*')) finalMobile = clientUser?.mobile || client?.mobile;
     if (finalPan && finalPan.includes('XXXX')) finalPan = client?.pan || '';
     if (finalAadhaar && finalAadhaar.includes('XXXX')) finalAadhaar = client?.aadhaar || '';
 
-    if (!name || name.trim().length < 2 || !/^[a-zA-Z\s\.]+$/.test(name)) {
-      return res.status(400).json({ success: false, message: 'Client name must contain only letters, dots, and spaces (min 2 chars).' });
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!finalEmail || !emailRegex.test(finalEmail)) {
-      return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
-    }
-    const mobileRegex = /^[0-9]{10}$/;
-    if (!finalMobile || !mobileRegex.test(finalMobile)) {
-      return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
-    }
-    if (finalPan && finalPan !== 'N/A' && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(finalPan)) {
-      return res.status(400).json({ success: false, message: 'Please enter a valid 10-character PAN.' });
-    }
-    if (finalAadhaar && finalAadhaar !== 'N/A' && !/^[0-9]{12}$/.test(finalAadhaar)) {
-      return res.status(400).json({ success: false, message: 'Please enter a valid 12-digit Aadhaar number.' });
+    // Validate name if provided
+    if (name !== undefined) {
+      if (!name || name.trim().length < 2 || !/^[a-zA-Z\s\.]+$/.test(name.trim())) {
+        return res.status(400).json({ success: false, message: 'Client name must contain only letters, dots, and spaces (min 2 chars).' });
+      }
     }
 
-    const existingEmail = await dynamicDb.User.findOne({ email: finalEmail, _id: { $ne: clientUser._id } }).lean();
-    if (existingEmail) {
-      return res.status(400).json({ success: false, message: 'Email already in use by another user.' });
+    // Validate email if provided
+    if (email !== undefined) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!finalEmail || !emailRegex.test(finalEmail)) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+      }
+      if (clientUser?._id && finalEmail !== clientUser.email) {
+        const existingEmail = await dynamicDb.User.findOne({ email: finalEmail, _id: { $ne: clientUser._id } }).lean();
+        if (existingEmail) {
+          return res.status(400).json({ success: false, message: 'Email already in use by another user.' });
+        }
+      }
     }
 
-    const existingMobile = await dynamicDb.User.findOne({ mobile: finalMobile, _id: { $ne: clientUser._id } }).lean();
-    if (existingMobile) {
-      return res.status(400).json({ success: false, message: 'Mobile number already in use by another user.' });
+    // Validate mobile if provided
+    if (mobile !== undefined) {
+      const mobileRegex = /^[0-9]{10}$/;
+      if (!finalMobile || !mobileRegex.test(finalMobile)) {
+        return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
+      }
+      if (clientUser?._id && finalMobile !== clientUser.mobile) {
+        const existingMobile = await dynamicDb.User.findOne({ mobile: finalMobile, _id: { $ne: clientUser._id } }).lean();
+        if (existingMobile) {
+          return res.status(400).json({ success: false, message: 'Mobile number already in use by another user.' });
+        }
+      }
     }
 
-    if (finalPan && finalPan !== 'N/A') {
+    // Validate PAN if provided
+    if (pan !== undefined && finalPan && finalPan !== 'N/A') {
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(finalPan)) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid 10-character PAN.' });
+      }
       const existingPan = await dynamicDb.Client.findOne({ pan: finalPan, _id: { $ne: actualClientId } }).lean();
       if (existingPan) {
         return res.status(400).json({ success: false, message: 'PAN already in use by another client.' });
       }
     }
 
-    if (finalAadhaar && finalAadhaar !== 'N/A') {
+    // Validate Aadhaar if provided
+    if (aadhaar !== undefined && finalAadhaar && finalAadhaar !== 'N/A') {
+      if (!/^[0-9]{12}$/.test(finalAadhaar)) {
+        return res.status(400).json({ success: false, message: 'Please enter a valid 12-digit Aadhaar number.' });
+      }
       const existingAadhaar = await dynamicDb.Client.findOne({ aadhaar: finalAadhaar, _id: { $ne: actualClientId } }).lean();
       if (existingAadhaar) {
         return res.status(400).json({ success: false, message: 'Aadhaar number already in use by another client.' });
       }
     }
 
-    await dynamicDb.User.findByIdAndUpdate(clientUser._id, {
-      $set: {
-        firstName: name.split(' ')[0],
-        lastName: name.split(' ').slice(1).join(' ') || 'Client',
-        email: finalEmail,
-        mobile: finalMobile
+    // Update User if user fields were supplied
+    if (clientUser?._id) {
+      const userUpdate: any = {};
+      if (name !== undefined) {
+        const trimmed = name.trim();
+        userUpdate.firstName = trimmed.split(' ')[0];
+        userUpdate.lastName = trimmed.split(' ').slice(1).join(' ') || 'Client';
       }
-    });
+      if (email !== undefined && finalEmail) {
+        userUpdate.email = finalEmail;
+      }
+      if (mobile !== undefined && finalMobile) {
+        userUpdate.mobile = finalMobile;
+      }
+      if (Object.keys(userUpdate).length > 0) {
+        await dynamicDb.User.findByIdAndUpdate(clientUser._id, { $set: userUpdate });
+      }
+    }
 
-    if (client && finalPan && finalPan !== client.pan) {
+    if (client && pan !== undefined && finalPan && finalPan !== client.pan) {
       await dynamicDb.ClientIdentityHistory.create({
         clientId: actualClientId,
         fieldName: 'PAN',
@@ -1852,7 +1877,7 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
 
-    if (client && finalAadhaar && finalAadhaar !== client.aadhaar) {
+    if (client && aadhaar !== undefined && finalAadhaar && finalAadhaar !== client.aadhaar) {
       await dynamicDb.ClientIdentityHistory.create({
         clientId: actualClientId,
         fieldName: 'AADHAAR',
@@ -1863,34 +1888,51 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
 
-    const updatedClient = await dynamicDb.Client.findByIdAndUpdate(
-      actualClientId,
-      {
-        $set: {
-          name,
-          email: finalEmail,
-          mobile: finalMobile,
-          pan: finalPan,
-          aadhaar: finalAadhaar,
-          category: category || 'INDIVIDUAL',
-          occupation,
-          ...(isTelegramTradeEnabled !== undefined ? { isTelegramTradeEnabled: isTelegramTradeEnabled === true || isTelegramTradeEnabled === 'true' } : {}),
-          ...(isSmsTradeEnabled !== undefined ? { isSmsTradeEnabled: isSmsTradeEnabled === true || isSmsTradeEnabled === 'true' } : {}),
-          ...(telegramChatId !== undefined ? { telegramChatId: telegramChatId ? String(telegramChatId).trim() : null } : {}),
-          ...(telegramUsername !== undefined ? { telegramUsername: telegramUsername ? String(telegramUsername).trim().replace(/^@/, '') : null } : {})
-        }
-      },
-      { returnDocument: 'after', lean: true }
-    );
+    const clientUpdate: any = {};
+    if (name !== undefined) clientUpdate.name = name.trim();
+    if (email !== undefined && finalEmail) clientUpdate.email = finalEmail;
+    if (mobile !== undefined && finalMobile) clientUpdate.mobile = finalMobile;
+    if (pan !== undefined) clientUpdate.pan = finalPan;
+    if (aadhaar !== undefined) clientUpdate.aadhaar = finalAadhaar;
+    if (category !== undefined) clientUpdate.category = category || 'INDIVIDUAL';
+    if (occupation !== undefined) clientUpdate.occupation = occupation;
+    if (isTelegramTradeEnabled !== undefined) {
+      clientUpdate.isTelegramTradeEnabled = isTelegramTradeEnabled === true || isTelegramTradeEnabled === 'true';
+    }
+    if (isSmsTradeEnabled !== undefined) {
+      clientUpdate.isSmsTradeEnabled = isSmsTradeEnabled === true || isSmsTradeEnabled === 'true';
+    }
+    if (telegramChatId !== undefined) {
+      clientUpdate.telegramChatId = telegramChatId ? String(telegramChatId).trim() : null;
+    }
+    if (telegramUsername !== undefined) {
+      clientUpdate.telegramUsername = telegramUsername ? String(telegramUsername).trim().replace(/^@/, '') : null;
+    }
 
-    await dynamicDb.ClientProfile.findOneAndUpdate(
-      { clientId: actualClientId },
-      {
-        $set: { addressLine1, city, state, zipCode },
-        $setOnInsert: { clientId: actualClientId, country: 'India' }
-      },
-      { upsert: true, returnDocument: 'after' }
-    );
+    if (Object.keys(clientUpdate).length > 0) {
+      await dynamicDb.Client.findByIdAndUpdate(
+        actualClientId,
+        { $set: clientUpdate },
+        { returnDocument: 'after', lean: true }
+      );
+    }
+
+    if (addressLine1 !== undefined || city !== undefined || state !== undefined || zipCode !== undefined) {
+      const profileUpdate: any = {};
+      if (addressLine1 !== undefined) profileUpdate.addressLine1 = addressLine1;
+      if (city !== undefined) profileUpdate.city = city;
+      if (state !== undefined) profileUpdate.state = state;
+      if (zipCode !== undefined) profileUpdate.zipCode = zipCode;
+
+      await dynamicDb.ClientProfile.findOneAndUpdate(
+        { clientId: actualClientId },
+        {
+          $set: profileUpdate,
+          $setOnInsert: { clientId: actualClientId, country: 'India' }
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+    }
 
     const newClientVal: any = await dynamicDb.Client.findById(actualClientId).lean();
     const newClientProfile = await dynamicDb.ClientProfile.findOne({ clientId: actualClientId }).lean();
@@ -1908,7 +1950,8 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
     return res.status(200).json({
       success: true,
       message: 'Client updated successfully',
-      data: { ...newClientVal, profile: newClientProfile }
+      data: { ...newClientVal, profile: newClientProfile },
+      client: { ...newClientVal, profile: newClientProfile }
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
