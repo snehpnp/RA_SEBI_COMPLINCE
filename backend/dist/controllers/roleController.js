@@ -42,6 +42,8 @@ const getRoles = async (req, res) => {
                 name: role.name,
                 description: role.description,
                 allowMultiDeviceLogin: role.allowMultiDeviceLogin || false,
+                requiresNism: role.requiresNism || false,
+                twoFactorAuth: role.twoFactorAuth || 'DISABLED',
                 permissions: permMap.get(idStr) || [],
                 isAssigned: (userCountMap.get(idStr) || 0) > 0
             };
@@ -61,7 +63,7 @@ const getRoles = async (req, res) => {
 };
 exports.getRoles = getRoles;
 const createRole = async (req, res) => {
-    const { name, description } = req.body;
+    const { name, description, requiresNism, twoFactorAuth } = req.body;
     if (!name || name.trim().length < 2) {
         return res.status(400).json({
             success: false,
@@ -82,7 +84,9 @@ const createRole = async (req, res) => {
         }
         const newRole = await db_1.default.Role.create({
             name: formattedName,
-            description
+            description,
+            requiresNism: !!requiresNism,
+            twoFactorAuth: ['DISABLED', 'EMAIL_OTP', 'SMS_OTP', 'BOTH'].includes(twoFactorAuth) ? twoFactorAuth : 'DISABLED'
         });
         await (0, auditService_1.logAudit)({
             tenantId: req.user?.tenantId,
@@ -100,6 +104,8 @@ const createRole = async (req, res) => {
                 id: String(newRole._id || newRole.id),
                 name: newRole.name,
                 description: newRole.description,
+                requiresNism: newRole.requiresNism || false,
+                twoFactorAuth: newRole.twoFactorAuth || 'DISABLED',
                 permissions: []
             }
         });
@@ -188,7 +194,7 @@ const updateRolePermissions = async (req, res) => {
 exports.updateRolePermissions = updateRolePermissions;
 const updateRole = async (req, res) => {
     const { id } = req.params;
-    const { name, description, allowMultiDeviceLogin } = req.body;
+    const { name, description, allowMultiDeviceLogin, requiresNism, twoFactorAuth } = req.body;
     try {
         const role = await db_1.default.Role.findById(id);
         if (!role) {
@@ -197,6 +203,14 @@ const updateRole = async (req, res) => {
         const dataToUpdate = {};
         if (allowMultiDeviceLogin !== undefined) {
             dataToUpdate.allowMultiDeviceLogin = allowMultiDeviceLogin;
+        }
+        if (requiresNism !== undefined) {
+            dataToUpdate.requiresNism = !!requiresNism;
+        }
+        if (twoFactorAuth !== undefined) {
+            if (['DISABLED', 'EMAIL_OTP', 'SMS_OTP', 'BOTH'].includes(twoFactorAuth)) {
+                dataToUpdate.twoFactorAuth = twoFactorAuth;
+            }
         }
         if (name) {
             if (name.trim().length < 2) {

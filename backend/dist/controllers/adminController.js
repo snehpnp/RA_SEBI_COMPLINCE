@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = void 0;
+exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -489,56 +489,60 @@ const createStaff = async (req, res) => {
     if (!tenantId) {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
-    // VALIDATIONS
-    const cleanUsername = String(username || '').trim().toLowerCase();
-    if (!cleanUsername || cleanUsername.length < 3) {
-        return res.status(400).json({ success: false, message: 'Staff username is required and must be at least 3 characters.' });
-    }
-    if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
-        return res.status(400).json({ success: false, message: 'Staff username can only contain letters, numbers, dots, hyphens, and underscores.' });
-    }
-    if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
-        return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email || !emailRegex.test(email)) {
-        return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
-    }
-    const mobileRegex = /^[0-9]{10}$/;
-    if (!mobile || !mobileRegex.test(mobile)) {
-        return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
-    }
-    const effectivePersonAssociatedType = roleName === 'OTHER' ? 'OTHER' : personAssociatedType;
-    let effectiveRoleName = roleName === 'OTHER' ? 'PERSON_ASSOCIATED' : roleName;
-    if (effectiveRoleName === 'PERSON_ASSOCIATED') {
-        if (effectivePersonAssociatedType === 'SALES')
-            effectiveRoleName = 'SALES';
-        else if (effectivePersonAssociatedType === 'MARKETING')
-            effectiveRoleName = 'MARKETING';
-    }
-    const isOther = effectivePersonAssociatedType === 'OTHER';
-    if (!isOther) {
-        if (!nismNumber || nismNumber.trim().length < 5) {
-            return res.status(400).json({ success: false, message: 'NISM Registration Number is required and must be at least 5 characters.' });
+    try {
+        // VALIDATIONS
+        const cleanUsername = String(username || '').trim().toLowerCase();
+        if (!cleanUsername || cleanUsername.length < 2) {
+            return res.status(400).json({ success: false, message: 'Staff username is required and must be at least 2 characters.' });
         }
-        if (!nismValidity || new Date(nismValidity) <= new Date()) {
-            return res.status(400).json({ success: false, message: 'NISM validity expiry date is required and must be in the future.' });
+        if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+            return res.status(400).json({ success: false, message: 'Staff username can only contain letters, numbers, dots, hyphens, and underscores.' });
         }
-        if (!req.file) {
-            return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory.' });
+        if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
+            return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
         }
-    }
-    else {
-        if (nismNumber && nismNumber.trim().length > 0) {
-            if (nismNumber.trim().length < 5) {
-                return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email || !emailRegex.test(email)) {
+            return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+        }
+        const mobileRegex = /^[0-9]{10}$/;
+        if (!mobile || !mobileRegex.test(mobile)) {
+            return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
+        }
+        const effectivePersonAssociatedType = roleName === 'OTHER' ? 'OTHER' : personAssociatedType;
+        let effectiveRoleName = roleName === 'OTHER' ? 'PERSON_ASSOCIATED' : roleName;
+        if (effectiveRoleName === 'PERSON_ASSOCIATED') {
+            if (effectivePersonAssociatedType === 'SALES')
+                effectiveRoleName = 'SALES';
+            else if (effectivePersonAssociatedType === 'MARKETING')
+                effectiveRoleName = 'MARKETING';
+        }
+        const targetRole = await db_1.default.Role.findOne({ name: effectiveRoleName }).lean();
+        if (!targetRole) {
+            return res.status(400).json({ success: false, message: `Role '${effectiveRoleName}' not found.` });
+        }
+        const roleRequiresNism = targetRole.requiresNism === true;
+        if (roleRequiresNism) {
+            if (!nismNumber || nismNumber.trim().length < 5) {
+                return res.status(400).json({ success: false, message: `NISM Registration Number is mandatory for role '${effectiveRoleName}' (min 5 characters).` });
             }
             if (!nismValidity || new Date(nismValidity) <= new Date()) {
-                return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
+                return res.status(400).json({ success: false, message: 'Valid future NISM expiry date is mandatory for this role.' });
+            }
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory for this role.' });
             }
         }
-    }
-    try {
+        else {
+            if (nismNumber && nismNumber.trim().length > 0) {
+                if (nismNumber.trim().length < 5) {
+                    return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
+                }
+                if (!nismValidity || new Date(nismValidity) <= new Date()) {
+                    return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
+                }
+            }
+        }
         if (nismNumber && nismNumber.trim().length > 0) {
             const existingNism = await db_1.default.Staff.findOne({
                 nismNumber: nismNumber.trim()
@@ -559,10 +563,6 @@ const createStaff = async (req, res) => {
         if (centralExisting) {
             return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose a different username.` });
         }
-        const targetRole = await db_1.default.Role.findOne({ name: effectiveRoleName }).lean();
-        if (!targetRole) {
-            return res.status(400).json({ success: false, message: `Role '${effectiveRoleName}' not found.` });
-        }
         const randomPassword = 'Staff@' + Math.floor(1000 + Math.random() * 9000);
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(randomPassword, salt);
@@ -575,6 +575,7 @@ const createStaff = async (req, res) => {
             email,
             mobile,
             passwordHash,
+            tempPassword: randomPassword,
             status: 'ACTIVE'
         });
         const staff = await db_1.default.Staff.create({
@@ -586,7 +587,7 @@ const createStaff = async (req, res) => {
             mobile,
             dob: dob ? new Date(dob) : null,
             joiningDate: joiningDate ? new Date(joiningDate) : null,
-            nismNumber,
+            nismNumber: roleRequiresNism || nismNumber ? nismNumber : null,
             nismUpload: req.file ? `/uploads/staff/${req.file.filename}` : null,
             nismValidity: nismValidity ? new Date(nismValidity) : null,
             status: 'ACTIVE'
@@ -627,6 +628,7 @@ const createStaff = async (req, res) => {
                 tenantId,
                 toEmail: email,
                 name,
+                username: cleanUsername,
                 password: randomPassword,
                 role: roleName,
                 loginUrl,
@@ -698,50 +700,27 @@ const updateStaff = async (req, res) => {
     if (!tenantId) {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
-    // VALIDATIONS
-    if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
-        return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!email || !emailRegex.test(email)) {
-        return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
-    }
-    const mobileRegex = /^[0-9]{10}$/;
-    if (!mobile || !mobileRegex.test(mobile)) {
-        return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
-    }
-    const effectivePersonAssociatedType = roleName === 'OTHER' ? 'OTHER' : personAssociatedType;
-    let effectiveRoleName = roleName === 'OTHER' ? 'PERSON_ASSOCIATED' : roleName;
-    if (effectiveRoleName === 'PERSON_ASSOCIATED') {
-        if (effectivePersonAssociatedType === 'SALES')
-            effectiveRoleName = 'SALES';
-        else if (effectivePersonAssociatedType === 'MARKETING')
-            effectiveRoleName = 'MARKETING';
-    }
-    const isOther = effectivePersonAssociatedType === 'OTHER';
-    if (!isOther) {
-        if (!nismNumber || nismNumber.trim().length < 5) {
-            return res.status(400).json({ success: false, message: 'NISM Registration Number is required and must be at least 5 characters.' });
-        }
-        if (!nismValidity || new Date(nismValidity) <= new Date()) {
-            return res.status(400).json({ success: false, message: 'NISM validity expiry date is required and must be in the future.' });
-        }
-        const currentStaff = await db_1.default.Staff.findById(id).lean();
-        if (!currentStaff?.nismUpload && !req.file) {
-            return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory.' });
-        }
-    }
-    else {
-        if (nismNumber && nismNumber.trim().length > 0) {
-            if (nismNumber.trim().length < 5) {
-                return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
-            }
-            if (!nismValidity || new Date(nismValidity) <= new Date()) {
-                return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
-            }
-        }
-    }
     try {
+        // VALIDATIONS
+        if (!name || name.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(name)) {
+            return res.status(400).json({ success: false, message: 'Staff name must contain only letters and spaces (min 2 chars).' });
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email || !emailRegex.test(email)) {
+            return res.status(400).json({ success: false, message: 'Please enter a valid email address.' });
+        }
+        const mobileRegex = /^[0-9]{10}$/;
+        if (!mobile || !mobileRegex.test(mobile)) {
+            return res.status(400).json({ success: false, message: 'Mobile number must be a valid 10-digit number.' });
+        }
+        const effectivePersonAssociatedType = roleName === 'OTHER' ? 'OTHER' : personAssociatedType;
+        let effectiveRoleName = roleName === 'OTHER' ? 'PERSON_ASSOCIATED' : roleName;
+        if (effectiveRoleName === 'PERSON_ASSOCIATED') {
+            if (effectivePersonAssociatedType === 'SALES')
+                effectiveRoleName = 'SALES';
+            else if (effectivePersonAssociatedType === 'MARKETING')
+                effectiveRoleName = 'MARKETING';
+        }
         let staff = null;
         if (mongoose_1.default.Types.ObjectId.isValid(id)) {
             staff = await db_1.default.Staff.findById(id).lean();
@@ -757,6 +736,29 @@ const updateStaff = async (req, res) => {
         }
         if (!staff) {
             return res.status(404).json({ success: false, message: 'Staff member not found.' });
+        }
+        const targetRole = await db_1.default.Role.findOne({ name: effectiveRoleName }).lean();
+        const roleRequiresNism = targetRole?.requiresNism === true;
+        if (roleRequiresNism) {
+            if (!nismNumber || nismNumber.trim().length < 5) {
+                return res.status(400).json({ success: false, message: `NISM Registration Number is mandatory for role '${effectiveRoleName}' (min 5 characters).` });
+            }
+            if (!nismValidity || new Date(nismValidity) <= new Date()) {
+                return res.status(400).json({ success: false, message: 'Valid future NISM expiry date is mandatory for this role.' });
+            }
+            if (!staff.nismUpload && !req.file) {
+                return res.status(400).json({ success: false, message: 'NISM Certificate document upload is mandatory for this role.' });
+            }
+        }
+        else {
+            if (nismNumber && nismNumber.trim().length > 0) {
+                if (nismNumber.trim().length < 5) {
+                    return res.status(400).json({ success: false, message: 'NISM Registration Number must be at least 5 characters.' });
+                }
+                if (!nismValidity || new Date(nismValidity) <= new Date()) {
+                    return res.status(400).json({ success: false, message: 'NISM validity expiry date must be in the future.' });
+                }
+            }
         }
         const staffId = staff._id;
         let staffUser = null;
@@ -778,7 +780,6 @@ const updateStaff = async (req, res) => {
                 return res.status(400).json({ success: false, message: 'Duplicate NISM Certificate Number. This number is already in use.' });
             }
         }
-        const targetRole = await db_1.default.Role.findOne({ name: effectiveRoleName }).lean();
         const updateUserData = {
             firstName: name.split(' ')[0],
             lastName: name.split(' ').slice(1).join(' ') || 'Staff',
@@ -789,20 +790,6 @@ const updateStaff = async (req, res) => {
             updateUserData.roleId = targetRole._id || targetRole.id;
         }
         const targetUserId = staff.userId || staffUser?._id;
-        if (username) {
-            const cleanUsername = String(username).trim().toLowerCase();
-            if (cleanUsername.length < 3 || !/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
-                return res.status(400).json({ success: false, message: 'Username must be at least 3 characters and contain only letters, numbers, dots, hyphens, and underscores.' });
-            }
-            const existingWithUsername = await db_1.default.User.findOne({
-                username: { $regex: new RegExp(`^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-                ...(targetUserId ? { _id: { $ne: targetUserId } } : {})
-            }).lean();
-            if (existingWithUsername) {
-                return res.status(400).json({ success: false, message: `Username '${cleanUsername}' is already taken. Please choose another.` });
-            }
-            updateUserData.username = cleanUsername;
-        }
         if (targetUserId) {
             await db_1.default.User.findByIdAndUpdate(targetUserId, { $set: updateUserData });
         }
@@ -812,9 +799,8 @@ const updateStaff = async (req, res) => {
             mobile,
             dob: dob ? new Date(dob) : null,
             joiningDate: joiningDate ? new Date(joiningDate) : null,
-            nismNumber,
+            nismNumber: roleRequiresNism || nismNumber ? nismNumber : null,
             nismValidity: nismValidity ? new Date(nismValidity) : null,
-            ...(updateUserData.username ? { username: updateUserData.username } : {}),
             ...(targetUserId ? { userId: targetUserId } : {})
         };
         if (req.file) {
@@ -1009,6 +995,121 @@ const restoreStaff = async (req, res) => {
     }
 };
 exports.restoreStaff = restoreStaff;
+const getStaffPassword = async (req, res) => {
+    const { id } = req.params;
+    const callerRole = req.user?.role;
+    if (callerRole !== 'ADMIN' && callerRole !== 'SUPER_ADMIN') {
+        return res.status(403).json({ success: false, message: 'Access denied: Only Administrators can view staff passwords.' });
+    }
+    try {
+        let staff = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+        }
+        if (!staff) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+                    { employeeId: id }
+                ]
+            }).lean();
+        }
+        if (!staff) {
+            return res.status(404).json({ success: false, message: 'Staff member not found.' });
+        }
+        let user = null;
+        if (staff.userId) {
+            user = await db_1.default.User.findById(staff.userId).lean();
+        }
+        if (!user && staff.email) {
+            user = await db_1.default.User.findOne({ email: staff.email }).lean();
+        }
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Associated login account not found.' });
+        }
+        return res.status(200).json({
+            success: true,
+            data: {
+                username: user.username || staff.username || (user.email ? user.email.split('@')[0] : null),
+                email: user.email,
+                password: user.tempPassword || null
+            }
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, errors: [error.message] });
+    }
+};
+exports.getStaffPassword = getStaffPassword;
+const resendStaffCredentials = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    const { id } = req.params;
+    const callerRole = req.user?.role;
+    if (callerRole !== 'ADMIN' && callerRole !== 'SUPER_ADMIN') {
+        return res.status(403).json({ success: false, message: 'Access denied: Only Administrators can resend staff credentials.' });
+    }
+    try {
+        let staff = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+        }
+        if (!staff) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [
+                    ...(mongoose_1.default.Types.ObjectId.isValid(id) ? [{ userId: id }] : []),
+                    { employeeId: id }
+                ]
+            }).lean();
+        }
+        if (!staff) {
+            return res.status(404).json({ success: false, message: 'Staff member not found.' });
+        }
+        let user = null;
+        if (staff.userId) {
+            user = await db_1.default.User.findById(staff.userId);
+        }
+        if (!user && staff.email) {
+            user = await db_1.default.User.findOne({ email: staff.email });
+        }
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Associated login account not found.' });
+        }
+        let passwordToSend = user.tempPassword;
+        if (!passwordToSend) {
+            passwordToSend = 'Staff@' + Math.floor(1000 + Math.random() * 9000);
+            const salt = await bcrypt.genSalt(10);
+            const passwordHash = await bcrypt.hash(passwordToSend, salt);
+            user.passwordHash = passwordHash;
+            user.tempPassword = passwordToSend;
+            await user.save();
+        }
+        const roleDoc = await db_1.default.Role.findById(user.roleId).lean();
+        const roleName = roleDoc?.name || 'STAFF';
+        const loginUrl = req.headers.origin || `${req.protocol}://${req.headers.host}`;
+        const tenant = tenantId ? await db_1.default.Tenant.findById(tenantId).lean() : null;
+        const emailSent = await (0, emailService_1.sendWelcomeEmail)({
+            tenantId: tenantId ? String(tenantId) : '',
+            toEmail: user.email,
+            name: staff.name || `${user.firstName} ${user.lastName}`,
+            username: user.username || staff.username,
+            password: passwordToSend,
+            role: roleName,
+            loginUrl,
+            companyName: tenant?.companyName || 'RAGCP Platform'
+        });
+        if (!emailSent) {
+            return res.status(500).json({ success: false, message: 'Failed to send credentials email. Please verify SMTP settings.' });
+        }
+        return res.status(200).json({
+            success: true,
+            message: `Login credentials successfully sent to staff registered email (${user.email}).`
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, errors: [error.message] });
+    }
+};
+exports.resendStaffCredentials = resendStaffCredentials;
 // =====================================================
 // CLIENT MANAGEMENT (Admin View)
 // =====================================================
@@ -1497,7 +1598,7 @@ exports.toggleClientStatus = toggleClientStatus;
 const updateClient = async (req, res) => {
     const tenantId = req.user.tenantId;
     const { id } = req.params;
-    const { name, email, mobile, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode } = req.body;
+    const { name, email, mobile, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode, isTelegramTradeEnabled, isSmsTradeEnabled, telegramChatId, telegramUsername } = req.body;
     if (!tenantId) {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
@@ -1639,7 +1740,11 @@ const updateClient = async (req, res) => {
                 pan: finalPan,
                 aadhaar: finalAadhaar,
                 category: category || 'INDIVIDUAL',
-                occupation
+                occupation,
+                ...(isTelegramTradeEnabled !== undefined ? { isTelegramTradeEnabled: isTelegramTradeEnabled === true || isTelegramTradeEnabled === 'true' } : {}),
+                ...(isSmsTradeEnabled !== undefined ? { isSmsTradeEnabled: isSmsTradeEnabled === true || isSmsTradeEnabled === 'true' } : {}),
+                ...(telegramChatId !== undefined ? { telegramChatId: telegramChatId ? String(telegramChatId).trim() : null } : {}),
+                ...(telegramUsername !== undefined ? { telegramUsername: telegramUsername ? String(telegramUsername).trim().replace(/^@/, '') : null } : {})
             }
         }, { returnDocument: 'after', lean: true });
         await db_1.default.ClientProfile.findOneAndUpdate({ clientId: actualClientId }, {
@@ -2379,7 +2484,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, camsClientCode, camsClientId, camsClientSecret, camsPoscode, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId } = req.body;
+    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, camsClientCode, camsClientId, camsClientSecret, camsPoscode, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId, telegramTradeEnabled, smsTradeEnabled, telegramBotToken, telegramBotUsername, telegramJoinRule } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2455,6 +2560,16 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.smsSenderId = smsSenderId ? smsSenderId.trim() : null;
         if (smsEntityId !== undefined)
             dataToUpdate.smsEntityId = smsEntityId ? smsEntityId.trim() : null;
+        if (telegramTradeEnabled !== undefined)
+            dataToUpdate.telegramTradeEnabled = telegramTradeEnabled === 'true' || telegramTradeEnabled === true;
+        if (smsTradeEnabled !== undefined)
+            dataToUpdate.smsTradeEnabled = smsTradeEnabled === 'true' || smsTradeEnabled === true;
+        if (telegramBotToken !== undefined)
+            dataToUpdate.telegramBotToken = telegramBotToken ? telegramBotToken.trim() : null;
+        if (telegramBotUsername !== undefined)
+            dataToUpdate.telegramBotUsername = telegramBotUsername ? telegramBotUsername.trim().replace(/^@/, '') : null;
+        if (telegramJoinRule !== undefined)
+            dataToUpdate.telegramJoinRule = ['ALL', 'KYC_AGREEMENT_VERIFIED', 'ACTIVE_PLAN_ONLY'].includes(telegramJoinRule) ? telegramJoinRule : 'ALL';
         if (themeColor)
             dataToUpdate.themeColor = themeColor;
         if (companyName)

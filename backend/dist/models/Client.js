@@ -68,6 +68,10 @@ exports.ClientSchema = new mongoose_1.Schema({
     signedAt: { type: Date, default: null },
     videoKycStatus: { type: String, enum: ['NOT_REQUIRED', 'PENDING', 'IN_PROGRESS', 'APPROVED', 'REJECTED'], default: 'PENDING' },
     videoKycSessionId: { type: String, default: null },
+    isTelegramTradeEnabled: { type: Boolean, default: true },
+    isSmsTradeEnabled: { type: Boolean, default: true },
+    telegramChatId: { type: String, default: null },
+    telegramUsername: { type: String, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Client', autoIndex: false });
 exports.ClientSchema.index({ pan: 1 }, { unique: true, partialFilterExpression: { pan: { $type: 'string', $gt: '' } }, name: 'pan_unique_partial' });

@@ -39,7 +39,13 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.RoleSchema = new mongoose_1.Schema({
     name: { type: String, required: true, unique: true },
     description: { type: String, default: null },
-    allowMultiDeviceLogin: { type: Boolean, default: false }
+    allowMultiDeviceLogin: { type: Boolean, default: false },
+    requiresNism: { type: Boolean, default: false },
+    twoFactorAuth: {
+        type: String,
+        enum: ['DISABLED', 'EMAIL_OTP', 'SMS_OTP', 'BOTH'],
+        default: 'DISABLED'
+    }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Role' });
 // Virtual relations
 exports.RoleSchema.virtual('permissions', {

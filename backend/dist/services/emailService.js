@@ -488,7 +488,7 @@ async function sendTwoFactorLoginOtpEmail(opts) {
  * Welcome email sent to newly onboarded Staff or Client.
  */
 async function sendWelcomeEmail(opts) {
-    const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText } = opts;
+    const { tenantId, toEmail, name, username, password, role, loginUrl, companyName, customText } = opts;
     let attachments = opts.attachments || [];
     if ((!attachments || attachments.length === 0) && role === 'CLIENT' && tenantId) {
         try {
@@ -504,6 +504,7 @@ async function sendWelcomeEmail(opts) {
     const vars = {
         clientName: name,
         name,
+        username: username || toEmail,
         email: toEmail,
         temporaryPassword: password,
         password,
@@ -528,9 +529,14 @@ async function sendWelcomeEmail(opts) {
           <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; width: 38%;">Account Role</td>
           <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right; border-bottom: 1px solid #e2e8f0;">${cleanRole}</td>
         </tr>
+        ${username ? `
         <tr>
-          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Email / Login</td>
-          <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; color: #0284c7; text-align: right; border-bottom: 1px solid #e2e8f0;">${toEmail}</td>
+          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Assigned Username</td>
+          <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; font-family: monospace; color: #0284c7; text-align: right; border-bottom: 1px solid #e2e8f0;">${username}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Email Address</td>
+          <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${toEmail}</td>
         </tr>
         <tr>
           <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Temporary Password</td>

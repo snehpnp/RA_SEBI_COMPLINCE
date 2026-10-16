@@ -12,6 +12,7 @@ const superAdminController_1 = require("../controllers/superAdminController");
 const third_party_api_1 = require("../third-party-api");
 const adminController_1 = require("../controllers/adminController");
 const clientController_1 = require("../controllers/clientController");
+const telegramController_1 = require("../controllers/telegramController");
 const researchController_1 = require("../controllers/researchController");
 const complianceController_1 = require("../controllers/complianceController");
 const ticketController_1 = require("../controllers/ticketController");
@@ -40,6 +41,7 @@ const clientVaultController_1 = require("../controllers/clientVaultController");
 const faqController_1 = require("../controllers/faqController");
 const researcherSignatureController_1 = require("../controllers/researcherSignatureController");
 const videoKycController_1 = require("../controllers/videoKycController");
+const deliveryReportController_1 = require("../controllers/deliveryReportController");
 const router = (0, express_1.Router)();
 // Robust Upload Root Helper
 const getUploadRoot = () => {
@@ -162,6 +164,8 @@ router.get('/public/clients', third_party_api_1.getThirdPartyClients);
 router.get('/clients', third_party_api_1.getThirdPartyClients);
 router.post('/public/request-otp', authController_1.requestOtp);
 router.post('/public/verify-otp', authController_1.verifyOtp);
+router.post('/public/telegram/webhook/:tokenOrTenant?', telegramController_1.handleTelegramWebhook);
+router.post('/public/telegram/webhook', telegramController_1.handleTelegramWebhook);
 // ----------------------------------------------------
 // PROFILE
 // ----------------------------------------------------
@@ -307,6 +311,8 @@ router.post('/admin/staff/:id/status', auth_1.authenticateJWT, (0, auth_1.requir
 router.delete('/admin/staff/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.deleteStaff);
 router.post('/admin/staff/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.deleteStaff);
 router.post('/admin/staff/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.restoreStaff);
+router.get('/admin/staff/:id/password', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.getStaffPassword);
+router.post('/admin/staff/:id/resend-password', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.resendStaffCredentials);
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
 router.get('/admin/clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, adminController_1.getAdminClients);
@@ -390,6 +396,8 @@ router.post('/client/agreement/initiate', auth_1.authenticateJWT, (0, auth_1.req
 router.post('/client/kyc/status', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), kycController_1.updateKycAgreementStatus);
 router.get('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.getClientProfile);
 router.put('/client/profile', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.updateClientProfile);
+router.put('/client/telegram', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.updateClientTelegramPreferences);
+router.post('/client/telegram/test-ping', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.testClientTelegramPing);
 router.delete('/client/account', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.deleteClientAccount);
 router.post('/client/documents', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.single('file'), clientController_1.uploadClientDocument);
 router.post('/client/kyc/initiate-digio', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.initiateDigioKyc);
@@ -486,6 +494,12 @@ router.post('/signals', auth_1.authenticateJWT, (0, auth_1.requirePermission)('A
 router.patch('/signals/:id/close', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, signalController_1.closeSignal);
 router.post('/signals/:id/report', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), signalController_1.uploadReport);
 router.post('/signals/:id/messages', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, signalController_1.addSignalMessage);
+// TRADE SIGNAL MULTI-CHANNEL DELIVERY REPORTS
+router.get('/signals/delivery-reports/master', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.getMasterDeliveryReport);
+router.get('/signals/delivery-reports/channel/:channel', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.getChannelDeliveryReport);
+router.post('/admin/telegram/test', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.testTelegramBotConnection);
+router.post('/admin/telegram/set-webhook', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.setTelegramWebhookEndpoint);
+router.get('/admin/telegram/webhook-info', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.getTelegramWebhookStatus);
 // ----------------------------------------------------
 // RESEARCHER SIGNATURE, AADHAAR ESIGN & DSC ROUTES
 // ----------------------------------------------------

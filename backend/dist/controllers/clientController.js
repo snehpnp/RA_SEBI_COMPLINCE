@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.getRelatedTenantIds = exports.getResolvedTenant = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
+exports.testClientTelegramPing = exports.updateClientTelegramPreferences = exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.getRelatedTenantIds = exports.getResolvedTenant = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -55,6 +55,7 @@ const ccavenue_1 = require("../utils/ccavenue");
 const querystring_1 = __importDefault(require("querystring"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
+const telegramService_1 = require("../services/telegramService");
 const registerClient = async (req, res) => {
     const { tenantId: passedTenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode, createdById } = req.body;
     const authHeader = req.headers.authorization;
@@ -1538,8 +1539,10 @@ const getClientProfile = async (req, res) => {
                 gstCalculationType: tenantObj.gstCalculationType || 'EXCLUSIVE',
                 isPaymentGatewayConfigured,
                 hasDigioConfigured: Boolean(tenantObj.digioClientId && tenantObj.digioClientSecret),
-                digioEnvironment: tenantObj.digioEnvironment || 'PRODUCTION',
-                digioClientId: tenantObj.digioClientId || null
+                telegramTradeEnabled: Boolean(tenantObj.telegramTradeEnabled),
+                telegramBotUsername: tenantObj.telegramBotUsername ? String(tenantObj.telegramBotUsername).trim().replace(/^@/, '') : null,
+                telegramJoinRule: tenantObj.telegramJoinRule || 'ACTIVE_PLAN_ONLY',
+                smsTradeEnabled: Boolean(tenantObj.smsTradeEnabled)
             };
         }
         const nameParts = (client.name || '').trim().split(' ');
@@ -1547,6 +1550,11 @@ const getClientProfile = async (req, res) => {
             ...client,
             id: String(clientId),
             profile,
+            tenant: tenantFormatted,
+            isTelegramTradeEnabled: client.isTelegramTradeEnabled !== false,
+            telegramChatId: client.telegramChatId || null,
+            telegramUsername: client.telegramUsername || null,
+            isSmsTradeEnabled: client.isSmsTradeEnabled !== false,
             subscriptions: subscriptions.map((s) => ({
                 ...s,
                 id: String(s._id || s.id),
@@ -2105,3 +2113,133 @@ const getPaymentGatewayStatus = async (req, res) => {
     }
 };
 exports.getPaymentGatewayStatus = getPaymentGatewayStatus;
+/**
+ * PUT /api/v1/client/telegram
+ * Allows a client to update their own Telegram trade alert preferences, Chat ID, and Telegram username.
+ */
+const updateClientTelegramPreferences = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const client = await db_1.default.Client.findOne({ userId }) || await db_1.default.Client.findById(userId);
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client profile not found.' });
+        }
+        const { isTelegramTradeEnabled, telegramChatId, telegramUsername } = req.body;
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
+        const telegramJoinRule = tenantObj?.telegramJoinRule || 'ACTIVE_PLAN_ONLY';
+        // If client is attempting to link or enable Telegram alerts, enforce requirements
+        if (telegramChatId && telegramChatId.trim()) {
+            const now = new Date();
+            const activeSub = await db_1.default.Subscription.findOne({
+                $or: [{ clientId: client._id }, { clientId: client.userId }, { clientId: userId }],
+                status: 'ACTIVE',
+                endDate: { $gte: now }
+            }).lean();
+            if (!activeSub) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'An active paid subscription plan is required to connect Telegram trade alerts.'
+                });
+            }
+            if (telegramJoinRule === 'KYC_AGREEMENT_VERIFIED') {
+                const isKraVerified = Boolean(client.kraVerified === true ||
+                    client.kycStatus === 'VERIFIED' ||
+                    client.kycStatus === 'APPROVED');
+                const signedAgreement = await db_1.default.Agreement.findOne({
+                    $or: [{ clientId: client._id }, { clientId: client.userId }, { clientId: userId }],
+                    status: { $in: ['SIGNED', 'ACTIVE'] }
+                }).lean();
+                if (!isKraVerified || !signedAgreement) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Under SEBI regulations, DigiLocker KYC and SEBI Service Agreement must be verified before connecting Telegram trade alerts.'
+                    });
+                }
+            }
+        }
+        const updateFields = {};
+        if (isTelegramTradeEnabled !== undefined) {
+            updateFields.isTelegramTradeEnabled = isTelegramTradeEnabled === true || isTelegramTradeEnabled === 'true';
+        }
+        if (telegramChatId !== undefined) {
+            updateFields.telegramChatId = telegramChatId ? String(telegramChatId).trim() : null;
+        }
+        if (telegramUsername !== undefined) {
+            updateFields.telegramUsername = telegramUsername ? String(telegramUsername).trim().replace(/^@/, '') : null;
+        }
+        const updated = await db_1.default.Client.findByIdAndUpdate(client._id, { $set: updateFields }, { new: true }).lean();
+        return res.status(200).json({
+            success: true,
+            message: 'Telegram settings updated successfully.',
+            data: {
+                isTelegramTradeEnabled: updated.isTelegramTradeEnabled,
+                telegramChatId: updated.telegramChatId,
+                telegramUsername: updated.telegramUsername
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error updating client telegram preferences:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Server error' });
+    }
+};
+exports.updateClientTelegramPreferences = updateClientTelegramPreferences;
+/**
+ * POST /api/v1/client/telegram/test-ping
+ * Sends a live test ping message to the client's linked Telegram chat.
+ */
+const testClientTelegramPing = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const client = await db_1.default.Client.findOne({ userId }) || await db_1.default.Client.findById(userId);
+        if (!client) {
+            return res.status(404).json({ success: false, message: 'Client profile not found.' });
+        }
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
+        const botToken = tenantObj?.telegramBotToken;
+        if (!botToken) {
+            return res.status(400).json({
+                success: false,
+                message: 'Telegram Bot is not configured by the administrator yet.'
+            });
+        }
+        const chatId = client.telegramChatId;
+        if (!chatId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Your Telegram Chat ID is not linked yet. Please click "Connect Telegram Bot" or enter your Chat ID.'
+            });
+        }
+        const pingMessage = `🔔 <b>Test Notification from ${tenantObj.companyName || 'SEBI Registered Research Analyst'}</b>
+━━━━━━━━━━━━━━━━━━━━
+✅ <b>Connection Successful!</b>
+👋 Hello <b>${client.name}</b>, your Telegram channel is active and verified.
+
+You will receive live trade alerts here whenever a recommendation matching your active plan is dispatched!
+
+🕒 Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`;
+        const sendRes = await (0, telegramService_1.sendTelegramMessage)({
+            botToken,
+            chatId,
+            text: pingMessage,
+            parseMode: 'HTML'
+        });
+        if (sendRes.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Test message sent successfully to your Telegram account! Please check your Telegram app.'
+            });
+        }
+        else {
+            return res.status(400).json({
+                success: false,
+                message: sendRes.error || 'Failed to deliver message to Telegram. Please make sure you have started the bot in Telegram.'
+            });
+        }
+    }
+    catch (error) {
+        console.error('Error sending client telegram test ping:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Error sending test message' });
+    }
+};
+exports.testClientTelegramPing = testClientTelegramPing;

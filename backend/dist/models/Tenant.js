@@ -140,6 +140,11 @@ exports.TenantSchema = new mongoose_1.Schema({
     smsPassword: { type: String, default: null },
     smsSenderId: { type: String, default: null },
     smsEntityId: { type: String, default: null },
+    telegramTradeEnabled: { type: Boolean, default: false },
+    smsTradeEnabled: { type: Boolean, default: false },
+    telegramBotToken: { type: String, default: null },
+    telegramBotUsername: { type: String, default: null },
+    telegramJoinRule: { type: String, enum: ['ALL', 'KYC_AGREEMENT_VERIFIED', 'ACTIVE_PLAN_ONLY'], default: 'ALL' },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Tenant' });
