@@ -1242,8 +1242,10 @@ const getChecklist = async (req, res) => {
         const now = new Date();
         const isLive = Boolean(tenant.isLive);
         const cutoffDate = tenant.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+        const effectiveRefDate = (isLive && cutoffDate && cutoffDate > now) ? cutoffDate : now;
+        const effectiveTenantStart = (isLive && cutoffDate) ? cutoffDate : tenant.createdAt;
         for (const reqItem of requirements) {
-            const period = (0, complianceDateHelper_1.getCompliancePeriod)(reqItem.frequencyType, now, tenant.createdAt);
+            const period = (0, complianceDateHelper_1.getCompliancePeriod)(reqItem.frequencyType, effectiveRefDate, effectiveTenantStart);
             // 1. Look for any active overdue or non-compliant audit first (only if Live)
             let audit = null;
             if (isLive) {
@@ -1277,9 +1279,12 @@ const getChecklist = async (req, res) => {
                     .populate('penalty')
                     .lean();
             }
+            const isUpcoming = Boolean(isLive && cutoffDate && now < cutoffDate && !audit);
             checklist.push({
                 ...reqItem,
                 id: reqItem._id?.toString() || reqItem.id,
+                isUpcoming,
+                cycleStartDate: cutoffDate,
                 audit: audit ? {
                     ...audit,
                     id: audit._id?.toString() || audit.id,
@@ -1319,7 +1324,11 @@ const updateAuditStatus = async (req, res) => {
                 parsedAmount = parseFloat(cleanStr);
             }
         }
-        const period = (0, complianceDateHelper_1.getCompliancePeriod)(requirement.frequencyType, new Date(), tenant?.createdAt);
+        const isLive = Boolean(tenant?.isLive);
+        const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+        const effectiveRef = (isLive && cutoffDate && cutoffDate > new Date()) ? cutoffDate : new Date();
+        const effectiveStart = (isLive && cutoffDate) ? cutoffDate : tenant?.createdAt;
+        const period = (0, complianceDateHelper_1.getCompliancePeriod)(requirement.frequencyType, effectiveRef, effectiveStart);
         // Find the audit record for the current period
         let audit = await db_1.default.ComplianceAudit.findOne({
             tenantId,

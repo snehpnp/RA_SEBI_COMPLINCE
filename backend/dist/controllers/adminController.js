@@ -2661,7 +2661,7 @@ const updateTenantSettings = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
-    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, camsClientCode, camsClientId, camsClientSecret, camsPoscode, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId, telegramTradeEnabled, smsTradeEnabled, telegramBotToken, telegramBotUsername, telegramJoinRule } = req.body;
+    const { themeColor, companyName, companyEmail, gstEnabled, gstCalculationType, invoiceDispatchPolicy, state, gst, smtpHost, smtpPort, smtpUser, smtpPassword, smtpFrom, ccInvoiceEnabled, ccInvoiceEmail, ccAgreementEnabled, ccAgreementEmail, bankAccountName, bankAccountNo, bankAccountType, bankIfsc, bankName, bankBranch, socialMediaLinks, digioClientId, digioClientSecret, digioKycTemplateName, digioEnvironment, camsClientCode, camsClientId, camsClientSecret, camsPoscode, agreementContent, kycFirst, welcomeEmailText, reportDisclaimer, kraProvider, kraApiKey, kraApiSecret, activePaymentGateway, paymentGatewayEnabled, razorpayKeyId, razorpayKeySecret, cashfreeAppId, cashfreeSecretKey, ccavenueMerchantId, ccavenueAccessCode, ccavenueWorkingKey, stripePublishableKey, stripeSecretKey, upiQrEnabled, upiId, upiPayeeName, upiQrImageUrl, upiInstructions, address, website, mobile, passwordPolicy, client2FAEnabled, twoFactorChannel, signupVerificationMode, lockedTradesPreviewCount, showOpenTradePotential, showLockedTradePotential, smsGatewayEnabled, smsGatewayUrl, smsUsername, smsPassword, smsSenderId, smsEntityId, telegramTradeEnabled, smsTradeEnabled, telegramBotToken, telegramBotUsername, telegramJoinRule } = req.body;
     const files = req.files;
     try {
         let oldTenant = null;
@@ -2729,6 +2729,8 @@ const updateTenantSettings = async (req, res) => {
         }
         if (smsGatewayEnabled !== undefined)
             dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
+        if (smsGatewayUrl !== undefined)
+            dataToUpdate.smsGatewayUrl = smsGatewayUrl ? smsGatewayUrl.trim() : null;
         if (smsUsername !== undefined)
             dataToUpdate.smsUsername = smsUsername ? smsUsername.trim() : null;
         if (smsPassword !== undefined && smsPassword.trim() !== '')
@@ -5453,13 +5455,20 @@ const goLiveTenant = async (req, res) => {
     }
     try {
         // 1. Password verification
-        const user = await db_1.default.User.findById(userId);
+        let user = await db_1.default.User.findById(userId);
+        if (!user && db_1.default.SuperAdmin) {
+            user = await db_1.default.SuperAdmin.findById(userId);
+        }
         if (!user) {
             return res.status(404).json({ success: false, message: 'Admin user not found.' });
         }
-        const isMatch = await bcrypt.compare(password, user.password);
+        const hash = user.passwordHash || user.password;
+        if (!hash) {
+            return res.status(400).json({ success: false, message: 'No password hash found for this user.' });
+        }
+        const isMatch = await bcrypt.compare(password, hash);
         if (!isMatch) {
-            return res.status(401).json({ success: false, message: 'Incorrect password. Verification failed.' });
+            return res.status(400).json({ success: false, message: 'Incorrect password. Verification failed.' });
         }
         // 2. Fetch tenant
         let tenant = await db_1.default.Tenant.findById(tenantId);
@@ -5516,7 +5525,7 @@ const goLiveTenant = async (req, res) => {
         // C. Remove routine / calendar alerts (keep active client KYC/Agreement alerts)
         await db_1.default.ComplianceAlert.updateMany({
             $or: [{ tenantId: resolvedTenantId }, { tenantId }],
-            alertType: { $in: ['DEPOSIT_LOW', 'NISM_EXPIRY', 'COMPLAINT_OVERDUE', 'FEE_CAP_EXCEEDED'] },
+            alertType: { $nin: ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING'] },
             status: 'OPEN'
         }, {
             $set: {

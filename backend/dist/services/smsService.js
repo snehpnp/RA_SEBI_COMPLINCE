@@ -9,9 +9,9 @@ exports.sendSms = sendSms;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = __importDefault(require("../config/db"));
 /**
- * Default SMSJust Base URL
+ * Default SMS Gateway Base URL (bulksms.pnpuniverse.com)
  */
-const SMSJUST_BASE_URL = 'https://smsjust.com/sms/user/urlsms.php';
+const SMSJUST_BASE_URL = 'https://bulksms.pnpuniverse.com/sms/user/urlsms.php';
 /**
  * Normalizes 10-digit Indian mobile number (stripping +91 or leading 0).
  */
@@ -200,8 +200,9 @@ async function sendSms(options) {
             dlttempid: finalDltTempId.trim(),
             message: finalMessage
         });
-        const requestUrl = `${SMSJUST_BASE_URL}?${params.toString()}`;
-        console.log(`[SMS Service] Sending SMS to ${cleanMobile} via SMSJust (Sender: ${smsSenderId}, DLT: ${finalDltTempId})...`);
+        const gatewayBaseUrl = (overrideCredentials?.gatewayUrl || tenant?.smsGatewayUrl || SMSJUST_BASE_URL).trim();
+        const requestUrl = `${gatewayBaseUrl}?${params.toString()}`;
+        console.log(`[SMS Service] Sending SMS to ${cleanMobile} via ${gatewayBaseUrl} (Sender: ${smsSenderId}, DLT: ${finalDltTempId})...`);
         const response = await axios_1.default.get(requestUrl, { timeout: 10000 });
         const responseData = typeof response.data === 'string' ? response.data.trim() : JSON.stringify(response.data);
         console.log(`[SMS Service] Response: ${responseData}`);
@@ -217,6 +218,7 @@ async function sendSms(options) {
         return {
             success: true,
             message: 'SMS dispatched successfully',
+            sentMessage: finalMessage,
             rawResponse: responseData
         };
     }

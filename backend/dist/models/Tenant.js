@@ -136,6 +136,7 @@ exports.TenantSchema = new mongoose_1.Schema({
     showOpenTradePotential: { type: Boolean, default: true },
     showLockedTradePotential: { type: Boolean, default: true },
     smsGatewayEnabled: { type: Boolean, default: false },
+    smsGatewayUrl: { type: String, default: 'https://bulksms.pnpuniverse.com/sms/user/urlsms.php' },
     smsUsername: { type: String, default: null },
     smsPassword: { type: String, default: null },
     smsSenderId: { type: String, default: null },
