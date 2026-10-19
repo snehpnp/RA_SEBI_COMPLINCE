@@ -15,6 +15,7 @@ export interface SmsSendOptions {
   customMessage?: string;
   dltTemplateId?: string;
   overrideCredentials?: {
+    gatewayUrl?: string;
     username?: string;
     password?: string;
     senderId?: string;
@@ -28,14 +29,15 @@ export interface SmsSendOptions {
 export interface SmsSendResult {
   success: boolean;
   message?: string;
+  sentMessage?: string;
   reason?: 'SMS_GATEWAY_DISABLED' | 'TEMPLATE_INACTIVE' | 'CREDENTIALS_MISSING' | 'HTTP_ERROR' | 'INVALID_MOBILE';
   rawResponse?: string;
 }
 
 /**
- * Default SMSJust Base URL
+ * Default SMS Gateway Base URL (bulksms.pnpuniverse.com)
  */
-const SMSJUST_BASE_URL = 'https://smsjust.com/sms/user/urlsms.php';
+const SMSJUST_BASE_URL = 'https://bulksms.pnpuniverse.com/sms/user/urlsms.php';
 
 /**
  * Normalizes 10-digit Indian mobile number (stripping +91 or leading 0).
@@ -256,8 +258,9 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
       message: finalMessage
     });
 
-    const requestUrl = `${SMSJUST_BASE_URL}?${params.toString()}`;
-    console.log(`[SMS Service] Sending SMS to ${cleanMobile} via SMSJust (Sender: ${smsSenderId}, DLT: ${finalDltTempId})...`);
+    const gatewayBaseUrl = (overrideCredentials?.gatewayUrl || tenant?.smsGatewayUrl || SMSJUST_BASE_URL).trim();
+    const requestUrl = `${gatewayBaseUrl}?${params.toString()}`;
+    console.log(`[SMS Service] Sending SMS to ${cleanMobile} via ${gatewayBaseUrl} (Sender: ${smsSenderId}, DLT: ${finalDltTempId})...`);
 
     const response = await axios.get(requestUrl, { timeout: 10000 });
     const responseData = typeof response.data === 'string' ? response.data.trim() : JSON.stringify(response.data);
@@ -277,6 +280,7 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
     return {
       success: true,
       message: 'SMS dispatched successfully',
+      sentMessage: finalMessage,
       rawResponse: responseData
     };
   } catch (error: any) {

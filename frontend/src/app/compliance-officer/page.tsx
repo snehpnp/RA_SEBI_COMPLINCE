@@ -57,6 +57,7 @@ import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
+import { toast } from 'react-hot-toast';
 import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy, Calendar as CalendarIcon, ShieldAlert } from 'lucide-react';
 import ComplianceCalendarModal from '../../components/compliance/ComplianceCalendarModal';
 import { SebiPenaltiesMatrixView } from '../../components/SebiPenaltiesMatrixView';
@@ -592,6 +593,7 @@ function AdminDashboardContent() {
   const [complaintResolveId, setComplaintResolveId] = useState<string | null>(null);
   const [complaintAtrProof, setComplaintAtrProof] = useState<File | null>(null);
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
+  const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
   const [allPayments, setAllPayments] = useState<any[]>([]);
   const pendingQrCount = useMemo(() => {
     return allPayments.filter((p: any) =>
@@ -607,6 +609,7 @@ function AdminDashboardContent() {
   const checklistPendingCount = useMemo(() => {
     const AUTO_MONITORED_SERIALS = [4, 5, 6, 12, 17, 48];
     return checklist.filter((item: any) => 
+      !item.isUpcoming &&
       !AUTO_MONITORED_SERIALS.includes(item.serialNo) && 
       (!item.audit || item.audit.status === 'PENDING' || item.audit.status === 'OVERDUE' || item.audit.status === 'NON_COMPLIANT')
     ).length;
@@ -4789,21 +4792,25 @@ function AdminDashboardContent() {
                                           </thead>
                                           <tbody className="text-xs divide-y divide-slate-300 dark:divide-white/5 text-slate-700 dark:text-slate-300">
                                             {pageData.map((item: any) => {
-                                              const status = item.audit?.status || 'PENDING';
+                                              const isUpcoming = item.isUpcoming;
+                                              const status = item.audit?.status || (isUpcoming ? 'UPCOMING' : 'PENDING');
                                               const colors: Record<string, string> = {
                                                 COMPLIANT: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
                                                 NON_COMPLIANT: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
                                                 PENDING: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
+                                                UPCOMING: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
                                                 OVERDUE: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
                                                 PENALTY_RESOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
                                                 PAID: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
                                               };
                                               const dueDateMs = item.currentPeriod?.dueDate ? new Date(item.currentPeriod.dueDate).getTime() : null;
                                               const daysLeft = dueDateMs ? Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24)) : null;
-                                              const requiresAction = daysLeft === null || daysLeft <= 30;
+                                              const requiresAction = !isUpcoming && (daysLeft === null || daysLeft <= 30);
 
                                               let dateColorClass = 'text-slate-600 dark:text-slate-400';
-                                              if (daysLeft !== null) {
+                                              if (isUpcoming) {
+                                                dateColorClass = 'text-blue-600 dark:text-blue-400 font-medium';
+                                              } else if (daysLeft !== null) {
                                                 if (daysLeft < 0) dateColorClass = 'text-red-600 dark:text-red-500 font-bold';
                                                 else if (daysLeft <= 7) dateColorClass = 'text-rose-600 dark:text-rose-400 font-bold';
                                                 else if (daysLeft <= 30) dateColorClass = 'text-orange-600 dark:text-orange-400 font-bold';
@@ -4820,7 +4827,9 @@ function AdminDashboardContent() {
                                                   <td className="py-3 px-4 font-medium max-w-xs">{item.requirement}</td>
                                                   <td className="py-3 px-4">
                                                     <span className="block font-medium">{item.frequency}</span>
-                                                    <span className={`block text-[10px] mt-0.5 ${dateColorClass}`}>Due: {dueDateText}</span>
+                                                    <span className={`block text-[10px] mt-0.5 ${dateColorClass}`}>
+                                                      {isUpcoming ? `Cycle: ${item.currentPeriod?.label || 'Nov 2026'} · Due: ${dueDateText}` : `Due: ${dueDateText}`}
+                                                    </span>
                                                   </td>
                                                   <td className="py-3 px-4">
                                                     {item.severityLevel === 'HIGH' && (

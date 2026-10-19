@@ -145,6 +145,10 @@ exports.TenantSchema = new mongoose_1.Schema({
     telegramBotToken: { type: String, default: null },
     telegramBotUsername: { type: String, default: null },
     telegramJoinRule: { type: String, enum: ['ALL', 'KYC_AGREEMENT_VERIFIED', 'ACTIVE_PLAN_ONLY'], default: 'ALL' },
+    isLive: { type: Boolean, default: false },
+    goLiveAt: { type: Date, default: null },
+    goLiveBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
+    complianceCutoffDate: { type: Date, default: null },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Tenant' });

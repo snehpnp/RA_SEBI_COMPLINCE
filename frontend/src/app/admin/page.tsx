@@ -530,6 +530,13 @@ function AdminDashboardContent() {
   const [profileConfirmPassword, setProfileConfirmPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+  const [isGoLiveModalOpen, setIsGoLiveModalOpen] = useState(false);
+  const [goLivePassword, setGoLivePassword] = useState('');
+  const [showGoLivePassword, setShowGoLivePassword] = useState(false);
+  const [isSubmittingGoLive, setIsSubmittingGoLive] = useState(false);
+  const [tenantIsLive, setTenantIsLive] = useState<boolean>(false);
+  const [tenantGoLiveAt, setTenantGoLiveAt] = useState<string | null>(null);
+  const [tenantCutoffDate, setTenantCutoffDate] = useState<string | null>(null);
   const [completeness, setCompleteness] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const cached = localStorage.getItem('tenant_completeness');
@@ -905,12 +912,16 @@ function AdminDashboardContent() {
   }, [alerts]);
 
   const checklistPendingCount = useMemo(() => {
+    if (tenantCutoffDate && new Date() < new Date(tenantCutoffDate)) {
+      return 0;
+    }
     const AUTO_MONITORED_SERIALS = [4, 5, 6, 12, 17, 48];
     return checklist.filter((item: any) => 
+      !item.isUpcoming &&
       !AUTO_MONITORED_SERIALS.includes(item.serialNo) && 
       (!item.audit || item.audit.status === 'PENDING' || item.audit.status === 'OVERDUE' || item.audit.status === 'NON_COMPLIANT')
     ).length;
-  }, [checklist]);
+  }, [checklist, tenantCutoffDate]);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
@@ -1807,7 +1818,12 @@ function AdminDashboardContent() {
       // Tab specific data loading
       if (tab === 'dashboard') {
         api.request('/admin/dashboard-stats').then(res => {
-          if (res.success) setDashboardStats(res.data);
+          if (res.success) {
+            setDashboardStats(res.data);
+            if (res.data?.isLive !== undefined) setTenantIsLive(Boolean(res.data.isLive));
+            if (res.data?.goLiveAt) setTenantGoLiveAt(res.data.goLiveAt);
+            if (res.data?.complianceCutoffDate) setTenantCutoffDate(res.data.complianceCutoffDate);
+          }
         }).catch(() => { });
         api.getTenantAuditLogs().then(res => {
           if (res.success) setActivityLogs(res.data);
@@ -1994,6 +2010,10 @@ function AdminDashboardContent() {
         const u = JSON.parse(userStr);
         setUser(u);
 
+        if (u?.tenant?.isLive !== undefined) setTenantIsLive(Boolean(u.tenant.isLive));
+        if (u?.tenant?.goLiveAt) setTenantGoLiveAt(u.tenant.goLiveAt);
+        if (u?.tenant?.complianceCutoffDate) setTenantCutoffDate(u.tenant.complianceCutoffDate);
+
         if (u?.role === 'COMPLIANCE_OFFICER') setActiveTab('compliance');
         else if (u?.role === 'RESEARCHER' || u?.role === 'PRINCIPAL_OFFICER') setActiveTab('research');
       } catch (e) {
@@ -2014,6 +2034,10 @@ function AdminDashboardContent() {
           if (!syncedUser.tenantName && syncedUser.tenant?.companyName) {
             syncedUser.tenantName = syncedUser.tenant.companyName;
           }
+          if (syncedUser.tenant?.isLive !== undefined) setTenantIsLive(Boolean(syncedUser.tenant.isLive));
+          if (syncedUser.tenant?.goLiveAt) setTenantGoLiveAt(syncedUser.tenant.goLiveAt);
+          if (syncedUser.tenant?.complianceCutoffDate) setTenantCutoffDate(syncedUser.tenant.complianceCutoffDate);
+
           setUser(syncedUser);
           localStorage.setItem('user', JSON.stringify(syncedUser));
 
@@ -2664,6 +2688,66 @@ function AdminDashboardContent() {
       toast.error(err.message || 'Failed to change password');
     } finally {
       setIsChangingPassword(false);
+    }
+  };
+
+  const getCalculatedCutoffInfo = () => {
+    const today = new Date();
+    const currentDay = today.getDate();
+    let cutoff: Date;
+    let ruleExplanation = '';
+
+    if (currentDay >= 1 && currentDay <= 14) {
+      cutoff = new Date(today.getFullYear(), today.getMonth(), 15);
+      ruleExplanation = `Since today is day ${currentDay} (between 1st-14th), periodic calendar tasks & BSE disclosures will officially begin on the 15th of this month (${cutoff.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}). All prior test penalties are waived.`;
+    } else {
+      cutoff = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+      ruleExplanation = `Since today is day ${currentDay} (between 15th-31st), routine calendar checklist & monthly BSE disclosures will officially begin on the 1st of next month (${cutoff.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}). All prior test penalties are waived.`;
+    }
+
+    return { cutoff, ruleExplanation, currentDay };
+  };
+
+  const handleConfirmGoLive = async () => {
+    if (!goLivePassword || !goLivePassword.trim()) {
+      toast.error('Please enter your Admin password to authorize Go-Live.');
+      return;
+    }
+    setIsSubmittingGoLive(true);
+    try {
+      const res: any = await api.goLiveTenant(goLivePassword);
+      if (res.success) {
+        setTenantIsLive(true);
+        if (res.data?.goLiveAt) setTenantGoLiveAt(res.data.goLiveAt);
+        if (res.data?.complianceCutoffDate) setTenantCutoffDate(res.data.complianceCutoffDate);
+
+        setUser((prev: any) => {
+          const updated = {
+            ...prev,
+            tenant: {
+              ...(prev?.tenant || {}),
+              isLive: true,
+              goLiveAt: res.data?.goLiveAt,
+              complianceCutoffDate: res.data?.complianceCutoffDate
+            }
+          };
+          localStorage.setItem('user', JSON.stringify(updated));
+          return updated;
+        });
+
+        toast.success(res.message || '🎉 Portal successfully launched to LIVE production!');
+        setIsGoLiveModalOpen(false);
+        setGoLivePassword('');
+
+        // Reload data for current active tab
+        loadData(true);
+      } else {
+        toast.error(res.message || 'Incorrect password. Go-Live failed.');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Server error while taking portal live.');
+    } finally {
+      setIsSubmittingGoLive(false);
     }
   };
 
@@ -4508,10 +4592,13 @@ function AdminDashboardContent() {
         width: '180px',
         selector: (row: any) => row.frequency,
         cell: (row: any) => {
+          const isUpcoming = row.isUpcoming || (tenantCutoffDate && new Date() < new Date(tenantCutoffDate) && !row.audit);
           const dueDateMs = row.currentPeriod?.dueDate ? new Date(row.currentPeriod.dueDate).getTime() : null;
           const daysLeft = dueDateMs ? Math.ceil((dueDateMs - Date.now()) / (1000 * 3600 * 24)) : null;
           let dateColorClass = 'text-slate-600 dark:text-slate-400';
-          if (daysLeft !== null) {
+          if (isUpcoming) {
+            dateColorClass = 'text-blue-600 dark:text-blue-400 font-medium';
+          } else if (daysLeft !== null) {
             if (daysLeft < 0) dateColorClass = 'text-red-600 dark:text-red-500 font-bold';
             else if (daysLeft <= 7) dateColorClass = 'text-rose-600 dark:text-rose-400 font-bold';
             else if (daysLeft <= 30) dateColorClass = 'text-orange-600 dark:text-orange-400 font-bold';
@@ -4523,7 +4610,9 @@ function AdminDashboardContent() {
           return (
             <div>
               <span className="block font-medium">{row.frequency}</span>
-              <span className={`block text-[10px] mt-0.5 ${dateColorClass}`}>Due: {dueDateText}</span>
+              <span className={`block text-[10px] mt-0.5 ${dateColorClass}`}>
+                {isUpcoming ? `Cycle: ${row.currentPeriod?.label || 'Nov 2026'} · Due: ${dueDateText}` : `Due: ${dueDateText}`}
+              </span>
             </div>
           );
         },
@@ -4550,11 +4639,13 @@ function AdminDashboardContent() {
         width: '130px',
         selector: (row: any) => row.audit?.status,
         cell: (row: any) => {
-          const status = row.audit?.status || 'PENDING';
+          const isUpcoming = row.isUpcoming || (tenantCutoffDate && new Date() < new Date(tenantCutoffDate) && !row.audit);
+          const status = row.audit?.status || (isUpcoming ? 'UPCOMING' : 'PENDING');
           const colors: Record<string, string> = {
             COMPLIANT: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
             NON_COMPLIANT: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
             PENDING: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20',
+            UPCOMING: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
             OVERDUE: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20',
             PENALTY_RESOLVED: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
             PAID: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
@@ -5231,6 +5322,13 @@ function AdminDashboardContent() {
             {NAV_CONFIG.map((mod) => {
               if (!hasPermission(mod.accessKey)) return null;
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
+
+              // Pre-Live (Setup Mode): Show only 3 essential panels (Dashboard, Client Management, Settings)
+              const PRE_LIVE_TABS = ['dashboard', 'clients', 'settings', 'profile'];
+              if (!tenantIsLive && !PRE_LIVE_TABS.includes(mod.tab)) {
+                return null;
+              }
+
               const Icon = ICON_MAP[mod.icon] || Layers;
 
               if (mod.tab === 'delivery-reports') {
@@ -5474,6 +5572,18 @@ function AdminDashboardContent() {
                 )}
               </button>
             )}
+
+            {!tenantIsLive && !isSidebarCollapsed && (
+              <div className="mx-2 mt-4 p-3 rounded-2xl bg-amber-500/15 border border-amber-400/30 text-amber-200">
+                <div className="flex items-center gap-1.5 text-[11px] font-black text-amber-300 mb-1 uppercase tracking-wide">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Setup Mode (3 Panels)</span>
+                </div>
+                <p className="text-[10px] text-amber-200/80 leading-relaxed font-medium">
+                  Compliance &amp; advanced desks are paused. Click <strong className="text-amber-200 underline">Go Live</strong> in top header to launch production.
+                </p>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -5623,6 +5733,31 @@ function AdminDashboardContent() {
                   </>
                 )}
               </div>
+
+              {/* Go Live Button / LIVE Status Badge */}
+              {!tenantIsLive ? (
+                <button
+                  onClick={() => setIsGoLiveModalOpen(true)}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 transition-all transform hover:scale-105 animate-pulse border border-emerald-400/50"
+                  title="Launch portal to LIVE production (password verification required)"
+                >
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  <span>Go Live</span>
+                </button>
+              ) : (
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-black text-xs flex items-center gap-2 cursor-default shadow-sm select-none">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>LIVE</span>
+                  {tenantCutoffDate && (
+                    <span className="hidden xl:inline text-[10px] text-emerald-700/80 dark:text-emerald-300/80 font-medium">
+                      • Cycle: {new Date(tenantCutoffDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Theme Toggle */}
               <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
@@ -7838,6 +7973,17 @@ function AdminDashboardContent() {
                             </button>
                           </div>
                         </div>
+ 
+                          {tenantCutoffDate && new Date() < new Date(tenantCutoffDate) && (
+                            <div className="flex items-center gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-transparent border border-blue-500/20 text-blue-800 dark:text-blue-300">
+                              <div className="p-2 bg-blue-500/20 rounded-xl shrink-0">
+                                <span className="text-base">🚀</span>
+                              </div>
+                              <div className="text-xs">
+                                <span className="font-bold">Production Go-Live Cycle Scheduled:</span> Since the portal was activated on Day 19 (between 15th-31st Oct), routine compliance tasks & monthly checklists officially commence on <strong>{new Date(tenantCutoffDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>. All October test periods are auto-waived (₹0 penalty).
+                              </div>
+                            </div>
+                          )}
 
                           {/* Info banner about auto-monitored items */}
                           <div className="flex items-start gap-3 p-4 rounded-2xl bg-primary-500/5 border border-primary-500/20">
@@ -16192,6 +16338,129 @@ function AdminDashboardContent() {
           }}
           userRole={user?.role}
         />
+
+        {/* ====================================================
+            PRODUCTION GO-LIVE AUTHORIZATION MODAL
+           ==================================================== */}
+        {isGoLiveModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-white/10 relative overflow-hidden">
+              {/* Header Gradient bar */}
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600" />
+              
+              <div className="flex items-start gap-4 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Zap className="w-6 h-6 fill-current animate-bounce" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                    Launch Portal to LIVE Production
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                    Permanent Action • Routine test penalties cleared • Full desks unlocked
+                  </p>
+                </div>
+              </div>
+
+              {/* Dynamic Cycle Info Callout */}
+              {(() => {
+                const info = getCalculatedCutoffInfo();
+                return (
+                  <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 mb-5">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs font-black uppercase tracking-wider text-emerald-900 dark:text-emerald-300">
+                        Smart Regulatory Cut-off Rule
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-800 dark:text-emerald-200 leading-relaxed font-medium">
+                      {info.ruleExplanation}
+                    </p>
+                    <div className="mt-3 pt-2.5 border-t border-emerald-200/60 dark:border-emerald-800/60 flex items-center justify-between text-[11px] font-bold text-emerald-900 dark:text-emerald-200">
+                      <span>Official Compliance Monitoring:</span>
+                      <span className="px-2.5 py-0.5 rounded-md bg-emerald-600 text-white font-mono font-black shadow-sm">
+                        From {info.cutoff.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Scope Breakdown */}
+              <div className="space-y-2.5 mb-6 text-xs text-slate-600 dark:text-slate-300">
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <span><strong>Clean Pre-Operational Noise:</strong> Past routine checklist breaches and test BSE penalties are auto-waived (₹0 Penalty).</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                  <span><strong>Preserve Real Ledger:</strong> Registered clients, payments, invoices, and active KYC/Agreement checks remain 100% intact.</span>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                  <span><strong>Unlock All Desks:</strong> Compliance Desk, SEBI Checklist, Penalties, Delivery Reports, Signals &amp; Tickets unlock immediately.</span>
+                </div>
+              </div>
+
+              {/* Password Input */}
+              <div className="mb-6">
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
+                  Enter Admin Password to Authorize
+                </label>
+                <div className="relative">
+                  <input
+                    type={showGoLivePassword ? 'text' : 'password'}
+                    value={goLivePassword}
+                    onChange={(e) => setGoLivePassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmGoLive(); }}
+                    placeholder="Enter your admin account password..."
+                    className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono pr-11"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGoLivePassword(!showGoLivePassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"
+                  >
+                    {showGoLivePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isSubmittingGoLive}
+                  onClick={() => {
+                    setIsGoLiveModalOpen(false);
+                    setGoLivePassword('');
+                  }}
+                  className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingGoLive}
+                  onClick={handleConfirmGoLive}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSubmittingGoLive ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Verifying &amp; Launching...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 fill-current" />
+                      <span>Authorize &amp; Go Live</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Logout Modal */}
         {isLogoutModalOpen && (

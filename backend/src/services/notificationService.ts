@@ -375,7 +375,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                 recipient: destMobile,
                 channel: 'SMS',
                 title,
-                message: smsResult.message || `SMS dispatched for ${data?.stockSymbol}`,
+                message: smsResult.sentMessage || smsResult.message || `SMS dispatched for ${data?.stockSymbol}`,
                 type,
                 isRead: false,
                 status: smsResult.success ? 'DELIVERED' : 'FAILED',

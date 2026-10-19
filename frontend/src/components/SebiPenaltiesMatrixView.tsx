@@ -233,7 +233,7 @@ export const SEBI_CALENDAR_SCHEDULE: SebiCalendarEvent[] = [
     id: 'daily-recommendation-timestamp',
     ruleSrNo: 32,
     title: 'Daily Trade Recommendation Rationale & Simultaneous Broadcast',
-    category: 'CODE_OF_CONDUCT',
+    category: 'CLIENT_OPS',
     frequency: 'DAILY',
     frequencyLabel: 'Daily (Every Recommendation)',
     statutoryDueDateText: 'Continuous / Daily Before Publication',

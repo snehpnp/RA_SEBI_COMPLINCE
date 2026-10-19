@@ -37,7 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.updateResearcherDscPermission = exports.getResearcherDscPermissions = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = void 0;
+exports.goLiveTenant = exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -100,13 +100,17 @@ const getDashboardStats = async (req, res) => {
             db_1.default.ResearchReport.countDocuments(researchFilter),
             db_1.default.Plan.countDocuments(planFilter)
         ]);
+        const tenantDoc = await db_1.default.Tenant.findById(tenantId).lean() || await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
         res.json({
             success: true,
             data: {
                 staffCount,
                 clientCount,
                 researchCount,
-                planCount
+                planCount,
+                isLive: Boolean(tenantDoc?.isLive),
+                goLiveAt: tenantDoc?.goLiveAt || null,
+                complianceCutoffDate: tenantDoc?.complianceCutoffDate || null
             }
         });
     }
@@ -5432,3 +5436,156 @@ const permanentDeleteClient = async (req, res) => {
     }
 };
 exports.permanentDeleteClient = permanentDeleteClient;
+/**
+ * Launch tenant portal to LIVE production.
+ * Verifies admin password, waives/cleans prior routine calendar penalties and alerts,
+ * and sets the compliance cutoff date based on the 1-14 (15th of current month) vs 15-31 (1st of next month) rule.
+ */
+const goLiveTenant = async (req, res) => {
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.id;
+    const { password } = req.body;
+    if (!tenantId) {
+        return res.status(400).json({ success: false, message: 'Tenant context missing.' });
+    }
+    if (!password || !password.trim()) {
+        return res.status(400).json({ success: false, message: 'Admin password is required to verify and launch portal.' });
+    }
+    try {
+        // 1. Password verification
+        const user = await db_1.default.User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Admin user not found.' });
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ success: false, message: 'Incorrect password. Verification failed.' });
+        }
+        // 2. Fetch tenant
+        let tenant = await db_1.default.Tenant.findById(tenantId);
+        if (!tenant) {
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null });
+        }
+        if (!tenant) {
+            return res.status(404).json({ success: false, message: 'Tenant record not found.' });
+        }
+        if (tenant.isLive) {
+            return res.status(400).json({
+                success: false,
+                message: 'This portal is already LIVE. The Go-Live action is permanent and cannot be re-run.'
+            });
+        }
+        // 3. Smart Date Cut-off calculation
+        const now = new Date();
+        const currentDay = now.getDate();
+        let complianceCutoffDate;
+        if (currentDay >= 1 && currentDay <= 14) {
+            // 1st to 14th: Cut-off is 15th of the current month
+            complianceCutoffDate = new Date(now.getFullYear(), now.getMonth(), 15, 0, 0, 0, 0);
+        }
+        else {
+            // 15th to 31st: Cut-off is 1st of the next month
+            complianceCutoffDate = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+        }
+        const resolvedTenantId = String(tenant._id || tenant.id || tenantId);
+        // 4. Pre-operational Data Cleanup:
+        // A. Waive all existing pending / non-compliant penalties created prior to cutoff
+        await db_1.default.Penalty.updateMany({
+            $or: [{ tenantId: resolvedTenantId }, { tenantId }],
+            status: { $in: ['PENDING', 'NON_COMPLIANT'] }
+        }, {
+            $set: {
+                status: 'WAIVED',
+                resolutionType: 'Compliant',
+                remarks: `Auto-waived: Pre-operational setup period prior to Production Go-Live (${now.toLocaleDateString('en-IN')}).`,
+                resolvedAt: now
+            }
+        });
+        // B. Waive all existing audits that are OVERDUE or NON_COMPLIANT
+        await db_1.default.ComplianceAudit.updateMany({
+            $or: [{ tenantId: resolvedTenantId }, { tenantId }],
+            status: { $in: ['OVERDUE', 'NON_COMPLIANT', 'PENDING'] },
+            dueDate: { $lt: complianceCutoffDate }
+        }, {
+            $set: {
+                status: 'WAIVED',
+                officerRemarks: `Auto-waived prior to Go-Live. Periodic compliance begins from ${complianceCutoffDate.toLocaleDateString('en-IN')}.`,
+                submittedAt: now
+            }
+        });
+        // C. Remove routine / calendar alerts (keep active client KYC/Agreement alerts)
+        await db_1.default.ComplianceAlert.updateMany({
+            $or: [{ tenantId: resolvedTenantId }, { tenantId }],
+            alertType: { $in: ['DEPOSIT_LOW', 'NISM_EXPIRY', 'COMPLAINT_OVERDUE', 'FEE_CAP_EXCEEDED'] },
+            status: 'OPEN'
+        }, {
+            $set: {
+                status: 'CLOSED',
+                remarks: `Auto-resolved: Routine calendar alert cleared prior to Production Go-Live.`,
+                closedAt: now
+            }
+        });
+        // 5. Update Tenant to LIVE permanently
+        const updatedTenant = await db_1.default.Tenant.findByIdAndUpdate(tenant._id, {
+            $set: {
+                isLive: true,
+                goLiveAt: now,
+                goLiveBy: user._id,
+                complianceCutoffDate
+            }
+        }, { returnDocument: 'after', lean: true });
+        // Also update centralModels if available
+        try {
+            if (db_1.centralModels?.Tenant) {
+                await db_1.centralModels.Tenant.findByIdAndUpdate(tenant._id, {
+                    $set: {
+                        isLive: true,
+                        goLiveAt: now,
+                        goLiveBy: user._id,
+                        complianceCutoffDate
+                    }
+                });
+            }
+        }
+        catch { }
+        // 6. Log Audit and Activity
+        await (0, auditService_1.logAudit)({
+            userId: user._id.toString(),
+            tenantId: resolvedTenantId,
+            action: 'UPDATE',
+            module: 'TENANTS',
+            newValue: {
+                isLive: true,
+                goLiveAt: now,
+                complianceCutoffDate,
+                adminEmail: user.email
+            }
+        });
+        await (0, activityService_1.logActivity)({
+            tenantId: resolvedTenantId,
+            actorType: 'ADMIN',
+            actorId: user._id,
+            actorName: user.name || 'Admin',
+            actorEmail: user.email,
+            category: 'SYSTEM',
+            action: 'PORTAL_LAUNCHED_LIVE',
+            title: 'Portal Launched to Live Production',
+            description: `Production Go-Live enabled by Admin. Compliance effective date: ${complianceCutoffDate.toLocaleDateString('en-IN')}.`,
+            status: 'SUCCESS'
+        });
+        return res.status(200).json({
+            success: true,
+            message: `Portal successfully launched to LIVE! Compliance monitoring will officially begin from ${complianceCutoffDate.toLocaleDateString('en-IN')}.`,
+            data: {
+                isLive: true,
+                goLiveAt: now,
+                complianceCutoffDate
+            }
+        });
+    }
+    catch (error) {
+        console.error('Go Live error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.goLiveTenant = goLiveTenant;

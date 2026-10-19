@@ -65,7 +65,7 @@ class ApiClient {
           (data.message && data.message.toLowerCase().includes('suspended'))
         ));
 
-      if (isAuthError && !endpoint.startsWith('/auth/')) {
+      if (isAuthError && !endpoint.startsWith('/auth/') && endpoint !== '/admin/tenant/go-live') {
         if (typeof window !== 'undefined') {
           if ((window as any).__isRedirecting) return new Promise(() => { });
           (window as any).__isRedirecting = true;
@@ -1752,6 +1752,13 @@ class ApiClient {
     return this.request('/video-kyc/settings', {
       method: 'PUT',
       body: JSON.stringify(payload)
+    });
+  }
+
+  async goLiveTenant(password: string) {
+    return this.request('/admin/tenant/go-live', {
+      method: 'POST',
+      body: JSON.stringify({ password })
     });
   }
 }

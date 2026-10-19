@@ -65,13 +65,18 @@ export const getDashboardStats = async (req: AuthenticatedRequest, res: Response
       dynamicDb.Plan.countDocuments(planFilter)
     ]);
 
+    const tenantDoc: any = await dynamicDb.Tenant.findById(tenantId).lean() || await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+
     res.json({
       success: true,
       data: {
         staffCount,
         clientCount,
         researchCount,
-        planCount
+        planCount,
+        isLive: Boolean(tenantDoc?.isLive),
+        goLiveAt: tenantDoc?.goLiveAt || null,
+        complianceCutoffDate: tenantDoc?.complianceCutoffDate || null
       }
     });
   } catch (error: any) {
@@ -2887,7 +2892,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     passwordPolicy, client2FAEnabled, twoFactorChannel,
     signupVerificationMode, lockedTradesPreviewCount,
     showOpenTradePotential, showLockedTradePotential,
-    smsGatewayEnabled, smsUsername, smsPassword, smsSenderId, smsEntityId,
+    smsGatewayEnabled, smsGatewayUrl, smsUsername, smsPassword, smsSenderId, smsEntityId,
     telegramTradeEnabled, smsTradeEnabled, telegramBotToken, telegramBotUsername,
     telegramJoinRule
   } = req.body;
@@ -2956,6 +2961,7 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
       dataToUpdate.showLockedTradePotential = showLockedTradePotential === 'true' || showLockedTradePotential === true;
     }
     if (smsGatewayEnabled !== undefined) dataToUpdate.smsGatewayEnabled = smsGatewayEnabled === 'true' || smsGatewayEnabled === true;
+    if (smsGatewayUrl !== undefined) dataToUpdate.smsGatewayUrl = smsGatewayUrl ? smsGatewayUrl.trim() : null;
     if (smsUsername !== undefined) dataToUpdate.smsUsername = smsUsername ? smsUsername.trim() : null;
     if (smsPassword !== undefined && smsPassword.trim() !== '') dataToUpdate.smsPassword = smsPassword.trim();
     if (smsSenderId !== undefined) dataToUpdate.smsSenderId = smsSenderId ? smsSenderId.trim() : null;
@@ -5818,6 +5824,195 @@ export const permanentDeleteClient = async (req: any, res: any) => {
     });
   }
 };
+
+/**
+ * Launch tenant portal to LIVE production.
+ * Verifies admin password, waives/cleans prior routine calendar penalties and alerts,
+ * and sets the compliance cutoff date based on the 1-14 (15th of current month) vs 15-31 (1st of next month) rule.
+ */
+export const goLiveTenant = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user?.tenantId;
+  const userId = req.user?.id;
+  const { password } = req.body;
+
+  if (!tenantId) {
+    return res.status(400).json({ success: false, message: 'Tenant context missing.' });
+  }
+
+  if (!password || !password.trim()) {
+    return res.status(400).json({ success: false, message: 'Admin password is required to verify and launch portal.' });
+  }
+
+  try {
+    // 1. Password verification
+    let user: any = await dynamicDb.User.findById(userId);
+    if (!user && (dynamicDb as any).SuperAdmin) {
+      user = await (dynamicDb as any).SuperAdmin.findById(userId);
+    }
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Admin user not found.' });
+    }
+
+    const hash = user.passwordHash || user.password;
+    if (!hash) {
+      return res.status(400).json({ success: false, message: 'No password hash found for this user.' });
+    }
+
+    const isMatch = await bcrypt.compare(password, hash);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: 'Incorrect password. Verification failed.' });
+    }
+
+    // 2. Fetch tenant
+    let tenant: any = await dynamicDb.Tenant.findById(tenantId);
+    if (!tenant) {
+      tenant = await dynamicDb.Tenant.findOne({ deletedAt: null });
+    }
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant record not found.' });
+    }
+
+    if (tenant.isLive) {
+      return res.status(400).json({
+        success: false,
+        message: 'This portal is already LIVE. The Go-Live action is permanent and cannot be re-run.'
+      });
+    }
+
+    // 3. Smart Date Cut-off calculation
+    const now = new Date();
+    const currentDay = now.getDate();
+    let complianceCutoffDate: Date;
+
+    if (currentDay >= 1 && currentDay <= 14) {
+      // 1st to 14th: Cut-off is 15th of the current month
+      complianceCutoffDate = new Date(now.getFullYear(), now.getMonth(), 15, 0, 0, 0, 0);
+    } else {
+      // 15th to 31st: Cut-off is 1st of the next month
+      complianceCutoffDate = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+    }
+
+    const resolvedTenantId = String(tenant._id || tenant.id || tenantId);
+
+    // 4. Pre-operational Data Cleanup:
+    // A. Waive all existing pending / non-compliant penalties created prior to cutoff
+    await dynamicDb.Penalty.updateMany(
+      {
+        $or: [{ tenantId: resolvedTenantId }, { tenantId }],
+        status: { $in: ['PENDING', 'NON_COMPLIANT'] }
+      },
+      {
+        $set: {
+          status: 'WAIVED',
+          resolutionType: 'Compliant',
+          remarks: `Auto-waived: Pre-operational setup period prior to Production Go-Live (${now.toLocaleDateString('en-IN')}).`,
+          resolvedAt: now
+        }
+      }
+    );
+
+    // B. Waive all existing audits that are OVERDUE or NON_COMPLIANT
+    await dynamicDb.ComplianceAudit.updateMany(
+      {
+        $or: [{ tenantId: resolvedTenantId }, { tenantId }],
+        status: { $in: ['OVERDUE', 'NON_COMPLIANT', 'PENDING'] },
+        dueDate: { $lt: complianceCutoffDate }
+      },
+      {
+        $set: {
+          status: 'WAIVED',
+          officerRemarks: `Auto-waived prior to Go-Live. Periodic compliance begins from ${complianceCutoffDate.toLocaleDateString('en-IN')}.`,
+          submittedAt: now
+        }
+      }
+    );
+
+    // C. Remove routine / calendar alerts (keep active client KYC/Agreement alerts)
+    await dynamicDb.ComplianceAlert.updateMany(
+      {
+        $or: [{ tenantId: resolvedTenantId }, { tenantId }],
+        alertType: { $nin: ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING'] },
+        status: 'OPEN'
+      },
+      {
+        $set: {
+          status: 'CLOSED',
+          remarks: `Auto-resolved: Routine calendar alert cleared prior to Production Go-Live.`,
+          closedAt: now
+        }
+      }
+    );
+
+    // 5. Update Tenant to LIVE permanently
+    const updatedTenant = await dynamicDb.Tenant.findByIdAndUpdate(
+      tenant._id,
+      {
+        $set: {
+          isLive: true,
+          goLiveAt: now,
+          goLiveBy: user._id,
+          complianceCutoffDate
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
+
+    // Also update centralModels if available
+    try {
+      if (centralModels?.Tenant) {
+        await centralModels.Tenant.findByIdAndUpdate(tenant._id, {
+          $set: {
+            isLive: true,
+            goLiveAt: now,
+            goLiveBy: user._id,
+            complianceCutoffDate
+          }
+        });
+      }
+    } catch { }
+
+    // 6. Log Audit and Activity
+    await logAudit({
+      userId: user._id.toString(),
+      tenantId: resolvedTenantId,
+      action: 'UPDATE',
+      module: 'TENANTS',
+      newValue: {
+        isLive: true,
+        goLiveAt: now,
+        complianceCutoffDate,
+        adminEmail: user.email
+      }
+    });
+
+    await logActivity({
+      tenantId: resolvedTenantId,
+      actorType: 'ADMIN',
+      actorId: user._id,
+      actorName: user.name || 'Admin',
+      actorEmail: user.email,
+      category: 'SYSTEM',
+      action: 'PORTAL_LAUNCHED_LIVE',
+      title: 'Portal Launched to Live Production',
+      description: `Production Go-Live enabled by Admin. Compliance effective date: ${complianceCutoffDate.toLocaleDateString('en-IN')}.`,
+      status: 'SUCCESS'
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Portal successfully launched to LIVE! Compliance monitoring will officially begin from ${complianceCutoffDate.toLocaleDateString('en-IN')}.`,
+      data: {
+        isLive: true,
+        goLiveAt: now,
+        complianceCutoffDate
+      }
+    });
+  } catch (error: any) {
+    console.error('Go Live error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 
 
 

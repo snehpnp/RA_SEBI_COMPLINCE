@@ -75,6 +75,10 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
 
     const alertsCreated: any[] = [];
 
+    const isLive = Boolean(tenant.isLive);
+    const cutoffDate = tenant.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+    const isPeriodicAuditingActive = isLive && (!cutoffDate || new Date() >= cutoffDate);
+
     const tenantUsers = await dynamicDb.User.find({
       $or: [
         { tenantId: resolvedTenantId },
@@ -83,9 +87,11 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
       deletedAt: null
     }).select('_id role roleId').populate('role').populate('roleId').lean();
     const tenantUserIds = tenantUsers.map((u: any) => u._id);
+    let staffMembers: any[] = [];
 
-    // 1. DEPOSIT RULE CHECK
-    const activeClientsCount = await dynamicDb.Client.countDocuments({
+    if (isPeriodicAuditingActive) {
+      // 1. DEPOSIT RULE CHECK
+      const activeClientsCount = await dynamicDb.Client.countDocuments({
       $or: [
         { tenantId: resolvedTenantId },
         { tenantId: tenant._id },
@@ -231,7 +237,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
     })
     .lean();
 
-  const staffMembers = rawStaffMembers.filter((st: any) => st.userId && !st.userId.deletedAt);
+  staffMembers = rawStaffMembers.filter((st: any) => st.userId && !st.userId.deletedAt);
 
   for (const staff of staffMembers) {
     if (staff.nismValidity) {
@@ -308,6 +314,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
       });
     }
   }
+  } // End if (isPeriodicAuditingActive) for Sections 1, 2, 3
 
   // 4. MISSING KYC / AGREEMENT CHECK for active subscribers
   const rawClientsWithSubscriptions = await dynamicDb.Client.find({
@@ -448,7 +455,8 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
     }
   }
 
-  // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 incl. GST per client per financial year
+  if (isPeriodicAuditingActive) {
+    // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 incl. GST per client per financial year
   const today = new Date();
   const fyStart = today.getMonth() >= 3
     ? new Date(today.getFullYear(), 3, 1)
@@ -1005,6 +1013,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
       }
     }
   }
+  } // End if (isPeriodicAuditingActive) for Sections 5, 5B, 6
 
   return alertsCreated;
 } catch (err: any) {
@@ -1348,25 +1357,34 @@ export const getChecklist = async (req: AuthenticatedRequest, res: Response) => 
     const checklist: any[] = [];
     const now = new Date();
 
-    for (const reqItem of requirements) {
-      const period = getCompliancePeriod(reqItem.frequencyType, now, tenant.createdAt);
-      
-      // 1. Look for any active overdue or non-compliant audit first (e.g. unfulfilled tasks from 30 Sep)
-      let audit: any = await dynamicDb.ComplianceAudit.findOne({
-        tenantId,
-        requirementId: reqItem._id,
-        $or: [
-          { status: { $in: ['OVERDUE', 'NON_COMPLIANT'] } },
-          { status: 'PENDING', dueDate: { $lt: now } }
-        ]
-      })
-        .sort({ dueDate: 1 })
-        .populate('penalty')
-        .lean();
+    const isLive = Boolean(tenant.isLive);
+    const cutoffDate = tenant.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+    const effectiveRefDate = (isLive && cutoffDate && cutoffDate > now) ? cutoffDate : now;
+    const effectiveTenantStart = (isLive && cutoffDate) ? cutoffDate : tenant.createdAt;
 
-      // If past-due pending audit found, mark its effective status as OVERDUE
-      if (audit && audit.status === 'PENDING' && audit.dueDate && new Date(audit.dueDate) < now) {
-        audit.status = 'OVERDUE';
+    for (const reqItem of requirements) {
+      const period = getCompliancePeriod(reqItem.frequencyType, effectiveRefDate, effectiveTenantStart);
+      
+      // 1. Look for any active overdue or non-compliant audit first (only if Live)
+      let audit: any = null;
+      if (isLive) {
+        audit = await dynamicDb.ComplianceAudit.findOne({
+          tenantId,
+          requirementId: reqItem._id,
+          ...(cutoffDate ? { dueDate: { $gte: cutoffDate } } : {}),
+          $or: [
+            { status: { $in: ['OVERDUE', 'NON_COMPLIANT'] } },
+            { status: 'PENDING', dueDate: { $lt: now } }
+          ]
+        })
+          .sort({ dueDate: 1 })
+          .populate('penalty')
+          .lean();
+
+        // If past-due pending audit found, mark its effective status as OVERDUE
+        if (audit && audit.status === 'PENDING' && audit.dueDate && new Date(audit.dueDate) < now) {
+          audit.status = 'OVERDUE';
+        }
       }
 
       // 2. If no overdue audit, look for current period audit
@@ -1383,9 +1401,13 @@ export const getChecklist = async (req: AuthenticatedRequest, res: Response) => 
           .lean();
       }
 
+      const isUpcoming = Boolean(isLive && cutoffDate && now < cutoffDate && !audit);
+
       checklist.push({
         ...reqItem,
         id: reqItem._id?.toString() || reqItem.id,
+        isUpcoming,
+        cycleStartDate: cutoffDate,
         audit: audit ? {
           ...audit,
           id: audit._id?.toString() || audit.id,
@@ -1428,7 +1450,11 @@ export const updateAuditStatus = async (req: AuthenticatedRequest, res: Response
       }
     }
 
-    const period = getCompliancePeriod(requirement.frequencyType, new Date(), tenant?.createdAt);
+    const isLive = Boolean(tenant?.isLive);
+    const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+    const effectiveRef = (isLive && cutoffDate && cutoffDate > new Date()) ? cutoffDate : new Date();
+    const effectiveStart = (isLive && cutoffDate) ? cutoffDate : tenant?.createdAt;
+    const period = getCompliancePeriod(requirement.frequencyType, effectiveRef, effectiveStart);
 
     // Find the audit record for the current period
     let audit: any = await dynamicDb.ComplianceAudit.findOne({
@@ -1613,7 +1639,21 @@ export const getPenalties = async (req: AuthenticatedRequest, res: Response) => 
     return res.status(200).json({ success: true, data: [] });
   }
   try {
-    const penalties = await dynamicDb.Penalty.find({ tenantId })
+    let tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    if (!tenant) tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+
+    if (!tenant?.isLive) {
+      // In setup mode, penalties are paused
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+    const penaltyQuery: any = { tenantId };
+    if (cutoffDate) {
+      penaltyQuery.createdAt = { $gte: cutoffDate };
+    }
+
+    const penalties = await dynamicDb.Penalty.find(penaltyQuery)
       .populate({
         path: 'auditId',
         populate: { path: 'requirementId' }

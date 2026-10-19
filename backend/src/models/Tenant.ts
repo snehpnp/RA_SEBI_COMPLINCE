@@ -100,6 +100,7 @@ export interface ITenant extends Document {
   showOpenTradePotential?: boolean;
   showLockedTradePotential?: boolean;
   smsGatewayEnabled?: boolean;
+  smsGatewayUrl?: string | null;
   smsUsername?: string | null;
   smsPassword?: string | null;
   smsSenderId?: string | null;
@@ -109,6 +110,10 @@ export interface ITenant extends Document {
   telegramBotToken?: string | null;
   telegramBotUsername?: string | null;
   telegramJoinRule?: 'ALL' | 'KYC_AGREEMENT_VERIFIED' | 'ACTIVE_PLAN_ONLY';
+  isLive?: boolean;
+  goLiveAt?: Date | null;
+  goLiveBy?: Types.ObjectId | null;
+  complianceCutoffDate?: Date | null;
   createdById?: Types.ObjectId | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -216,6 +221,7 @@ export const TenantSchema = new Schema<ITenant>(
     showOpenTradePotential: { type: Boolean, default: true },
     showLockedTradePotential: { type: Boolean, default: true },
     smsGatewayEnabled: { type: Boolean, default: false },
+    smsGatewayUrl: { type: String, default: 'https://bulksms.pnpuniverse.com/sms/user/urlsms.php' },
     smsUsername: { type: String, default: null },
     smsPassword: { type: String, default: null },
     smsSenderId: { type: String, default: null },
@@ -225,6 +231,10 @@ export const TenantSchema = new Schema<ITenant>(
     telegramBotToken: { type: String, default: null },
     telegramBotUsername: { type: String, default: null },
     telegramJoinRule: { type: String, enum: ['ALL', 'KYC_AGREEMENT_VERIFIED', 'ACTIVE_PLAN_ONLY'], default: 'ALL' },
+    isLive: { type: Boolean, default: false },
+    goLiveAt: { type: Date, default: null },
+    goLiveBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    complianceCutoffDate: { type: Date, default: null },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
   },
