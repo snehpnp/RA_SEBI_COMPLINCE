@@ -313,6 +313,8 @@ router.post('/admin/staff/:id/delete', auth_1.authenticateJWT, (0, auth_1.requir
 router.post('/admin/staff/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.restoreStaff);
 router.get('/admin/staff/:id/password', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.getStaffPassword);
 router.post('/admin/staff/:id/resend-password', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.resendStaffCredentials);
+router.get('/admin/researcher-dsc-permissions', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.getResearcherDscPermissions);
+router.put('/admin/researcher-dsc-permissions/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, adminController_1.updateResearcherDscPermission);
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
 router.get('/admin/clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, adminController_1.getAdminClients);
@@ -510,6 +512,7 @@ router.post('/researcher/esign/initiate', auth_1.authenticateJWT, (0, auth_1.req
 router.post('/researcher/esign/complete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researcherSignatureController_1.completeReportAadhaarEsign);
 router.post('/researcher/esign/use-daily-stamp', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), researcherSignatureController_1.useDailyAadhaarSign);
 router.post('/researcher/dsc/save-signed-report', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), researcherSignatureController_1.saveDscSignedReport);
+router.post('/researcher/dsc/verify-token', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researcherSignatureController_1.verifyDscToken);
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES
 // ----------------------------------------------------

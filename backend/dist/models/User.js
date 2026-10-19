@@ -80,6 +80,11 @@ exports.UserSchema = new mongoose_1.Schema({
             default: 'ALL_PAGES'
         },
         registeredCertSerial: { type: String, default: null }
+    },
+    dscSigningScope: {
+        type: String,
+        enum: ['DISABLED', 'SELF', 'ALL'],
+        default: 'DISABLED'
     }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'User' });
 // Virtual relations

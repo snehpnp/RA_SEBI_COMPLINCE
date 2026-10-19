@@ -705,7 +705,7 @@ export const getStaff = async (req: AuthenticatedRequest, res: Response) => {
 export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   const { id } = req.params;
-  const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
+  const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole, dscSigningScope } = req.body;
 
   if (!tenantId) {
     return res.status(400).json({ success: false, message: 'Invalid tenant context' });
@@ -805,6 +805,9 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
     if (targetRole) {
       updateUserData.roleId = targetRole._id || targetRole.id;
     }
+    if (dscSigningScope && ['DISABLED', 'SELF', 'ALL'].includes(dscSigningScope)) {
+      updateUserData.dscSigningScope = dscSigningScope;
+    }
 
     const targetUserId = staff.userId || staffUser?._id;
 
@@ -820,6 +823,7 @@ export const updateStaff = async (req: AuthenticatedRequest, res: Response) => {
       joiningDate: joiningDate ? new Date(joiningDate) : null,
       nismNumber: roleRequiresNism || nismNumber ? nismNumber : null,
       nismValidity: nismValidity ? new Date(nismValidity) : null,
+      ...(dscSigningScope && ['DISABLED', 'SELF', 'ALL'].includes(dscSigningScope) ? { dscSigningScope } : {}),
       ...(targetUserId ? { userId: targetUserId } : {})
     };
 
@@ -1173,6 +1177,137 @@ export const resendStaffCredentials = async (req: AuthenticatedRequest, res: Res
     });
   } catch (error: any) {
     return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+// =====================================================
+// RESEARCHER HARDWARE DSC PERMISSIONS (Admin Controlled)
+// =====================================================
+
+export const getResearcherDscPermissions = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) {
+    return res.status(400).json({ success: false, message: 'Invalid tenant context' });
+  }
+
+  try {
+    const researcherRole = await dynamicDb.Role.findOne({ name: 'RESEARCHER' }).lean();
+    if (!researcherRole) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const researcherRoleId = researcherRole._id || researcherRole.id;
+    // Find all users with role RESEARCHER in this tenant
+    const users: any[] = await dynamicDb.User.find({
+      tenantId,
+      roleId: researcherRoleId
+    })
+      .populate('roleId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const userIds = users.map((u: any) => u._id || u.id);
+    const staffList: any[] = await dynamicDb.Staff.find({ userId: { $in: userIds } }).lean();
+    const staffMap = new Map(staffList.map((s: any) => [String(s.userId), s]));
+
+    const result = users.map((u: any) => {
+      const s = staffMap.get(String(u._id || u.id));
+      const staffName = s?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username;
+      const username = s?.username || u.username;
+      const dscScope = s?.dscSigningScope || u.dscSigningScope || 'DISABLED';
+      const isInactiveOrDeleted = !!(u.deletedAt || s?.deletedAt || u.status !== 'ACTIVE' || (s && s.status !== 'ACTIVE'));
+
+      return {
+        id: String(s?._id || u._id || u.id),
+        staffId: s ? String(s._id || s.id) : null,
+        userId: String(u._id || u.id),
+        name: staffName,
+        username,
+        email: u.email,
+        mobile: u.mobile || s?.mobile,
+        status: isInactiveOrDeleted ? 'INACTIVE' : 'ACTIVE',
+        deletedAt: u.deletedAt || s?.deletedAt || null,
+        dscSigningScope: dscScope,
+        roleName: 'RESEARCHER'
+      };
+    });
+
+    return res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateResearcherDscPermission = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  const { id } = req.params;
+  const { dscSigningScope } = req.body;
+
+  if (!tenantId) {
+    return res.status(400).json({ success: false, message: 'Invalid tenant context' });
+  }
+
+  if (!['DISABLED', 'SELF', 'ALL'].includes(dscSigningScope)) {
+    return res.status(400).json({ success: false, message: 'Invalid dscSigningScope. Allowed values: DISABLED, SELF, ALL' });
+  }
+
+  try {
+    let staff: any = null;
+    let user: any = null;
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staff = await dynamicDb.Staff.findById(id).lean();
+      if (!staff) {
+        user = await dynamicDb.User.findById(id).lean();
+        if (user) {
+          staff = await dynamicDb.Staff.findOne({ userId: user._id }).lean();
+        }
+      } else if (staff.userId) {
+        user = await dynamicDb.User.findById(staff.userId).lean();
+      }
+    }
+
+    if (!staff && !user) {
+      staff = await dynamicDb.Staff.findOne({
+        $or: [{ employeeId: id }, { email: id }]
+      }).lean();
+      if (staff && staff.userId) {
+        user = await dynamicDb.User.findById(staff.userId).lean();
+      }
+    }
+
+    if (!staff && !user) {
+      return res.status(404).json({ success: false, message: 'Researcher not found.' });
+    }
+
+    if (user && user.tenantId && String(user.tenantId) !== String(tenantId)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized: Researcher belongs to another tenant.' });
+    }
+
+    if (staff) {
+      await dynamicDb.Staff.findByIdAndUpdate(staff._id, { $set: { dscSigningScope } });
+    }
+    if (user) {
+      await dynamicDb.User.findByIdAndUpdate(user._id, { $set: { dscSigningScope } });
+    }
+
+    await logAudit({
+      tenantId,
+      userId: req.user!.id,
+      action: 'UPDATE',
+      module: 'STAFF',
+      oldValue: { dscSigningScope: staff?.dscSigningScope || user?.dscSigningScope },
+      newValue: { dscSigningScope },
+      ipAddress: req.ip
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `DSC Signing scope updated to ${dscSigningScope} successfully`,
+      data: { id, dscSigningScope }
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 

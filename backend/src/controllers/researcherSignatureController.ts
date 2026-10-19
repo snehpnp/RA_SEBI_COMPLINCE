@@ -593,6 +593,22 @@ export const saveDscSignedReport = async (req: Request, res: Response) => {
       }
     }
 
+    // Verify DSC permission before saving
+    const signerName = req.body.signerName || parsedMeta?.signerName || parsedMeta?.subject;
+    if (signerName) {
+      const loggedInUserId = userPayload?.id || userPayload?._id;
+      const loggedInUserName = userPayload?.name || `${userPayload?.firstName || ''} ${userPayload?.lastName || ''}`.trim() || userPayload?.username || '';
+      const checkRes = await checkDscSignerPermission(
+        signal.tenantId || userPayload?.tenantId,
+        loggedInUserId,
+        loggedInUserName,
+        signerName
+      );
+      if (!checkRes.valid) {
+        return res.status(403).json({ success: false, message: checkRes.message });
+      }
+    }
+
     const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(
       signalId,
       {
@@ -643,3 +659,173 @@ export const saveDscSignedReport = async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, message: err.message || 'Server error' });
   }
 };
+
+// ----------------------------------------------------
+// 8. VERIFY HARDWARE DSC TOKEN PERMISSION (Admin Scope & Active Guard)
+// ----------------------------------------------------
+
+export const checkDscSignerPermission = async (
+  tenantId: any,
+  loggedInUserId: any,
+  loggedInUserName: string,
+  signerName: string
+) => {
+  if (!signerName || !signerName.trim()) {
+    return {
+      valid: false,
+      code: 'NO_SIGNER_NAME',
+      message: 'No signer name detected from USB DSC Token.'
+    };
+  }
+
+  const rawTokenName = signerName.trim();
+  const normalize = (str: string) =>
+    str.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokenNormalized = normalize(rawTokenName);
+
+  // Find RESEARCHER role
+  const researcherRole = await dynamicDb.Role.findOne({ name: 'RESEARCHER' }).lean();
+  if (!researcherRole) {
+    return {
+      valid: false,
+      code: 'NO_RESEARCHER_ROLE',
+      message: 'RESEARCHER role not found in system.'
+    };
+  }
+
+  const researcherRoleId = researcherRole._id || researcherRole.id;
+
+  // Find all researcher users for this tenant
+  const researcherUsers: any[] = await dynamicDb.User.find({
+    tenantId,
+    roleId: researcherRoleId
+  }).lean();
+
+  const userIds = researcherUsers.map((u: any) => u._id || u.id);
+  const staffList: any[] = await dynamicDb.Staff.find({ userId: { $in: userIds } }).lean();
+  const staffByUserId = new Map(staffList.map((s: any) => [String(s.userId), s]));
+
+  let matchedResearcher: any = null;
+  let matchedUser: any = null;
+
+  for (const u of researcherUsers) {
+    const s = staffByUserId.get(String(u._id || u.id));
+    const namesToTest = [
+      s?.name,
+      `${u.firstName || ''} ${u.lastName || ''}`.trim(),
+      u.username,
+      s?.username
+    ].filter(Boolean) as string[];
+
+    const isMatch = namesToTest.some((n) => {
+      const norm = normalize(n);
+      return norm === tokenNormalized || norm.includes(tokenNormalized) || tokenNormalized.includes(norm);
+    });
+
+    if (isMatch) {
+      matchedResearcher = s;
+      matchedUser = u;
+      break;
+    }
+  }
+
+  if (!matchedUser) {
+    return {
+      valid: false,
+      code: 'RESEARCHER_NOT_FOUND',
+      message: `No registered researcher found matching DSC token name: "${rawTokenName}". Only authorized researchers registered by Admin can sign reports.`
+    };
+  }
+
+  const officialName = matchedResearcher?.name || `${matchedUser.firstName} ${matchedUser.lastName}`.trim();
+  const scope = matchedResearcher?.dscSigningScope || matchedUser.dscSigningScope || 'DISABLED';
+
+  // Inactive or Deleted Check
+  const isInactiveOrDeleted = !!(
+    matchedUser.deletedAt ||
+    matchedResearcher?.deletedAt ||
+    matchedUser.status !== 'ACTIVE' ||
+    (matchedResearcher && matchedResearcher.status !== 'ACTIVE')
+  );
+
+  if (isInactiveOrDeleted) {
+    return {
+      valid: false,
+      code: 'RESEARCHER_INACTIVE_OR_DELETED',
+      message: `DSC Token belongs to "${officialName}", who is currently INACTIVE or Deactivated. Signing is blocked.`
+    };
+  }
+
+  // Permission Scope: DISABLED
+  if (scope === 'DISABLED') {
+    return {
+      valid: false,
+      code: 'DSC_DISABLED',
+      message: `Hardware DSC Signing is DISABLED by Admin for "${officialName}". Request Admin to enable DSC permission.`
+    };
+  }
+
+  // Permission Scope: ALL
+  if (scope === 'ALL') {
+    return {
+      valid: true,
+      code: 'AUTHORIZED_ALL',
+      scope: 'ALL',
+      ownerName: officialName,
+      message: `Master/Shared DSC Token verified. Admin has permitted this token (${officialName}) for all researchers.`
+    };
+  }
+
+  // Permission Scope: SELF
+  if (scope === 'SELF') {
+    const isSelf = String(matchedUser._id) === String(loggedInUserId);
+    if (isSelf) {
+      return {
+        valid: true,
+        code: 'AUTHORIZED_SELF',
+        scope: 'SELF',
+        ownerName: officialName,
+        message: `DSC Token verified for your account (${officialName}).`
+      };
+    } else {
+      return {
+        valid: false,
+        code: 'SELF_MISMATCH',
+        message: `DSC Token belongs to "${officialName}" (Self-login only). You are logged in as "${loggedInUserName}". You cannot use another researcher's personal DSC token.`
+      };
+    }
+  }
+
+  return {
+    valid: false,
+    code: 'UNAUTHORIZED',
+    message: 'Unauthorized DSC signing permission.'
+  };
+};
+
+export const verifyDscToken = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const tenantId = user?.tenantId;
+    const loggedInUserId = user?.id || user?._id;
+    const loggedInUserName = user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || '';
+    const { signerName } = req.body;
+
+    const result = await checkDscSignerPermission(tenantId, loggedInUserId, loggedInUserName, signerName);
+
+    if (!result.valid) {
+      return res.status(403).json({
+        success: false,
+        ...result
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      ...result
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, valid: false, message: err.message });
+  }
+};
+

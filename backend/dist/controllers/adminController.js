@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = void 0;
+exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.updateResearcherDscPermission = exports.getResearcherDscPermissions = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -696,7 +696,7 @@ exports.getStaff = getStaff;
 const updateStaff = async (req, res) => {
     const tenantId = req.user.tenantId;
     const { id } = req.params;
-    const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole } = req.body;
+    const { username, name, email, mobile, dob, joiningDate, nismNumber, nismValidity, roleName, personAssociatedType, customRole, dscSigningScope } = req.body;
     if (!tenantId) {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     }
@@ -789,6 +789,9 @@ const updateStaff = async (req, res) => {
         if (targetRole) {
             updateUserData.roleId = targetRole._id || targetRole.id;
         }
+        if (dscSigningScope && ['DISABLED', 'SELF', 'ALL'].includes(dscSigningScope)) {
+            updateUserData.dscSigningScope = dscSigningScope;
+        }
         const targetUserId = staff.userId || staffUser?._id;
         if (targetUserId) {
             await db_1.default.User.findByIdAndUpdate(targetUserId, { $set: updateUserData });
@@ -801,6 +804,7 @@ const updateStaff = async (req, res) => {
             joiningDate: joiningDate ? new Date(joiningDate) : null,
             nismNumber: roleRequiresNism || nismNumber ? nismNumber : null,
             nismValidity: nismValidity ? new Date(nismValidity) : null,
+            ...(dscSigningScope && ['DISABLED', 'SELF', 'ALL'].includes(dscSigningScope) ? { dscSigningScope } : {}),
             ...(targetUserId ? { userId: targetUserId } : {})
         };
         if (req.file) {
@@ -1110,6 +1114,123 @@ const resendStaffCredentials = async (req, res) => {
     }
 };
 exports.resendStaffCredentials = resendStaffCredentials;
+// =====================================================
+// RESEARCHER HARDWARE DSC PERMISSIONS (Admin Controlled)
+// =====================================================
+const getResearcherDscPermissions = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    if (!tenantId) {
+        return res.status(400).json({ success: false, message: 'Invalid tenant context' });
+    }
+    try {
+        const researcherRole = await db_1.default.Role.findOne({ name: 'RESEARCHER' }).lean();
+        if (!researcherRole) {
+            return res.status(200).json({ success: true, data: [] });
+        }
+        const researcherRoleId = researcherRole._id || researcherRole.id;
+        // Find all users with role RESEARCHER in this tenant
+        const users = await db_1.default.User.find({
+            tenantId,
+            roleId: researcherRoleId
+        })
+            .populate('roleId')
+            .sort({ createdAt: -1 })
+            .lean();
+        const userIds = users.map((u) => u._id || u.id);
+        const staffList = await db_1.default.Staff.find({ userId: { $in: userIds } }).lean();
+        const staffMap = new Map(staffList.map((s) => [String(s.userId), s]));
+        const result = users.map((u) => {
+            const s = staffMap.get(String(u._id || u.id));
+            const staffName = s?.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.username;
+            const username = s?.username || u.username;
+            const dscScope = s?.dscSigningScope || u.dscSigningScope || 'DISABLED';
+            const isInactiveOrDeleted = !!(u.deletedAt || s?.deletedAt || u.status !== 'ACTIVE' || (s && s.status !== 'ACTIVE'));
+            return {
+                id: String(s?._id || u._id || u.id),
+                staffId: s ? String(s._id || s.id) : null,
+                userId: String(u._id || u.id),
+                name: staffName,
+                username,
+                email: u.email,
+                mobile: u.mobile || s?.mobile,
+                status: isInactiveOrDeleted ? 'INACTIVE' : 'ACTIVE',
+                deletedAt: u.deletedAt || s?.deletedAt || null,
+                dscSigningScope: dscScope,
+                roleName: 'RESEARCHER'
+            };
+        });
+        return res.status(200).json({ success: true, data: result });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.getResearcherDscPermissions = getResearcherDscPermissions;
+const updateResearcherDscPermission = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    const { id } = req.params;
+    const { dscSigningScope } = req.body;
+    if (!tenantId) {
+        return res.status(400).json({ success: false, message: 'Invalid tenant context' });
+    }
+    if (!['DISABLED', 'SELF', 'ALL'].includes(dscSigningScope)) {
+        return res.status(400).json({ success: false, message: 'Invalid dscSigningScope. Allowed values: DISABLED, SELF, ALL' });
+    }
+    try {
+        let staff = null;
+        let user = null;
+        if (mongoose_1.default.Types.ObjectId.isValid(id)) {
+            staff = await db_1.default.Staff.findById(id).lean();
+            if (!staff) {
+                user = await db_1.default.User.findById(id).lean();
+                if (user) {
+                    staff = await db_1.default.Staff.findOne({ userId: user._id }).lean();
+                }
+            }
+            else if (staff.userId) {
+                user = await db_1.default.User.findById(staff.userId).lean();
+            }
+        }
+        if (!staff && !user) {
+            staff = await db_1.default.Staff.findOne({
+                $or: [{ employeeId: id }, { email: id }]
+            }).lean();
+            if (staff && staff.userId) {
+                user = await db_1.default.User.findById(staff.userId).lean();
+            }
+        }
+        if (!staff && !user) {
+            return res.status(404).json({ success: false, message: 'Researcher not found.' });
+        }
+        if (user && user.tenantId && String(user.tenantId) !== String(tenantId)) {
+            return res.status(403).json({ success: false, message: 'Unauthorized: Researcher belongs to another tenant.' });
+        }
+        if (staff) {
+            await db_1.default.Staff.findByIdAndUpdate(staff._id, { $set: { dscSigningScope } });
+        }
+        if (user) {
+            await db_1.default.User.findByIdAndUpdate(user._id, { $set: { dscSigningScope } });
+        }
+        await (0, auditService_1.logAudit)({
+            tenantId,
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'STAFF',
+            oldValue: { dscSigningScope: staff?.dscSigningScope || user?.dscSigningScope },
+            newValue: { dscSigningScope },
+            ipAddress: req.ip
+        });
+        return res.status(200).json({
+            success: true,
+            message: `DSC Signing scope updated to ${dscSigningScope} successfully`,
+            data: { id, dscSigningScope }
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.updateResearcherDscPermission = updateResearcherDscPermission;
 // =====================================================
 // CLIENT MANAGEMENT (Admin View)
 // =====================================================

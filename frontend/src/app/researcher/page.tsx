@@ -7305,23 +7305,25 @@ function AdminDashboardContent() {
                             </div>
                           </div>
 
-                          {/* Category Filter Pills */}
-                          <div className="flex space-x-3 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                          {/* Category Filter Pills - Multi-line Flex Wrap (No scroll required) & Active Categories Only */}
+                          <div className="flex flex-wrap gap-2.5 mb-6">
                             <button
                               onClick={() => setSelectedCategoryFilter('ALL')}
-                              className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                              className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
                             >
                               All Plans
                             </button>
-                            {categories.map(cat => (
-                              <button
-                                key={cat.id}
-                                onClick={() => setSelectedCategoryFilter(cat.id)}
-                                className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
-                              >
-                                {cat.name}
-                              </button>
-                            ))}
+                            {categories
+                              .filter(cat => cat.status === 'ACTIVE' || (!cat.status && !cat.deletedAt))
+                              .map(cat => (
+                                <button
+                                  key={cat.id || cat._id}
+                                  onClick={() => setSelectedCategoryFilter(cat.id || cat._id)}
+                                  className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === (cat.id || cat._id) ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                                >
+                                  {cat.name}
+                                </button>
+                              ))}
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -57,9 +57,9 @@ import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
-import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy, Calendar as CalendarIcon } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy, Calendar as CalendarIcon, ShieldAlert } from 'lucide-react';
 import ComplianceCalendarModal from '../../components/compliance/ComplianceCalendarModal';
+import { SebiPenaltiesMatrixView } from '../../components/SebiPenaltiesMatrixView';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -136,6 +136,14 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'Access to main statistics and compliance alerts',
   },
   {
+    tab: 'compliance',
+    label: 'Compliance Desk',
+    icon: 'AlertTriangle',
+    accessKey: 'ACCESS_COMPLIANCE',
+    moduleLabel: 'Compliance Desk',
+    moduleDesc: 'SEBI compliance monitoring, sweeps, checklist audits, and SCORES complaints',
+  },
+  {
     tab: 'checklist',
     label: 'SEBI Checklist',
     icon: 'CheckSquare',
@@ -144,12 +152,12 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'View and manage SEBI compliance checklist',
   },
   {
-    tab: 'compliance',
-    label: 'Compliance Desk',
-    icon: 'ShieldCheck',
-    accessKey: 'ACCESS_COMPLIANCE',
-    moduleLabel: 'Compliance Desk',
-    moduleDesc: 'SEBI compliance monitoring, sweeps, checklist audits, and SCORES complaints',
+    tab: 'penalty-matrix',
+    label: 'Penalty Matrix',
+    icon: 'ShieldAlert',
+    accessKey: 'ACCESS_CHECKLIST',
+    moduleLabel: 'SEBI Penalty Matrix',
+    moduleDesc: 'Complete official reference schedule of all 78 SEBI penalties, triggers, and compliance frequencies',
   },
   {
     tab: 'complaintReport',
@@ -219,7 +227,7 @@ const NAV_CONFIG: NavModule[] = [
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, ShieldAlert
 };
 
 // =============================================================================
@@ -538,7 +546,7 @@ function AdminDashboardContent() {
   const [plans, setPlans] = useState<any[]>([]);
   const [checklist, setChecklist] = useState<any[]>([]);
   const [checklistHistory, setChecklistHistory] = useState<any[]>([]);
-  const [checklistSubTab, setChecklistSubTab] = useState<'active' | 'history'>('active');
+  const [checklistSubTab, setChecklistSubTab] = useState<'active' | 'history' | 'penalties'>('active');
   const [checklistStatusFilter, setChecklistStatusFilter] = useState<'ALL' | 'OVERDUE' | 'PENDING'>('ALL');
   const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
   const [alertsSubTab, setAlertsSubTab] = useState<'active' | 'history'>('active');
@@ -584,8 +592,25 @@ function AdminDashboardContent() {
   const [complaintResolveId, setComplaintResolveId] = useState<string | null>(null);
   const [complaintAtrProof, setComplaintAtrProof] = useState<File | null>(null);
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
-  const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
   const [allPayments, setAllPayments] = useState<any[]>([]);
+  const pendingQrCount = useMemo(() => {
+    return allPayments.filter((p: any) =>
+      (p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl) &&
+      (p.status || 'PENDING').toUpperCase() === 'PENDING'
+    ).length;
+  }, [allPayments]);
+
+  const complianceAlertCount = useMemo(() => {
+    return alerts.filter((a: any) => (a.status || 'OPEN').toUpperCase() === 'OPEN').length;
+  }, [alerts]);
+
+  const checklistPendingCount = useMemo(() => {
+    const AUTO_MONITORED_SERIALS = [4, 5, 6, 12, 17, 48];
+    return checklist.filter((item: any) => 
+      !AUTO_MONITORED_SERIALS.includes(item.serialNo) && 
+      (!item.audit || item.audit.status === 'PENDING' || item.audit.status === 'OVERDUE' || item.audit.status === 'NON_COMPLIANT')
+    ).length;
+  }, [checklist]);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
@@ -1402,7 +1427,7 @@ function AdminDashboardContent() {
           const isAllowed = (tab: string) => {
             if (syncedUser.role === 'SUPER_ADMIN' || syncedUser.role === 'ADMIN') return true;
             if (tab === 'dashboard' || tab === 'profile' || tab === 'legalView') return true;
-            if (tab === 'checklist') {
+            if (tab === 'checklist' || tab === 'penalty-matrix') {
               return syncedUser.permissions?.includes('ACCESS_CHECKLIST') || syncedUser.permissions?.includes('ACCESS_COMPLIANCE') || false;
             }
             const permMap: Record<string, string> = {
@@ -1463,7 +1488,7 @@ function AdminDashboardContent() {
       const isAllowed = (tab: string) => {
         if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
         if (tab === 'dashboard' || tab === 'profile' || tab === 'legalView') return true;
-        if (tab === 'checklist') {
+        if (tab === 'checklist' || tab === 'penalty-matrix') {
           return user.permissions?.includes('ACCESS_CHECKLIST') || user.permissions?.includes('ACCESS_COMPLIANCE') || false;
         }
         const permMap: Record<string, string> = {
@@ -2984,25 +3009,110 @@ function AdminDashboardContent() {
               }
 
               const isActive = activeTab === mod.tab;
+              const isPaymentsTab = mod.tab === 'payments';
+              const isComplianceTab = mod.tab === 'compliance';
+              const isChecklistTab = mod.tab === 'checklist';
+
+              let badgeCount = 0;
+              let badgeTooltip = '';
+              if (isPaymentsTab && pendingQrCount > 0) {
+                badgeCount = pendingQrCount;
+                badgeTooltip = `${pendingQrCount} Pending QR`;
+              } else if (isComplianceTab && complianceAlertCount > 0) {
+                badgeCount = complianceAlertCount;
+                badgeTooltip = `${complianceAlertCount} Active Alerts`;
+              } else if (isChecklistTab && checklistPendingCount > 0) {
+                badgeCount = checklistPendingCount;
+                badgeTooltip = `${checklistPendingCount} Pending Tasks`;
+              }
+
+              const showPendingBadge = badgeCount > 0;
+              const isComplianceCluster = ['compliance', 'checklist', 'penalty-matrix'].includes(mod.tab);
+
+              let buttonStyle = '';
+              let iconStyle = '';
+
+              if (isComplianceCluster) {
+                if (isActive) {
+                  buttonStyle = 'bg-gradient-to-r from-amber-500/25 via-indigo-600/30 to-amber-500/20 text-slate-900 dark:text-white font-extrabold shadow-md border border-amber-400/50';
+                  iconStyle = 'text-amber-500 dark:text-amber-300';
+                } else {
+                  buttonStyle = 'bg-amber-400/[0.08] dark:bg-amber-400/[0.07] border border-amber-400/25 text-amber-900 dark:text-amber-100 hover:bg-amber-400/20 hover:border-amber-400/50';
+                  iconStyle = 'text-amber-500 dark:text-amber-400 group-hover:text-amber-600 dark:group-hover:text-amber-200';
+                }
+              } else {
+                if (isActive) {
+                  buttonStyle = 'bg-premium-primary/10 text-premium-primary font-semibold';
+                  iconStyle = 'text-premium-primary';
+                } else {
+                  buttonStyle = 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text';
+                  iconStyle = 'text-premium-text/50 group-hover:text-premium-text/80';
+                }
+              }
+
               return (
-                <button
-                  key={mod.tab}
-                  onClick={() => {
-                    setActiveTab(mod.tab);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                    ? 'bg-premium-primary/10 text-premium-primary font-semibold'
-                    : 'text-premium-text/70 hover:bg-premium-bg hover:text-premium-text'
-                    } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
-                  title={isSidebarCollapsed ? mod.label : undefined}
-                >
-                  <Icon className={`w-5 h-5 transition-colors shrink-0 ${isActive ? 'text-premium-primary' : 'text-premium-text/50 group-hover:text-premium-text/80'}`} />
-                  {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
-                  {!isSidebarCollapsed && isActive && (
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                <div key={mod.tab}>
+                  {!isSidebarCollapsed && mod.tab === 'compliance' && (
+                    <div className="pt-3 pb-1.5 px-3 flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-300 flex items-center gap-1.5">
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        SEBI Regulatory
+                      </span>
+                      <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-700 dark:text-amber-300 border border-amber-400/30 font-mono">
+                        3 Desks
+                      </span>
+                    </div>
                   )}
-                </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveTab(mod.tab);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`w-full relative flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${buttonStyle} ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                    title={isSidebarCollapsed ? (showPendingBadge ? `${mod.label} (${badgeTooltip})` : mod.label) : undefined}
+                  >
+                    <div className="relative shrink-0 flex items-center justify-center">
+                      <Icon className={`w-5 h-5 transition-colors shrink-0 ${iconStyle}`} />
+                      {isSidebarCollapsed && showPendingBadge && (
+                        <span className="absolute -top-1.5 -right-2 px-1.5 py-0.2 bg-amber-500 text-black text-[9px] font-black rounded-full shadow-md animate-pulse">
+                          {badgeCount}
+                        </span>
+                      )}
+                    </div>
+                    {!isSidebarCollapsed && <span className="truncate whitespace-nowrap text-sm">{mod.label}</span>}
+
+                    {!isSidebarCollapsed && showPendingBadge && (
+                      <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black shadow-sm shrink-0 animate-pulse">
+                        {badgeCount}
+                      </span>
+                    )}
+
+                    {!isSidebarCollapsed && isComplianceCluster && !showPendingBadge && (
+                      <span className="ml-auto">
+                        {mod.tab === 'compliance' && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                            Desk
+                          </span>
+                        )}
+                        {mod.tab === 'checklist' && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/30">
+                            Checklist
+                          </span>
+                        )}
+                        {mod.tab === 'penalty-matrix' && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-mono">
+                            78 Rules
+                          </span>
+                        )}
+                      </span>
+                    )}
+
+                    {!isSidebarCollapsed && isActive && !showPendingBadge && !isComplianceCluster && (
+                      <div className="ml-auto w-1.5 h-1.5 rounded-full bg-premium-primary shadow-[0_0_8px_var(--tw-colors-premium-primary)]" />
+                    )}
+                  </button>
+                </div>
               );
             })}
 
@@ -4618,19 +4728,38 @@ function AdminDashboardContent() {
                           </div>
 
                           {/* Sub-tab selection */}
-                          <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
-                            <button
-                              onClick={() => setChecklistSubTab('active')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
-                            >
-                              Active Checklist ({activeList.length})
-                            </button>
-                            <button
-                              onClick={() => setChecklistSubTab('history')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
-                            >
-                              Checklist History ({checklistHistory.length})
-                            </button>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
+                              <button
+                                onClick={() => setChecklistSubTab('active')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              >
+                                Active Checklist ({activeList.length})
+                              </button>
+                              <button
+                                onClick={() => setChecklistSubTab('history')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              >
+                                Checklist History ({checklistHistory.length})
+                              </button>
+                              <button
+                                onClick={() => setChecklistSubTab('penalties')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${checklistSubTab === 'penalties' ? 'bg-amber-500 text-slate-950 font-black shadow-sm' : 'text-amber-500 hover:bg-amber-500/10'}`}
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                <span>SEBI Penalties Master (78 Rules)</span>
+                              </button>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={() => setChecklistSubTab('penalties')}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${checklistSubTab === 'penalties' ? 'bg-amber-500 text-slate-950 border-amber-600 font-extrabold' : 'bg-gradient-to-r from-amber-500/10 to-rose-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20'}`}
+                              >
+                                <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0" />
+                                <span>View SEBI Penalty Matrix (All 78 Penalties)</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* ACTIVE CHECKLIST VIEW */}
@@ -4888,10 +5017,26 @@ function AdminDashboardContent() {
                             <MobilePreview mode="CHECKLIST" checklistItems={checklistSubTab === 'history' ? checklistHistory : activeList} title={NAV_CONFIG.find(n => n.tab === activeTab)?.label} />
                           </div>
                         )}
+
+                        {/* SEBI PENALTIES MATRIX VIEW */}
+                        {checklistSubTab === 'penalties' && (
+                          <SebiPenaltiesMatrixView 
+                            onClose={() => setChecklistSubTab('active')} 
+                            onOpenChecklistCalendar={() => setShowCalendarModal(true)}
+                          />
+                        )}
                       </div>
                     );
                   })()}
 
+                  {/* ====================================================
+                      SEBI PENALTY MATRIX TAB (Dedicated Full Page)
+                  ==================================================== */}
+                  {activeTab === 'penalty-matrix' && (
+                    <div className="w-full space-y-6">
+                      <SebiPenaltiesMatrixView onOpenChecklistCalendar={() => setShowCalendarModal(true)} />
+                    </div>
+                  )}
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
@@ -7318,23 +7463,25 @@ function AdminDashboardContent() {
                             </div>
                           </div>
 
-                          {/* Category Filter Pills */}
-                          <div className="flex space-x-3 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                          {/* Category Filter Pills - Multi-line Flex Wrap (No scroll required) & Active Categories Only */}
+                          <div className="flex flex-wrap gap-2.5 mb-6">
                             <button
                               onClick={() => setSelectedCategoryFilter('ALL')}
-                              className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                              className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
                             >
                               All Plans
                             </button>
-                            {categories.map(cat => (
-                              <button
-                                key={cat.id}
-                                onClick={() => setSelectedCategoryFilter(cat.id)}
-                                className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
-                              >
-                                {cat.name}
-                              </button>
-                            ))}
+                            {categories
+                              .filter(cat => cat.status === 'ACTIVE' || (!cat.status && !cat.deletedAt))
+                              .map(cat => (
+                                <button
+                                  key={cat.id || cat._id}
+                                  onClick={() => setSelectedCategoryFilter(cat.id || cat._id)}
+                                  className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === (cat.id || cat._id) ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                                >
+                                  {cat.name}
+                                </button>
+                              ))}
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

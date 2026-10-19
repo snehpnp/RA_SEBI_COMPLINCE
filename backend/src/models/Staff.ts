@@ -16,6 +16,7 @@ export interface IStaff extends Document {
   nismUpload?: string | null;
   nismValidity?: Date | null;
   status: string;
+  dscSigningScope?: 'DISABLED' | 'SELF' | 'ALL';
 }
 
 export const StaffSchema = new Schema<IStaff>(
@@ -31,7 +32,12 @@ export const StaffSchema = new Schema<IStaff>(
     nismNumber: { type: String, default: null },
     nismUpload: { type: String, default: null },
     nismValidity: { type: Date, default: null },
-    status: { type: String, default: 'ACTIVE' }
+    status: { type: String, default: 'ACTIVE' },
+    dscSigningScope: {
+      type: String,
+      enum: ['DISABLED', 'SELF', 'ALL'],
+      default: 'DISABLED'
+    }
   },
   { ...baseSchemaOptions, collection: 'Staff' }
 );

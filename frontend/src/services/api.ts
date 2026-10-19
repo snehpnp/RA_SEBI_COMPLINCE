@@ -1314,6 +1314,24 @@ class ApiClient {
     });
   }
 
+  async verifyDscToken(signerName: string) {
+    return this.request('/researcher/dsc/verify-token', {
+      method: 'POST',
+      body: JSON.stringify({ signerName })
+    });
+  }
+
+  async getResearcherDscPermissions() {
+    return this.request('/admin/researcher-dsc-permissions');
+  }
+
+  async updateResearcherDscPermission(id: string, dscSigningScope: 'DISABLED' | 'SELF' | 'ALL') {
+    return this.request(`/admin/researcher-dsc-permissions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ dscSigningScope })
+    });
+  }
+
   // Coupon Methods
   async getCoupons() {
     return this.request('/admin/coupons');

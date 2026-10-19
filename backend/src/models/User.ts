@@ -37,6 +37,7 @@ export interface IUser extends Document {
     signScope?: 'ALL_PAGES' | 'LAST_PAGE';
     registeredCertSerial?: string | null;
   };
+  dscSigningScope?: 'DISABLED' | 'SELF' | 'ALL';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -86,6 +87,11 @@ export const UserSchema = new Schema<IUser>(
         default: 'ALL_PAGES'
       },
       registeredCertSerial: { type: String, default: null }
+    },
+    dscSigningScope: {
+      type: String,
+      enum: ['DISABLED', 'SELF', 'ALL'],
+      default: 'DISABLED'
     }
   },
   { ...baseSchemaOptions, collection: 'User' }

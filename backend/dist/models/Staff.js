@@ -48,7 +48,12 @@ exports.StaffSchema = new mongoose_1.Schema({
     nismNumber: { type: String, default: null },
     nismUpload: { type: String, default: null },
     nismValidity: { type: Date, default: null },
-    status: { type: String, default: 'ACTIVE' }
+    status: { type: String, default: 'ACTIVE' },
+    dscSigningScope: {
+        type: String,
+        enum: ['DISABLED', 'SELF', 'ALL'],
+        default: 'DISABLED'
+    }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Staff' });
 // Virtual relations
 exports.StaffSchema.virtual('user', {

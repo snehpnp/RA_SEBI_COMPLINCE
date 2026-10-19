@@ -3,13 +3,52 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPeriodicReportMeta = exports.getPeriodicReportData = exports.getComplianceDashboardMetrics = exports.resolvePenalty = exports.getPenalties = exports.getChecklistHistory = exports.updateAuditStatus = exports.getChecklist = exports.closeAlert = exports.getAlerts = exports.runComplianceCheck = exports.checkComplianceForTenant = void 0;
+exports.getPeriodicReportMeta = exports.getPeriodicReportData = exports.getComplianceDashboardMetrics = exports.resolvePenalty = exports.getPenalties = exports.getChecklistHistory = exports.updateAuditStatus = exports.getChecklist = exports.closeAlert = exports.getAlerts = exports.runComplianceCheck = exports.checkComplianceForTenant = exports.isClientKycComplete = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
 const activityService_1 = require("../services/activityService");
 const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
+/**
+ * Check if a client's KYC is complete and verified.
+ * Complies with SEBI / DigiLocker norms:
+ * - KRA verified
+ * - Aadhaar data present (12-digit number OR masked Aadhaar from DigiLocker e.g. XXXX-XXXX-1234 or XXXX XXXX 1234)
+ * - DigiLocker fetched documents / metadata present in client or profile
+ * - Client KYC status is VERIFIED / APPROVED / COMPLETED
+ */
+const isClientKycComplete = (client) => {
+    if (!client)
+        return false;
+    const clientStatus = String(client.status || '').toUpperCase();
+    if (clientStatus === 'KYC_FAILED')
+        return false;
+    // 1. KRA Verified
+    if (client.kraVerified === true)
+        return true;
+    // 2. Aadhaar present (either 12-digit number or masked Aadhaar from DigiLocker e.g. XXXX-XXXX-1234)
+    const aadhaarStr = String(client.aadhaar || '').trim();
+    const hasAadhaar = aadhaarStr.length >= 4;
+    // 3. DigiLocker verification (either on client object or client profile)
+    const hasDigiLocker = Boolean((client.digilockerData && (typeof client.digilockerData === 'object' ? Object.keys(client.digilockerData).length > 0 : true)) ||
+        (client.profile?.digilockerData && (typeof client.profile.digilockerData === 'object' ? Object.keys(client.profile.digilockerData).length > 0 : true)) ||
+        client.profile?.isDigiLockerLocked === true ||
+        (client.aadhaarName && String(client.aadhaarName).trim() !== ''));
+    // 4. KYC Status explicitly verified or approved
+    const kycStatus = String(client.kycStatus || '').toUpperCase();
+    const isKycStatusVerified = ['VERIFIED', 'APPROVED', 'COMPLETED'].includes(kycStatus);
+    if (hasAadhaar || hasDigiLocker || isKycStatusVerified) {
+        return true;
+    }
+    // 5. If status is ACTIVE and client is not in pending onboarding states
+    const isStatusPending = ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(clientStatus);
+    if (!isStatusPending && clientStatus === 'ACTIVE' && (client.pan || client.aadhaar)) {
+        return true;
+    }
+    return false;
+};
+exports.isClientKycComplete = isClientKycComplete;
 const checkComplianceForTenant = async (tenantId) => {
     try {
         let tenant = null;
@@ -249,6 +288,7 @@ const checkComplianceForTenant = async (tenantId) => {
             .populate('agreements')
             .populate('subscriptions')
             .populate('userId')
+            .populate('profile')
             .lean();
         const clientsWithSubscriptions = rawClientsWithSubscriptions.filter((c) => {
             const hasActiveSub = (c.subscriptions || []).some((s) => s.status === 'ACTIVE');
@@ -257,9 +297,10 @@ const checkComplianceForTenant = async (tenantId) => {
         for (const clientItem of clientsWithSubscriptions) {
             const client = clientItem;
             const clientId = client._id;
-            // 4a. KYC Check
-            const isKycPending = !client.kraVerified || ['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
-            const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (KRA: ${client.kraVerified ? 'VERIFIED' : 'PENDING'}).`;
+            // 4a. KYC Check (considers KRA, Aadhaar/DigiLocker, masked Aadhaar data)
+            const isKycComplete = (0, exports.isClientKycComplete)(client);
+            const isKycPending = !isKycComplete;
+            const kycDescription = `Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has an active subscription but incomplete KYC (No KRA / DigiLocker Aadhaar verification).`;
             const existingKycAlert = await db_1.default.ComplianceAlert.findOne({
                 tenantId,
                 alertType: 'KYC_MISSING',
@@ -283,7 +324,7 @@ const checkComplianceForTenant = async (tenantId) => {
                     await db_1.default.ComplianceAlert.findByIdAndUpdate(existingKycAlert._id, {
                         $set: {
                             status: 'CLOSED',
-                            remarks: 'Daily auto-sweep: resolved as client completed KYC.',
+                            remarks: 'Daily auto-sweep: resolved as client completed KYC (Aadhaar / DigiLocker / KRA verified).',
                             closedAt: new Date()
                         }
                     });
@@ -323,9 +364,10 @@ const checkComplianceForTenant = async (tenantId) => {
                 const client = await db_1.default.Client.findById(alert.clientId)
                     .populate('agreements')
                     .populate('subscriptions')
+                    .populate('profile')
                     .lean();
                 if (client) {
-                    const isKycComplete = Boolean(client.kraVerified) && !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+                    const isKycComplete = (0, exports.isClientKycComplete)(client);
                     const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
                     const hasActiveSub = (client.subscriptions || []).some((s) => s.status === 'ACTIVE');
                     if ((isKycComplete && isAgreementComplete) || !hasActiveSub) {
@@ -350,15 +392,16 @@ const checkComplianceForTenant = async (tenantId) => {
             if (alert.clientId) {
                 const client = await db_1.default.Client.findById(alert.clientId)
                     .populate('subscriptions')
+                    .populate('profile')
                     .lean();
                 if (client) {
-                    const isKycComplete = Boolean(client.kraVerified) && !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+                    const isKycComplete = (0, exports.isClientKycComplete)(client);
                     const hasActiveSub = (client.subscriptions || []).some((s) => s.status === 'ACTIVE');
                     if (isKycComplete || !hasActiveSub) {
                         await db_1.default.ComplianceAlert.findByIdAndUpdate(alert._id, {
                             $set: {
                                 status: 'CLOSED',
-                                remarks: 'Resolved or client no longer has active subscription.',
+                                remarks: 'Resolved: Aadhaar / DigiLocker / KRA KYC verified, or client no longer has active subscription.',
                                 closedAt: new Date()
                             }
                         });
@@ -1004,11 +1047,12 @@ const closeAlert = async (req, res) => {
             }
             const client = await db_1.default.Client.findById(alert.clientId)
                 .populate('agreements')
+                .populate('profile')
                 .lean();
             if (!client) {
                 return res.status(404).json({ success: false, message: 'Client associated with this alert not found.' });
             }
-            const isKycComplete = Boolean(client.kraVerified) && !['PENDING_ONBOARDING', 'KYC_PENDING', 'KYC_FAILED'].includes(client.status);
+            const isKycComplete = (0, exports.isClientKycComplete)(client);
             const isAgreementComplete = Array.isArray(client.agreements) && client.agreements.length > 0;
             const isPanComplete = !!(client.pan && client.pan.trim() !== '');
             if (alert.alertType === 'AGREEMENT_MISSING') {

@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video, Send, RefreshCcw, XCircle, Monitor } from 'lucide-react';
+import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video, Send, RefreshCcw, XCircle, Monitor, Usb } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -44,6 +44,7 @@ import ClientTimelineModal from '../../components/admin/ClientTimelineModal';
 import ClientVaultExplorer from '../../components/admin/vault/ClientVaultExplorer';
 import ComplianceCalendarModal from '../../components/compliance/ComplianceCalendarModal';
 import VideoKycDesk from '../../components/admin/VideoKycDesk';
+import { SebiPenaltiesMatrixView } from '../../components/SebiPenaltiesMatrixView';
 
 const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
 let ClassicEditor: any;
@@ -194,6 +195,14 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'View all successful client payments and subscriptions',
   },
   {
+    tab: 'compliance',
+    label: 'Compliance Desk',
+    icon: 'AlertTriangle',
+    accessKey: 'ACCESS_COMPLIANCE',
+    moduleLabel: 'Compliance Desk',
+    moduleDesc: 'Allows running sweeps, checklist audits, and SCORES complaints',
+  },
+  {
     tab: 'checklist',
     label: 'SEBI Checklist',
     icon: 'CheckSquare',
@@ -202,12 +211,12 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'View and manage SEBI compliance checklist',
   },
   {
-    tab: 'compliance',
-    label: 'Compliance Desk',
-    icon: 'AlertTriangle',
-    accessKey: 'ACCESS_COMPLIANCE',
-    moduleLabel: 'Compliance Desk',
-    moduleDesc: 'Allows running sweeps, checklist audits, and SCORES complaints',
+    tab: 'penalty-matrix',
+    label: 'Penalty Matrix',
+    icon: 'ShieldAlert',
+    accessKey: 'ACCESS_CHECKLIST',
+    moduleLabel: 'SEBI Penalty Matrix',
+    moduleDesc: 'Complete official reference schedule of all 78 SEBI penalties, triggers, and compliance frequencies',
   },
   {
     tab: 'tickets',
@@ -290,7 +299,7 @@ const NAV_CONFIG: NavModule[] = [
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video, Send, Smartphone, Monitor
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video, Send, Smartphone, Monitor, ShieldAlert
 };
 
 // =============================================================================
@@ -811,6 +820,10 @@ function AdminDashboardContent() {
 
   // Lists state
   const [staff, setStaff] = useState<any[]>([]);
+  const [researcherDscList, setResearcherDscList] = useState<any[]>([]);
+  const [loadingResearcherDsc, setLoadingResearcherDsc] = useState<boolean>(false);
+  const [updatingDscScopeId, setUpdatingDscScopeId] = useState<string | null>(null);
+  const [staffDscScope, setStaffDscScope] = useState<'DISABLED' | 'SELF' | 'ALL'>('DISABLED');
   const [clients, setClients] = useState<any[]>([]);
   const [deletedClients, setDeletedClients] = useState<any[]>([]);
   const [clientSubTab, setClientSubTab] = useState<'active' | 'deleted'>('active');
@@ -832,7 +845,7 @@ function AdminDashboardContent() {
   const [plans, setPlans] = useState<any[]>([]);
   const [checklist, setChecklist] = useState<any[]>([]);
   const [checklistHistory, setChecklistHistory] = useState<any[]>([]);
-  const [checklistSubTab, setChecklistSubTab] = useState<'active' | 'history'>('active');
+  const [checklistSubTab, setChecklistSubTab] = useState<'active' | 'history' | 'penalties'>('active');
   const [checklistStatusFilter, setChecklistStatusFilter] = useState<'ALL' | 'OVERDUE' | 'PENDING'>('ALL');
   const [showCalendarModal, setShowCalendarModal] = useState<boolean>(false);
   const [alertsSubTab, setAlertsSubTab] = useState<'active' | 'history'>('active');
@@ -886,6 +899,18 @@ function AdminDashboardContent() {
       (p.status || 'PENDING').toUpperCase() === 'PENDING'
     ).length;
   }, [allPayments]);
+
+  const complianceAlertCount = useMemo(() => {
+    return alerts.filter((a: any) => (a.status || 'OPEN').toUpperCase() === 'OPEN').length;
+  }, [alerts]);
+
+  const checklistPendingCount = useMemo(() => {
+    const AUTO_MONITORED_SERIALS = [4, 5, 6, 12, 17, 48];
+    return checklist.filter((item: any) => 
+      !AUTO_MONITORED_SERIALS.includes(item.serialNo) && 
+      (!item.audit || item.audit.status === 'PENDING' || item.audit.status === 'OVERDUE' || item.audit.status === 'NON_COMPLIANT')
+    ).length;
+  }, [checklist]);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
@@ -1815,6 +1840,7 @@ function AdminDashboardContent() {
 
       if (tab === 'staff' || tab === 'roles') {
         api.getStaff().then(res => { if (res.success) setStaff(res.data); }).catch(() => { });
+        fetchResearcherDscPermissions();
       }
 
       if (tab === 'clients') {
@@ -2053,12 +2079,13 @@ function AdminDashboardContent() {
     if (user?.role) {
       const isAllowed = (tab: string) => {
         if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
-        if (tab === 'checklist') {
+        if (tab === 'checklist' || tab === 'penalty-matrix') {
           return user.permissions?.includes('ACCESS_CHECKLIST') || user.permissions?.includes('ACCESS_COMPLIANCE') || false;
         }
         const permMap: Record<string, string> = {
           dashboard: 'ACCESS_DASHBOARD',
           checklist: 'ACCESS_CHECKLIST',
+          'penalty-matrix': 'ACCESS_CHECKLIST',
           staff: 'ACCESS_STAFF',
           clients: 'ACCESS_CLIENTS',
           plans: 'ACCESS_PLANS',
@@ -2768,6 +2795,7 @@ function AdminDashboardContent() {
     setStaffNismParsed(null);
     setNismParseMsg('');
     setIsParsingStaffNism(false);
+    setStaffDscScope('DISABLED');
     setEditingStaff(null);
   };
 
@@ -2820,6 +2848,42 @@ function AdminDashboardContent() {
     }
   };
 
+  const fetchResearcherDscPermissions = async () => {
+    try {
+      setLoadingResearcherDsc(true);
+      const res = await api.getResearcherDscPermissions();
+      if (res && res.success && Array.isArray(res.data)) {
+        setResearcherDscList(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch researcher DSC permissions:', err);
+    } finally {
+      setLoadingResearcherDsc(false);
+    }
+  };
+
+  const handleUpdateDscScope = async (researcherId: string, researcherName: string, newScope: 'DISABLED' | 'SELF' | 'ALL') => {
+    try {
+      setUpdatingDscScopeId(researcherId);
+      const res = await api.updateResearcherDscPermission(researcherId, newScope);
+      if (res && res.success) {
+        const scopeLabels: Record<string, string> = {
+          ALL: 'ALL (Shared Master DSC for all researchers)',
+          SELF: 'SELF (Personal Self-Login Only)',
+          DISABLED: 'DISABLED (Signing Blocked)'
+        };
+        toast.success(`Updated DSC Permission for ${researcherName} to: ${scopeLabels[newScope] || newScope}`);
+        setResearcherDscList(prev => prev.map(r => (r.id === researcherId || r.userId === researcherId || r.staffId === researcherId) ? { ...r, dscSigningScope: newScope } : r));
+      } else {
+        toast.error(res?.message || 'Failed to update DSC permission');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Error updating DSC permission');
+    } finally {
+      setUpdatingDscScopeId(null);
+    }
+  };
+
   const startEditStaff = (st: any) => {
     setEditingStaff(st);
     setStaffName(st.name || '');
@@ -2838,6 +2902,7 @@ function AdminDashboardContent() {
     setStaffNism(st.nismNumber || '');
     setStaffNismValidity(st.nismValidity ? new Date(st.nismValidity).toISOString().split('T')[0] : '');
     setStaffNismFile(null);
+    setStaffDscScope(st.dscSigningScope || st.user?.dscSigningScope || 'DISABLED');
     setCreatedStaffCreds(null);
     setIsStaffModalOpen(true);
   };
@@ -2967,6 +3032,9 @@ function AdminDashboardContent() {
       if (staffNismFile) {
         formData.append('nismUpload', staffNismFile);
       }
+      if (staffRole === 'RESEARCHER') {
+        formData.append('dscSigningScope', staffDscScope);
+      }
 
       let res;
       if (editingStaff) {
@@ -2987,6 +3055,7 @@ function AdminDashboardContent() {
           resetStaffForm();
         }
         loadData();
+        fetchResearcherDscPermissions();
       } else {
         toast.error(res.message || (res.errors && res.errors.join(', ')) || 'Staff operation failed.');
       }
@@ -3010,6 +3079,7 @@ function AdminDashboardContent() {
           const res = await api.toggleStaffStatus(id);
           if (res.success) {
             loadData();
+            fetchResearcherDscPermissions();
             toast(res.message);
           }
         } catch (err: any) {
@@ -3063,6 +3133,7 @@ function AdminDashboardContent() {
           const res = await api.deleteStaff(id);
           if (res.success) {
             loadData();
+            fetchResearcherDscPermissions();
             toast.success('Staff member soft-deleted successfully.');
           }
         } catch (err: any) {
@@ -3084,6 +3155,7 @@ function AdminDashboardContent() {
           const res = await api.restoreStaff(id);
           if (res.success) {
             loadData();
+            fetchResearcherDscPermissions();
             toast.success('Staff member restored successfully.');
           }
         } catch (err: any) {
@@ -5283,39 +5355,106 @@ function AdminDashboardContent() {
 
               const isActive = activeTab === mod.tab;
               const isPaymentsTab = mod.tab === 'payments';
-              const showPendingBadge = isPaymentsTab && pendingQrCount > 0;
+              const isComplianceTab = mod.tab === 'compliance';
+              const isChecklistTab = mod.tab === 'checklist';
+
+              let badgeCount = 0;
+              let badgeTooltip = '';
+              if (isPaymentsTab && pendingQrCount > 0) {
+                badgeCount = pendingQrCount;
+                badgeTooltip = `${pendingQrCount} Pending QR`;
+              } else if (isComplianceTab && complianceAlertCount > 0) {
+                badgeCount = complianceAlertCount;
+                badgeTooltip = `${complianceAlertCount} Active Alerts`;
+              } else if (isChecklistTab && checklistPendingCount > 0) {
+                badgeCount = checklistPendingCount;
+                badgeTooltip = `${checklistPendingCount} Pending Tasks`;
+              }
+
+              const showPendingBadge = badgeCount > 0;
+              const isComplianceCluster = ['compliance', 'checklist', 'penalty-matrix'].includes(mod.tab);
+
+              let buttonStyle = '';
+              let iconStyle = '';
+
+              if (isComplianceCluster) {
+                if (isActive) {
+                  buttonStyle = 'bg-gradient-to-r from-amber-500/25 via-indigo-600/30 to-amber-500/20 text-white font-extrabold shadow-md border border-amber-400/50';
+                  iconStyle = 'text-amber-300';
+                } else {
+                  buttonStyle = 'bg-amber-400/[0.08] dark:bg-amber-400/[0.07] border border-amber-400/20 text-amber-100 hover:bg-amber-400/20 hover:border-amber-400/40 hover:text-white';
+                  iconStyle = 'text-amber-400 group-hover:text-amber-200';
+                }
+              } else {
+                if (isActive) {
+                  buttonStyle = 'bg-white/20 text-white font-semibold shadow-inner';
+                  iconStyle = 'text-white';
+                } else {
+                  buttonStyle = 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white';
+                  iconStyle = 'text-blue-200 dark:text-white/50 group-hover:text-white';
+                }
+              }
 
               return (
-                <button
-                  key={mod.tab}
-                  onClick={() => {
-                    setActiveTab(mod.tab);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className={`w-full relative flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${isActive
-                    ? 'bg-white/20 text-white font-semibold shadow-inner'
-                    : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
-                    } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
-                  title={isSidebarCollapsed ? (showPendingBadge ? `${mod.label} (${pendingQrCount} Pending QR)` : mod.label) : undefined}
-                >
-                  <div className="relative shrink-0 flex items-center justify-center">
-                    <Icon className={`w-5 h-5 transition-colors ${isActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'}`} />
-                    {isSidebarCollapsed && showPendingBadge && (
-                      <span className="absolute -top-1.5 -right-2 px-1.5 py-0.2 bg-amber-500 text-black text-[9px] font-black rounded-full shadow-md animate-pulse">
-                        {pendingQrCount}
+                <div key={mod.tab}>
+                  {!isSidebarCollapsed && mod.tab === 'compliance' && (
+                    <div className="pt-3 pb-1.5 px-3 flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-300/90 flex items-center gap-1.5">
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        SEBI Regulatory
+                      </span>
+                      <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono">
+                        3 Desks
+                      </span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      setActiveTab(mod.tab);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`w-full relative flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group ${buttonStyle} ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                    title={isSidebarCollapsed ? (showPendingBadge ? `${mod.label} (${badgeTooltip})` : mod.label) : undefined}
+                  >
+                    <div className="relative shrink-0 flex items-center justify-center">
+                      <Icon className={`w-5 h-5 transition-colors ${iconStyle}`} />
+                      {isSidebarCollapsed && showPendingBadge && (
+                        <span className="absolute -top-1.5 -right-2 px-1.5 py-0.2 bg-amber-500 text-black text-[9px] font-black rounded-full shadow-md animate-pulse">
+                          {badgeCount}
+                        </span>
+                      )}
+                    </div>
+                    {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
+                    {!isSidebarCollapsed && showPendingBadge && (
+                      <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black shadow-sm shrink-0 animate-pulse">
+                        {badgeCount}
                       </span>
                     )}
-                  </div>
-                  {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
-                  {!isSidebarCollapsed && showPendingBadge && (
-                    <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black shadow-sm shrink-0 animate-pulse">
-                      {pendingQrCount}
-                    </span>
-                  )}
-                  {!isSidebarCollapsed && isActive && !showPendingBadge && (
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
-                  )}
-                </button>
+                    {!isSidebarCollapsed && isComplianceCluster && !showPendingBadge && (
+                      <span className="ml-auto">
+                        {mod.tab === 'compliance' && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Desk
+                          </span>
+                        )}
+                        {mod.tab === 'checklist' && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            Checklist
+                          </span>
+                        )}
+                        {mod.tab === 'penalty-matrix' && (
+                          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-300 border border-rose-500/30 font-mono">
+                            78 Rules
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {!isSidebarCollapsed && isActive && !showPendingBadge && !isComplianceCluster && (
+                      <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]" />
+                    )}
+                  </button>
+                </div>
               );
             })}
 
@@ -6245,6 +6384,192 @@ function AdminDashboardContent() {
                         </div>
                       </div>
 
+                      {/* RESEARCHER HARDWARE DSC PERMISSIONS PANEL */}
+                      <div className="bg-white dark:bg-[#0F172A] rounded-2xl border border-slate-200 dark:border-slate-800/60 p-6 space-y-5 shadow-xl shadow-slate-200/20 dark:shadow-none">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-white/5">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
+                                <Usb className="w-4 h-4" />
+                              </div>
+                              <h4 className="font-bold text-base text-slate-900 dark:text-white">
+                                Researcher Hardware DSC Permissions (USB Token Signing)
+                              </h4>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                              Configure physical USB DSC token permissions for Research Analysts. Control whether each researcher can sign reports for <strong>Self Login Only</strong> or as a <strong>Master DSC for All Researchers</strong>.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={fetchResearcherDscPermissions}
+                            disabled={loadingResearcherDsc}
+                            className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 transition flex items-center gap-1.5 shrink-0"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${loadingResearcherDsc ? 'animate-spin' : ''}`} />
+                            <span>Refresh Permissions</span>
+                          </button>
+                        </div>
+
+                        {/* Guidance Alerts Banner */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                          <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 space-y-1">
+                            <span className="font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                              🟡 Self Login Only (SELF)
+                            </span>
+                            <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 leading-relaxed">
+                              Token CN must strictly match their own logged-in account name. Cannot sign on behalf of others.
+                            </p>
+                          </div>
+                          <div className="p-3.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 space-y-1">
+                            <span className="font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                              🟢 All Researchers (ALL)
+                            </span>
+                            <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 leading-relaxed">
+                              Shared Master DSC. Any active researcher logged in can sign research reports using this connected physical USB token.
+                            </p>
+                          </div>
+                          <div className="p-3.5 rounded-xl bg-rose-50/70 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800/40 space-y-1">
+                            <span className="font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1.5">
+                              🛡️ Inactive / Deleted Guard
+                            </span>
+                            <p className="text-[11px] text-rose-800/80 dark:text-rose-300/80 leading-relaxed">
+                              If a researcher is marked Inactive or Deleted, their DSC USB token is automatically blocked immediately.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Researcher List Table */}
+                        {loadingResearcherDsc && researcherDscList.length === 0 ? (
+                          <div className="py-8 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                            <span>Loading researcher DSC permissions...</span>
+                          </div>
+                        ) : researcherDscList.length === 0 ? (
+                          <div className="p-6 text-center rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+                            No staff members with the <span className="font-bold text-amber-600">RESEARCHER</span> role found. Only staff assigned the Researcher role appear here.
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse text-xs">
+                                <thead>
+                                  <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                    <th className="py-3 px-4">Researcher Name</th>
+                                    <th className="py-3 px-4">Username / Email</th>
+                                    <th className="py-3 px-4">Account Status</th>
+                                    <th className="py-3 px-4">Current DSC Scope</th>
+                                    <th className="py-3 px-4 text-right">Configure Permission</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                                  {researcherDscList.map((resItem: any) => {
+                                    const isInactiveOrDeleted = resItem.status !== 'ACTIVE' || !!resItem.deletedAt;
+                                    const currentScope = resItem.dscSigningScope || 'DISABLED';
+                                    const isUpdating = updatingDscScopeId === resItem.id;
+
+                                    return (
+                                      <tr key={resItem.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition">
+                                        <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-white">
+                                          <div className="flex items-center gap-2.5">
+                                            <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 font-bold flex items-center justify-center text-xs">
+                                              {resItem.name ? resItem.name.charAt(0).toUpperCase() : 'R'}
+                                            </div>
+                                            <div>
+                                              <span className="font-bold text-slate-900 dark:text-white block">
+                                                {resItem.name}
+                                              </span>
+                                              <span className="text-[10px] text-slate-400 font-mono">
+                                                Role: RESEARCHER
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </td>
+                                        <td className="py-3.5 px-4">
+                                          <div className="space-y-0.5">
+                                            <span className="font-mono text-slate-800 dark:text-slate-200 font-bold block text-xs">
+                                              @{resItem.username}
+                                            </span>
+                                            <span className="text-slate-500 text-[11px] block">
+                                              {resItem.email}
+                                            </span>
+                                          </div>
+                                        </td>
+                                        <td className="py-3.5 px-4">
+                                          {isInactiveOrDeleted ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/50">
+                                              <AlertTriangle className="w-3 h-3" />
+                                              Inactive / Deactivated (DSC Blocked)
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50">
+                                              <CheckCircle2 className="w-3 h-3" />
+                                              Active
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-3.5 px-4">
+                                          {isInactiveOrDeleted ? (
+                                            <span className="text-[11px] text-rose-500 font-semibold italic">
+                                              Blocked (Account Inactive)
+                                            </span>
+                                          ) : currentScope === 'ALL' ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                              <ShieldCheck className="w-3.5 h-3.5" />
+                                              ALL (Master DSC)
+                                            </span>
+                                          ) : currentScope === 'SELF' ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                              <Lock className="w-3.5 h-3.5" />
+                                              SELF (Personal Login Only)
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-300 dark:border-slate-700">
+                                              DISABLED
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-3.5 px-4 text-right">
+                                          <div className="inline-flex items-center rounded-xl bg-slate-100 dark:bg-slate-800/80 p-1 border border-slate-200 dark:border-slate-700">
+                                            {[
+                                              { id: 'DISABLED', label: 'Disabled', color: 'hover:text-rose-600' },
+                                              { id: 'SELF', label: 'Self Only', color: 'hover:text-amber-600' },
+                                              { id: 'ALL', label: 'All (Master)', color: 'hover:text-emerald-600' }
+                                            ].map((btn) => {
+                                              const active = currentScope === btn.id;
+                                              return (
+                                                <button
+                                                  key={btn.id}
+                                                  type="button"
+                                                  disabled={isUpdating}
+                                                  onClick={() => handleUpdateDscScope(resItem.id, resItem.name, btn.id as any)}
+                                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
+                                                    active
+                                                      ? btn.id === 'ALL'
+                                                        ? 'bg-emerald-600 text-white shadow-sm'
+                                                        : btn.id === 'SELF'
+                                                        ? 'bg-amber-600 text-white shadow-sm'
+                                                        : 'bg-slate-700 text-white shadow-sm'
+                                                      : 'text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700/60 ' + btn.color
+                                                  } disabled:opacity-50`}
+                                                >
+                                                  {isUpdating && active && <Loader2 className="w-3 h-3 animate-spin" />}
+                                                  <span>{btn.label}</span>
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Register/Edit Staff Modal Popup */}
                       {isStaffModalOpen && (
                         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -6355,6 +6680,27 @@ function AdminDashboardContent() {
                                   )}
                                 </div>
                               </div>
+
+                              {staffRole === 'RESEARCHER' && (
+                                <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 space-y-2">
+                                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
+                                    <Usb className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                    <span>Hardware DSC Token Permission Scope</span>
+                                  </div>
+                                  <select
+                                    value={staffDscScope}
+                                    onChange={e => setStaffDscScope(e.target.value as any)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-semibold"
+                                  >
+                                    <option value="DISABLED">DISABLED (No DSC Signing)</option>
+                                    <option value="SELF">SELF (Can only sign in their own login account)</option>
+                                    <option value="ALL">ALL (Shared Master DSC - Any researcher can sign)</option>
+                                  </select>
+                                  <p className="text-[10px] text-amber-700/80 dark:text-amber-300/80 leading-relaxed">
+                                    Controls whether this researcher&apos;s physical USB DSC token can sign for Self only or acts as a shared Master DSC for all researchers.
+                                  </p>
+                                </div>
+                              )}
 
                               {staffRole === 'PERSON_ASSOCIATED' && (
                                 <div className="space-y-3 bg-slate-100 dark:bg-white/5 p-3 rounded-xl border border-slate-300 dark:border-white/5">
@@ -7522,19 +7868,38 @@ function AdminDashboardContent() {
                           </div>
 
                           {/* Sub-tab selection */}
-                          <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
-                            <button
-                              onClick={() => setChecklistSubTab('active')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
-                            >
-                              Active Checklist ({activeList.length})
-                            </button>
-                            <button
-                              onClick={() => setChecklistSubTab('history')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
-                            >
-                              Checklist History ({checklistHistory.length})
-                            </button>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
+                              <button
+                                onClick={() => setChecklistSubTab('active')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              >
+                                Active Checklist ({activeList.length})
+                              </button>
+                              <button
+                                onClick={() => setChecklistSubTab('history')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              >
+                                Checklist History ({checklistHistory.length})
+                              </button>
+                              <button
+                                onClick={() => setChecklistSubTab('penalties')}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${checklistSubTab === 'penalties' ? 'bg-amber-500 text-slate-950 font-black shadow-sm' : 'text-amber-500 hover:bg-amber-500/10'}`}
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                <span>SEBI Penalties Master (78 Rules)</span>
+                              </button>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={() => setChecklistSubTab('penalties')}
+                                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${checklistSubTab === 'penalties' ? 'bg-amber-500 text-slate-950 border-amber-600 font-extrabold' : 'bg-gradient-to-r from-amber-500/10 to-rose-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20'}`}
+                              >
+                                <ShieldAlert className="h-4 w-4 text-amber-500 shrink-0" />
+                                <span>View SEBI Penalty Matrix (All 78 Penalties)</span>
+                              </button>
+                            </div>
                           </div>
 
                           {/* ACTIVE CHECKLIST VIEW */}
@@ -7666,10 +8031,26 @@ function AdminDashboardContent() {
                             </div>
                           </div>
                         )}
+
+                        {/* SEBI PENALTIES MATRIX VIEW */}
+                        {checklistSubTab === 'penalties' && (
+                          <SebiPenaltiesMatrixView 
+                            onClose={() => setChecklistSubTab('active')} 
+                            onOpenChecklistCalendar={() => setShowCalendarModal(true)}
+                          />
+                        )}
                       </div>
                     );
                   })()}
 
+                  {/* ====================================================
+                      SEBI PENALTY MATRIX TAB (Dedicated Full Page)
+                  ==================================================== */}
+                  {activeTab === 'penalty-matrix' && (
+                    <div className="w-full space-y-6">
+                      <SebiPenaltiesMatrixView onOpenChecklistCalendar={() => setShowCalendarModal(true)} />
+                    </div>
+                  )}
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
@@ -11505,23 +11886,25 @@ function AdminDashboardContent() {
                             </div>
                           </div>
 
-                          {/* Category Filter Pills */}
-                          <div className="flex space-x-3 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                          {/* Category Filter Pills - Multi-line Flex Wrap (No scroll required) & Active Categories Only */}
+                          <div className="flex flex-wrap gap-2.5 mb-6">
                             <button
                               onClick={() => setSelectedCategoryFilter('ALL')}
-                              className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                              className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
                             >
                               All Plans
                             </button>
-                            {categories.map(cat => (
-                              <button
-                                key={cat.id}
-                                onClick={() => setSelectedCategoryFilter(cat.id)}
-                                className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
-                              >
-                                {cat.name}
-                              </button>
-                            ))}
+                            {categories
+                              .filter(cat => cat.status === 'ACTIVE' || (!cat.status && !cat.deletedAt))
+                              .map(cat => (
+                                <button
+                                  key={cat.id || cat._id}
+                                  onClick={() => setSelectedCategoryFilter(cat.id || cat._id)}
+                                  className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === (cat.id || cat._id) ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                                >
+                                  {cat.name}
+                                </button>
+                              ))}
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
