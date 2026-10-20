@@ -23,6 +23,7 @@ const complianceController_1 = require("./controllers/complianceController");
 const third_party_api_1 = require("./third-party-api");
 const videoKycSocket_1 = require("./services/videoKycSocket");
 const telegramPoller_1 = require("./services/telegramPoller");
+const dscBridgeService_1 = require("./services/dscBridgeService");
 const app = (0, express_1.default)();
 const httpServer = http_1.default.createServer(app);
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
@@ -189,4 +190,5 @@ httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`RAGCP Express Server (with Video KYC WebSockets) is running on http://0.0.0.0:${PORT}`);
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
     (0, telegramPoller_1.initTelegramPoller)(); // Initialize Telegram auto-poller for 1-click client connects
+    (0, dscBridgeService_1.initDscBridgeServer)(); // Automatically start Hardware DSC Bridge service on port 1620
 });

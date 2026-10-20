@@ -1329,15 +1329,20 @@ class ApiClient {
     setDscBridgeUrl(url);
   }
 
-  async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 2500) {
+  async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 3500) {
     const bridgeUrl = customBridgeUrl || getDscBridgeUrl();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+      const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null;
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (tenantId) headers['x-tenant-id'] = tenantId;
+
       const res = await fetch(`${bridgeUrl}/token-status`, {
         method: 'GET',
-        mode: 'cors',
-        referrerPolicy: 'no-referrer',
+        headers,
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -1361,11 +1366,15 @@ class ApiClient {
     location?: string;
   }, customBridgeUrl?: string) {
     const bridgeUrl = customBridgeUrl || getDscBridgeUrl();
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (tenantId) headers['x-tenant-id'] = tenantId;
+
     const res = await fetch(`${bridgeUrl}/sign-pdf`, {
       method: 'POST',
-      mode: 'cors',
-      referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
