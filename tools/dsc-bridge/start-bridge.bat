@@ -4,7 +4,9 @@ echo ==============================================================
 echo   SEBI Research Analyst Hardware DSC Token Local Bridge
 echo ==============================================================
 echo.
-echo Starting bridge service on http://127.0.0.1:1620 ...
+if not "%1"=="" set PORT=%1
+if "%PORT%"=="" set PORT=1620
+echo Starting bridge service on http://127.0.0.1:%PORT% ...
 echo Make sure your USB DSC Token (ePass2003, mToken, ProxKey) is plugged in.
 echo.
 

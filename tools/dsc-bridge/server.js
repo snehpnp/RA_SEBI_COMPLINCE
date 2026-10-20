@@ -4,7 +4,23 @@ const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const { exec } = require('child_process');
 
 const app = express();
-const PORT = 1620;
+const PORT = process.env.PORT || process.env.DSC_BRIDGE_PORT || 1620;
+const HOST = process.env.HOST || '127.0.0.1';
+
+// Support Chrome Private Network Access (PNA) from public HTTPS sites to local DSC bridge
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, Access-Control-Request-Private-Network, Sec-Fetch-Mode, Sec-Fetch-Site');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 // 1. Private Network Access (PNA) & CORS for browsers accessing localhost from HTTPS sites
 app.use((req, res, next) => {
@@ -216,10 +232,10 @@ app.post('/sign-pdf', async (req, res) => {
   }
 });
 
-app.listen(PORT, '127.0.0.1', () => {
+app.listen(PORT, HOST, () => {
   console.log(`\n======================================================`);
   console.log(`  SEBI Research Analyst Hardware DSC Bridge Service`);
-  console.log(`  Listening on: http://127.0.0.1:${PORT}`);
+  console.log(`  Listening on: http://${HOST}:${PORT}`);
   console.log(`  Ready to sign research reports with USB DSC tokens`);
   console.log(`======================================================\n`);
 });
