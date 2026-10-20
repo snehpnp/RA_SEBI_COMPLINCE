@@ -13,9 +13,11 @@ import {
   AlertCircle,
   AlertTriangle,
   Lock,
-  ShieldCheck
+  ShieldCheck,
+  Settings
 } from 'lucide-react';
 import api from '../services/api';
+import { getDscBridgeUrl, setDscBridgeUrl } from '../utils/config';
 import toast from 'react-hot-toast';
 
 interface UploadSignConfirmModalProps {
@@ -48,6 +50,7 @@ export default function UploadSignConfirmModal({
   const [dscPin, setDscPin] = useState('');
   const [dscPinError, setDscPinError] = useState('');
   const [dscBridgeConnected, setDscBridgeConnected] = useState<boolean | null>(null);
+  const [dscBridgeUrl, setDscBridgeUrlState] = useState<string>(() => getDscBridgeUrl());
   const [dscSignerName, setDscSignerName] = useState('');
   const [detectedCertificates, setDetectedCertificates] = useState<string[]>([]);
   const [dscVerifyStatus, setDscVerifyStatus] = useState<{
@@ -114,6 +117,7 @@ export default function UploadSignConfirmModal({
       } catch (err) {
         console.warn('Failed to load researcher signature settings:', err);
       } finally {
+        setDscBridgeUrlState(getDscBridgeUrl());
         setLoadingSettings(false);
       }
     };
@@ -305,41 +309,28 @@ export default function UploadSignConfirmModal({
   };
 
   // ── 2D. HARDWARE DSC TOKEN FLOW ──
-  const openDscModalFlow = async () => {
+  const openDscModalFlow = async (overrideUrl?: string) => {
     setIsProcessing(true);
-    setStatusMessage('Checking Hardware DSC Bridge on localhost:1620...');
+    const activeUrl = overrideUrl || dscBridgeUrl || getDscBridgeUrl();
+    setStatusMessage(`Checking Hardware DSC Bridge on ${activeUrl}...`);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch('http://127.0.0.1:1620/token-status', {
-        method: 'GET',
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        setDscBridgeConnected(true);
-        setDscPin('');
-        setDscPinError('');
-        const certList: string[] = Array.isArray(data.certificates) ? data.certificates : [];
-        setDetectedCertificates(certList);
-        const autoName = data.detectedSignerName || certList[0] || '';
-        setDscSignerName(autoName);
-        setShowDscModal(true);
-        if (autoName) {
-          verifyTokenName(autoName);
-        } else {
-          setDscVerifyStatus({
-            loading: false,
-            valid: false,
-            message: 'No digital certificate detected on the USB token. Please ensure your physical DSC token is inserted into your computer.'
-          });
-        }
+      const data = await api.checkDscBridgeStatus(activeUrl, 3000);
+      setDscBridgeConnected(true);
+      setDscPin('');
+      setDscPinError('');
+      const certList: string[] = Array.isArray(data.certificates) ? data.certificates : [];
+      setDetectedCertificates(certList);
+      const autoName = data.detectedSignerName || certList[0] || '';
+      setDscSignerName(autoName);
+      setShowDscModal(true);
+      if (autoName) {
+        verifyTokenName(autoName);
       } else {
-        setDscBridgeConnected(false);
-        setDscSignerName('');
-        setDscVerifyStatus(null);
-        setShowDscModal(true);
+        setDscVerifyStatus({
+          loading: false,
+          valid: false,
+          message: 'No digital certificate detected on the USB token. Please ensure your physical DSC token is inserted into your computer.'
+        });
       }
     } catch {
       setDscBridgeConnected(false);
@@ -377,21 +368,16 @@ export default function UploadSignConfirmModal({
       reader.readAsDataURL(file);
       const pdfBase64 = await base64Promise;
 
-      const bridgeRes = await fetch('http://127.0.0.1:1620/sign-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pdfBase64,
-          pin: dscPin,
-          placement: dscSettings?.placement || 'BOTTOM_RIGHT',
-          signScope: dscSettings?.signScope || 'ALL_PAGES',
-          signerName: dscSignerName.trim() || 'SEBI Research Analyst',
-          reason: 'SEBI Research Report Digital Signature',
-          location: user?.tenant?.city || 'India'
-        })
-      });
+      const bridgeData = await api.signPdfWithDscBridge({
+        pdfBase64,
+        pin: dscPin,
+        placement: dscSettings?.placement || 'BOTTOM_RIGHT',
+        signScope: dscSettings?.signScope || 'ALL_PAGES',
+        signerName: dscSignerName.trim() || 'SEBI Research Analyst',
+        reason: 'SEBI Research Report Digital Signature',
+        location: user?.tenant?.city || 'India'
+      }, dscBridgeUrl);
 
-      const bridgeData = await bridgeRes.json();
       if (!bridgeData.success || !bridgeData.signedPdfBase64) {
         throw new Error(bridgeData.message || 'DSC signing failed inside hardware token');
       }
@@ -689,14 +675,72 @@ export default function UploadSignConfirmModal({
             </div>
 
             {dscBridgeConnected === false ? (
-              <div className="p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-rose-800 dark:text-rose-300">
-                  <AlertCircle className="w-4 h-4 text-rose-600" />
-                  Local DSC Bridge Not Connected
+              <div className="space-y-4">
+                <div className="p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-rose-800 dark:text-rose-300">
+                    <AlertCircle className="w-4 h-4 text-rose-600" />
+                    Local DSC Bridge Not Connected
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                    Could not connect to the local DSC Bridge at <code className="font-mono bg-white dark:bg-slate-800 px-1 py-0.5 rounded text-[11px]">{dscBridgeUrl}</code>. Make sure your local DSC Bridge is running and your physical USB token (ePass2003, mToken, ProxKey) is inserted.
+                  </p>
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Make sure your local DSC Bridge software is running on port 1620 and your physical USB token (ePass2003, mToken, ProxKey) is inserted.
-                </p>
+
+                {/* Editable Dynamic DSC Bridge URL */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-white/10 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Settings className="w-3.5 h-3.5 text-slate-500" />
+                      DSC Bridge URL / Port (Dynamic)
+                    </label>
+                    {dscBridgeUrl !== 'http://127.0.0.1:1620' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDscBridgeUrl('http://127.0.0.1:1620');
+                          setDscBridgeUrlState('http://127.0.0.1:1620');
+                          toast.success('Reset to default: http://127.0.0.1:1620');
+                        }}
+                        className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+                      >
+                        Reset Default
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={dscBridgeUrl}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDscBridgeUrlState(val);
+                      setDscBridgeUrl(val);
+                    }}
+                    placeholder="http://127.0.0.1:1620"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                    If your DSC bridge is running on another port (e.g. 1621), another host, or HTTPS, you can edit it above.
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openDscModalFlow(dscBridgeUrl)}
+                    disabled={isProcessing}
+                    className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                  >
+                    {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    <span>Retry Bridge Check</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDscModal(false)}
+                    className="py-2.5 px-4 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs hover:bg-slate-200 transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-4">

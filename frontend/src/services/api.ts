@@ -1,4 +1,4 @@
-import { base_api_url } from '../utils/config';
+import { base_api_url, getDscBridgeUrl, setDscBridgeUrl } from '../utils/config';
 
 const getApiBaseUrl = () => {
   return base_api_url;
@@ -1319,6 +1319,80 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ signerName })
     });
+  }
+
+  getDscBridgeUrl() {
+    return getDscBridgeUrl();
+  }
+
+  setDscBridgeUrl(url: string) {
+    setDscBridgeUrl(url);
+  }
+
+  async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 2500) {
+    const bridgeUrl = customBridgeUrl || getDscBridgeUrl();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${bridgeUrl}/token-status`, {
+        method: 'GET',
+        mode: 'cors',
+        referrerPolicy: 'no-referrer',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        throw new Error(`DSC bridge error (HTTP ${res.status})`);
+      }
+      return await res.json();
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
+  }
+
+  async signPdfWithDscBridge(payload: {
+    pdfBase64: string;
+    pin: string;
+    placement?: string;
+    signScope?: string;
+    signerName?: string;
+    reason?: string;
+    location?: string;
+  }, customBridgeUrl?: string) {
+    const bridgeUrl = customBridgeUrl || getDscBridgeUrl();
+    const res = await fetch(`${bridgeUrl}/sign-pdf`, {
+      method: 'POST',
+      mode: 'cors',
+      referrerPolicy: 'no-referrer',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || `DSC bridge error (HTTP ${res.status})`);
+    }
+    return await res.json();
+  }
+
+  async pingDscBridge(customBridgeUrl?: string, timeoutMs = 2000) {
+    const bridgeUrl = customBridgeUrl || getDscBridgeUrl();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${bridgeUrl}/ping`, {
+        method: 'GET',
+        mode: 'cors',
+        referrerPolicy: 'no-referrer',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error(`Bridge returned HTTP ${res.status}`);
+      return await res.json();
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      throw err;
+    }
   }
 
   async getResearcherDscPermissions() {

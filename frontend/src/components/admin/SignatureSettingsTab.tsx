@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../../services/api';
+import { getDscBridgeUrl, setDscBridgeUrl } from '../../utils/config';
 
 interface Props {
   user: any;
@@ -59,6 +60,7 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFileSize, setSelectedFileSize] = useState<string | null>(null);
+  const [dscBridgeUrl, setDscBridgeUrlState] = useState<string>(() => getDscBridgeUrl());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -80,6 +82,7 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
     } catch (err: any) {
       console.warn('Could not load researcher signature settings:', err);
     } finally {
+      setDscBridgeUrlState(getDscBridgeUrl());
       setLoadingSettings(false);
     }
   };
@@ -89,27 +92,16 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
   }, []);
 
   // Ping DSC local bridge
-  const checkDscBridge = async (silent = false) => {
+  const checkDscBridge = async (silent = false, customUrl?: string) => {
     setCheckingBridge(true);
+    const activeUrl = customUrl || dscBridgeUrl || getDscBridgeUrl();
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch('http://127.0.0.1:1620/ping', {
-        method: 'GET',
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) {
-        const data = await res.json();
-        setBridgeStatus('connected');
-        if (!silent) toast.success(`DSC Bridge Connected! (${data.service || 'v1.0.0'})`);
-      } else {
-        setBridgeStatus('disconnected');
-        if (!silent) toast.error('DSC Bridge responded with an error');
-      }
+      const data = await api.pingDscBridge(activeUrl, 2500);
+      setBridgeStatus('connected');
+      if (!silent) toast.success(`DSC Bridge Connected! (${data.service || 'v1.0.0'})`);
     } catch (err) {
       setBridgeStatus('disconnected');
-      if (!silent) toast.error('DSC Local Bridge is not running on http://127.0.0.1:1620');
+      if (!silent) toast.error(`DSC Local Bridge is not running on ${activeUrl}`);
     } finally {
       setCheckingBridge(false);
     }
@@ -652,6 +644,55 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
               </div>
             </div>
 
+            {/* Bridge URL Configuration */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-white/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Settings className="w-4 h-4 text-slate-500" />
+                  DSC Local Bridge URL / Port (Dynamic)
+                </label>
+                {dscBridgeUrl !== 'http://127.0.0.1:1620' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDscBridgeUrl('http://127.0.0.1:1620');
+                      setDscBridgeUrlState('http://127.0.0.1:1620');
+                      toast.success('Reset to default bridge URL');
+                      checkDscBridge(false, 'http://127.0.0.1:1620');
+                    }}
+                    className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+                  >
+                    Reset Default (1620)
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={dscBridgeUrl}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDscBridgeUrlState(val);
+                    setDscBridgeUrl(val);
+                  }}
+                  placeholder="http://127.0.0.1:1620"
+                  className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => checkDscBridge(false, dscBridgeUrl)}
+                  disabled={checkingBridge}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {checkingBridge ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  <span>Test Connection</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Current active bridge URL: <code className="font-mono bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded text-[10px]">{dscBridgeUrl}</code>
+              </p>
+            </div>
+
             {/* Bridge Setup Guide */}
             <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200 space-y-2">
               <h5 className="font-bold flex items-center gap-1.5">
@@ -660,7 +701,7 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
               </h5>
               <ol className="list-decimal pl-4 space-y-1 text-slate-700 dark:text-slate-300">
                 <li>Insert your USB DSC Pen Drive (ePass2003 / mToken / ProxKey) into your computer.</li>
-                <li>Make sure the SEBI DSC Bridge is running locally on port 1620 (found in <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-[11px]">tools/dsc-bridge/start-bridge.bat</code>).</li>
+                <li>Make sure the SEBI DSC Bridge is running locally (found in <code className="bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded font-mono text-[11px]">tools/dsc-bridge/start-bridge.bat</code>).</li>
                 <li>When you click <strong>Generate & Upload PDF</strong>, a prompt will appear asking for your DSC Token PIN.</li>
                 <li>Upon entering your PIN, your token digitally signs the PDF with Adobe Approved Trust List (AATL) green tick!</li>
               </ol>
