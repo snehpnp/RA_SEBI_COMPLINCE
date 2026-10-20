@@ -300,6 +300,18 @@ export default function VideoKycRoomPage() {
         setLoading(true);
         const res: any = await api.getVideoKycSession(activeSessionId);
         if (res?.success && res?.data) {
+          const s = res.data.session;
+          if (['APPROVED', 'REJECTED', 'EXPIRED'].includes(s?.status)) {
+            if (s.status === 'EXPIRED') {
+              setErrorMsg('This Video KYC link has expired (24 hours exceeded). Please request a fresh verification link.');
+            } else if (s.status === 'APPROVED') {
+              setErrorMsg('This Video KYC session has been APPROVED and successfully concluded. Re-joining is not permitted.');
+            } else if (s.status === 'REJECTED') {
+              setErrorMsg(`This Video KYC session was REJECTED (${s.rejectionReason || 'Requirements not met'}). Please request a new verification session.`);
+            }
+            setLoading(false);
+            return;
+          }
           setSessionData(res.data.session);
           setTenantData(res.data.tenant);
           if (res.data.maskedEmail) {
@@ -666,6 +678,13 @@ export default function VideoKycRoomPage() {
       stopMediaAndRecording();
     });
 
+    // Socket: Session concluded or expired
+    socket.on('session-already-concluded', (data: any) => {
+      console.warn('⚠️ [Video KYC] Session concluded:', data);
+      setErrorMsg(data.message || 'This Video KYC session has already been concluded.');
+      stopMediaAndRecording();
+    });
+
     // Socket: Session ended
     socket.on('session-ended', (data: any) => {
       setSessionCompleted(true);
@@ -995,7 +1014,7 @@ export default function VideoKycRoomPage() {
       // Capture composite stream at 25 FPS
       const canvasStream = canvas.captureStream(25);
 
-      // Mix Audio from both parties
+      // Mix Audio from both parties with Lip-Sync Delay alignment
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtx) {
@@ -1003,19 +1022,25 @@ export default function VideoKycRoomPage() {
           audioContextRef.current = audioCtx;
           const dest = audioCtx.createMediaStreamDestination();
 
+          // Audio delay node to perfectly compensate for canvas captureStream rendering latency (~200ms)
+          const delayNode = audioCtx.createDelay(1.0);
+          delayNode.delayTime.value = 0.20; // 200ms calibrated delay aligns audio with canvas video
+
           if (localStreamRef.current && localStreamRef.current.getAudioTracks().length > 0) {
             const localSource = audioCtx.createMediaStreamSource(localStreamRef.current);
-            localSource.connect(dest);
+            localSource.connect(delayNode);
           }
 
           if (remoteStreamRef.current && remoteStreamRef.current.getAudioTracks().length > 0) {
             const remoteSource = audioCtx.createMediaStreamSource(remoteStreamRef.current);
-            remoteSource.connect(dest);
+            remoteSource.connect(delayNode);
           }
+
+          delayNode.connect(dest);
 
           if (dest.stream.getAudioTracks().length > 0) {
             canvasStream.addTrack(dest.stream.getAudioTracks()[0]);
-            console.log('🎙️ [Audio Mix] Combined Admin & Client audio channels.');
+            console.log('🎙️ [Audio Mix] Combined Admin & Client audio channels with calibrated Lip-Sync alignment.');
           }
         }
       } catch (audioErr) {
@@ -1205,7 +1230,33 @@ export default function VideoKycRoomPage() {
 
     try {
       setUploading(true);
-      setSnapshotToast('⏳ Compressing & saving verification records to vault...');
+      setSnapshotToast('⏳ Session ended. Disconnecting video & archiving to vault...');
+
+      // 1. Immediately inform the client and disconnect video streams without delay!
+      if (socketRef.current) {
+        socketRef.current.emit('end-session', { sessionId });
+      }
+
+      // Stop local camera and microphone tracks immediately so webcams turn off instantly
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      if (remoteStreamRef.current) {
+        remoteStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      if (peerConnectionRef.current) {
+        try { peerConnectionRef.current.close(); } catch {}
+      }
+
+      // Stop animations and audio processing
+      if (compositeAnimIdRef.current) {
+        cancelAnimationFrame(compositeAnimIdRef.current);
+        compositeAnimIdRef.current = null;
+      }
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch {}
+        audioContextRef.current = null;
+      }
 
       // Force flush any pending chunks from recorder
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -1222,8 +1273,8 @@ export default function VideoKycRoomPage() {
       }
       if (timerRef.current) clearInterval(timerRef.current);
 
-      // Wait 1.5 seconds for all ondataavailable chunks to be collected
-      await new Promise(r => setTimeout(r, 1500));
+      // Wait 600ms for ondataavailable chunks to be collected
+      await new Promise(r => setTimeout(r, 600));
 
       console.log(`📊 [Finish Call] Total chunks in buffer: ${recordedChunksRef.current.length}`);
 
@@ -1273,10 +1324,6 @@ export default function VideoKycRoomPage() {
       console.log(`📤 [Video KYC] Uploading: chunks=${recordedChunksRef.current.length}, blobSize=${blob.size} bytes, snaps=${snapshotGallery.length}`);
       const res = await api.uploadVideoKycRecording(sessionId, formData);
       if (res?.success) {
-        // Inform other participants that session successfully concluded
-        if (socketRef.current) {
-          socketRef.current.emit('end-session', { sessionId });
-        }
         setUploadSuccess(true);
         setSessionCompleted(true);
         stopMediaAndRecording();

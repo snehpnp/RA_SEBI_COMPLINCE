@@ -265,8 +265,8 @@ export async function createVideoKycSession(req: Request, res: Response) {
       status: { $in: ['REQUESTED', 'SCHEDULED', 'IN_PROGRESS'] }
     }).sort({ createdAt: -1 });
 
-    const sessionId = existing?.sessionId || `VKYC-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-    const otpCode = existing?.otpCode || generateOtp();
+
+
 
     // Prepare personalized consent statement
     const rawConsent = (customConsentText && customConsentText.trim()) ||
@@ -284,33 +284,60 @@ export async function createVideoKycSession(req: Request, res: Response) {
       .replace(/\{\{\s*pan\s*\}\}/gi, pan)
       .replace(/\{\{\s*date\s*\}\}/gi, today);
 
-    // Resolve Instant vs Scheduled Mode
+    // Resolve Instant vs Scheduled Mode & 24-Hour Expiration
+    const now = new Date();
     const isSchedule = scheduleType === 'SCHEDULED' && scheduledAt;
     const targetStatus = isSchedule ? 'SCHEDULED' : 'REQUESTED';
     const resolvedScheduledAt = isSchedule ? new Date(scheduledAt) : null;
     const resolvedScheduleType = isSchedule ? 'SCHEDULED' : 'INSTANT';
 
-    let sessionDoc;
-    if (existing) {
-      existing.consentText = resolvedConsent;
-      existing.status = targetStatus;
-      existing.scheduleType = resolvedScheduleType;
-      existing.scheduledAt = resolvedScheduledAt;
+    // 24-hour expiration timestamp
+    const expiresAt = isSchedule && resolvedScheduledAt
+      ? new Date(resolvedScheduledAt.getTime() + 24 * 60 * 60 * 1000)
+      : new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+    // If existing session is older than 24 hours, mark it expired and generate a fresh session
+    const isExistingExpired = existing && (
+      existing.expiresAt
+        ? now > new Date(existing.expiresAt)
+        : (now.getTime() - new Date(existing.createdAt).getTime() > 24 * 60 * 60 * 1000)
+    );
+
+    if (existing && isExistingExpired) {
+      existing.status = 'EXPIRED';
       await existing.save();
-      sessionDoc = existing;
+    }
+
+    const activeExisting = (existing && !isExistingExpired) ? existing : null;
+    const finalSessionId = activeExisting?.sessionId || `VKYC-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+    const finalOtpCode = activeExisting?.otpCode || generateOtp();
+
+    let sessionDoc;
+    if (activeExisting) {
+      activeExisting.consentText = resolvedConsent;
+      activeExisting.status = targetStatus;
+      activeExisting.scheduleType = resolvedScheduleType;
+      activeExisting.scheduledAt = resolvedScheduledAt;
+      activeExisting.expiresAt = expiresAt;
+      await activeExisting.save();
+      sessionDoc = activeExisting;
     } else {
       sessionDoc = await dynamicDb.VideoKycSession.create({
         tenantId,
         clientId: client._id,
-        sessionId,
+        sessionId: finalSessionId,
         status: targetStatus,
         scheduleType: resolvedScheduleType,
         scheduledAt: resolvedScheduledAt,
+        expiresAt,
         initiatedBy,
         consentText: resolvedConsent,
-        otpCode
+        otpCode: finalOtpCode
       });
     }
+
+    const sessionId = sessionDoc.sessionId;
+    const otpCode = sessionDoc.otpCode;
 
     // Determine Frontend Base URL for Invite Link
     const frontendUrl = resolveFrontendBaseUrl(req);
@@ -399,6 +426,18 @@ export async function getSessionDetails(req: Request, res: Response) {
       return res.status(404).json({ success: false, message: 'Video KYC session not found.' });
     }
 
+    // Check 24-hour expiration dynamically
+    const now = new Date();
+    const isExpired = ['REQUESTED', 'SCHEDULED'].includes(session.status) && (
+      session.expiresAt
+        ? now > new Date(session.expiresAt)
+        : (now.getTime() - new Date(session.createdAt).getTime() > 24 * 60 * 60 * 1000)
+    );
+    if (isExpired && session.status !== 'EXPIRED') {
+      session.status = 'EXPIRED';
+      await session.save();
+    }
+
     // Also get tenant info
     const tenant = await dynamicDb.Tenant.findById(session.tenantId).select(
       'companyName logoUrl videoKycEnabled clientVideoKycRequestEnabled'
@@ -454,6 +493,34 @@ export async function verifyVideoKycOtp(req: Request, res: Response) {
     const session = await dynamicDb.VideoKycSession.findOne({ sessionId });
     if (!session) {
       return res.status(404).json({ success: false, message: 'Video KYC session not found.' });
+    }
+
+    // Check if session is expired (24h)
+    const now = new Date();
+    const isExpired = ['REQUESTED', 'SCHEDULED'].includes(session.status) && (
+      session.expiresAt
+        ? now > new Date(session.expiresAt)
+        : (now.getTime() - new Date(session.createdAt).getTime() > 24 * 60 * 60 * 1000)
+    );
+    if (isExpired || session.status === 'EXPIRED') {
+      if (session.status !== 'EXPIRED') {
+        session.status = 'EXPIRED';
+        await session.save();
+      }
+      return res.status(410).json({
+        success: false,
+        code: 'LINK_EXPIRED',
+        message: 'This Video KYC verification link has expired (24 hours exceeded). Please contact your advisor or compliance team for a new link.'
+      });
+    }
+
+    // Block re-joining if session is already approved, rejected, or completed
+    if (['APPROVED', 'REJECTED', 'COMPLETED'].includes(session.status)) {
+      return res.status(403).json({
+        success: false,
+        code: 'SESSION_CONCLUDED',
+        message: `This Video KYC session has been ${session.status.toLowerCase()} and cannot be rejoined. Please request a new verification session.`
+      });
     }
 
     if (!session.otpCode || session.otpCode.trim() !== String(otpCode).trim()) {
@@ -533,6 +600,20 @@ export async function listVideoKycSessions(req: Request, res: Response) {
   try {
     const tenantId = (req as any).tenantId;
     const { status, clientId, search, page = 1, limit = 20 } = req.query;
+
+    // Auto-expire sessions older than 24 hours
+    const now = new Date();
+    await dynamicDb.VideoKycSession.updateMany(
+      {
+        tenantId,
+        status: { $in: ['REQUESTED', 'SCHEDULED'] },
+        $or: [
+          { expiresAt: { $ne: null, $lt: now } },
+          { expiresAt: null, createdAt: { $lt: new Date(now.getTime() - 24 * 60 * 60 * 1000) } }
+        ]
+      },
+      { $set: { status: 'EXPIRED' } }
+    ).catch(() => {});
 
     const filter: any = { tenantId };
     if (status && status !== 'ALL') {

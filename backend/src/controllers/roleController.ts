@@ -166,7 +166,16 @@ export const updateRolePermissions = async (req: AuthenticatedRequest, res: Resp
     // 1. Delete existing role permissions
     await dynamicDb.RolePermission.deleteMany({ roleId: id });
 
-    // 2. Fetch the permissions matching the request codes
+    // 2. Auto-upsert any requested permissions into Permission collection so custom codes exist
+    for (const pCode of filteredPermissions) {
+      await dynamicDb.Permission.findOneAndUpdate(
+        { code: pCode },
+        { $setOnInsert: { code: pCode, name: pCode } },
+        { upsert: true }
+      );
+    }
+
+    // Fetch the permissions matching the request codes
     const dbPermissions = await dynamicDb.Permission.find({
       code: { $in: filteredPermissions }
     }).lean();

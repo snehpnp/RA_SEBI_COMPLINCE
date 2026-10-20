@@ -36,6 +36,7 @@ interface ComplianceCalendarModalProps {
   onOpenAuditModal?: (requirement: any) => void;
   onReloadData?: () => void;
   userRole?: string;
+  complianceCutoffDate?: string | Date | null;
 }
 
 export interface CalendarEvent {
@@ -67,7 +68,8 @@ export default function ComplianceCalendarModal({
   checklistHistory = [],
   onOpenAuditModal,
   onReloadData,
-  userRole
+  userRole,
+  complianceCutoffDate
 }: ComplianceCalendarModalProps) {
   // Current view date (year & month)
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
@@ -206,12 +208,19 @@ export default function ComplianceCalendarModal({
       new Date(year, month + 1, 1)
     ];
 
+    const parsedCutoff = complianceCutoffDate ? new Date(complianceCutoffDate) : null;
+
     targetMonths.forEach((targetMonthDate) => {
       const tYear = targetMonthDate.getFullYear();
       const tMonth = targetMonthDate.getMonth(); // 0-indexed (0=Jan, 2=Mar, 8=Sep, 9=Oct, 11=Dec)
       const lastDayOfMonth = new Date(tYear, tMonth + 1, 0).getDate();
       const monthEndDateStr = `${tYear}-${String(tMonth + 1).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
       const monthEndDueDate = new Date(tYear, tMonth, lastDayOfMonth, 23, 59, 59);
+
+      // Do not project historical checklist tasks as OVERDUE prior to company compliance start date
+      if (parsedCutoff && monthEndDueDate < parsedCutoff) {
+        return;
+      }
 
       // Ensure Monthly Complaint Data Disclosure (Sr. 50) is included even if not loaded from cache
       const activeChecklist = [...checklist];
@@ -272,6 +281,7 @@ export default function ComplianceCalendarModal({
         }
 
         if (!appliesToThisMonth) return;
+        if (parsedCutoff && dueDateForMonth < parsedCutoff) return; // Ignore tasks due before compliance commencement
 
         // Calculate days left relative to current real-time
         const daysLeft = Math.ceil((dueDateForMonth.getTime() - Date.now()) / (1000 * 3600 * 24));
@@ -948,6 +958,15 @@ export default function ComplianceCalendarModal({
               </div>
 
               <div className="p-4 overflow-y-auto space-y-2 flex-1">
+                {selectedDayEvents.events.length === 0 ? (
+                  <div className="py-8 text-center text-slate-500 dark:text-slate-400 space-y-1">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-70" />
+                    <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">No Pending Tasks</p>
+                    <p className="text-[11px] text-slate-400">
+                      {complianceCutoffDate ? `Company compliance monitoring is active from ${new Date(complianceCutoffDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}. No overdue obligations for this date.` : "No compliance tasks scheduled or audited for this date."}
+                    </p>
+                  </div>
+                ) : null}
                 {selectedDayEvents.events.map((ev) => (
                   <button
                     key={ev.id}

@@ -487,13 +487,13 @@ router.post('/admin/verify-payment-gateway', authenticateJWT, requireRoles(['ADM
 router.post('/admin/tenant/go-live', authenticateJWT, requireRoles(['ADMIN', 'SUPER_ADMIN']), goLiveTenant);
 
 // Bulk Exports
-router.get('/admin/exports/invoices', authenticateJWT, requirePermission('EXPORT_DATA'), exportInvoicesZip);
-router.get('/admin/exports/agreements', authenticateJWT, requirePermission('EXPORT_DATA'), exportAgreementsZip);
-router.get('/admin/exports/kra', authenticateJWT, requirePermission('EXPORT_DATA'), exportKRAZip);
-router.get('/admin/exports/clients', authenticateJWT, requirePermission('EXPORT_DATA'), exportClientsCSV);
-router.get('/admin/exports/deleted-clients', authenticateJWT, requirePermission('EXPORT_DATA'), exportDeletedClientsCSV);
-router.get('/admin/exports/payments', authenticateJWT, requirePermission('EXPORT_DATA'), exportPaymentsCSV);
-router.get('/admin/exports/research-reports', authenticateJWT, requirePermission('EXPORT_DATA'), exportResearchReportsZip);
+router.get('/admin/exports/invoices', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportInvoicesZip);
+router.get('/admin/exports/agreements', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportAgreementsZip);
+router.get('/admin/exports/kra', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportKRAZip);
+router.get('/admin/exports/clients', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportClientsCSV);
+router.get('/admin/exports/deleted-clients', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportDeletedClientsCSV);
+router.get('/admin/exports/payments', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportPaymentsCSV);
+router.get('/admin/exports/research-reports', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportResearchReportsZip);
 
 // Custom Pages (Admin & Read-only for Staff/CO/PO)
 router.get('/admin/pages', authenticateJWT, getAdminPages);
@@ -662,7 +662,7 @@ router.get(
 router.get(
   '/admin/active-clients/summary',
   authenticateJWT,
-  requirePermission('ACCESS_DASHBOARD'),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']),
   enforceTenantIsolation,
   getActiveClientSummary
 );
@@ -670,7 +670,7 @@ router.get(
 router.get(
   '/admin/active-clients/month-export',
   authenticateJWT,
-  requirePermission('ACCESS_DASHBOARD'),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']),
   enforceTenantIsolation,
   getActiveClientsByMonthExport
 );
@@ -789,14 +789,14 @@ router.post(
 router.get(
   '/admin/researcher-dsc-permissions',
   authenticateJWT,
-  requirePermission('ACCESS_STAFF'),
+  requireAnyPermission(['MANAGE_STAFF_DSC', 'ACCESS_STAFF']),
   enforceTenantIsolation,
   getResearcherDscPermissions
 );
 router.put(
   '/admin/researcher-dsc-permissions/:id',
   authenticateJWT,
-  requirePermission('ACCESS_STAFF'),
+  requireAnyPermission(['MANAGE_STAFF_DSC', 'ACCESS_STAFF']),
   enforceTenantIsolation,
   updateResearcherDscPermission
 );
@@ -1278,7 +1278,7 @@ router.post(
 router.post(
   '/admin/payments/verify',
   authenticateJWT,
-  requirePermission('ACCESS_PAYMENTS'),
+  requireAnyPermission(['ACCESS_PAYMENT_QR_VERIFICATION', 'ACCESS_PAYMENTS']),
   enforceTenantIsolation,
   verifyManualPayment
 );

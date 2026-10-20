@@ -344,6 +344,27 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
             }
 
             if (tradeSegment && tradeAction) {
+              let futMonth = '';
+              if (data?.expiryDate) {
+                try {
+                  const d = new Date(data.expiryDate);
+                  if (!isNaN(d.getTime())) {
+                    futMonth = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+                  }
+                } catch (e) {}
+              }
+
+              let fullInstrument = data?.stockSymbol || '';
+              if (tradeSegment === 'OPTION') {
+                fullInstrument = [data?.stockSymbol, data?.strikePrice, data?.optionType].filter(Boolean).join(' ');
+              } else if (tradeSegment === 'FUTURE') {
+                fullInstrument = [data?.stockSymbol, futMonth, 'FUT'].filter(Boolean).join(' ');
+              }
+
+              const targetsJoined = [data?.target1, data?.target2, data?.target3]
+                .filter((v: any) => v !== undefined && v !== null && String(v).trim() !== '')
+                .join('/');
+
               const smsResult = await sendSms({
                 tenantId: currentTenantId,
                 mobile: destMobile,
@@ -353,21 +374,28 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                 variables: {
                   stock: data?.stockSymbol || '',
                   symbol: data?.stockSymbol || '',
+                  fullInstrument,
                   action: tradeAction,
+                  callType: tradeAction,
                   segment: tradeSegment,
                   price: data?.entryPrice || data?.exitPrice || '',
+                  entryPrice: data?.entryPrice || '',
                   entry: data?.entryPrice || '',
                   exit: data?.exitPrice || '',
+                  targets: targetsJoined,
                   target: data?.target1 || '',
+                  target1: data?.target1 || '',
+                  target2: data?.target2 || '',
+                  target3: data?.target3 || '',
                   stoploss: data?.stoploss || '',
-                  sl: data?.stoploss || ''
+                  sl: data?.stoploss || '',
+                  duration: data?.tradeDuration || '',
+                  tradeDuration: data?.tradeDuration || '',
+                  instrumentWithPrice: `${fullInstrument} @ ${data?.entryPrice || data?.exitPrice || ''}`.trim()
                 },
-                orderedVariables: [
-                  data?.stockSymbol || '',
-                  data?.entryPrice || data?.exitPrice || '',
-                  data?.target1 || '',
-                  data?.stoploss || ''
-                ]
+                orderedVariables: Array.isArray(data?.smsOrderedVariables) && data.smsOrderedVariables.length > 0
+                  ? data.smsOrderedVariables
+                  : undefined
               });
 
               await dynamicDb.NotificationLog.create({

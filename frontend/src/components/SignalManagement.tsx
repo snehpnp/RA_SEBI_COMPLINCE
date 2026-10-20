@@ -136,6 +136,151 @@ export default function SignalManagement({
   const [alertMessage, setAlertMessage] = useState('');
   const [sendingAlert, setSendingAlert] = useState(false);
   const [isMobileVisible, setIsMobileVisible] = useState(false);
+  const [smsTemplates, setSmsTemplates] = useState<any[]>([]);
+  const [customVariableValues, setCustomVariableValues] = useState<Record<number, string>>({});
+
+  // Selected stock details
+  const selectedStockObj = useMemo(() => {
+    return stocks.find((s: any) => s._id === stockId || s.id === stockId);
+  }, [stocks, stockId]);
+
+  const currentStockSymbol = useMemo(() => {
+    return selectedStockObj?.symbol || stockSearchQuery || '';
+  }, [selectedStockObj, stockSearchQuery]);
+
+  // Formatted instrument string
+  const formattedInstrument = useMemo(() => {
+    const sym = currentStockSymbol;
+    if (segment === 'OPTION') {
+      return [sym, strikePrice, optionType].filter(Boolean).join(' ');
+    }
+    if (segment === 'FUTURE') {
+      let futMonth = '';
+      if (expiryDate) {
+        try {
+          const d = new Date(expiryDate);
+          if (!isNaN(d.getTime())) {
+            futMonth = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+          }
+        } catch (e) {}
+      }
+      return [sym, futMonth, 'FUT'].filter(Boolean).join(' ');
+    }
+    return sym;
+  }, [segment, currentStockSymbol, strikePrice, optionType, expiryDate]);
+
+  // Formatted targets string (180/200/250)
+  const formattedTargets = useMemo(() => {
+    return [target1, target2, target3]
+      .filter((v: any) => v !== undefined && v !== null && String(v).trim() !== '')
+      .join('/');
+  }, [target1, target2, target3]);
+
+  // Matched Active SMS Template
+  const matchedSmsTemplate = useMemo(() => {
+    if (!segment || !callType) return null;
+    const triggerKey = `${segment.toUpperCase()}_${callType.toUpperCase()}`;
+    return smsTemplates.find((t: any) => (t.status === 'ACTIVE' || t.isActive) && (
+      (Array.isArray(t.applicableCombinations) && t.applicableCombinations.includes(triggerKey)) ||
+      (Array.isArray(t.applicableSegments) && t.applicableSegments.includes(segment.toUpperCase()) &&
+       Array.isArray(t.applicableActions) && t.applicableActions.includes(callType.toUpperCase()))
+    )) || null;
+  }, [segment, callType, smsTemplates]);
+
+  // Resolved SMS data with variable mappings
+  const resolvedSmsData = useMemo(() => {
+    if (!matchedSmsTemplate) return null;
+    const templateMsg = matchedSmsTemplate.content || matchedSmsTemplate.message || '';
+    const mappings: any[] = matchedSmsTemplate.variableMappings || [];
+
+    const detectedRegex = /\{#(var|alp|num|val|[a-z0-9_]+)#\}|\{([a-z0-9_]+)\}/gi;
+    const matches = Array.from(templateMsg.matchAll(detectedRegex));
+
+    const resolvedVars: { index: number; placeholder: string; fieldKey: string; label: string; value: string; isOverLimit: boolean }[] = [];
+
+    const FIELD_LABELS: Record<string, string> = {
+      callType: 'Call Type',
+      stock: 'Stock Name',
+      strikePrice: 'Strike Price',
+      optionType: 'Option Type',
+      expiryDate: 'Expiry Date',
+      entryType: 'Entry Type',
+      entryPrice: 'Entry Price',
+      targets: 'Targets',
+      target1: 'Target 1',
+      target2: 'Target 2',
+      target3: 'Target 3',
+      stoploss: 'Stoploss',
+      duration: 'Duration',
+      fullInstrument: 'Full Instrument'
+    };
+
+    matches.forEach((m: any, idx: number) => {
+      const placeholder = m[0];
+      const mapItem = mappings.find((mp: any) => mp.index === idx);
+      const selectedFields: string[] = Array.isArray(mapItem?.selectedFields) && mapItem.selectedFields.length > 0
+        ? mapItem.selectedFields
+        : (mapItem?.fieldKey ? mapItem.fieldKey.split(',').map((s: string) => s.trim()).filter(Boolean) : (idx === 0 ? ['callType', 'stock', 'entryPrice'] : idx === 1 ? ['targets'] : ['stoploss']));
+
+      const fieldValues: string[] = [];
+      for (const fKey of selectedFields) {
+        let partVal = '';
+        if (fKey === 'callType') partVal = callType;
+        else if (fKey === 'stock') partVal = currentStockSymbol;
+        else if (fKey === 'strikePrice') partVal = strikePrice;
+        else if (fKey === 'optionType') partVal = optionType;
+        else if (fKey === 'expiryDate') partVal = expiryDate;
+        else if (fKey === 'entryType') partVal = entryType;
+        else if (fKey === 'entryPrice') partVal = entryPrice;
+        else if (fKey === 'targets') partVal = formattedTargets;
+        else if (fKey === 'target1') partVal = target1;
+        else if (fKey === 'target2') partVal = target2;
+        else if (fKey === 'target3') partVal = target3;
+        else if (fKey === 'stoploss') partVal = stoploss;
+        else if (fKey === 'duration') partVal = tradeDuration;
+        else if (fKey === 'fullInstrument') partVal = formattedInstrument;
+        else if (fKey === 'instrumentWithPrice') partVal = [formattedInstrument, entryPrice ? `@ ${entryPrice}` : ''].filter(Boolean).join(' ');
+
+        if (partVal && String(partVal).trim()) {
+          fieldValues.push(String(partVal).trim());
+        }
+      }
+      const autoVal = fieldValues.join(' ');
+      const finalVal = customVariableValues[idx] !== undefined ? customVariableValues[idx] : autoVal;
+      const isOverLimit = finalVal.length > 30;
+
+      const label = selectedFields.length > 0
+        ? selectedFields.map(f => FIELD_LABELS[f] || f).join(' + ')
+        : 'No fields';
+
+      resolvedVars.push({
+        index: idx,
+        placeholder,
+        fieldKey: selectedFields.join(','),
+        label,
+        value: finalVal,
+        isOverLimit
+      });
+    });
+
+    let previewText = templateMsg;
+    resolvedVars.forEach(rv => {
+      previewText = previewText.replace(rv.placeholder, rv.value || `[${rv.placeholder}]`);
+    });
+
+    const charCount = previewText.length;
+    const smsCredits = charCount === 0 ? 0 : charCount <= 160 ? 1 : Math.ceil(charCount / 153);
+    const anyOverLimit = resolvedVars.some(r => r.isOverLimit);
+
+    return {
+      template: matchedSmsTemplate,
+      resolvedVars,
+      previewText,
+      charCount,
+      smsCredits,
+      anyOverLimit
+    };
+  }, [matchedSmsTemplate, formattedInstrument, currentStockSymbol, entryPrice, formattedTargets, target1, target2, target3, stoploss, callType, tradeDuration, customVariableValues]);
 
   // Smart download helper — checks if file exists before downloading
   const BASE_URL = base_ra_url;
@@ -396,7 +541,7 @@ export default function SignalManagement({
         // Reset form
         setSegment(''); setPlanIds([]); setCallType(''); setTradeDuration(''); setStockId(''); setExpiryDate(''); setStrikePrice(''); setOptionType('');
         setEntryPrice(''); setEntryType(''); setTarget1(''); setTarget2(''); setTarget3('');
-        setStoploss(''); setDescription(''); setReportFile(null); setStockSearchQuery('');
+        setStoploss(''); setDescription(''); setReportFile(null); setStockSearchQuery(''); setCustomVariableValues({});
       } else {
         toast(res.message);
       }

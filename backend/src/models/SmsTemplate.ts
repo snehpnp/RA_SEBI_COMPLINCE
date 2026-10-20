@@ -1,6 +1,14 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 import { baseSchemaOptions } from './_schemaOptions';
 
+export interface IVariableMapping {
+  index: number;
+  placeholder: string;
+  fieldKey: string;
+  selectedFields?: string[];
+  customLabel?: string;
+}
+
 export interface ISmsTemplate extends Document {
   _id: Types.ObjectId;
   id: string;
@@ -11,6 +19,7 @@ export interface ISmsTemplate extends Document {
   applicableSegments: string[]; // e.g. ['CASH', 'FUTURE', 'OPTION']
   applicableActions: string[]; // e.g. ['BUY', 'SELL', 'TARGET', 'STOPLOSS']
   applicableCombinations: string[]; // e.g. ['CASH_BUY', 'CASH_SELL']
+  variableMappings?: IVariableMapping[];
   dltTemplateId: string;
   message: string;
   status: 'ACTIVE' | 'INACTIVE';
@@ -29,6 +38,18 @@ export const SmsTemplateSchema = new Schema<ISmsTemplate>(
     applicableSegments: { type: [String], default: [] },
     applicableActions: { type: [String], default: [] },
     applicableCombinations: { type: [String], default: [] },
+    variableMappings: {
+      type: [
+        {
+          index: { type: Number, required: true },
+          placeholder: { type: String, required: true },
+          fieldKey: { type: String, default: '' },
+          selectedFields: { type: [String], default: [] },
+          customLabel: { type: String, default: '' }
+        }
+      ],
+      default: []
+    },
     dltTemplateId: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     status: { type: String, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },

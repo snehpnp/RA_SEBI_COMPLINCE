@@ -4847,6 +4847,7 @@ export const getSmsTemplates = async (req: AuthenticatedRequest, res: Response) 
         applicableCombinations: combos,
         content: t.message || t.content || '',
         message: t.message || t.content || '',
+        variableMappings: t.variableMappings || [],
         isActive: t.status === 'ACTIVE' || t.isActive === true,
         status: t.status || (t.isActive ? 'ACTIVE' : 'INACTIVE')
       };
@@ -4875,6 +4876,7 @@ export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response
     const applicableSegments: string[] = Array.isArray(req.body.applicableSegments)
       ? req.body.applicableSegments.map((s: string) => s.trim().toUpperCase())
       : [];
+    const variableMappings = Array.isArray(req.body.variableMappings) ? req.body.variableMappings.map((m: any, idx: number) => ({ index: typeof m.index === 'number' ? m.index : idx, placeholder: String(m.placeholder || '').trim(), fieldKey: String(m.fieldKey || '').trim(), selectedFields: Array.isArray(m.selectedFields) ? m.selectedFields.map(String) : (m.fieldKey ? [String(m.fieldKey)] : []), customLabel: String(m.customLabel || '').trim() })) : [];
     const applicableActions: string[] = Array.isArray(req.body.applicableActions)
       ? req.body.applicableActions.map((a: string) => a.trim().toUpperCase())
       : [];
@@ -4936,6 +4938,7 @@ export const createSmsTemplate = async (req: AuthenticatedRequest, res: Response
       applicableSegments: tObj.applicableSegments || [],
       applicableActions: tObj.applicableActions || [],
       applicableCombinations: tObj.applicableCombinations || [],
+      variableMappings: tObj.variableMappings || [],
       content: tObj.message,
       isActive: tObj.status === 'ACTIVE'
     };
@@ -4971,6 +4974,9 @@ export const updateSmsTemplate = async (req: AuthenticatedRequest, res: Response
     if (req.body.status) template.status = req.body.status;
     if (typeof req.body.isActive === 'boolean') template.status = req.body.isActive ? 'ACTIVE' : 'INACTIVE';
 
+    if (req.body.variableMappings !== undefined) {
+      template.variableMappings = Array.isArray(req.body.variableMappings) ? req.body.variableMappings.map((m: any, idx: number) => ({ index: typeof m.index === 'number' ? m.index : idx, placeholder: String(m.placeholder || '').trim(), fieldKey: String(m.fieldKey || '').trim(), selectedFields: Array.isArray(m.selectedFields) ? m.selectedFields.map(String) : (m.fieldKey ? [String(m.fieldKey)] : []), customLabel: String(m.customLabel || '').trim() })) : [];
+    }
     if (req.body.applicableSegments !== undefined) {
       template.applicableSegments = Array.isArray(req.body.applicableSegments)
         ? req.body.applicableSegments.map((s: string) => s.trim().toUpperCase())

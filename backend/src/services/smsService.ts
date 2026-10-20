@@ -143,6 +143,7 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
     // 3. Resolve Template & DLT Template ID
     let finalMessage = customMessage || '';
     let finalDltTempId = dltTemplateId || '';
+    let template: any = null;
 
     if (!finalMessage || !finalDltTempId) {
       await ensureDefaultSmsTemplates(tenant?._id?.toString());
@@ -151,8 +152,6 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
         { tenantId: null },
         { tenantId: { $exists: false } }
       ];
-
-      let template: any = null;
 
       // A. If segment and action are specified, look for matching active TRADE_SIGNAL template
       if (segment && action) {
@@ -208,12 +207,52 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
     }
 
     // 4. Replace placeholders with variable values
-    // A. Sequential replacement for orderedVariables (e.g. {#var#}, {#alp#}, {#num#}, {#val#})
-    if (Array.isArray(orderedVariables) && orderedVariables.length > 0) {
+    let activeOrderedVars = Array.isArray(orderedVariables) && orderedVariables.length > 0 ? [...orderedVariables] : [];
+
+    // Dynamically resolve from template variableMappings if present
+    if (activeOrderedVars.length === 0 && Array.isArray((template as any)?.variableMappings) && (template as any).variableMappings.length > 0) {
+      const sortedMappings = [...(template as any).variableMappings].sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0));
+      for (const mapping of sortedMappings) {
+        const fieldsToUse: string[] = Array.isArray((mapping as any).selectedFields) && (mapping as any).selectedFields.length > 0
+          ? (mapping as any).selectedFields
+          : (mapping.fieldKey ? [mapping.fieldKey] : []);
+
+        const fieldValues: string[] = [];
+        for (const fKey of fieldsToUse) {
+          let partVal = '';
+          if (fKey === 'callType' || fKey === 'action') partVal = variables.callType || variables.action || '';
+          else if (fKey === 'stock' || fKey === 'symbol') partVal = variables.stock || variables.symbol || '';
+          else if (fKey === 'strikePrice') partVal = variables.strikePrice ? String(variables.strikePrice) : '';
+          else if (fKey === 'optionType') partVal = variables.optionType || '';
+          else if (fKey === 'expiryDate') partVal = variables.expiryDate || '';
+          else if (fKey === 'entryType') partVal = variables.entryType || '';
+          else if (fKey === 'entryPrice' || fKey === 'price') partVal = variables.entryPrice || variables.price || '';
+          else if (fKey === 'targets') partVal = variables.targets || variables.target || '';
+          else if (fKey === 'target1') partVal = variables.target1 || '';
+          else if (fKey === 'target2') partVal = variables.target2 || '';
+          else if (fKey === 'target3') partVal = variables.target3 || '';
+          else if (fKey === 'stoploss' || fKey === 'sl') partVal = variables.stoploss || variables.sl || '';
+          else if (fKey === 'duration' || fKey === 'tradeDuration') partVal = variables.duration || variables.tradeDuration || '';
+          else if (fKey === 'fullInstrument') partVal = variables.fullInstrument || variables.stock || '';
+          else if (fKey === 'instrumentWithPrice') partVal = variables.instrumentWithPrice || (variables.fullInstrument ? (variables.fullInstrument + ' @ ' + (variables.entryPrice || '')) : '');
+          else if (fKey === 'custom') partVal = mapping.customLabel || '';
+          else if (variables[fKey] !== undefined) partVal = String(variables[fKey]);
+
+          if (partVal && String(partVal).trim()) {
+            fieldValues.push(String(partVal).trim());
+          }
+        }
+        const combinedVal = fieldValues.join(' ');
+        activeOrderedVars.push(combinedVal);
+      }
+    }
+
+    // A. Sequential replacement for ordered variables (e.g. {#var#}, {#alp#}, {#num#}, {#val#})
+    if (activeOrderedVars.length > 0) {
       let vIdx = 0;
-      finalMessage = finalMessage.replace(/\{#(var|alp|num|val)#\}/gi, (match) => {
-        if (vIdx < orderedVariables.length && orderedVariables[vIdx] !== undefined) {
-          return String(orderedVariables[vIdx++]);
+      finalMessage = finalMessage.replace(/\{#(var|alp|num|val|[a-z0-9_]+)#\}/gi, (match) => {
+        if (vIdx < activeOrderedVars.length && activeOrderedVars[vIdx] !== undefined) {
+          return String(activeOrderedVars[vIdx++]);
         }
         return match;
       });

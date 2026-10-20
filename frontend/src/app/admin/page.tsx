@@ -100,6 +100,10 @@ const NAV_CONFIG: NavModule[] = [
     accessKey: 'ACCESS_DASHBOARD',
     moduleLabel: 'Dashboard Overview',
     moduleDesc: 'Access to main statistics, compliance alerts, and checklist metrics',
+    subPermissions: [
+      { code: 'ACCESS_BULK_EXPORTS', label: 'Bulk Data Exports', desc: 'Allows viewing and downloading bulk compliance, client, and audit export packages' },
+      { code: 'ACCESS_ACTIVE_CLIENT_SUMMARY', label: 'Active Client Summary', desc: 'Allows viewing the Active Client Summary table and metrics on the admin dashboard' },
+    ],
   },
   {
     tab: 'staff',
@@ -108,6 +112,9 @@ const NAV_CONFIG: NavModule[] = [
     accessKey: 'ACCESS_STAFF',
     moduleLabel: 'Staff Control Desk',
     moduleDesc: 'Manage staff profiles, employee codes, and NISM validity checks',
+    subPermissions: [
+      { code: 'MANAGE_STAFF_DSC', label: 'Researcher Hardware DSC Permissions', desc: 'Allows viewing and managing physical USB DSC token permissions for Research Analysts' },
+    ],
   },
   {
     tab: 'clients',
@@ -193,6 +200,9 @@ const NAV_CONFIG: NavModule[] = [
     accessKey: 'ACCESS_PAYMENTS',
     moduleLabel: 'Payment History Desk',
     moduleDesc: 'View all successful client payments and subscriptions',
+    subPermissions: [
+      { code: 'ACCESS_PAYMENT_QR_VERIFICATION', label: 'QR & Screenshot Verifications', desc: 'Allows viewing and verifying manual QR code payment screenshots' },
+    ],
   },
   {
     tab: 'compliance',
@@ -587,6 +597,10 @@ function AdminDashboardContent() {
   const [adminNotifications, setAdminNotifications] = useState<any[]>([]);
   const [adminUnreadCount, setAdminUnreadCount] = useState(0);
   const [isAdminNotifOpen, setIsAdminNotifOpen] = useState(false);
+  const [showAllNotifsModal, setShowAllNotifsModal] = useState(false);
+  const [notifModalFilter, setNotifModalFilter] = useState<'ALL' | 'SIGNALS' | 'REPORTS' | 'UNREAD'>('ALL');
+  const [notifSearchQuery, setNotifSearchQuery] = useState('');
+  const [showRawAuditJson, setShowRawAuditJson] = useState(false);
 
   const fetchAdminNotifications = async () => {
     try {
@@ -5717,13 +5731,23 @@ function AdminDashboardContent() {
                         )}
                       </div>
 
-                      <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-white/10 text-center">
+                      <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-white/10 flex items-center justify-between px-3">
                         <button
                           onClick={() => {
                             setIsAdminNotifOpen(false);
-                            setActiveTab('research');
+                            setShowAllNotifsModal(true);
                           }}
-                          className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-500 flex items-center justify-center gap-1 mx-auto"
+                          className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-500 flex items-center gap-1"
+                        >
+                          <Bell className="w-3.5 h-3.5" />
+                          <span>View All ({adminNotifications.length})</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setIsAdminNotifOpen(false);
+                            setShowAllNotifsModal(true);
+                          }}
+                          className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-500 flex items-center gap-1"
                         >
                           <span>Manage Signals &amp; Reports</span>
                           <ChevronRight className="w-3.5 h-3.5" />
@@ -6320,7 +6344,7 @@ function AdminDashboardContent() {
                       {/* Closing Alert Modal removed from dashboard tab block */}
 
                       {/* Bulk Exports Section */}
-                      {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                      {(hasPermission('ACCESS_BULK_EXPORTS') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                         <div className="mt-8 glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 space-y-4">
                           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
@@ -6412,7 +6436,7 @@ function AdminDashboardContent() {
                       )}
 
                       {/* Active Client Summary Button */}
-                      {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                      {(hasPermission('ACCESS_ACTIVE_CLIENT_SUMMARY') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                         <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-100 dark:border-blue-800/30 flex items-center justify-between shadow-sm">
                           <div>
                             <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -6434,7 +6458,7 @@ function AdminDashboardContent() {
                     </div>
                   )}
 
-                  {activeTab === 'activeClientSummary' && (
+                  {activeTab === 'activeClientSummary' && (hasPermission('ACCESS_ACTIVE_CLIENT_SUMMARY') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                     <ActiveClientSummary />
                   )}
 
@@ -6520,6 +6544,7 @@ function AdminDashboardContent() {
                       </div>
 
                       {/* RESEARCHER HARDWARE DSC PERMISSIONS PANEL */}
+                      {(hasPermission('MANAGE_STAFF_DSC') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                       <div className="bg-white dark:bg-[#0F172A] rounded-2xl border border-slate-200 dark:border-slate-800/60 p-6 space-y-5 shadow-xl shadow-slate-200/20 dark:shadow-none">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-white/5">
                           <div>
@@ -6704,6 +6729,7 @@ function AdminDashboardContent() {
                           </div>
                         )}
                       </div>
+                      )}
 
                       {/* Register/Edit Staff Modal Popup */}
                       {isStaffModalOpen && (
@@ -7425,27 +7451,29 @@ function AdminDashboardContent() {
                             </span>
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => setPaymentSubTab('qr_verifications')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                              paymentSubTab === 'qr_verifications'
-                                ? 'bg-primary-600 text-white shadow-md shadow-primary-600/20'
-                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                            }`}
-                          >
-                            <QrCode className="w-4 h-4" />
-                            <span>QR &amp; Screenshot Verifications</span>
-                            {pendingQrCount > 0 ? (
-                              <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black animate-pulse">
-                                {pendingQrCount} PENDING
-                              </span>
-                            ) : (
-                              <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
-                                {qrVerificationsList.length}
-                              </span>
-                            )}
-                          </button>
+                          {(hasPermission('ACCESS_PAYMENT_QR_VERIFICATION') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                            <button
+                              type="button"
+                              onClick={() => setPaymentSubTab('qr_verifications')}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                                paymentSubTab === 'qr_verifications'
+                                  ? 'bg-primary-600 text-white shadow-md shadow-primary-600/20'
+                                  : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                              }`}
+                            >
+                              <QrCode className="w-4 h-4" />
+                              <span>QR &amp; Screenshot Verifications</span>
+                              {pendingQrCount > 0 ? (
+                                <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-black animate-pulse">
+                                  {pendingQrCount} PENDING
+                                </span>
+                              ) : (
+                                <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
+                                  {qrVerificationsList.length}
+                                </span>
+                              )}
+                            </button>
+                          )}
                         </div>
 
                         {/* View: All Transactions */}
@@ -7468,7 +7496,7 @@ function AdminDashboardContent() {
                         )}
 
                         {/* View: QR & Screenshot Verifications */}
-                        {paymentSubTab === 'qr_verifications' && (
+                        {paymentSubTab === 'qr_verifications' && (hasPermission('ACCESS_PAYMENT_QR_VERIFICATION') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                           <div className="space-y-4">
                             <div className="flex items-center justify-between bg-primary-50 dark:bg-primary-950/30 border border-primary-200 dark:border-primary-500/20 p-4 rounded-2xl text-xs">
                               <div className="flex items-center gap-3">
@@ -15531,49 +15559,149 @@ function AdminDashboardContent() {
                               </div>
                             </div>
 
-                            {/* Details text */}
-                            <div className="space-y-1.5">
-                              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Event Title & Notes</label>
-                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5 text-xs text-slate-800 dark:text-slate-200">
-                                <div className="font-bold mb-1">{selectedAuditLog.title}</div>
-                                {selectedAuditLog.description && <p className="text-slate-600 dark:text-slate-400">{selectedAuditLog.description}</p>}
-                              </div>
-                            </div>
+                            {(() => {
+                              const parseSafe = (val: any) => {
+                                if (!val) return null;
+                                if (typeof val === 'object') return val;
+                                if (typeof val === 'string') {
+                                  try {
+                                    const p = JSON.parse(val);
+                                    if (typeof p === 'string') return JSON.parse(p);
+                                    return p;
+                                  } catch {
+                                    return val;
+                                  }
+                                }
+                                return val;
+                              };
 
-                            {/* User & Client details */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
-                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Triggered By</span>
-                                <div className="font-semibold text-slate-900 dark:text-white">{selectedAuditLog.user?.name || 'System / Admin'}</div>
-                                <div className="text-[11px] text-slate-500 font-mono">{selectedAuditLog.user?.email || 'N/A'}</div>
-                              </div>
-                              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
-                                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Network & Device</span>
-                                <div className="font-mono text-slate-900 dark:text-white">{selectedAuditLog.ipAddress || '127.0.0.1'}</div>
-                                <div className="text-[11px] text-slate-500">{selectedAuditLog.device || 'Desktop'} {selectedAuditLog.browser ? `(${selectedAuditLog.browser})` : ''}</div>
-                              </div>
-                            </div>
+                              const oldObj = parseSafe(selectedAuditLog.parsedOld || selectedAuditLog.oldValue || selectedAuditLog.metadata?.oldValue);
+                              const newObj = parseSafe(selectedAuditLog.parsedNew || selectedAuditLog.newValue || selectedAuditLog.metadata?.newValue);
 
-                            {/* Metadata / Payload */}
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between">
-                                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Technical Payload / State Change</label>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(JSON.stringify(selectedAuditLog.metadata || selectedAuditLog, null, 2));
-                                    toast.success('JSON payload copied to clipboard');
-                                  }}
-                                  className="text-[10px] text-blue-500 hover:text-blue-400 font-bold flex items-center space-x-1"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                  <span>Copy JSON</span>
-                                </button>
-                              </div>
-                              <pre className="p-3.5 bg-slate-950 text-emerald-400 rounded-xl font-mono text-[11px] overflow-x-auto max-h-56 border border-slate-800 leading-relaxed">
-                                {JSON.stringify(selectedAuditLog.metadata || { oldValue: selectedAuditLog.oldValue, newValue: selectedAuditLog.newValue }, null, 2)}
-                              </pre>
-                            </div>
+                              let displayNotes = selectedAuditLog.description || selectedAuditLog.title || '';
+                              if (typeof displayNotes === 'string' && displayNotes.trim().startsWith('{')) {
+                                const parsedDesc = parseSafe(displayNotes);
+                                if (parsedDesc && typeof parsedDesc === 'object') {
+                                  displayNotes = parsedDesc.message || parsedDesc.remarks || parsedDesc.title || selectedAuditLog.title;
+                                }
+                              }
+
+                              const changes: Array<{ field: string; oldVal: string; newVal: string }> = [];
+                              const ignoredKeys = new Set(['_id', '__v', 'tenantId', 'updatedAt', 'createdAt', 'id']);
+
+                              if (oldObj && typeof oldObj === 'object' && newObj && typeof newObj === 'object') {
+                                const allKeys = Array.from(new Set([...Object.keys(oldObj), ...Object.keys(newObj)])).filter(k => !ignoredKeys.has(k));
+                                allKeys.forEach(key => {
+                                  const o = oldObj[key];
+                                  const n = newObj[key];
+                                  if (JSON.stringify(o) !== JSON.stringify(n)) {
+                                    changes.push({
+                                      field: key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()),
+                                      oldVal: o !== undefined && o !== null ? (typeof o === 'object' ? JSON.stringify(o) : String(o)) : '—',
+                                      newVal: n !== undefined && n !== null ? (typeof n === 'object' ? JSON.stringify(n) : String(n)) : '—'
+                                    });
+                                  }
+                                });
+                              } else if (newObj && typeof newObj === 'object') {
+                                Object.keys(newObj).filter(k => !ignoredKeys.has(k)).forEach(key => {
+                                  const n = newObj[key];
+                                  if (n !== undefined && n !== null && n !== '') {
+                                    changes.push({
+                                      field: key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()),
+                                      oldVal: '—',
+                                      newVal: typeof n === 'object' ? JSON.stringify(n) : String(n)
+                                    });
+                                  }
+                                });
+                              }
+
+                              return (
+                                <>
+                                  {/* Human-Readable Details Box */}
+                                  <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Activity Summary</label>
+                                    <div className="p-3.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5 text-xs text-slate-800 dark:text-slate-200 space-y-1">
+                                      <div className="font-extrabold text-sm text-slate-900 dark:text-white">{selectedAuditLog.title}</div>
+                                      <p className="text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                                        {displayNotes}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* User & Client details */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                    <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
+                                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Triggered By</span>
+                                      <div className="font-semibold text-slate-900 dark:text-white">{selectedAuditLog.user?.name || 'System / Admin'}</div>
+                                      <div className="text-[11px] text-slate-500 font-mono">{selectedAuditLog.user?.email || 'N/A'}</div>
+                                    </div>
+                                    <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/5">
+                                      <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Network & Device</span>
+                                      <div className="font-mono text-slate-900 dark:text-white">{selectedAuditLog.ipAddress || '127.0.0.1'}</div>
+                                      <div className="text-[11px] text-slate-500">{selectedAuditLog.device || 'Desktop'} {selectedAuditLog.browser ? `(${selectedAuditLog.browser})` : ''}</div>
+                                    </div>
+                                  </div>
+
+                                  {/* Human-Readable Changes Table */}
+                                  {changes.length > 0 && (
+                                    <div className="space-y-1.5">
+                                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">Updated Details & Values</label>
+                                      <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden text-xs">
+                                        <table className="w-full divide-y divide-slate-200 dark:divide-white/10">
+                                          <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 font-bold uppercase text-[10px]">
+                                            <tr>
+                                              <th className="py-2 px-3 text-left">Property</th>
+                                              <th className="py-2 px-3 text-left">Previous State</th>
+                                              <th className="py-2 px-3 text-left">Updated Value</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-slate-100 dark:divide-white/5 bg-white dark:bg-slate-900/60 font-medium">
+                                            {changes.map((c, i) => (
+                                              <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                                                <td className="py-2 px-3 font-semibold text-slate-800 dark:text-slate-200">{c.field}</td>
+                                                <td className="py-2 px-3 text-slate-500 font-mono text-[11px] break-all">{c.oldVal}</td>
+                                                <td className="py-2 px-3 text-emerald-600 dark:text-emerald-400 font-mono text-[11px] font-bold break-all">{c.newVal}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Collapsible Technical Payload */}
+                                  <div className="space-y-1.5 pt-1">
+                                    <div className="flex items-center justify-between">
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowRawAuditJson(!showRawAuditJson)}
+                                        className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                                      >
+                                        <span>{showRawAuditJson ? '▲ Hide' : '▼ Show'} Raw Technical Payload (For Developers)</span>
+                                      </button>
+                                      {showRawAuditJson && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(JSON.stringify(selectedAuditLog.metadata || selectedAuditLog, null, 2));
+                                            toast.success('JSON payload copied to clipboard');
+                                          }}
+                                          className="text-[10px] text-blue-500 hover:text-blue-400 font-bold flex items-center space-x-1"
+                                        >
+                                          <Copy className="w-3 h-3" />
+                                          <span>Copy JSON</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                    {showRawAuditJson && (
+                                      <pre className="p-3.5 bg-slate-950 text-emerald-400 rounded-xl font-mono text-[11px] overflow-x-auto max-h-56 border border-slate-800 leading-relaxed animate-in fade-in">
+                                        {JSON.stringify(selectedAuditLog.metadata || { oldValue: selectedAuditLog.oldValue, newValue: selectedAuditLog.newValue }, null, 2)}
+                                      </pre>
+                                    )}
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
 
                           <div className="p-4 border-t border-slate-200 dark:border-white/10 flex justify-end">
@@ -16329,6 +16457,7 @@ function AdminDashboardContent() {
           onClose={() => setShowCalendarModal(false)}
           checklist={checklist}
           checklistHistory={checklistHistory}
+          complianceCutoffDate={tenantCutoffDate || tenantDetails?.complianceCutoffDate || tenantDetails?.createdAt || null}
           onReloadData={loadData}
           onOpenAuditModal={(req) => {
             setAuditModalReq(req);
@@ -16338,6 +16467,150 @@ function AdminDashboardContent() {
           }}
           userRole={user?.role}
         />
+        {/* Full Admin Notifications Center Modal */}
+        {showAllNotifsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-150">
+              <div className="p-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50/80 dark:bg-slate-800/50">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                    <Bell className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 dark:text-white text-base">Researcher Activity &amp; Live Alerts</h3>
+                    <p className="text-xs text-slate-500">{adminNotifications.length} total notification{adminNotifications.length === 1 ? '' : 's'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {adminUnreadCount > 0 && (
+                    <button
+                      onClick={handleMarkAdminNotifsRead}
+                      className="px-3 py-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-lg hover:underline"
+                    >
+                      Mark all as read
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowAllNotifsModal(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Filters & Search */}
+              <div className="p-3 border-b border-slate-200 dark:border-white/10 bg-slate-50/40 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5">
+                  {(['ALL', 'UNREAD', 'SIGNALS', 'REPORTS'] as const).map(tabKey => (
+                    <button
+                      key={tabKey}
+                      onClick={() => setNotifModalFilter(tabKey)}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition ${notifModalFilter === tabKey ? 'bg-rose-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'}`}
+                    >
+                      {tabKey}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search notifications..."
+                  value={notifSearchQuery}
+                  onChange={(e) => setNotifSearchQuery(e.target.value)}
+                  className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-lg text-xs text-slate-800 dark:text-white focus:outline-none"
+                />
+              </div>
+
+              {/* Notifications List */}
+              <div className="p-3 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5 flex-1 max-h-[60vh]">
+                {(() => {
+                  const filtered = adminNotifications.filter((n: any) => {
+                    const isUnread = !n.isRead && !n.read && n.status !== 'READ';
+                    if (notifModalFilter === 'UNREAD' && !isUnread) return false;
+                    const type = (n.type || '').toLowerCase();
+                    if (notifModalFilter === 'SIGNALS' && type !== 'signal' && type !== 'trade') return false;
+                    if (notifModalFilter === 'REPORTS' && type !== 'report') return false;
+                    if (notifSearchQuery) {
+                      const q = notifSearchQuery.toLowerCase();
+                      const titleMatch = (n.title || '').toLowerCase().includes(q);
+                      const msgMatch = (n.message || '').toLowerCase().includes(q);
+                      if (!titleMatch && !msgMatch) return false;
+                    }
+                    return true;
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="py-12 text-center">
+                        <Bell className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-2 opacity-50" />
+                        <p className="text-xs text-slate-500 font-medium">No notifications matching selected filter</p>
+                      </div>
+                    );
+                  }
+
+                  return filtered.map((n: any) => {
+                    const isUnread = !n.isRead && !n.read && n.status !== 'READ';
+                    const type = (n.type || '').toLowerCase();
+                    return (
+                      <div
+                        key={n.id || n._id}
+                        onClick={() => {
+                          setShowAllNotifsModal(false);
+                          setActiveTab('research');
+                        }}
+                        className={`p-3.5 cursor-pointer rounded-xl transition flex items-start gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${isUnread ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}`}
+                      >
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-xs ${
+                          type === 'signal' || type === 'alert' || type === 'update'
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                            : type === 'report'
+                            ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400'
+                            : 'bg-slate-500/15 text-slate-600'
+                        }`}>
+                          {type === 'signal' ? <Target className="w-4 h-4" /> : type === 'report' ? <FileText className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <h5 className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                              {n.title}
+                            </h5>
+                            <span className="text-[10px] text-slate-400">
+                              {n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                            {n.message}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+
+              <div className="p-3 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAllNotifsModal(false);
+                    setActiveTab('research');
+                  }}
+                  className="px-4 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition"
+                >
+                  Go to Research &amp; Signals Desk
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllNotifsModal(false)}
+                  className="px-4 py-2 text-xs font-bold bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-200 rounded-xl transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {/* ====================================================
             PRODUCTION GO-LIVE AUTHORIZATION MODAL

@@ -133,8 +133,20 @@ export const createSignal = async (req: Request, res: Response) => {
           target3,
           stoploss,
           segment,
+          expiryDate: expiryDate || null,
+          strikePrice: strikePrice || null,
+          optionType: optionType || null,
           tradeDuration,
-          action: 'NEW_TRADE'
+          action: 'NEW_TRADE',
+          smsOrderedVariables: req.body.smsOrderedVariables ? (
+            (() => {
+              try {
+                return typeof req.body.smsOrderedVariables === 'string' ? JSON.parse(req.body.smsOrderedVariables) : req.body.smsOrderedVariables;
+              } catch (e) {
+                return undefined;
+              }
+            })()
+          ) : undefined
         },
         adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
         adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`

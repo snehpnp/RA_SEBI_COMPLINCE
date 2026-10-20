@@ -30,6 +30,14 @@ import api from '@/services/api';
 export const AVAILABLE_SEGMENTS = ['CASH', 'FUTURE', 'OPTION'] as const;
 export const AVAILABLE_ACTIONS = ['BUY', 'SELL', 'TARGET', 'STOPLOSS'] as const;
 
+export interface VariableMappingItem {
+  index: number;
+  placeholder: string;
+  fieldKey?: string;
+  selectedFields: string[];
+  customLabel?: string;
+}
+
 export interface SmsTemplateItem {
   id: string;
   _id?: string;
@@ -39,6 +47,7 @@ export interface SmsTemplateItem {
   applicableSegments?: string[];
   applicableActions?: string[];
   applicableCombinations?: string[];
+  variableMappings?: VariableMappingItem[];
   content: string;
   description?: string;
   isActive: boolean;
@@ -102,6 +111,103 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   const [tplDescription, setTplDescription] = useState('');
   const [tplIsActive, setTplIsActive] = useState(true);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [tplVariableMappings, setTplVariableMappings] = useState<VariableMappingItem[]>([]);
+
+  const AVAILABLE_FIELD_PILLS = [
+    { key: 'callType', label: 'Call Type', sample: 'BUY' },
+    { key: 'stock', label: 'Stock Name', sample: 'NIFTY' },
+    { key: 'strikePrice', label: 'Strike Price', sample: '24500' },
+    { key: 'optionType', label: 'Option Type (CE/PE)', sample: 'CE' },
+    { key: 'expiryDate', label: 'Expiry Date', sample: '28OCT' },
+    { key: 'entryType', label: 'Entry Type', sample: 'CMP' },
+    { key: 'entryPrice', label: 'Entry Price', sample: '150' },
+    { key: 'targets', label: 'Targets (180/200/250)', sample: '180/200/250' },
+    { key: 'target1', label: 'Target 1', sample: '180' },
+    { key: 'target2', label: 'Target 2', sample: '200' },
+    { key: 'target3', label: 'Target 3', sample: '250' },
+    { key: 'stoploss', label: 'Stoploss', sample: '120' },
+    { key: 'duration', label: 'Trade Duration', sample: 'INTRADAY' }
+  ];
+
+  // Auto-detect placeholders in template content
+  const detectedVariables = useMemo(() => {
+    if (!tplContent) return [];
+    const regex = /\{#(var|alp|num|val|[a-z0-9_]+)#\}|\{([a-z0-9_]+)\}/gi;
+    const matches = Array.from(tplContent.matchAll(regex));
+    return matches.map((m, idx) => ({
+      index: idx,
+      placeholder: m[0],
+      rawType: (m[1] || m[2] || '').toLowerCase()
+    }));
+  }, [tplContent]);
+
+  // Synchronize mappings when detected variables change
+  useEffect(() => {
+    if (detectedVariables.length === 0) {
+      return;
+    }
+    setTplVariableMappings(prev => {
+      return detectedVariables.map((dVar, idx) => {
+        const existing = prev.find(p => p.index === idx);
+        if (existing && Array.isArray(existing.selectedFields) && existing.selectedFields.length > 0) {
+          return { ...existing, placeholder: dVar.placeholder };
+        }
+        let defaultFields: string[] = [];
+        if (idx === 0) {
+          defaultFields = tplSelectedCombos.some(c => c.startsWith('OPTION'))
+            ? ['callType', 'stock', 'strikePrice', 'optionType', 'entryPrice']
+            : ['callType', 'stock', 'entryPrice'];
+        } else if (idx === 1) {
+          defaultFields = ['targets'];
+        } else if (idx === 2) {
+          defaultFields = ['stoploss'];
+        } else {
+          defaultFields = ['entryPrice'];
+        }
+        return {
+          index: idx,
+          placeholder: dVar.placeholder,
+          selectedFields: defaultFields,
+          customLabel: ''
+        };
+      });
+    });
+  }, [detectedVariables, tplSelectedCombos]);
+
+  // Toggle field in variable multi-select
+  const toggleFieldForVariable = (varIndex: number, fieldKey: string) => {
+    setTplVariableMappings(prev => {
+      return prev.map(item => {
+        if (item.index !== varIndex) return item;
+        const currentFields = item.selectedFields || [];
+        const isSelected = currentFields.includes(fieldKey);
+        const newFields = isSelected
+          ? currentFields.filter(f => f !== fieldKey)
+          : [...currentFields, fieldKey];
+        return { ...item, selectedFields: newFields, fieldKey: newFields.join(',') };
+      });
+    });
+  };
+
+  // Live sample preview calculation with auto-spacing
+  const liveSamplePreview = useMemo(() => {
+    if (!tplContent) return { text: '', charCount: 0, smsCount: 0 };
+    let preview = tplContent;
+    detectedVariables.forEach(v => {
+      const mapping = tplVariableMappings.find(m => m.index === v.index);
+      const selFields = mapping?.selectedFields || [];
+      const parts: string[] = [];
+      selFields.forEach(fKey => {
+        const pill = AVAILABLE_FIELD_PILLS.find(p => p.key === fKey);
+        if (pill) parts.push(pill.sample);
+      });
+      const combinedVal = parts.join(' ');
+      preview = preview.replace(v.placeholder, combinedVal);
+    });
+    const len = preview.length;
+    const parts = len === 0 ? 0 : len <= 160 ? 1 : Math.ceil(len / 153);
+    return { text: preview, charCount: len, smsCount: parts };
+  }, [tplContent, detectedVariables, tplVariableMappings]);
 
   // Claimed combinations map (from other active templates) for collision prevention
   const claimedCombinationsMap = useMemo(() => {
@@ -206,6 +312,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
     setTplContent('');
     setTplDescription('');
     setTplIsActive(true);
+    setTplVariableMappings([]);
     setTemplateModalOpen(true);
   };
 
@@ -221,6 +328,15 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
     setTplContent(tpl.content);
     setTplDescription(tpl.description || '');
     setTplIsActive(tpl.isActive);
+    const normalizedMappings: VariableMappingItem[] = (tpl.variableMappings || []).map((m: any, idx: number) => ({
+      index: typeof m.index === 'number' ? m.index : idx,
+      placeholder: m.placeholder || '',
+      selectedFields: Array.isArray(m.selectedFields) && m.selectedFields.length > 0
+        ? m.selectedFields
+        : (m.fieldKey ? m.fieldKey.split(',').map((s: string) => s.trim()).filter(Boolean) : []),
+      customLabel: m.customLabel || ''
+    }));
+    setTplVariableMappings(normalizedMappings);
     setTemplateModalOpen(true);
   };
 
@@ -283,6 +399,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
         applicableSegments,
         applicableActions,
         applicableCombinations: tplCategory === 'TRADE_SIGNAL' ? tplSelectedCombos : [],
+        variableMappings: tplVariableMappings,
         content: tplContent.trim(),
         description: tplDescription.trim(),
         isActive: tplIsActive
@@ -1256,6 +1373,141 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                   )}
                 </p>
               </div>
+
+              {/* DYNAMIC MULTI-FIELD VARIABLE MAPPING (Like Buy/Sell Grid) */}
+              {tplCategory === 'TRADE_SIGNAL' && detectedVariables.length > 0 && (
+                <div className="bg-slate-50 dark:bg-slate-900/70 rounded-xl p-4 border border-slate-200 dark:border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                        Multi-Field Variable Mapping ({detectedVariables.length} Variable{detectedVariables.length > 1 ? 's' : ''} Detected)
+                      </h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        Har variable ke liye trade fields select karein (jaise Buy/Sell buttons). Selected fields auto-space ke sath join hongi.
+                      </p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                      Multi-Select Buttons
+                    </span>
+                  </div>
+
+                  <div className="space-y-3.5">
+                    {detectedVariables.map((dVar, idx) => {
+                      const currentMapping = tplVariableMappings.find(m => m.index === idx);
+                      const selectedFields = currentMapping?.selectedFields || [];
+
+                      // Calculate sample preview length for this variable
+                      const sampleParts: string[] = [];
+                      selectedFields.forEach(fKey => {
+                        const pill = AVAILABLE_FIELD_PILLS.find(p => p.key === fKey);
+                        if (pill) sampleParts.push(pill.sample);
+                      });
+                      const combinedSample = sampleParts.join(' ');
+                      const varLength = combinedSample.length;
+
+                      return (
+                        <div
+                          key={idx}
+                          className="bg-white dark:bg-slate-800/90 rounded-xl p-3 border border-slate-200 dark:border-slate-700 shadow-sm space-y-2.5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-700/60">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-1 rounded-md text-[11px] font-mono font-bold bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700">
+                                Variable #{idx + 1}: <span className="text-emerald-600 dark:text-emerald-400">{dVar.placeholder}</span>
+                              </span>
+                              <span className="text-[11px] text-slate-500">
+                                Selected: <strong className="text-slate-800 dark:text-slate-200">{selectedFields.length} field{selectedFields.length !== 1 ? 's' : ''}</strong>
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <div
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${
+                                  varLength > 30
+                                    ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 border-amber-300 dark:border-amber-700'
+                                    : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 border-emerald-300 dark:border-emerald-700'
+                                }`}
+                              >
+                                {varLength}/30 chars {varLength > 30 ? '⚠️ High' : '✓ Safe'}
+                              </div>
+
+                              {selectedFields.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTplVariableMappings(prev =>
+                                      prev.map(p => (p.index === idx ? { ...p, selectedFields: [], fieldKey: '' } : p))
+                                    );
+                                  }}
+                                  className="text-[10px] font-semibold text-rose-500 hover:text-rose-700 underline"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Multi-Select Field Pills (Similar to Buy/Sell Grid) */}
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            {AVAILABLE_FIELD_PILLS.map(pill => {
+                              const isSelected = selectedFields.includes(pill.key);
+                              return (
+                                <button
+                                  key={pill.key}
+                                  type="button"
+                                  onClick={() => toggleFieldForVariable(idx, pill.key)}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
+                                    isSelected
+                                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-sm'
+                                      : 'bg-slate-50 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-500 hover:text-emerald-600'
+                                  }`}
+                                >
+                                  {isSelected ? (
+                                    <Check className="h-3 w-3 stroke-[2.5]" />
+                                  ) : (
+                                    <Plus className="h-3 w-3 opacity-60" />
+                                  )}
+                                  <span>{pill.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Live preview for this specific variable */}
+                          <div className="flex items-center gap-2 pt-1 text-[11px] font-mono text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/50 px-2.5 py-1.5 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                            <span className="text-[10px] uppercase font-bold text-slate-400">Var #{idx + 1} Preview:</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold truncate">
+                              {combinedSample || '(No field selected)'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* LIVE SMS MESSAGE PREVIEW BOX */}
+                  <div className="bg-slate-900 text-slate-100 rounded-xl p-3 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span className="font-semibold text-slate-300">📱 Live SMS Final Preview</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400">
+                          Total Chars: <span className="font-bold text-white">{liveSamplePreview.charCount}</span>
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-primary-400 border border-slate-700">
+                          {liveSamplePreview.smsCount} SMS Credit{liveSamplePreview.smsCount > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-black/40 text-xs font-mono text-emerald-400 whitespace-pre-wrap break-words leading-relaxed border border-slate-800/80">
+                      {liveSamplePreview.text || 'Type template content to preview...'}
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      * Multiple selected fields ke beech auto-space add ho jayega. Form me bhare gaye inputs yahan live replace honge.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">

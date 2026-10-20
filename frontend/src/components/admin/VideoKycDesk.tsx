@@ -7,7 +7,8 @@ import {
   Save, 
   Send, 
   CheckCircle, 
-  XCircle, 
+  XCircle,
+  Lock, 
   Clock, 
   Eye, 
   Search, 
@@ -48,7 +49,7 @@ interface VideoKycSessionItem {
     mobile?: string;
     pan?: string;
   };
-  status: 'REQUESTED' | 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'APPROVED' | 'REJECTED';
+  status: 'REQUESTED' | 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
   scheduleType?: 'INSTANT' | 'SCHEDULED';
   scheduledAt?: string;
   initiatedBy: 'ADMIN' | 'CLIENT';
@@ -616,17 +617,33 @@ export default function VideoKycDesk() {
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5">
                               <span className="font-mono text-slate-300 font-medium">{session.sessionId}</span>
-                              <button
-                                type="button"
-                                onClick={() => copyToClipboard(getClientInviteUrl(session), 'LINK')}
-                                className="text-slate-500 hover:text-blue-400 p-1 rounded transition"
-                                title="Copy Client Link"
-                              >
-                                <Copy className="w-3.5 h-3.5" />
-                              </button>
+                              {['APPROVED', 'REJECTED', 'EXPIRED', 'COMPLETED'].includes(session.status) ? (
+                                <span className="text-slate-600 p-1" title="Link Inactive (Session Concluded)">
+                                  <Lock className="w-3.5 h-3.5" />
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(getClientInviteUrl(session), 'LINK')}
+                                  className="text-slate-500 hover:text-blue-400 p-1 rounded transition"
+                                  title="Copy Client Link"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
-                            <div className="text-[10px] text-emerald-400 font-mono font-bold tracking-wider">
-                              OTP: {session.otpCode}
+                            <div className="text-[10px] font-mono font-bold tracking-wider">
+                              {session.status === 'APPROVED' ? (
+                                <span className="text-emerald-500">Approved</span>
+                              ) : session.status === 'REJECTED' ? (
+                                <span className="text-rose-500">Rejected</span>
+                              ) : session.status === 'EXPIRED' ? (
+                                <span className="text-amber-500">Expired</span>
+                              ) : session.status === 'COMPLETED' ? (
+                                <span className="text-blue-400">Completed</span>
+                              ) : (
+                                <span className="text-emerald-400">OTP: {session.otpCode}</span>
+                              )}
                             </div>
                           </td>
                           <td className="py-3 px-4">
@@ -662,6 +679,7 @@ export default function VideoKycDesk() {
                               <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
                                 session.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                                 session.status === 'REJECTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                session.status === 'EXPIRED' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
                                 session.status === 'COMPLETED' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                                 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                               }`}>
@@ -1806,81 +1824,141 @@ export default function VideoKycDesk() {
                 </div>
               </div>
 
-              {/* Session OTP Security Box */}
-              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" /> Session Security OTP
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Required by client on 2FA screen to enter room
+              {/* Status Specific Action View */}
+              {viewDetailsSession.status === 'APPROVED' ? (
+                <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-4 text-center space-y-2">
+                  <CheckCircle className="w-7 h-7 text-emerald-400 mx-auto" />
+                  <div className="text-sm font-bold text-emerald-300">Video KYC Session Approved & Completed</div>
+                  <p className="text-xs text-slate-400">
+                    This verification session has been approved by compliance. The join link and OTP have been permanently deactivated to prevent unauthorized re-use.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl font-mono font-black text-emerald-300 tracking-widest px-3 py-1 bg-slate-950 border border-emerald-500/30 rounded-lg">
-                    {viewDetailsSession.otpCode}
-                  </span>
+              ) : viewDetailsSession.status === 'REJECTED' ? (
+                <div className="bg-rose-950/40 border border-rose-500/30 rounded-xl p-4 text-center space-y-2.5">
+                  <AlertTriangle className="w-7 h-7 text-rose-400 mx-auto" />
+                  <div className="text-sm font-bold text-rose-300">Video KYC Session Rejected</div>
+                  <p className="text-xs text-slate-300">
+                    Reason: <span className="font-semibold text-rose-200">{viewDetailsSession.rejectionReason || 'Verification requirements not met.'}</span>
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Re-joining with this link is strictly disabled. Please generate a new verification session for this client.
+                  </p>
                   <button
                     type="button"
-                    onClick={() => copyToClipboard(viewDetailsSession.otpCode, 'OTP')}
-                    className="p-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded-lg border border-emerald-500/30 transition text-xs font-bold flex items-center gap-1"
-                    title="Copy OTP"
+                    onClick={() => {
+                      const cId = String(viewDetailsSession.clientId?._id || (viewDetailsSession.clientId as any) || '');
+                      setViewDetailsSession(null);
+                      if (cId) {
+                        setSelectedClientForInvite(cId);
+                      }
+                      setInviteModalOpen(true);
+                    }}
+                    className="mt-2 py-2 px-4 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 mx-auto shadow-lg shadow-rose-950/50"
                   >
-                    {copiedOtp ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                    {copiedOtp ? 'Copied' : 'Copy'}
+                    <RefreshCw className="w-3.5 h-3.5" /> Create New Video KYC Link
                   </button>
                 </div>
-              </div>
+              ) : (viewDetailsSession.status as any) === 'EXPIRED' ? (
+                <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-4 text-center space-y-2.5">
+                  <Clock className="w-7 h-7 text-amber-400 mx-auto" />
+                  <div className="text-sm font-bold text-amber-300">Link Expired (24 Hours Exceeded)</div>
+                  <p className="text-xs text-slate-400">
+                    This Video KYC invitation link has expired because 24 hours elapsed. Clients can no longer join using this link.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cId = String(viewDetailsSession.clientId?._id || (viewDetailsSession.clientId as any) || '');
+                      setViewDetailsSession(null);
+                      if (cId) {
+                        setSelectedClientForInvite(cId);
+                      }
+                      setInviteModalOpen(true);
+                    }}
+                    className="mt-2 py-2 px-4 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 mx-auto shadow-lg shadow-amber-950/50"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Generate Fresh Video KYC Link
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Session OTP Security Box */}
+                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" /> Session Security OTP
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Required by client on 2FA screen to enter room
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-mono font-black text-emerald-300 tracking-widest px-3 py-1 bg-slate-950 border border-emerald-500/30 rounded-lg">
+                        {viewDetailsSession.otpCode}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(viewDetailsSession.otpCode, 'OTP')}
+                        className="p-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded-lg border border-emerald-500/30 transition text-xs font-bold flex items-center gap-1"
+                        title="Copy OTP"
+                      >
+                        {copiedOtp ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        {copiedOtp ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
 
-              {/* Client Verification Link (One-Click Copy & WhatsApp Share) */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <ExternalLink className="w-3.5 h-3.5 text-blue-400" /> Client Join Link
-                  </span>
-                  {copiedLink && (
-                    <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Link Copied to Clipboard!
-                    </span>
-                  )}
-                </div>
+                  {/* Client Verification Link (One-Click Copy & WhatsApp Share) */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                        <ExternalLink className="w-3.5 h-3.5 text-blue-400" /> Client Join Link
+                      </span>
+                      {copiedLink && (
+                        <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Link Copied to Clipboard!
+                        </span>
+                      )}
+                    </div>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={getClientInviteUrl(viewDetailsSession)}
-                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-blue-300 select-all focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(getClientInviteUrl(viewDetailsSession), 'LINK')}
-                    className="py-2 px-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    {copiedLink ? 'Copied' : 'Copy Link'}
-                  </button>
-                </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={getClientInviteUrl(viewDetailsSession)}
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-blue-300 select-all focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(getClientInviteUrl(viewDetailsSession), 'LINK')}
+                        className="py-2 px-3.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        {copiedLink ? 'Copied' : 'Copy Link'}
+                      </button>
+                    </div>
 
-                {/* WhatsApp & Text Sharing Buttons */}
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => openWhatsAppShare(viewDetailsSession)}
-                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-md shadow-emerald-950/50"
-                  >
-                    <MessageSquare className="w-4 h-4" /> Share via WhatsApp
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(getWhatsAppShareText(viewDetailsSession), 'WA')}
-                    className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition"
-                  >
-                    <Share2 className="w-4 h-4 text-cyan-400" />
-                    {copiedWaMsg ? 'Message Copied!' : 'Copy WA Message'}
-                  </button>
-                </div>
-              </div>
+                    {/* WhatsApp & Text Sharing Buttons */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => openWhatsAppShare(viewDetailsSession)}
+                        className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-md shadow-emerald-950/50"
+                      >
+                        <MessageSquare className="w-4 h-4" /> Share via WhatsApp
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(getWhatsAppShareText(viewDetailsSession), 'WA')}
+                        className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition"
+                      >
+                        <Share2 className="w-4 h-4 text-cyan-400" />
+                        {copiedWaMsg ? 'Message Copied!' : 'Copy WA Message'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Session Consent Preview */}
               {viewDetailsSession.consentText && (

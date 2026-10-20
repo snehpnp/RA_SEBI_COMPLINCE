@@ -7,9 +7,10 @@ export interface IVideoKycSession extends Document {
   tenantId: Types.ObjectId;
   clientId: Types.ObjectId;
   sessionId: string;
-  status: 'REQUESTED' | 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'APPROVED' | 'REJECTED';
+  status: 'REQUESTED' | 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
   scheduleType?: 'INSTANT' | 'SCHEDULED';
   scheduledAt?: Date | null;
+  expiresAt?: Date | null;
   initiatedBy: 'ADMIN' | 'CLIENT';
   consentText: string;
   otpCode: string;
@@ -47,7 +48,7 @@ export const VideoKycSessionSchema = new Schema<IVideoKycSession>(
     sessionId: { type: String, required: true, unique: true, index: true },
     status: {
       type: String,
-      enum: ['REQUESTED', 'SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'APPROVED', 'REJECTED'],
+      enum: ['REQUESTED', 'SCHEDULED', 'IN_PROGRESS', 'COMPLETED', 'APPROVED', 'REJECTED', 'EXPIRED'],
       default: 'REQUESTED',
       index: true
     },
@@ -57,6 +58,7 @@ export const VideoKycSessionSchema = new Schema<IVideoKycSession>(
       default: 'INSTANT'
     },
     scheduledAt: { type: Date, default: null },
+    expiresAt: { type: Date, default: null, index: true },
     initiatedBy: {
       type: String,
       enum: ['ADMIN', 'CLIENT'],

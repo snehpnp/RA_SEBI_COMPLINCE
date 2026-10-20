@@ -1,3 +1,4 @@
+import dynamicDb from '../config/db';
 import { Server as HttpServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 
@@ -45,6 +46,22 @@ export function initVideoKycSocket(httpServer: HttpServer) {
       }
 
       const room = activeRooms.get(sessionId)!;
+
+      // Check if session is already concluded or expired
+      try {
+        dynamicDb.VideoKycSession.findOne({ sessionId }).then((s: any) => {
+          if (s && ['APPROVED', 'REJECTED', 'COMPLETED', 'EXPIRED'].includes(s.status)) {
+            socket.emit('session-already-concluded', {
+              status: s.status,
+              message: s.status === 'EXPIRED'
+                ? 'This Video KYC link has expired (24 hours exceeded).'
+                : `This Video KYC session has already been ${s.status.toLowerCase()} and cannot be rejoined.`
+            });
+            socket.leave(sessionId);
+            room.delete(socket.id);
+          }
+        }).catch(() => {});
+      } catch {}
 
       // Reject duplicate connections for the same role (one Client, one Admin only)
       const existingParticipantWithRole = Array.from(room.values()).find(p => p.role === role && p.socketId !== socket.id);
