@@ -173,6 +173,16 @@ export async function sendSms(options: SmsSendOptions): Promise<SmsSendResult> {
         }).lean();
       }
 
+      // A2. If DLT template ID is specified, lookup by dltTemplateId directly
+      if (!template && finalDltTempId) {
+        template = await dynamicDb.SmsTemplate.findOne({
+          $and: [
+            { $or: tenantFilter },
+            { dltTemplateId: finalDltTempId.trim() }
+          ]
+        }).lean();
+      }
+
       // B. Fallback to templateType / category lookup if not resolved
       if (!template && templateType) {
         template = await dynamicDb.SmsTemplate.findOne({

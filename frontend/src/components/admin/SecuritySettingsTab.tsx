@@ -91,6 +91,30 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   const [testMobile, setTestMobile] = useState('');
   const [testMessage, setTestMessage] = useState('');
   const [testDltId, setTestDltId] = useState('');
+  const [selectedTestTemplateId, setSelectedTestTemplateId] = useState('');
+
+  const openTestModalForTemplate = (tpl?: SmsTemplateItem) => {
+    setTestResult(null);
+    if (tpl) {
+      setSelectedTestTemplateId(tpl.id || tpl._id || '');
+      setTestDltId(tpl.dltTemplateId || '');
+      let sample = tpl.content || '';
+      if (tpl.category === 'TRADE_SIGNAL') {
+        let vIdx = 0;
+        const sampleVals = ['BUY RELIANCE 120', '150/160', '110'];
+        sample = sample.replace(/\{#(alp|var|num|val|[a-z0-9_]+)#\}/gi, () => sampleVals[vIdx++] || '100');
+        setTestMessage(sample);
+      } else {
+        sample = sample.replace(/\{#(var|alp|num|val|[a-z0-9_]+)#\}/gi, '123456');
+        setTestMessage(sample);
+      }
+    } else {
+      setSelectedTestTemplateId('');
+      setTestDltId('');
+      setTestMessage('');
+    }
+    setShowTestModal(true);
+  };
   const [testingSms, setTestingSms] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string; details?: any } | null>(null);
 
@@ -483,6 +507,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       const res: any = await api.testSmsGateway({
         mobile: cleanMobile.slice(-10),
         destMobile: cleanMobile.slice(-10),
+        templateId: selectedTestTemplateId || undefined,
         message: testMessage.trim() || undefined,
         dltTemplateId: testDltId.trim() || undefined,
         username: smsUsername.trim() || undefined,
@@ -1118,6 +1143,14 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                       <td className="py-3.5 px-4 text-right space-x-1 whitespace-nowrap">
                         <button
                           type="button"
+                          onClick={() => openTestModalForTemplate(tpl)}
+                          className="p-1.5 text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                          title="Send Test SMS with this template"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => openEditTemplateModal(tpl)}
                           className="p-1.5 text-slate-500 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                           title="Edit Template"
@@ -1577,6 +1610,43 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
             </div>
 
             <form onSubmit={handleTestSms} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Select Template to Test
+                </label>
+                <select
+                  value={selectedTestTemplateId}
+                  onChange={e => {
+                    const selId = e.target.value;
+                    setSelectedTestTemplateId(selId);
+                    const found = templates.find(t => (t.id || t._id) === selId);
+                    if (found) {
+                      setTestDltId(found.dltTemplateId || '');
+                      let sample = found.content || '';
+                      if (found.category === 'TRADE_SIGNAL') {
+                        let vIdx = 0;
+                        const sampleVals = ['BUY RELIANCE 120', '150/160', '110'];
+                        sample = sample.replace(/\{#(alp|var|num|val|[a-z0-9_]+)#\}/gi, () => sampleVals[vIdx++] || '100');
+                      } else {
+                        sample = sample.replace(/\{#(var|alp|num|val|[a-z0-9_]+)#\}/gi, '123456');
+                      }
+                      setTestMessage(sample);
+                    } else {
+                      setTestDltId('');
+                      setTestMessage('');
+                    }
+                  }}
+                  className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-800 dark:text-white focus:outline-none focus:border-primary-500"
+                >
+                  <option value="">-- Choose an Approved Template to Test --</option>
+                  {templates.map(t => (
+                    <option key={t.id || t._id} value={t.id || t._id}>
+                      {t.name} ({t.category} - DLT ID: {t.dltTemplateId})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Destination Mobile Number *

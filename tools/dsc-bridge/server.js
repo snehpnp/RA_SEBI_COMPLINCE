@@ -235,6 +235,7 @@ app.post('/sign-pdf', async (req, res) => {
 app.listen(PORT, HOST, () => {
   console.log(`\n======================================================`);
   console.log(`  SEBI Research Analyst Hardware DSC Bridge Service`);
+  console.log("Anuj here ");
   console.log(`  Listening on: http://${HOST}:${PORT}`);
   console.log(`  Ready to sign research reports with USB DSC tokens`);
   console.log(`======================================================\n`);

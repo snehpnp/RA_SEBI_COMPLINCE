@@ -1579,6 +1579,7 @@ class ApiClient {
   async testSmsGateway(data: {
     mobile?: string;
     destMobile?: string;
+    templateId?: string;
     message?: string;
     dltTemplateId?: string;
     username?: string;

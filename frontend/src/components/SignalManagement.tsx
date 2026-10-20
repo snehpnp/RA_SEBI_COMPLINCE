@@ -46,7 +46,7 @@ const tableCustomStyles = {
     },
   },
 };
-import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send } from 'lucide-react';
+import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send, Users } from 'lucide-react';
 import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
@@ -353,7 +353,22 @@ export default function SignalManagement({
         setLocalPlans(res.data);
       }
     }).catch(() => { });
+    api.getSmsTemplates().then(res => {
+      if (res && res.success && Array.isArray(res.data)) {
+        setSmsTemplates(res.data);
+      }
+    }).catch(() => { });
   }, []);
+
+  useEffect(() => {
+    if (view === 'ADD') {
+      api.getSmsTemplates().then(res => {
+        if (res && res.success && Array.isArray(res.data)) {
+          setSmsTemplates(res.data);
+        }
+      }).catch(() => { });
+    }
+  }, [view]);
 
   useEffect(() => {
     if (stockSearchQuery.length >= 2 || view === 'ADD') {
@@ -531,6 +546,9 @@ export default function SignalManagement({
     formData.append('stoploss', stoploss);
     formData.append('description', description);
     if (reportFile) formData.append('report', reportFile);
+    if (resolvedSmsData && Array.isArray(resolvedSmsData.resolvedVars) && resolvedSmsData.resolvedVars.length > 0) {
+      formData.append('smsOrderedVariables', JSON.stringify(resolvedSmsData.resolvedVars.map(v => v.value)));
+    }
 
     try {
       const res = await api.createSignal(formData);
@@ -1228,6 +1246,82 @@ export default function SignalManagement({
                 {errors.description && <p className="text-red-600 dark:text-red-500 text-xs mt-1">{errors.description}</p>}
               </div>
 
+              {/* DLT SMS NOTIFICATION LIVE PREVIEW */}
+              <div className="mb-8 p-4 rounded-xl border border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-slate-900/40 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-white/5 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                      <Send className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                        DLT SMS Notification Preview
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Auto-matched based on Segment ({segment || 'None'}) &amp; Call Type ({callType || 'None'})
+                      </p>
+                    </div>
+                  </div>
+                  {matchedSmsTemplate ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Matched Template: {matchedSmsTemplate.name}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      ⚠️ No Active SMS Template
+                    </span>
+                  )}
+                </div>
+
+                {matchedSmsTemplate && resolvedSmsData ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-white dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                        <span>DLT Template ID: <strong className="text-slate-800 dark:text-slate-200">{matchedSmsTemplate.dltTemplateId}</strong></span>
+                        <span>
+                          Length: <strong className={resolvedSmsData.charCount > 160 ? 'text-amber-600' : 'text-emerald-600'}>{resolvedSmsData.charCount} chars</strong> ({resolvedSmsData.smsCredits} SMS credit{resolvedSmsData.smsCredits > 1 ? 's' : ''})
+                        </span>
+                      </div>
+                      <p className="text-xs font-mono text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-white/5 leading-relaxed break-words">
+                        {resolvedSmsData.previewText}
+                      </p>
+                    </div>
+
+                    {resolvedSmsData.resolvedVars.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                        {resolvedSmsData.resolvedVars.map((v, i) => (
+                          <div key={i} className={`p-2 rounded-lg border ${v.isOverLimit ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/40' : 'bg-white dark:bg-slate-950/40 border-slate-200 dark:border-slate-800'}`}>
+                            <div className="flex justify-between items-center text-[10px] text-slate-500 mb-0.5">
+                              <span className="font-mono">{v.placeholder}</span>
+                              <span className={v.isOverLimit ? 'text-rose-600 font-bold' : ''}>{v.value.length}/30 chars</span>
+                            </div>
+                            <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={v.value || '(Empty)'}>
+                              {v.value || <span className="text-slate-400 italic">Auto-filling...</span>}
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate mt-0.5">{v.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span>
+                        Target Audience: Automatically dispatched only to clients holding an <strong>ACTIVE subscription</strong> to the selected plan(s).
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                    <p className="font-bold">Notice: No SMS will be sent to clients for this trade</p>
+                    <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-relaxed">
+                      There is no active DLT SMS template assigned for <strong>{segment || 'Selected Segment'} + {callType || 'Call Type'}</strong>. Clients will still receive this signal on their Web/Mobile portal dashboard, but no telecom SMS will be dispatched. You can configure a template in <strong>Settings &rarr; DLT SMS Templates</strong>.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Buttons */}
               <div className="flex justify-end space-x-4">
                 <button type="button" onClick={() => setView('TABLE')} className="px-8 py-2 bg-[#d4f23b] text-black font-bold rounded hover:bg-[#c3e031]">
@@ -1259,6 +1353,28 @@ export default function SignalManagement({
 
               {/* Modal Body */}
               <div className="p-6 space-y-6 text-sm text-slate-700 dark:text-slate-300">
+                {/* SMS Broadcast Summary */}
+                <div className="p-3.5 bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/40 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
+                    <span className="flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5 text-blue-600" />
+                      SMS Notification Preview
+                    </span>
+                    <span className="text-[11px] font-mono font-normal">
+                      {matchedSmsTemplate ? `Template: ${matchedSmsTemplate.name}` : 'No SMS Template'}
+                    </span>
+                  </div>
+                  {matchedSmsTemplate && resolvedSmsData ? (
+                    <p className="text-xs font-mono text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-2 rounded border border-blue-100 dark:border-blue-900/40">
+                      {resolvedSmsData.previewText}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      No active DLT SMS template configured for this trade. Dispatched to Web Portal only.
+                    </p>
+                  )}
+                </div>
+
                 <div className="bg-white/50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-3">
                   <p className="text-xs uppercase font-bold text-slate-500 tracking-wider">Terms & Conditions</p>
                   <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">

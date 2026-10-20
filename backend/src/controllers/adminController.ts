@@ -5133,20 +5133,72 @@ export const deleteSmsTemplate = async (req: AuthenticatedRequest, res: Response
 export const testSmsGateway = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const tenantId = req.user?.tenantId;
-    const { mobile, destMobile, message, dltTemplateId, username, password, senderId, entityId } = req.body;
+    const {
+      mobile,
+      destMobile,
+      message,
+      dltTemplateId,
+      templateId,
+      templateType,
+      username,
+      password,
+      senderId,
+      entityId,
+      variables,
+      orderedVariables
+    } = req.body;
     const targetMobile = (mobile || destMobile || req.body.dest_mobileno || '').toString().trim();
 
     if (!targetMobile) {
       return res.status(400).json({ success: false, message: 'Mobile number is required for testing' });
     }
 
+    let targetTemplate: any = null;
+    if (templateId) {
+      targetTemplate = await dynamicDb.SmsTemplate.findById(templateId).lean();
+    } else if (dltTemplateId) {
+      targetTemplate = await dynamicDb.SmsTemplate.findOne({ dltTemplateId: dltTemplateId.trim() }).lean();
+    }
+
+    const resolvedDltId = targetTemplate?.dltTemplateId || (dltTemplateId ? dltTemplateId.trim() : undefined);
+    const resolvedType = targetTemplate?.category || targetTemplate?.type || templateType || (resolvedDltId ? undefined : 'LOGIN_2FA');
+    const resolvedMessage = message ? message.trim() : (targetTemplate?.message || undefined);
+
+    const testVars = {
+      otp: '123456',
+      var: '123456',
+      num: '110',
+      alp: 'BUY RELIANCE 120',
+      code: '123456',
+      stock: 'RELIANCE',
+      symbol: 'RELIANCE',
+      action: 'BUY',
+      callType: 'BUY',
+      segment: 'CASH',
+      entryPrice: '120',
+      price: '120',
+      targets: '150/160',
+      target: '150',
+      target1: '150',
+      target2: '160',
+      stoploss: '110',
+      sl: '110',
+      duration: 'INTRADAY',
+      ...(variables || {})
+    };
+
+    const testOrderedVars = Array.isArray(orderedVariables) && orderedVariables.length > 0
+      ? orderedVariables
+      : (targetTemplate?.category === 'TRADE_SIGNAL' ? ['BUY RELIANCE 120', '150/160', '110'] : undefined);
+
     const result = await sendSms({
       tenantId,
       mobile: targetMobile,
-      templateType: 'LOGIN_2FA',
-      variables: { otp: '123456', var: '123456', num: '123456', alp: '123456', code: '123456' },
-      customMessage: message,
-      dltTemplateId,
+      templateType: resolvedType,
+      variables: testVars,
+      orderedVariables: testOrderedVars,
+      customMessage: resolvedMessage,
+      dltTemplateId: resolvedDltId,
       overrideCredentials: (username && senderId) ? {
         username,
         password,
