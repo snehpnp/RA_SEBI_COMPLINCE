@@ -1332,7 +1332,7 @@ class ApiClient {
   async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 3500) {
     const isLive = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
     
-    // Candidate URLs: on live site, probe local bridge (127.0.0.1:1620) first where USB token is inserted
+    // Candidate URLs: priority is local hardware USB bridge (127.0.0.1:1620 / localhost:1620)
     const candidateUrls: string[] = [];
     if (customBridgeUrl) {
       candidateUrls.push(customBridgeUrl);
@@ -1341,16 +1341,16 @@ class ApiClient {
       if (saved && saved.trim()) {
         candidateUrls.push(saved.trim());
       }
-      if (isLive) {
+      // Always test local hardware bridge (127.0.0.1:1620) where physical USB token is inserted
+      if (!candidateUrls.includes('http://127.0.0.1:1620')) {
         candidateUrls.push('http://127.0.0.1:1620');
+      }
+      if (!candidateUrls.includes('http://localhost:1620')) {
         candidateUrls.push('http://localhost:1620');
       }
       const defaultUrl = getDscBridgeUrl();
       if (!candidateUrls.includes(defaultUrl)) {
         candidateUrls.push(defaultUrl);
-      }
-      if (!isLive && !candidateUrls.includes('http://127.0.0.1:1620')) {
-        candidateUrls.push('http://127.0.0.1:1620');
       }
     }
 
@@ -1360,7 +1360,9 @@ class ApiClient {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (tenantId) headers['x-tenant-id'] = tenantId;
 
+    let lastOkData: any = null;
     let lastError: any = null;
+
     for (const bridgeUrl of candidateUrls) {
       const controller = new AbortController();
       const perUrlTimeout = candidateUrls.length > 1 ? Math.min(timeoutMs, 1800) : timeoutMs;
@@ -1375,15 +1377,27 @@ class ApiClient {
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          if (data && (data.detected || data.success)) {
+          // If this bridge actually detected a physical hardware token, return it immediately!
+          if (data && data.detected && (data.detectedSignerName || (Array.isArray(data.certificates) && data.certificates.length > 0))) {
             data.bridgeUrlUsed = bridgeUrl;
             return data;
+          }
+          // Otherwise store as fallback
+          if (data && (data.success || data.detected)) {
+            data.bridgeUrlUsed = bridgeUrl;
+            if (!lastOkData) {
+              lastOkData = data;
+            }
           }
         }
       } catch (err: any) {
         clearTimeout(timeoutId);
         lastError = err;
       }
+    }
+
+    if (lastOkData) {
+      return lastOkData;
     }
 
     throw lastError || new Error('Could not connect to any DSC hardware bridge');

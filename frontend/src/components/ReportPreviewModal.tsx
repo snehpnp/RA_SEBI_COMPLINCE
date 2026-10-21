@@ -627,7 +627,7 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
     setCheckingDscBridge(true);
     const activeUrl = customUrl || dscBridgeUrl || getDscBridgeUrl();
     try {
-      const data = await api.checkDscBridgeStatus(activeUrl, 3000);
+      const data = await api.checkDscBridgeStatus(customUrl, 3000);
       if (data?.bridgeUrlUsed) { setDscBridgeUrlState(data.bridgeUrlUsed); }
       setDscBridgeConnected(true);
       setDscPin('');
