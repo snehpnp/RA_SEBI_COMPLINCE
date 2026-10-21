@@ -1584,7 +1584,16 @@ export const getAdminClients = async (req: AuthenticatedRequest, res: Response) 
           id: String(uObj._id || uObj.id),
           role: uObj.roleId
         } : null,
-        profile: profileMap.get(cIdStr) || profileMap.get(uIdStr) || null,
+        profile: (() => {
+          const rawP = profileMap.get(cIdStr) || profileMap.get(uIdStr) || {};
+          return {
+            ...rawP,
+            addressLine1: rawP.addressLine1 || c.addressLine1 || c.address || null,
+            city: rawP.city || c.city || null,
+            state: rawP.state || c.state || null,
+            zipCode: rawP.zipCode || c.zipCode || null
+          };
+        })(),
         subscriptions: clientSubs,
         agreements: agMap.get(cIdStr) || agMap.get(uIdStr) || [],
         documents: docMap.get(cIdStr) || docMap.get(uIdStr) || [],
@@ -1742,7 +1751,16 @@ export const getAdminDeletedClients = async (req: AuthenticatedRequest, res: Res
           deletedAt: user.deletedAt,
           deletedBy: user.deletedBy
         } : null,
-        profile: profileMap.get(cIdStr) || profileMap.get(uIdStr) || null,
+        profile: (() => {
+          const rawP = profileMap.get(cIdStr) || profileMap.get(uIdStr) || {};
+          return {
+            ...rawP,
+            addressLine1: rawP.addressLine1 || c.addressLine1 || c.address || null,
+            city: rawP.city || c.city || null,
+            state: rawP.state || c.state || null,
+            zipCode: rawP.zipCode || c.zipCode || null
+          };
+        })(),
         subscriptions: subMap.get(cIdStr) || subMap.get(uIdStr) || [],
         agreements: agMap.get(cIdStr) || agMap.get(uIdStr) || [],
         documents: docMap.get(cIdStr) || docMap.get(uIdStr) || []
@@ -1976,12 +1994,14 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       }
     }
 
-    // Validate Aadhaar if provided
-    if (aadhaar !== undefined && finalAadhaar && finalAadhaar !== 'N/A') {
-      if (!/^[0-9]{12}$/.test(finalAadhaar)) {
+    // Validate Aadhaar if provided (skip check if masked with X or dashes)
+    const isMaskedAadhaar = finalAadhaar ? /x/i.test(String(finalAadhaar).replace(/[\s-]/g, '')) : false;
+    if (aadhaar !== undefined && finalAadhaar && finalAadhaar !== 'N/A' && !isMaskedAadhaar) {
+      const cleanAadhaar = String(finalAadhaar).replace(/[\s-]/g, '');
+      if (!/^[0-9]{12}$/.test(cleanAadhaar)) {
         return res.status(400).json({ success: false, message: 'Please enter a valid 12-digit Aadhaar number.' });
       }
-      const existingAadhaar = await dynamicDb.Client.findOne({ aadhaar: finalAadhaar, _id: { $ne: actualClientId } }).lean();
+      const existingAadhaar = await dynamicDb.Client.findOne({ aadhaar: cleanAadhaar, _id: { $ne: actualClientId } }).lean();
       if (existingAadhaar) {
         return res.status(400).json({ success: false, message: 'Aadhaar number already in use by another client.' });
       }
@@ -2028,12 +2048,32 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       });
     }
 
+    let finalState = state;
+    if (finalState) {
+      const trimmedState = String(finalState).trim();
+      const numCode = trimmedState.replace(/^0+/, '');
+      const stateDoc = await dynamicDb.State.findOne({
+        $or: [
+          { name: { $regex: new RegExp(`^${trimmedState}$`, 'i') } },
+          { gstCode: numCode },
+          { gstCode: trimmedState }
+        ]
+      }).lean();
+      if (stateDoc) {
+        finalState = stateDoc.name;
+      }
+    }
+
     const clientUpdate: any = {};
     if (name !== undefined) clientUpdate.name = name.trim();
     if (email !== undefined && finalEmail) clientUpdate.email = finalEmail;
     if (mobile !== undefined && finalMobile) clientUpdate.mobile = finalMobile;
     if (pan !== undefined) clientUpdate.pan = finalPan;
-    if (aadhaar !== undefined) clientUpdate.aadhaar = finalAadhaar;
+    if (aadhaar !== undefined) clientUpdate.aadhaar = isMaskedAadhaar ? (client?.aadhaar || aadhaar) : finalAadhaar;
+    if (addressLine1 !== undefined) clientUpdate.address = addressLine1;
+    if (city !== undefined) clientUpdate.city = city;
+    if (finalState !== undefined) clientUpdate.state = finalState;
+    if (zipCode !== undefined) clientUpdate.zipCode = zipCode;
     if (category !== undefined) clientUpdate.category = category || 'INDIVIDUAL';
     if (occupation !== undefined) clientUpdate.occupation = occupation;
     if (isTelegramTradeEnabled !== undefined) {
@@ -2061,7 +2101,7 @@ export const updateClient = async (req: AuthenticatedRequest, res: Response) => 
       const profileUpdate: any = {};
       if (addressLine1 !== undefined) profileUpdate.addressLine1 = addressLine1;
       if (city !== undefined) profileUpdate.city = city;
-      if (state !== undefined) profileUpdate.state = state;
+      if (finalState !== undefined) profileUpdate.state = finalState;
       if (zipCode !== undefined) profileUpdate.zipCode = zipCode;
 
       await dynamicDb.ClientProfile.findOneAndUpdate(
@@ -3792,6 +3832,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       channel: 'INAPP',
       title: 'New Plan Assigned',
       message: `Your account has been assigned the "${plan.name}" plan by your advisor. The plan is now active and valid until ${new Date(Date.now() + assignedDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}.`,
+      type: 'account',
+      data: { action: 'PLAN_ASSIGNED', planId: plan._id?.toString(), planName: plan.name },
       status: 'SENT'
     }).catch(() => { });
 

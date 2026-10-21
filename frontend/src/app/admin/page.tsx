@@ -13,7 +13,7 @@ import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
 import { useBranding } from '@/contexts/BrandingContext';
 import { base_ra_url } from '@/utils/config';
-import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video, Send, RefreshCcw, XCircle, Monitor, Usb } from 'lucide-react';
+import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video, Send, RefreshCcw, XCircle, Monitor, Usb, Info } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -3655,10 +3655,19 @@ function AdminDashboardContent() {
     setEditClientAadhaar(cl.aadhaar || '');
     setEditClientCategory(cl.category || 'INDIVIDUAL');
     setEditClientOccupation(cl.occupation || '');
-    setEditClientAddress(cl.profile?.addressLine1 || '');
-    setEditClientCity(cl.profile?.city || '');
-    setEditClientState(cl.profile?.state || '');
-    setEditClientZip(cl.profile?.zipCode || '');
+    setEditClientAddress(cl.profile?.addressLine1 || cl.address || '');
+    setEditClientCity(cl.profile?.city || cl.city || '');
+    
+    // Resolve state name properly (maps numeric GST codes like 023 -> Madhya Pradesh)
+    const rawSt = String(cl.profile?.state || cl.state || '').trim();
+    const cleanSt = rawSt.replace(/^0+/, '');
+    const matchedState = states.find((s: any) => 
+      s.name?.toLowerCase() === rawSt.toLowerCase() || 
+      String(s.gstCode || '').replace(/^0+/, '') === cleanSt
+    );
+    setEditClientState(matchedState ? matchedState.name : rawSt);
+    
+    setEditClientZip(cl.profile?.zipCode || cl.zipCode || '');
     setEditClientIsTelegramTradeEnabled(cl.isTelegramTradeEnabled !== false);
     setEditClientIsSmsTradeEnabled(cl.isSmsTradeEnabled !== false);
     setEditClientTelegramChatId(cl.telegramChatId || '');
@@ -3759,6 +3768,16 @@ function AdminDashboardContent() {
       toast.error('You do not have permission to edit clients.');
       return;
     }
+
+    const isKycLocked = Boolean(
+      editingClient?.kycStatus === 'VERIFIED' ||
+      editingClient?.agreementSigned === true ||
+      editingClient?.kraVerified === true ||
+      editingClient?.digilockerData ||
+      editingClient?.profile?.isDigiLockerLocked ||
+      (editingClient?.agreements && editingClient.agreements.some((a: any) => a.status === 'SIGNED'))
+    );
+
     if (!editClientName.trim() || editClientName.trim().length < 2) {
       toast('Full name must be at least 2 characters.'); return;
     }
@@ -3770,27 +3789,31 @@ function AdminDashboardContent() {
       toast('Mobile number must be exactly 10 digits.'); return;
     }
     const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-    if (!panRx.test(editClientPan)) {
+    if (!isKycLocked && editClientPan && editClientPan !== 'N/A' && !panRx.test(editClientPan)) {
       toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
     }
-    if (!/^\d{12}$/.test(editClientAadhaar)) {
+
+    // Aadhaar Validation: Never block if client is KYC locked or if Aadhaar is masked (contains 'X' or dashes)
+    const cleanAadhaar = editClientAadhaar.replace(/[\s-]/g, '');
+    const isMaskedAadhaar = /x/i.test(cleanAadhaar);
+    if (!isKycLocked && !isMaskedAadhaar && cleanAadhaar && cleanAadhaar !== 'N/A' && cleanAadhaar.length !== 12) {
       toast('Aadhaar number must be exactly 12 digits.'); return;
     }
 
     setEditClientModalLoading(true);
     try {
       const payload = {
-        name: editClientName.trim(),
+        name: isKycLocked ? (editingClient?.name || editClientName.trim()) : editClientName.trim(),
         email: editClientEmail.trim(),
         mobile: editClientMobile.trim(),
-        pan: editClientPan.toUpperCase(),
-        aadhaar: editClientAadhaar,
+        pan: isKycLocked ? (editingClient?.pan || editClientPan.toUpperCase()) : editClientPan.toUpperCase(),
+        aadhaar: isKycLocked ? (editingClient?.aadhaar || editClientAadhaar) : editClientAadhaar,
         category: editClientCategory,
         occupation: editClientOccupation || undefined,
-        addressLine1: editClientAddress || undefined,
-        city: editClientCity || undefined,
-        state: editClientState || undefined,
-        zipCode: editClientZip || undefined,
+        addressLine1: isKycLocked ? (editingClient?.profile?.addressLine1 || editingClient?.address || editClientAddress) : (editClientAddress || undefined),
+        city: isKycLocked ? (editingClient?.profile?.city || editingClient?.city || editClientCity) : (editClientCity || undefined),
+        state: isKycLocked ? (editingClient?.profile?.state || editingClient?.state || editClientState) : (editClientState || undefined),
+        zipCode: isKycLocked ? (editingClient?.profile?.zipCode || editingClient?.zipCode || editClientZip) : (editClientZip || undefined),
         isTelegramTradeEnabled: editClientIsTelegramTradeEnabled,
         isSmsTradeEnabled: editClientIsSmsTradeEnabled,
         telegramChatId: editClientTelegramChatId.trim() || null,
@@ -9861,18 +9884,67 @@ function AdminDashboardContent() {
 
                             <form onSubmit={handleUpdateClientSubmit}>
                               <div className="px-8 py-6 space-y-5">
+                                {(() => {
+                                  const isKycLocked = Boolean(
+                                    editingClient?.kycStatus === 'VERIFIED' ||
+                                    editingClient?.agreementSigned === true ||
+                                    editingClient?.kraVerified === true ||
+                                    editingClient?.digilockerData ||
+                                    editingClient?.profile?.isDigiLockerLocked ||
+                                    (editingClient?.agreements && editingClient.agreements.some((a: any) => a.status === 'SIGNED'))
+                                  );
+                                  return (
+                                    <>
+                                      {isKycLocked ? (
+                                        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
+                                          <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                                          <div className="space-y-0.5">
+                                            <span className="font-bold">Aadhaar KYC &amp; Agreement Verified Client</span>
+                                            <p className="text-[11px] text-emerald-700/90 dark:text-emerald-400/90 leading-relaxed">
+                                              Identity details (Full Name, PAN, Aadhaar) and Address (Line, State, City, ZIP) are verified from official Aadhaar KYC / DigiLocker and locked from editing as per SEBI compliance. You can update Mobile Number, Email, and Notification preferences.
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2">
+                                          <Info className="w-4 h-4 text-blue-500 shrink-0" />
+                                          <span><strong>Manual Client Entry:</strong> KYC verification is pending. You can manually enter or edit all personal, KYC, and address details.</span>
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+
                                 {/* Personal Info */}
                                 <div>
                                   <p className="text-[10px] text-primary-600 dark:text-primary-400 font-bold uppercase tracking-widest mb-3">Personal Information</p>
                                   <div className="grid grid-cols-2 gap-4">
                                     <div className="col-span-2">
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Full Name *</label>
-                                      <input
-                                        required
-                                        value={editClientName}
-                                        onChange={e => setEditClientName(e.target.value)}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      />
+                                      {(() => {
+                                        const isKycLocked = Boolean(
+                                          editingClient?.kycStatus === 'VERIFIED' ||
+                                          editingClient?.agreementSigned === true ||
+                                          editingClient?.kraVerified === true ||
+                                          editingClient?.digilockerData ||
+                                          editingClient?.profile?.isDigiLockerLocked ||
+                                          (editingClient?.agreements && editingClient.agreements.some((a: any) => a.status === 'SIGNED'))
+                                        );
+                                        return (
+                                          <>
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">Full Name *</label>
+                                              {isKycLocked && <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1"><Lock className="w-3 h-3" /> Locked (Aadhaar Verified)</span>}
+                                            </div>
+                                            <input
+                                              required
+                                              disabled={isKycLocked}
+                                              value={editClientName}
+                                              onChange={e => setEditClientName(e.target.value)}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                            />
+                                          </>
+                                        );
+                                      })()}
                                     </div>
                                     <div>
                                       <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Email *</label>
@@ -9920,26 +9992,48 @@ function AdminDashboardContent() {
                                 <div>
                                   <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest mb-3">KYC Documents</p>
                                   <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">PAN Number *</label>
-                                      <input
-                                        required
-                                        value={editClientPan}
-                                        onChange={e => setEditClientPan(formatPan(e.target.value))}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:border-emerald-500 focus:outline-none transition"
-                                        maxLength={10}
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Aadhaar Number *</label>
-                                      <input
-                                        required
-                                        value={editClientAadhaar}
-                                        onChange={e => setEditClientAadhaar(formatAadhaar(e.target.value))}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:border-emerald-500 focus:outline-none transition"
-                                        maxLength={12}
-                                      />
-                                    </div>
+                                    {(() => {
+                                      const isKycLocked = Boolean(
+                                        editingClient?.kycStatus === 'VERIFIED' ||
+                                        editingClient?.agreementSigned === true ||
+                                        editingClient?.kraVerified === true ||
+                                        editingClient?.digilockerData ||
+                                        editingClient?.profile?.isDigiLockerLocked ||
+                                        (editingClient?.agreements && editingClient.agreements.some((a: any) => a.status === 'SIGNED'))
+                                      );
+                                      return (
+                                        <>
+                                          <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">PAN Number *</label>
+                                              {isKycLocked && <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Verified</span>}
+                                            </div>
+                                            <input
+                                              required
+                                              disabled={isKycLocked}
+                                              value={editClientPan}
+                                              onChange={e => setEditClientPan(formatPan(e.target.value))}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:border-emerald-500 focus:outline-none transition ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                              maxLength={10}
+                                            />
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">Aadhaar Number *</label>
+                                              {isKycLocked && <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Verified (Masked)</span>}
+                                            </div>
+                                            <input
+                                              required
+                                              disabled={isKycLocked}
+                                              value={editClientAadhaar}
+                                              onChange={e => setEditClientAadhaar(formatAadhaar(e.target.value))}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:border-emerald-500 focus:outline-none transition ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                              maxLength={18}
+                                            />
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                     <div>
                                       <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Category</label>
                                       <select
@@ -9958,55 +10052,84 @@ function AdminDashboardContent() {
                                 <div>
                                   <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest mb-3">Address</p>
                                   <div className="grid grid-cols-2 gap-4">
-                                    <div className="col-span-2">
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Address Line 1</label>
-                                      <input
-                                        value={editClientAddress}
-                                        onChange={e => setEditClientAddress(e.target.value)}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">State</label>
-                                      <select
-                                        value={editClientState}
-                                        onChange={e => {
-                                          setEditClientState(e.target.value);
-                                          setEditClientCity(''); // Reset city when state changes
-                                        }}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition appearance-none"
-                                      >
-                                        <option value="">Select State</option>
-                                        {states.map((s: any) => (
-                                          <option key={s.id} value={s.name}>{s.name}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">City</label>
-                                      <input
-                                        value={editClientCity}
-                                        onChange={e => setEditClientCity(e.target.value)}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                        placeholder="Select or type city"
-                                        list="edit-client-city-options"
-                                        disabled={!editClientState}
-                                      />
-                                      <datalist id="edit-client-city-options">
-                                        {editClientCities.map((c: any, i: number) => (
-                                          <option key={i} value={c.name} />
-                                        ))}
-                                      </datalist>
-                                    </div>
-                                    <div>
-                                      <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">ZIP Code</label>
-                                      <input
-                                        value={editClientZip}
-                                        onChange={e => setEditClientZip(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                        maxLength={6}
-                                      />
-                                    </div>
+                                    {(() => {
+                                      const isKycLocked = Boolean(
+                                        editingClient?.kycStatus === 'VERIFIED' ||
+                                        editingClient?.agreementSigned === true ||
+                                        editingClient?.kraVerified === true ||
+                                        editingClient?.digilockerData ||
+                                        editingClient?.profile?.isDigiLockerLocked ||
+                                        (editingClient?.agreements && editingClient.agreements.some((a: any) => a.status === 'SIGNED'))
+                                      );
+                                      return (
+                                        <>
+                                          <div className="col-span-2">
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">Address Line 1</label>
+                                              {isKycLocked && <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Verified</span>}
+                                            </div>
+                                            <input
+                                              disabled={isKycLocked}
+                                              value={editClientAddress}
+                                              onChange={e => setEditClientAddress(e.target.value)}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                            />
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">State</label>
+                                              {isKycLocked && <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Verified</span>}
+                                            </div>
+                                            <select
+                                              disabled={isKycLocked}
+                                              value={editClientState}
+                                              onChange={e => {
+                                                setEditClientState(e.target.value);
+                                                setEditClientCity('');
+                                              }}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition appearance-none ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                            >
+                                              <option value="">Select State</option>
+                                              {states.map((s: any) => (
+                                                <option key={s.id} value={s.name}>{s.name}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">City</label>
+                                              {isKycLocked && <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Verified</span>}
+                                            </div>
+                                            <input
+                                              disabled={isKycLocked}
+                                              value={editClientCity}
+                                              onChange={e => setEditClientCity(e.target.value)}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                              placeholder="Select or type city"
+                                              list="edit-client-city-options"
+                                            />
+                                            <datalist id="edit-client-city-options">
+                                              {editClientCities.map((c: any, i: number) => (
+                                                <option key={i} value={c.name} />
+                                              ))}
+                                            </datalist>
+                                          </div>
+                                          <div>
+                                            <div className="flex items-center justify-between mb-1">
+                                              <label className="block text-[10px] text-slate-600 dark:text-slate-400 uppercase tracking-wide">ZIP Code</label>
+                                              {isKycLocked && <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Verified</span>}
+                                            </div>
+                                            <input
+                                              disabled={isKycLocked}
+                                              value={editClientZip}
+                                              onChange={e => setEditClientZip(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                              className={`w-full border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition ${isKycLocked ? 'bg-slate-200/70 dark:bg-slate-800/80 cursor-not-allowed opacity-80' : 'bg-slate-100 dark:bg-slate-800'}`}
+                                              maxLength={6}
+                                            />
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                 </div>
                               </div>
                               </div>

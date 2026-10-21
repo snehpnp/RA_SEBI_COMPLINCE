@@ -46,14 +46,16 @@ function buildReportQuery(tenantId: any, query: any, defaultChannel?: string) {
     }
   }
 
-  // Strictly filter for Trade Signals & Updates only (no plan assignment, payment receipts, or KYC notifications)
+  // Strictly filter for Trade Signals & Updates only (exclude plan assignments, payment approvals, KYC, welcome)
   where.$and = where.$and || [];
   where.$and.push({
+    title: { $nin: ['New Plan Assigned', 'Plan Assigned'] },
+    'data.action': { $nin: ['SUBSCRIPTION_ACTIVE', 'PLAN_ASSIGNED', 'PAYMENT', 'KYC'] },
+    message: { $not: /Your account has been assigned|payment for .* has been approved/i },
     $or: [
-      { type: { $in: ['signal', 'update'] } },
       { 'data.action': { $in: ['NEW_TRADE', 'TRADE_UPDATE'] } },
       { 'data.signalId': { $exists: true, $ne: null } },
-      { 'data.stockSymbol': { $exists: true, $ne: null } }
+      { 'data.stockSymbol': { $exists: true, $ne: null, $nin: ['', 'N/A'] } }
     ]
   });
 
@@ -249,11 +251,13 @@ export const getMasterDeliveryReport = async (req: AuthenticatedRequest, res: Re
           $match: {
             recipient: { $ne: 'ADMIN' },
             channel: { $in: ['INAPP', 'TELEGRAM', 'SMS'] },
+            title: { $nin: ['New Plan Assigned', 'Plan Assigned'] },
+            'data.action': { $nin: ['SUBSCRIPTION_ACTIVE', 'PLAN_ASSIGNED', 'PAYMENT', 'KYC'] },
+            message: { $not: /Your account has been assigned|payment for .* has been approved/i },
             $or: [
-              { type: { $in: ['signal', 'update'] } },
               { 'data.action': { $in: ['NEW_TRADE', 'TRADE_UPDATE'] } },
               { 'data.signalId': { $exists: true, $ne: null } },
-              { 'data.stockSymbol': { $exists: true, $ne: null } }
+              { 'data.stockSymbol': { $exists: true, $ne: null, $nin: ['', 'N/A'] } }
             ],
             ...(tenantId
               ? {

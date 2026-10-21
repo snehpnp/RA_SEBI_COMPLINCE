@@ -101,10 +101,16 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       .lean();
 
     // STRICT EXPIRY FILTER: Filter out expired subscriptions if endDate exists
+    // Ensures subscription remains active throughout the entire end date (inclusive up to 23:59:59.999)
     const checkDate = signalCreatedAt || new Date();
     const eligibleSubs = subscriptions.filter((sub: any) => {
       if (!sub.endDate) return true;
-      return new Date(sub.endDate) >= checkDate;
+      const end = new Date(sub.endDate);
+      if (isNaN(end.getTime())) return true;
+      const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+      const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+      const effectiveEnd = Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime());
+      return effectiveEnd >= checkDate.getTime();
     });
 
     const notifiedRecipients = new Set<string>();
@@ -279,6 +285,28 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
             }
           });
         }
+      } else {
+        await dynamicDb.NotificationLog.create({
+          tenantId: currentTenantId,
+          recipient: targetRecipient,
+          channel: 'TELEGRAM',
+          title,
+          message: 'Telegram Trade is disabled in Admin Settings',
+          type,
+          isRead: false,
+          status: 'SKIPPED',
+          data: {
+            ...data,
+            clientId: clientDbId,
+            clientName,
+            email: clientEmail,
+            mobile: destMobile,
+            telegramChatId: client.telegramChatId || null,
+            planId: sub.planId,
+            planName,
+            reason: 'Telegram Trade is disabled in Admin Settings'
+          }
+        });
       }
 
       // ==========================================
@@ -415,7 +443,8 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                   planId: sub.planId,
                   planName,
                   rawResponse: smsResult.rawResponse,
-                  error: smsResult.success ? null : (smsResult.message || smsResult.reason)
+                  error: smsResult.success ? null : (smsResult.message || smsResult.reason),
+                  reason: smsResult.success ? null : (smsResult.message || smsResult.reason)
                 }
               });
             }
@@ -437,11 +466,32 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                 mobile: destMobile,
                 planId: sub.planId,
                 planName,
-                error: smsCatchErr?.message
+                error: smsCatchErr?.message,
+                reason: smsCatchErr?.message || 'SMS dispatch error'
               }
             });
           }
         }
+      } else {
+        await dynamicDb.NotificationLog.create({
+          tenantId: currentTenantId,
+          recipient: destMobile || targetRecipient,
+          channel: 'SMS',
+          title,
+          message: 'SMS Gateway or SMS Trade is disabled in Admin Settings',
+          type,
+          isRead: false,
+          status: 'SKIPPED',
+          data: {
+            ...data,
+            clientId: clientDbId,
+            clientName,
+            mobile: destMobile,
+            planId: sub.planId,
+            planName,
+            reason: 'SMS Gateway or SMS Trade is disabled in Admin Settings'
+          }
+        });
       }
     }
 

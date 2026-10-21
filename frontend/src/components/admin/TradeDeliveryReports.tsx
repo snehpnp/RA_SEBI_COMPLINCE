@@ -684,8 +684,8 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
               <tbody className="divide-y divide-slate-200 dark:divide-white/5">
                 {filteredReports.map((row: any) => {
                   const isDelivered = row.status === 'DELIVERED' || row.status === 'SENT';
-                  const isFailed = row.status === 'FAILED';
-                  const isOptedOut = row.status === 'SKIPPED_CLIENT_DISABLED';
+                  const isFailed = row.status === 'FAILED' || row.status === 'REJECTED' || row.status === 'ERROR';
+                  const isOptedOut = row.status === 'SKIPPED_CLIENT_DISABLED' || row.status === 'SKIPPED';
                   const isExit = row.tradeAction === 'EXIT' || row.action === 'TRADE_UPDATE';
                   const messagePreview = stripHtml(row.message || '');
 
@@ -870,8 +870,8 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                             </span>
                           )}
                           {isOptedOut && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-500/10 text-slate-500 dark:text-slate-400 border border-slate-500/20">
-                              Opted Out
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                              <AlertCircle className="w-3 h-3" /> {row.status === 'SKIPPED_CLIENT_DISABLED' ? 'Opted Out' : 'Skipped'}
                             </span>
                           )}
                         </div>
@@ -884,8 +884,8 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                           <span className="text-[10px] text-slate-400 italic">No message body</span>
                         )}
 
-                        {isFailed && row.failureReason && (
-                          <div className="text-[9px] text-rose-500 truncate max-w-[220px] mt-0.5" title={row.failureReason}>
+                        {(isFailed || isOptedOut) && row.failureReason && (
+                          <div className="text-[9.5px] text-rose-600 dark:text-rose-400 font-semibold truncate max-w-[260px] mt-1 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded" title={row.failureReason}>
                             ⚠️ {row.failureReason}
                           </div>
                         )}
@@ -1062,7 +1062,7 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
               {selectedRecord.failureReason && (
                 <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-600 dark:text-rose-400">
                   <div className="font-bold flex items-center gap-1.5 mb-1">
-                    <ShieldAlert className="w-4 h-4" /> Failure / Skip Details:
+                    <ShieldAlert className="w-4 h-4" /> Failure / Rejection Reason:
                   </div>
                   <p className="text-[11px] font-mono leading-relaxed">{selectedRecord.failureReason}</p>
                 </div>

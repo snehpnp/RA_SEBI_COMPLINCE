@@ -560,7 +560,7 @@ router.delete(
 router.get(
   '/admin/sms-templates',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_RESEARCH', 'ADD_RESEARCH', 'OWN_RESEARCH', 'ACCESS_SIGNALS', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getSmsTemplates
 );

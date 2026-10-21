@@ -256,7 +256,10 @@ export const listSignals = async (req: Request, res: Response) => {
             createdAt: { $gte: sub.startDate }
           };
           if (sub.endDate) {
-            conditions.createdAt.$lte = sub.endDate;
+            const end = new Date(sub.endDate);
+            const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+            const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+            conditions.createdAt.$lte = new Date(Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime()));
           }
           return conditions;
         });

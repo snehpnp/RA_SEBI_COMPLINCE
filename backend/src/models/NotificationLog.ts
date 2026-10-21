@@ -28,7 +28,7 @@ export const NotificationLogSchema = new Schema<INotificationLog>(
     status: { type: String, default: 'PENDING' },
     retryCount: { type: Number, default: 0 },
     isRead: { type: Boolean, default: false },
-    type: { type: String, default: 'signal' },
+    type: { type: String, default: 'general' },
     data: { type: Schema.Types.Mixed, default: {} }
   },
   { ...baseSchemaOptions, collection: 'NotificationLog' }
