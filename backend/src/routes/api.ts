@@ -21,7 +21,7 @@ import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCoupo
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
 import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord, fetchCamsRecord, getCamsKraPdf } from '../controllers/kycController';
-import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
+import { authenticateJWT, optionalAuthenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
@@ -1754,12 +1754,12 @@ router.post(
 
 // Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
 router.get('/dsc-bridge/ping', dscBridgePing);
-router.get('/dsc-bridge/token-status', dscBridgeTokenStatus);
-router.post('/dsc-bridge/sign-pdf', dscBridgeSignPdf);
+router.get('/dsc-bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
+router.post('/dsc-bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
 
 router.get('/researcher/dsc/bridge/ping', dscBridgePing);
-router.get('/researcher/dsc/bridge/token-status', dscBridgeTokenStatus);
-router.post('/researcher/dsc/bridge/sign-pdf', dscBridgeSignPdf);
+router.get('/researcher/dsc/bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
+router.post('/researcher/dsc/bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
 
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES

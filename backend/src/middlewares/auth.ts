@@ -120,6 +120,30 @@ export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: 
   }
 };
 
+export const optionalAuthenticateJWT = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return next();
+  }
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return next();
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded: any) => {
+    if (!err && decoded) {
+      req.user = {
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+        tenantId: decoded.tenantId,
+        isImpersonated: decoded.isImpersonated || false
+      };
+    }
+    next();
+  });
+};
+
 export const requireRoles = (roles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {

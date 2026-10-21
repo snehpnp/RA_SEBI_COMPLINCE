@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "ts-node src/seeds/index.ts",
-    "swagger": "node swagger.js"
+    "swagger": "node swagger.js",
+    "dsc-bridge": "node tools/dsc-bridge/server.js"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

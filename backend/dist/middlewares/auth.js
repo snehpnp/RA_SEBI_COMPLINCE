@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireAnyPermission = exports.requirePermission = exports.requireRoles = exports.authenticateJWT = void 0;
+exports.requireAnyPermission = exports.requirePermission = exports.requireRoles = exports.optionalAuthenticateJWT = exports.authenticateJWT = void 0;
 const jwt = __importStar(require("jsonwebtoken"));
 const db_1 = require("../config/db");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
@@ -133,6 +133,29 @@ const authenticateJWT = (req, res, next) => {
     }
 };
 exports.authenticateJWT = authenticateJWT;
+const optionalAuthenticateJWT = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+        return next();
+    }
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+        return next();
+    }
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (!err && decoded) {
+            req.user = {
+                id: decoded.id,
+                email: decoded.email,
+                role: decoded.role,
+                tenantId: decoded.tenantId,
+                isImpersonated: decoded.isImpersonated || false
+            };
+        }
+        next();
+    });
+};
+exports.optionalAuthenticateJWT = optionalAuthenticateJWT;
 const requireRoles = (roles) => {
     return (req, res, next) => {
         if (!req.user) {
