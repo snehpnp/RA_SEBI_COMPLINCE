@@ -150,7 +150,11 @@ const updateRolePermissions = async (req, res) => {
         const oldPerms = existingRolePerms.map((p) => p.permissionId?.code || p.permission?.code).filter(Boolean);
         // 1. Delete existing role permissions
         await db_1.default.RolePermission.deleteMany({ roleId: id });
-        // 2. Fetch the permissions matching the request codes
+        // 2. Auto-upsert any requested permissions into Permission collection so custom codes exist
+        for (const pCode of filteredPermissions) {
+            await db_1.default.Permission.findOneAndUpdate({ code: pCode }, { $setOnInsert: { code: pCode, name: pCode } }, { upsert: true });
+        }
+        // Fetch the permissions matching the request codes
         const dbPermissions = await db_1.default.Permission.find({
             code: { $in: filteredPermissions }
         }).lean();

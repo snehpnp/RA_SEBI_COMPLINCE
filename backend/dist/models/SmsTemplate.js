@@ -44,6 +44,18 @@ exports.SmsTemplateSchema = new mongoose_1.Schema({
     applicableSegments: { type: [String], default: [] },
     applicableActions: { type: [String], default: [] },
     applicableCombinations: { type: [String], default: [] },
+    variableMappings: {
+        type: [
+            {
+                index: { type: Number, required: true },
+                placeholder: { type: String, required: true },
+                fieldKey: { type: String, default: '' },
+                selectedFields: { type: [String], default: [] },
+                customLabel: { type: String, default: '' }
+            }
+        ],
+        default: []
+    },
     dltTemplateId: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     status: { type: String, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },

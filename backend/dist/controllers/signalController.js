@@ -122,8 +122,19 @@ const createSignal = async (req, res) => {
                     target3,
                     stoploss,
                     segment,
+                    expiryDate: expiryDate || null,
+                    strikePrice: strikePrice || null,
+                    optionType: optionType || null,
                     tradeDuration,
-                    action: 'NEW_TRADE'
+                    action: 'NEW_TRADE',
+                    smsOrderedVariables: req.body.smsOrderedVariables ? ((() => {
+                        try {
+                            return typeof req.body.smsOrderedVariables === 'string' ? JSON.parse(req.body.smsOrderedVariables) : req.body.smsOrderedVariables;
+                        }
+                        catch (e) {
+                            return undefined;
+                        }
+                    })()) : undefined
                 },
                 adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
                 adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`
@@ -221,7 +232,10 @@ const listSignals = async (req, res) => {
                         createdAt: { $gte: sub.startDate }
                     };
                     if (sub.endDate) {
-                        conditions.createdAt.$lte = sub.endDate;
+                        const end = new Date(sub.endDate);
+                        const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+                        const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+                        conditions.createdAt.$lte = new Date(Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime()));
                     }
                     return conditions;
                 });
