@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '../../services/api';
-import { getDscBridgeUrl, setDscBridgeUrl } from '../../utils/config';
+import { getDscBridgeUrl, setDscBridgeUrl, getDefaultDscBridgeUrl } from '../../utils/config';
 
 interface Props {
   user: any;
@@ -651,18 +651,19 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
                   <Settings className="w-4 h-4 text-slate-500" />
                   DSC Local Bridge URL / Port (Dynamic)
                 </label>
-                {dscBridgeUrl !== 'http://127.0.0.1:1620' && (
+                {dscBridgeUrl !== getDefaultDscBridgeUrl() && (
                   <button
                     type="button"
                     onClick={() => {
-                      setDscBridgeUrl('http://127.0.0.1:1620');
-                      setDscBridgeUrlState('http://127.0.0.1:1620');
-                      toast.success('Reset to default bridge URL');
-                      checkDscBridge(false, 'http://127.0.0.1:1620');
+                      const def = getDefaultDscBridgeUrl();
+                      setDscBridgeUrl(def);
+                      setDscBridgeUrlState(def);
+                      toast.success('Reset to default dynamic bridge URL');
+                      checkDscBridge(false, def);
                     }}
                     className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
                   >
-                    Reset Default (1620)
+                    Reset Default
                   </button>
                 )}
               </div>
@@ -675,7 +676,7 @@ export default function SignatureSettingsTab({ user, setUser, loadData, showMobi
                     setDscBridgeUrlState(val);
                     setDscBridgeUrl(val);
                   }}
-                  placeholder="http://127.0.0.1:1620"
+                  placeholder={getDefaultDscBridgeUrl()}
                   className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
                 />
                 <button

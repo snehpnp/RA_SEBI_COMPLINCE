@@ -66,7 +66,10 @@ import {
   completeReportAadhaarEsign,
   useDailyAadhaarSign,
   saveDscSignedReport,
-  verifyDscToken
+  verifyDscToken,
+  dscBridgePing,
+  dscBridgeTokenStatus,
+  dscBridgeSignPdf
 } from '../controllers/researcherSignatureController';
 import {
   createVideoKycSession,
@@ -1748,6 +1751,15 @@ router.post(
   enforceTenantIsolation,
   verifyDscToken
 );
+
+// Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
+router.get('/dsc-bridge/ping', dscBridgePing);
+router.get('/dsc-bridge/token-status', dscBridgeTokenStatus);
+router.post('/dsc-bridge/sign-pdf', dscBridgeSignPdf);
+
+router.get('/researcher/dsc/bridge/ping', dscBridgePing);
+router.get('/researcher/dsc/bridge/token-status', dscBridgeTokenStatus);
+router.post('/researcher/dsc/bridge/sign-pdf', dscBridgeSignPdf);
 
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES

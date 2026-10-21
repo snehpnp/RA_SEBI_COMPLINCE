@@ -17,7 +17,7 @@ import {
   Settings
 } from 'lucide-react';
 import api from '../services/api';
-import { getDscBridgeUrl, setDscBridgeUrl } from '../utils/config';
+import { getDscBridgeUrl, setDscBridgeUrl, getDefaultDscBridgeUrl } from '../utils/config';
 import toast from 'react-hot-toast';
 
 interface UploadSignConfirmModalProps {
@@ -693,13 +693,14 @@ export default function UploadSignConfirmModal({
                       <Settings className="w-3.5 h-3.5 text-slate-500" />
                       DSC Bridge URL / Port (Dynamic)
                     </label>
-                    {dscBridgeUrl !== 'http://127.0.0.1:1620' && (
+                    {dscBridgeUrl !== getDefaultDscBridgeUrl() && (
                       <button
                         type="button"
                         onClick={() => {
-                          setDscBridgeUrl('http://127.0.0.1:1620');
-                          setDscBridgeUrlState('http://127.0.0.1:1620');
-                          toast.success('Reset to default: http://127.0.0.1:1620');
+                          const def = getDefaultDscBridgeUrl();
+                          setDscBridgeUrl(def);
+                          setDscBridgeUrlState(def);
+                          toast.success('Reset to default dynamic URL');
                         }}
                         className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline font-semibold"
                       >
@@ -715,7 +716,7 @@ export default function UploadSignConfirmModal({
                       setDscBridgeUrlState(val);
                       setDscBridgeUrl(val);
                     }}
-                    placeholder="http://127.0.0.1:1620"
+                    placeholder={getDefaultDscBridgeUrl()}
                     className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500 outline-none"
                   />
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
