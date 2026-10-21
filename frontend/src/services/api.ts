@@ -1330,30 +1330,63 @@ class ApiClient {
   }
 
   async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 3500) {
-    const bridgeUrl = customBridgeUrl || getDscBridgeUrl();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-      const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null;
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      if (tenantId) headers['x-tenant-id'] = tenantId;
-
-      const res = await fetch(`${bridgeUrl}/token-status`, {
-        method: 'GET',
-        headers,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) {
-        throw new Error(`DSC bridge error (HTTP ${res.status})`);
+    const isLive = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    
+    // Candidate URLs: on live site, probe local bridge (127.0.0.1:1620) first where USB token is inserted
+    const candidateUrls: string[] = [];
+    if (customBridgeUrl) {
+      candidateUrls.push(customBridgeUrl);
+    } else {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
+      if (saved && saved.trim()) {
+        candidateUrls.push(saved.trim());
       }
-      return await res.json();
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      throw err;
+      if (isLive) {
+        candidateUrls.push('http://127.0.0.1:1620');
+        candidateUrls.push('http://localhost:1620');
+      }
+      const defaultUrl = getDscBridgeUrl();
+      if (!candidateUrls.includes(defaultUrl)) {
+        candidateUrls.push(defaultUrl);
+      }
+      if (!isLive && !candidateUrls.includes('http://127.0.0.1:1620')) {
+        candidateUrls.push('http://127.0.0.1:1620');
+      }
     }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (tenantId) headers['x-tenant-id'] = tenantId;
+
+    let lastError: any = null;
+    for (const bridgeUrl of candidateUrls) {
+      const controller = new AbortController();
+      const perUrlTimeout = candidateUrls.length > 1 ? Math.min(timeoutMs, 1800) : timeoutMs;
+      const timeoutId = setTimeout(() => controller.abort(), perUrlTimeout);
+
+      try {
+        const res = await fetch(`${bridgeUrl}/token-status`, {
+          method: 'GET',
+          headers,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && (data.detected || data.success)) {
+            data.bridgeUrlUsed = bridgeUrl;
+            return data;
+          }
+        }
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('Could not connect to any DSC hardware bridge');
   }
 
   async signPdfWithDscBridge(payload: {

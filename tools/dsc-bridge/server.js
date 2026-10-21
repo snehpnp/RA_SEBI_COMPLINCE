@@ -22,19 +22,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// 1. Private Network Access (PNA) & CORS for browsers accessing localhost from HTTPS sites
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, *');
-  res.header('Access-Control-Allow-Private-Network', 'true');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
-
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 
@@ -53,8 +40,22 @@ app.get('/ping', (req, res) => {
 const getDetectedCertNames = () => {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve([]);
-    const cmd = `powershell -NoProfile -Command "$now = Get-Date; $certs = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object { $_.NotAfter -gt $now -and $_.Subject -notmatch 'trust_' -and $_.Subject -notmatch '^CN=[0-9a-fA-F-]{36}' } | ForEach-Object { if ($_.Subject -match 'CN=([^,]+)') { $matches[1].Trim() } }; $certs"`;
-    exec(cmd, { timeout: 3000 }, (err, stdout) => {
+    const psScript = `
+      $now = Get-Date
+      $certs = Get-ChildItem Cert:\\CurrentUser\\My -ErrorAction SilentlyContinue | Where-Object { 
+        $_.NotAfter -gt $now -and 
+        $_.Subject -notmatch 'trust_' -and 
+        $_.Subject -notmatch 'CN=[0-9a-fA-F-]{36}' 
+      }
+      foreach ($c in $certs) {
+        if ($c.Subject -match 'CN=([^,]+)') {
+          Write-Output $Matches[1].Trim()
+        }
+      }
+    `;
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    const cmd = `powershell -NoProfile -EncodedCommand ${encoded}`;
+    exec(cmd, { timeout: 4000 }, (err, stdout) => {
       if (err || !stdout) return resolve([]);
       const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       resolve([...new Set(lines)]);
@@ -67,11 +68,13 @@ app.get('/token-status', async (req, res) => {
   const certs = await getDetectedCertNames();
   res.json({
     success: true,
-    detected: true, // Bridge is active and ready
+    detected: certs.length > 0,
     certificates: certs,
     detectedSignerName: certs[0] || null,
     smartCardServiceActive: true,
-    details: 'Hardware DSC Token Bridge active and listening for USB dongles.'
+    details: certs.length > 0 
+      ? 'Hardware DSC Token Bridge active and listening for USB dongles.' 
+      : 'Hardware DSC Token Bridge active. No hardware token detected in CurrentUser store.'
   });
 });
 
@@ -98,9 +101,10 @@ app.post('/sign-pdf', async (req, res) => {
 
     let resolvedSigner = signerName && String(signerName).trim();
     if (!resolvedSigner) {
-      const certs = await getDetectedCertNames();
-      resolvedSigner = certs[0] || 'SEBI Research Analyst';
+      const detected = await getDetectedCertNames();
+      resolvedSigner = detected[0] || 'SEBI Research Analyst';
     }
+
     const cleanSigner = sanitizeForWinAnsi(resolvedSigner);
     const cleanPlacement = placement || 'BOTTOM_RIGHT';
     const cleanScope = signScope || 'ALL_PAGES';
@@ -132,7 +136,7 @@ app.post('/sign-pdf', async (req, res) => {
 
     for (const page of pagesToSign) {
       const { width, height } = page.getSize();
-      let x = width - boxWidth - 25; // default BOTTOM_RIGHT
+      let x = width - boxWidth - 25;
       if (cleanPlacement === 'BOTTOM_CENTER') {
         x = (width - boxWidth) / 2;
       } else if (cleanPlacement === 'BOTTOM_LEFT') {
@@ -140,7 +144,6 @@ app.post('/sign-pdf', async (req, res) => {
       }
       const y = 18;
 
-      // Outer Box (Adobe-compliant cryptographic signature appearance)
       page.drawRectangle({
         x,
         y,
@@ -151,7 +154,6 @@ app.post('/sign-pdf', async (req, res) => {
         borderWidth: 1.2
       });
 
-      // Top green badge bar
       page.drawRectangle({
         x,
         y: y + boxHeight - 13,
@@ -160,7 +162,6 @@ app.post('/sign-pdf', async (req, res) => {
         color: rgb(0.08, 0.58, 0.28)
       });
 
-      // Vector checkmark (WinAnsi-safe vector graphic)
       page.drawLine({
         start: { x: x + 7, y: y + boxHeight - 7.5 },
         end: { x: x + 9.5, y: y + boxHeight - 10 },
@@ -174,7 +175,6 @@ app.post('/sign-pdf', async (req, res) => {
         color: rgb(1, 1, 1)
       });
 
-      // Header Text (100% standard WinAnsi ASCII)
       page.drawText('DIGITALLY SIGNED (HARDWARE DSC)', {
         x: x + 18,
         y: y + boxHeight - 9.5,
@@ -183,7 +183,6 @@ app.post('/sign-pdf', async (req, res) => {
         color: rgb(1, 1, 1)
       });
 
-      // Signer Name
       page.drawText(`Digitally Signed by: ${cleanSigner}`, {
         x: x + 6,
         y: y + 24,
@@ -192,7 +191,6 @@ app.post('/sign-pdf', async (req, res) => {
         color: rgb(0.1, 0.15, 0.1)
       });
 
-      // Certificate Authority info
       page.drawText(`Certificate: Class 3 DSC Token (CCA India)`, {
         x: x + 6,
         y: y + 15,
@@ -201,7 +199,6 @@ app.post('/sign-pdf', async (req, res) => {
         color: rgb(0.2, 0.3, 0.25)
       });
 
-      // Date & Location
       page.drawText(`Date: ${istTime} | ${cleanLocation}`, {
         x: x + 6,
         y: y + 7,
@@ -228,15 +225,10 @@ app.post('/sign-pdf', async (req, res) => {
     });
   } catch (err) {
     console.error('DSC signing error:', err);
-    return res.status(500).json({ success: false, message: err.message || 'Error signing PDF with DSC token' });
+    return res.status(500).json({ success: false, message: err?.message || 'Error signing PDF with DSC token' });
   }
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`\n======================================================`);
-  console.log(`  SEBI Research Analyst Hardware DSC Bridge Service`);
-  console.log("Anuj here ");
-  console.log(`  Listening on: http://${HOST}:${PORT}`);
-  console.log(`  Ready to sign research reports with USB DSC tokens`);
-  console.log(`======================================================\n`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🔒 [DSC BRIDGE] Local Hardware DSC Bridge is running on http://127.0.0.1:${PORT}`);
 });

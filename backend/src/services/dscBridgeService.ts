@@ -4,11 +4,25 @@ import { exec } from 'child_process';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import dynamicDb from '../config/db';
 
-const getDetectedCertNames = (): Promise<string[]> => {
+export const getDetectedCertNames = (): Promise<string[]> => {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve([]);
-    const cmd = `powershell -NoProfile -Command "$now = Get-Date; $certs = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object { $_.NotAfter -gt $now -and $_.Subject -notmatch 'trust_' -and $_.Subject -notmatch '^CN=[0-9a-fA-F-]{36}' } | ForEach-Object { if ($_.Subject -match 'CN=([^,]+)') { $matches[1].Trim() } }; $certs"`;
-    exec(cmd, { timeout: 3000 }, (err, stdout) => {
+    const psScript = `
+      $now = Get-Date
+      $certs = Get-ChildItem Cert:\\CurrentUser\\My -ErrorAction SilentlyContinue | Where-Object { 
+        $_.NotAfter -gt $now -and 
+        $_.Subject -notmatch 'trust_' -and 
+        $_.Subject -notmatch 'CN=[0-9a-fA-F-]{36}' 
+      }
+      foreach ($c in $certs) {
+        if ($c.Subject -match 'CN=([^,]+)') {
+          Write-Output $Matches[1].Trim()
+        }
+      }
+    `;
+    const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+    const cmd = `powershell -NoProfile -EncodedCommand ${encoded}`;
+    exec(cmd, { timeout: 4000 }, (err, stdout) => {
       if (err || !stdout) return resolve([]);
       const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       resolve([...new Set(lines)]);

@@ -315,6 +315,7 @@ export default function UploadSignConfirmModal({
     setStatusMessage(`Checking Hardware DSC Bridge on ${activeUrl}...`);
     try {
       const data = await api.checkDscBridgeStatus(activeUrl, 3000);
+      if (data?.bridgeUrlUsed) { setDscBridgeUrlState(data.bridgeUrlUsed); }
       setDscBridgeConnected(true);
       setDscPin('');
       setDscPinError('');

@@ -1,3 +1,4 @@
+import { getDetectedCertNames } from '../services/dscBridgeService';
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -683,23 +684,36 @@ export const checkDscSignerPermission = async (
     str.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
   const tokenNormalized = normalize(rawTokenName);
 
-  // Find RESEARCHER role
-  const researcherRole = await dynamicDb.Role.findOne({ name: 'RESEARCHER' }).lean();
-  if (!researcherRole) {
+  // 1. Fetch Logged-in User and Staff info
+  const loggedInUser: any = loggedInUserId ? await dynamicDb.User.findById(loggedInUserId).lean() : null;
+  const loggedInStaff: any = loggedInUserId ? await dynamicDb.Staff.findOne({ userId: loggedInUserId }).lean() : null;
+
+  const userRole = loggedInUser?.roleId ? await dynamicDb.Role.findById(loggedInUser.roleId).lean() : null;
+  const roleName = userRole?.name || loggedInUser?.role || '';
+  const isAdminOrSuper = roleName === 'SUPER_ADMIN' || roleName === 'ADMIN' || loggedInUser?.email === 'superadmin@gmail.com';
+
+  const loggedInScope = loggedInStaff?.dscSigningScope || loggedInUser?.dscSigningScope || (isAdminOrSuper ? 'ALL' : 'DISABLED');
+
+  // Check if logged-in user is explicitly DISABLED by Admin
+  if (loggedInScope === 'DISABLED' && !isAdminOrSuper) {
+    const displayName = loggedInStaff?.name || `${loggedInUser?.firstName || ''} ${loggedInUser?.lastName || ''}`.trim() || loggedInUserName || 'Researcher';
     return {
       valid: false,
-      code: 'NO_RESEARCHER_ROLE',
-      message: 'RESEARCHER role not found in system.'
+      code: 'DSC_DISABLED',
+      message: `Hardware DSC Signing is DISABLED by Admin for your account (${displayName}). Request Admin to enable DSC permission in Staff Settings.`
     };
   }
 
-  const researcherRoleId = researcherRole._id || researcherRole.id;
-
-  // Find all researcher users for this tenant
-  const researcherUsers: any[] = await dynamicDb.User.find({
-    tenantId,
-    roleId: researcherRoleId
-  }).lean();
+  // 2. Fetch Tenant researcher users
+  const researcherRole = await dynamicDb.Role.findOne({ name: 'RESEARCHER' }).lean();
+  let researcherUsers: any[] = [];
+  if (researcherRole) {
+    const researcherRoleId = researcherRole._id || researcherRole.id;
+    researcherUsers = await dynamicDb.User.find({
+      ...(tenantId ? { tenantId } : {}),
+      roleId: researcherRoleId
+    }).lean();
+  }
 
   const userIds = researcherUsers.map((u: any) => u._id || u.id);
   const staffList: any[] = await dynamicDb.Staff.find({ userId: { $in: userIds } }).lean();
@@ -729,87 +743,116 @@ export const checkDscSignerPermission = async (
     }
   }
 
-  if (!matchedUser) {
-    return {
-      valid: false,
-      code: 'RESEARCHER_NOT_FOUND',
-      message: `No registered researcher found matching DSC token name: "${rawTokenName}". Only authorized researchers registered by Admin can sign reports.`
-    };
-  }
+  // 3. If token matches a registered researcher directly
+  if (matchedUser) {
+    const officialName = matchedResearcher?.name || `${matchedUser.firstName || ''} ${matchedUser.lastName || ''}`.trim() || matchedUser.username;
+    const tokenUserScope = matchedResearcher?.dscSigningScope || matchedUser.dscSigningScope || 'DISABLED';
 
-  const officialName = matchedResearcher?.name || `${matchedUser.firstName} ${matchedUser.lastName}`.trim();
-  const scope = matchedResearcher?.dscSigningScope || matchedUser.dscSigningScope || 'DISABLED';
+    const isInactiveOrDeleted = !!(
+      matchedUser.deletedAt ||
+      matchedResearcher?.deletedAt ||
+      matchedUser.status !== 'ACTIVE' ||
+      (matchedResearcher && matchedResearcher.status !== 'ACTIVE')
+    );
 
-  // Inactive or Deleted Check
-  const isInactiveOrDeleted = !!(
-    matchedUser.deletedAt ||
-    matchedResearcher?.deletedAt ||
-    matchedUser.status !== 'ACTIVE' ||
-    (matchedResearcher && matchedResearcher.status !== 'ACTIVE')
-  );
-
-  if (isInactiveOrDeleted) {
-    return {
-      valid: false,
-      code: 'RESEARCHER_INACTIVE_OR_DELETED',
-      message: `DSC Token belongs to "${officialName}", who is currently INACTIVE or Deactivated. Signing is blocked.`
-    };
-  }
-
-  // Permission Scope: DISABLED
-  if (scope === 'DISABLED') {
-    return {
-      valid: false,
-      code: 'DSC_DISABLED',
-      message: `Hardware DSC Signing is DISABLED by Admin for "${officialName}". Request Admin to enable DSC permission.`
-    };
-  }
-
-  // Permission Scope: ALL
-  if (scope === 'ALL') {
-    return {
-      valid: true,
-      code: 'AUTHORIZED_ALL',
-      scope: 'ALL',
-      ownerName: officialName,
-      message: `Master/Shared DSC Token verified. Admin has permitted this token (${officialName}) for all researchers.`
-    };
-  }
-
-  // Permission Scope: SELF
-  if (scope === 'SELF') {
-    const isSelf = String(matchedUser._id) === String(loggedInUserId);
-    if (isSelf) {
-      return {
-        valid: true,
-        code: 'AUTHORIZED_SELF',
-        scope: 'SELF',
-        ownerName: officialName,
-        message: `DSC Token verified for your account (${officialName}).`
-      };
-    } else {
+    if (isInactiveOrDeleted) {
       return {
         valid: false,
-        code: 'SELF_MISMATCH',
-        message: `DSC Token belongs to "${officialName}" (Self-login only). You are logged in as "${loggedInUserName}". You cannot use another researcher's personal DSC token.`
+        code: 'RESEARCHER_INACTIVE_OR_DELETED',
+        message: `DSC Token belongs to "${officialName}", who is currently INACTIVE or Deactivated. Signing is blocked.`
       };
     }
+
+    if (tokenUserScope === 'DISABLED') {
+      return {
+        valid: false,
+        code: 'DSC_DISABLED',
+        message: `Hardware DSC Signing is DISABLED by Admin for "${officialName}". Request Admin to enable DSC permission.`
+      };
+    }
+
+    if (tokenUserScope === 'ALL') {
+      return {
+        valid: true,
+        code: 'AUTHORIZED_ALL',
+        scope: 'ALL',
+        ownerName: officialName,
+        message: `Shared DSC Token verified. Admin has permitted this token (${officialName}) for researcher signing.`
+      };
+    }
+
+    if (tokenUserScope === 'SELF') {
+      const isSelf = String(matchedUser._id) === String(loggedInUserId);
+      if (isSelf || isAdminOrSuper) {
+        return {
+          valid: true,
+          code: 'AUTHORIZED_SELF',
+          scope: 'SELF',
+          ownerName: officialName,
+          message: `DSC Token verified for your account (${officialName}).`
+        };
+      } else {
+        return {
+          valid: false,
+          code: 'SELF_MISMATCH',
+          message: `DSC Token belongs to "${officialName}" (Self-login only). You are logged in as "${loggedInUserName}". You cannot use another researcher's personal DSC token.`
+        };
+      }
+    }
+  }
+
+  // 4. If token does not match an individual staff name, check if logged-in user has ALL scope or Admin
+  if (loggedInScope === 'ALL' || isAdminOrSuper) {
+    if (tenantId) {
+      try {
+        await dynamicDb.Tenant.findByIdAndUpdate(tenantId, {
+          $set: { dscSignerName: rawTokenName }
+        });
+      } catch (e) {}
+    }
+
+    return {
+      valid: true,
+      code: 'AUTHORIZED_MASTER',
+      scope: 'ALL',
+      ownerName: rawTokenName,
+      message: `Master Hardware DSC Token ("${rawTokenName}") verified. Admin has permitted your account to sign reports with this token.`
+    };
+  }
+
+  // 5. If logged-in user is restricted to SELF, but token did not match their name
+  if (loggedInScope === 'SELF') {
+    const myName = loggedInStaff?.name || `${loggedInUser?.firstName || ''} ${loggedInUser?.lastName || ''}`.trim() || loggedInUserName || 'Your Account';
+    return {
+      valid: false,
+      code: 'SELF_MISMATCH',
+      message: `DSC Token belongs to "${rawTokenName}". Your account (${myName}) is restricted to your own personal DSC token.`
+    };
   }
 
   return {
     valid: false,
-    code: 'UNAUTHORIZED',
-    message: 'Unauthorized DSC signing permission.'
+    code: 'RESEARCHER_NOT_FOUND',
+    message: `No registered researcher found matching DSC token name: "${rawTokenName}". Only authorized researchers registered by Admin can sign reports.`
   };
 };
 
 export const verifyDscToken = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const tenantId = user?.tenantId;
+    let tenantId = user?.tenantId || req.headers['x-tenant-id'];
     const loggedInUserId = user?.id || user?._id;
     const loggedInUserName = user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || '';
     const { signerName } = req.body;
+
+    if (!tenantId && loggedInUserId) {
+      const u: any = await dynamicDb.User.findById(loggedInUserId).lean();
+      tenantId = u?.tenantId;
+    }
+    if (!tenantId) {
+      const t: any = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+      tenantId = t?._id || t?.id;
+    }
 
     const result = await checkDscSignerPermission(tenantId, loggedInUserId, loggedInUserName, signerName);
 
@@ -847,6 +890,21 @@ export const dscBridgeTokenStatus = async (req: Request, res: Response) => {
     const user = (req as any).user;
     let detectedSignerName = '';
 
+    // 1. Query physical hardware DSC token from Windows certificate store
+    const winCerts = await getDetectedCertNames();
+    if (winCerts && winCerts.length > 0) {
+      detectedSignerName = winCerts[0];
+      return res.json({
+        success: true,
+        detected: true,
+        certificates: winCerts,
+        detectedSignerName,
+        smartCardServiceActive: true,
+        details: 'Hardware DSC Token Bridge active and connected with USB Token.'
+      });
+    }
+
+    // 2. Fallback to user / tenant profile if no physical token is detected
     if (user?.id || user?._id) {
       const u: any = await dynamicDb.User.findById(user.id || user._id).lean();
       const staff: any = await dynamicDb.Staff.findOne({ userId: user.id || user._id }).lean();
@@ -855,29 +913,27 @@ export const dscBridgeTokenStatus = async (req: Request, res: Response) => {
 
     if (!detectedSignerName && user?.tenantId) {
       const tenant: any = await dynamicDb.Tenant.findById(user.tenantId).lean();
-      detectedSignerName = tenant?.name || tenant?.complianceName || '';
-    }
-
-    if (!detectedSignerName) {
-      detectedSignerName = 'SEBI Registered Research Analyst';
+      detectedSignerName = tenant?.dscSignerName || tenant?.name || tenant?.complianceName || '';
     }
 
     return res.json({
       success: true,
-      detected: true,
-      certificates: [detectedSignerName],
-      detectedSignerName,
-      smartCardServiceActive: true,
-      details: 'Dynamic Digital Signature Bridge active and ready on server.'
+      detected: !!detectedSignerName,
+      certificates: detectedSignerName ? [detectedSignerName] : [],
+      detectedSignerName: detectedSignerName || '',
+      smartCardServiceActive: false,
+      details: detectedSignerName
+        ? 'No hardware DSC token detected. Using registered profile fallback.'
+        : 'No USB Hardware DSC Token detected. Please insert your USB token.'
     });
   } catch (err: any) {
     return res.json({
-      success: true,
-      detected: true,
-      certificates: ['SEBI Registered Research Analyst'],
-      detectedSignerName: 'SEBI Registered Research Analyst',
-      smartCardServiceActive: true,
-      details: 'Dynamic Digital Signature Bridge active and ready on server.'
+      success: false,
+      detected: false,
+      certificates: [],
+      detectedSignerName: '',
+      smartCardServiceActive: false,
+      details: err?.message || 'Error checking DSC token status'
     });
   }
 };
