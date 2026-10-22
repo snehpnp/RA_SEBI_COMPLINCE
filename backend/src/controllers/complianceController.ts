@@ -1647,11 +1647,11 @@ export const getPenalties = async (req: AuthenticatedRequest, res: Response) => 
       return res.status(200).json({ success: true, data: [] });
     }
 
-    const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
-    const penaltyQuery: any = { tenantId };
-    if (cutoffDate) {
-      penaltyQuery.createdAt = { $gte: cutoffDate };
-    }
+    const penaltyQuery: any = {
+      tenantId,
+      isMasked: { $ne: true },
+      status: { $ne: 'WAIVED' }
+    };
 
     const penalties = await dynamicDb.Penalty.find(penaltyQuery)
       .populate({
@@ -1868,7 +1868,7 @@ const getMetricsForTenant = async (tenantId: string, res: Response) => {
     ).map(normalizeAudit);
 
     const penalty = audits.filter((a: any) => 
-      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+      a.penalty && !a.penalty.isMasked && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
     ).map(normalizeAudit);
 
     const closed = audits.filter((a: any) => 
@@ -1952,7 +1952,7 @@ const getGlobalComplianceMetrics = async (res: Response) => {
     ).map(normalizeAudit);
 
     const penalty = audits.filter((a: any) => 
-      a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
+      a.penalty && !a.penalty.isMasked && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')
     ).map(normalizeAudit);
 
     const closed = audits.filter((a: any) => 

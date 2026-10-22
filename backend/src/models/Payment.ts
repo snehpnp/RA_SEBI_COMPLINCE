@@ -22,6 +22,34 @@ export interface IPayment extends Document {
   planValidityDays?: number | null;
   paymentGatewayId?: Types.ObjectId | null;
   paymentDate?: Date | null;
+  serviceStartDate?: Date | null;
+  approvalStatus?: 'DIRECT_APPROVED' | 'L1_PENDING' | 'L2_PENDING' | 'APPROVED' | 'REJECTED';
+  l1Details?: {
+    submittedBy?: Types.ObjectId | null;
+    submittedByName?: string | null;
+    planId?: Types.ObjectId | null;
+    amount?: number | null;
+    validityDays?: number | null;
+    discount?: number | null;
+    paymentDate?: Date | null;
+    serviceStartDate?: Date | null;
+    remarks?: string | null;
+    submittedAt?: Date | null;
+  } | null;
+  l2Details?: {
+    reviewedBy?: Types.ObjectId | null;
+    reviewedByName?: string | null;
+    action?: 'APPROVED' | 'REJECTED';
+    finalPlanId?: Types.ObjectId | null;
+    finalAmount?: number | null;
+    finalValidityDays?: number | null;
+    finalDiscount?: number | null;
+    finalPaymentDate?: Date | null;
+    finalServiceStartDate?: Date | null;
+    remarks?: string | null;
+    rejectionReason?: string | null;
+    reviewedAt?: Date | null;
+  } | null;
   couponId?: Types.ObjectId | null;
   discountApplied?: number | null;
   gstEnabled?: boolean | null;
@@ -54,6 +82,10 @@ export const PaymentSchema = new Schema<IPayment>(
     planValidityDays: { type: Number, default: null },
     paymentGatewayId: { type: Schema.Types.ObjectId, default: null },
     paymentDate: { type: Date, default: null },
+    serviceStartDate: { type: Date, default: null },
+    approvalStatus: { type: String, enum: ['DIRECT_APPROVED', 'L1_PENDING', 'L2_PENDING', 'APPROVED', 'REJECTED'], default: 'DIRECT_APPROVED' },
+    l1Details: { type: Schema.Types.Mixed, default: null },
+    l2Details: { type: Schema.Types.Mixed, default: null },
     couponId: { type: Schema.Types.ObjectId, ref: 'Coupon', default: null },
     discountApplied: { type: Number, default: 0 },
     gstEnabled: { type: Boolean, default: null },

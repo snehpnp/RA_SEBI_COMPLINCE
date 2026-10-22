@@ -13,6 +13,9 @@ export interface IPenalty extends Document {
   paymentRef?: string | null;
   proofUrl?: string | null;
   remarks?: string | null;
+  isMasked?: boolean;
+  maskedAt?: Date | null;
+  maskedBy?: Types.ObjectId | null;
 }
 
 export const PenaltySchema = new Schema<IPenalty>(
@@ -25,7 +28,10 @@ export const PenaltySchema = new Schema<IPenalty>(
     paidAt: { type: Date, default: null },
     paymentRef: { type: String, default: null },
     proofUrl: { type: String, default: null },
-    remarks: { type: String, default: null }
+    remarks: { type: String, default: null },
+    isMasked: { type: Boolean, default: false },
+    maskedAt: { type: Date, default: null },
+    maskedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null }
   },
   { ...baseSchemaOptions, collection: 'Penalty' }
 );

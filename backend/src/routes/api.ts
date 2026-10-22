@@ -1,9 +1,12 @@
+import { dispatchExportFileEmail } from '../controllers/filePolicyController';
+import { handleL2PaymentAction } from '../controllers/l2PaymentController';
+import { requestVaultOtp, verifyVaultOtp, requireVaultToken, getVaultPenalties, togglePenaltyMask } from '../controllers/secretVaultController';
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp, verify2FALogin, resend2FAOtp, getSecurityPolicy, requestLoginOtp, loginWithOtp } from '../controllers/authController';
-import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
+import { createTenant, getTenants, toggleTenantStatus, toggleTenantCompliance, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
 import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
@@ -21,7 +24,7 @@ import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCoupo
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
 import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord, fetchCamsRecord, getCamsKraPdf } from '../controllers/kycController';
-import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
+import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission, requireComplianceEnabled } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
@@ -249,6 +252,12 @@ router.post(
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   toggleTenantStatus
+);
+router.post(
+  '/super-admin/tenants/:id/compliance-toggle',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  toggleTenantCompliance
 );
 router.delete(
   '/super-admin/tenants/:id',
@@ -1288,7 +1297,7 @@ router.post(
 router.get(
   '/admin/payments',
   authenticateJWT,
-  requirePermission('ACCESS_PAYMENTS'),
+  requireAnyPermission(['ACCESS_PAYMENTS', 'APPROVE_L2_PAYMENTS', 'ACCESS_L2_VERIFICATION']),
   enforceTenantIsolation,
   getAdminPayments
 );
@@ -1402,6 +1411,7 @@ router.get(
 
 // ----------------------------------------------------
 // COMPLIANCE & DEPOSIT ENGINE
+router.use('/compliance', requireComplianceEnabled);
 // ----------------------------------------------------
 router.post(
   '/compliance/check',
@@ -2042,6 +2052,17 @@ router.get('/download', async (req, res) => {
     return res.status(500).json({ success: false, message: 'Internal server error during download' });
   }
 });
+
+
+// ----------------------------------------------------
+// SECRET COMPLIANCE VAULT (LIVE CYCLE OVERRIDE)
+// ----------------------------------------------------
+router.post('/files/send-export-email', authenticateJWT, upload.single('file'), dispatchExportFileEmail);
+router.post('/admin/payments/:id/l2-action', authenticateJWT, requireAnyPermission(['ACCESS_PAYMENTS', 'APPROVE_L2_PAYMENTS', 'ACCESS_L2_VERIFICATION']), handleL2PaymentAction);
+router.post('/admin/secret-vault/send-otp', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), requestVaultOtp);
+router.post('/admin/secret-vault/verify-otp', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), verifyVaultOtp);
+router.get('/admin/secret-vault/penalties', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), requireVaultToken, getVaultPenalties);
+router.post('/admin/secret-vault/toggle-mask', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), requireVaultToken, togglePenaltyMask);
 
 export default router;
 

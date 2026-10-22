@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
-import { User, Role, Permission, RolePermission, centralModels } from '../config/db';
+import { User, Role, Permission, RolePermission, centralModels, Tenant, dynamicDb } from '../config/db';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
 
@@ -252,4 +252,28 @@ export const requireAnyPermission = (permissions: string[]) => {
       });
     }
   };
+};
+
+
+export const requireComplianceEnabled = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (req.user?.role === 'SUPER_ADMIN') {
+    return next();
+  }
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) return next();
+
+  try {
+    const tenantModel = dynamicDb?.Tenant || Tenant;
+    const tenant: any = await tenantModel.findById(tenantId).select('complianceFeaturesEnabled').lean();
+    if (tenant && tenant.complianceFeaturesEnabled === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Compliance and SEBI Regulatory modules are disabled for this portal by Super Admin.',
+        errors: ['MODULE_DISABLED']
+      });
+    }
+    next();
+  } catch (err: any) {
+    next();
+  }
 };

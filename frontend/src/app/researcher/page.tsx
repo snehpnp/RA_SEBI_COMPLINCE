@@ -1,5 +1,7 @@
 'use client';
 
+import L2PaymentReviewModal from '@/components/admin/L2PaymentReviewModal';
+
 import AdminProfilePage from '../admin/profile/page';
 import StaffProfilePage from '../admin/staff-profile/page';
 import PAProfilePage from '../admin/pa-profile/page';
@@ -112,6 +114,14 @@ const NAV_CONFIG: NavModule[] = [
     accessKey: 'ACCESS_RESEARCH',
     moduleLabel: 'Research Reports',
     moduleDesc: 'Manage and upload PDF research reports',
+  },
+  {
+    tab: 'l2-approvals',
+    label: 'L2 Verification',
+    icon: 'ShieldCheck',
+    accessKey: 'ACCESS_L2_VERIFICATION',
+    moduleLabel: 'L2 Payment Verification',
+    moduleDesc: 'Review, modify, and give final L2 multi-level approval for client plan payments',
   },
   {
     tab: 'delivery-reports',
@@ -290,6 +300,11 @@ function AdminDashboardContent() {
 
   const hasPermission = (permCode: string) => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
+    if (permCode === 'ACCESS_L2_VERIFICATION') {
+      return user?.permissions?.includes('ACCESS_L2_VERIFICATION') ||
+             user?.permissions?.includes('APPROVE_L2_PAYMENTS') ||
+             false;
+    }
     return user?.permissions?.includes(permCode) || false;
   };
 
@@ -497,6 +512,7 @@ function AdminDashboardContent() {
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
   const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
   const [allPayments, setAllPayments] = useState<any[]>([]);
+  const [selectedL2Payment, setSelectedL2Payment] = useState<any | null>(null);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
@@ -1194,8 +1210,9 @@ function AdminDashboardContent() {
         api.getComplianceChecklistHistory().then(res => { if (res.success) setChecklistHistory(res.data); }).catch(() => { });
       }
 
-      if (tab === 'payments') {
+      if (tab === 'payments' || tab === 'l2-approvals') {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+        api.getAdminPlans().then(res => { if (res.success) setAdminPlans(res.data); }).catch(() => { });
       }
 
     } catch (err: any) {
@@ -2820,6 +2837,8 @@ function AdminDashboardContent() {
               if (!hasPermission(mod.accessKey)) return null;
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
               const Icon = ICON_MAP[mod.icon] || Layers;
+              const isL2PendingMod = mod.tab === 'l2-approvals';
+              const l2CountForBadge = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING').length;
 
               if (mod.tab === 'delivery-reports') {
                 const isDeliveryActive = activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_');
@@ -4396,6 +4415,142 @@ function AdminDashboardContent() {
                       )}
                     </div>
                   )}
+
+                  {/* L2 VERIFICATION DESK FOR RESEARCHER */}
+                  {activeTab === 'l2-approvals' && (() => {
+                    const l2PendingPayments = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING');
+                    const l2ApprovedPayments = allPayments.filter((p: any) => p.approvalStatus === 'APPROVED' || p.approvalStatus === 'DIRECT_APPROVED');
+                    const l2RejectedPayments = allPayments.filter((p: any) => p.approvalStatus === 'REJECTED');
+
+                    return (
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-300 dark:border-white/10 pb-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-2xl border border-amber-500/20">
+                              <ShieldCheck className="w-7 h-7" />
+                            </div>
+                            <div>
+                              <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                                <span>L2 Payment Verification</span>
+                                <span className="text-[11px] px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 uppercase tracking-wider font-mono font-bold">
+                                  Approver Desk
+                                </span>
+                              </h2>
+                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                                Review, modify plan parameters, service start date, and grant final L2 authorization before invoice dispatch.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+                              api.getAdminPlans().then(res => { if (res.success) setAdminPlans(res.data); }).catch(() => { });
+                            }}
+                            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Refresh Queue</span>
+                          </button>
+                        </div>
+
+                        {/* Summary Metrics */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-300 dark:border-amber-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">Awaiting L2 Approval</span>
+                              <span className="p-2 rounded-xl bg-amber-200/80 dark:bg-amber-500/20 text-amber-900 dark:text-amber-300"><Clock className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-amber-950 dark:text-white mt-2 font-mono">{l2PendingPayments.length}</div>
+                            <p className="text-xs font-bold text-amber-800 dark:text-amber-300/90 mt-1">Pending Second-Level Clearance</p>
+                          </div>
+                          <div className="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-emerald-900 dark:text-emerald-300">L2 Approved / Active</span>
+                              <span className="p-2 rounded-xl bg-emerald-200/80 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"><CheckCircle2 className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-emerald-950 dark:text-white mt-2 font-mono">{l2ApprovedPayments.length}</div>
+                            <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300/90 mt-1">Authorized &amp; Dispatched</p>
+                          </div>
+                          <div className="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-rose-900 dark:text-rose-300">L2 Rejected</span>
+                              <span className="p-2 rounded-xl bg-rose-200/80 dark:bg-rose-500/20 text-rose-900 dark:text-rose-300"><X className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-rose-950 dark:text-white mt-2 font-mono">{l2RejectedPayments.length}</div>
+                            <p className="text-xs font-bold text-rose-800 dark:text-rose-300/90 mt-1">Declined by Approver</p>
+                          </div>
+                        </div>
+
+                        {/* Payments Table */}
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-white/10 overflow-hidden shadow-sm">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm whitespace-nowrap">
+                              <thead>
+                                <tr className="bg-slate-100 dark:bg-slate-800/90 border-b border-slate-300 dark:border-white/10 text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200 font-black">
+                                  <th className="py-4 px-6">Payment Date</th>
+                                  <th className="py-4 px-6">Service Start Date</th>
+                                  <th className="py-4 px-6">Client Details</th>
+                                  <th className="py-4 px-6">Plan</th>
+                                  <th className="py-4 px-6">Amount</th>
+                                  <th className="py-4 px-6">Mode</th>
+                                  <th className="py-4 px-6 text-right">L2 Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200 dark:divide-white/5 font-medium">
+                                {l2PendingPayments.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={7} className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">
+                                      No pending L2 approval requests. Queue is fully cleared.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  l2PendingPayments.map((p: any) => (
+                                    <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition">
+                                      <td className="py-4 px-6 font-mono text-xs text-slate-900 dark:text-slate-100 font-bold">
+                                        {p.paymentDate ? new Date(p.paymentDate).toLocaleDateString() : new Date(p.createdAt).toLocaleDateString()}
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <span className="inline-block px-2.5 py-1 rounded-md bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700 font-mono font-bold text-xs">
+                                          {p.serviceStartDate ? new Date(p.serviceStartDate).toLocaleDateString() : 'Matches Payment Date'}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <div className="font-bold text-slate-900 dark:text-white text-sm">{p.client?.name || 'Unknown Client'}</div>
+                                        {p.client?.email && <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{p.client.email}</div>}
+                                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{p.client?.user?.mobile || p.client?.mobile || 'N/A'}</div>
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <span className="inline-block px-2.5 py-1 rounded-md bg-indigo-100 text-indigo-900 border border-indigo-300 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700 font-bold text-xs font-mono">
+                                          {p.plan?.name || 'Custom Plan'}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-6 font-black font-mono text-base text-emerald-700 dark:text-emerald-400">
+                                        ₹{Number(p.amount || 0).toLocaleString('en-IN')}
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded border border-slate-300 dark:border-white/10 inline-block">
+                                          {p.paymentMode || 'MANUAL_UPI'}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-6 text-right">
+                                        <button
+                                          onClick={() => setSelectedL2Payment(p)}
+                                          className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shadow-md shadow-amber-600/30 inline-flex items-center gap-1.5 transition-all transform hover:scale-105"
+                                        >
+                                          <ShieldCheck className="w-4 h-4" />
+                                          <span>Review (L2)</span>
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* PAYMENTS TAB (RESTORED) */}
                   {activeTab === 'payments' && (
@@ -9354,6 +9509,20 @@ function AdminDashboardContent() {
             </div>
           </div>
         )}
+
+        {/* L2 Payment Review Modal */}
+        <L2PaymentReviewModal
+          isOpen={!!selectedL2Payment}
+          payment={selectedL2Payment}
+          plans={adminPlans}
+          onClose={() => setSelectedL2Payment(null)}
+          onSuccess={() => {
+            api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+          }}
+          onApproved={() => {
+            api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+          }}
+        />
 
         {/* Logout Modal */}
         {isLogoutModalOpen && (

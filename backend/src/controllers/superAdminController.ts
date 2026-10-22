@@ -453,6 +453,40 @@ export const toggleTenantStatus = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
+export const toggleTenantCompliance = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { enabled } = req.body;
+
+  try {
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+    const query = isObjectId ? { $or: [{ _id: id }, { tenantId: id }] } : { tenantId: id };
+
+    if (dynamicDb.Tenant) {
+      await dynamicDb.Tenant.findOneAndUpdate(
+        query,
+        { $set: { complianceFeaturesEnabled: Boolean(enabled) } },
+        { returnDocument: 'after', lean: true }
+      );
+    }
+    if ((centralModels as any)?.AllCompany) {
+      await (centralModels as any).AllCompany.findOneAndUpdate(
+        query,
+        { $set: { complianceFeaturesEnabled: Boolean(enabled) } }
+      );
+    }
+
+    await tenantConnectionManager.evictTenant(id);
+
+    return res.status(200).json({
+      success: true,
+      message: `Compliance modules have been ${enabled ? 'ENABLED' : 'DISABLED'} for this tenant portal.`,
+      complianceFeaturesEnabled: Boolean(enabled)
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
 export const deleteTenant = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
@@ -1155,6 +1189,9 @@ export const updateTenantDetails = async (req: AuthenticatedRequest, res: Respon
     if (gst !== undefined) tenantUpdateData.gst = String(gst).trim().toUpperCase() || null;
     if (state !== undefined) tenantUpdateData.state = state ? String(state).trim() : null;
     if (status !== undefined && status !== '') tenantUpdateData.status = status;
+    if (req.body.complianceFeaturesEnabled !== undefined) {
+      tenantUpdateData.complianceFeaturesEnabled = req.body.complianceFeaturesEnabled === 'true' || req.body.complianceFeaturesEnabled === true;
+    }
 
     const incomingMobile = supportMobile || req.body.tenantMobile || req.body.mobile;
     if (incomingMobile !== undefined && incomingMobile !== '') {

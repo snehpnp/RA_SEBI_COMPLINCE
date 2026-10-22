@@ -114,6 +114,12 @@ export interface ITenant extends Document {
   goLiveAt?: Date | null;
   goLiveBy?: Types.ObjectId | null;
   complianceCutoffDate?: Date | null;
+  complianceFeaturesEnabled?: boolean;
+  l2ApprovalEnabled?: boolean;
+  l2ApprovalRoleId?: Types.ObjectId | null;
+  fileDownloadPolicy?: 'SYSTEM' | 'EMAIL' | 'BOTH';
+  fileDownloadNotificationEmail?: string | null;
+  maxEmailFileSizeMb?: number;
   createdById?: Types.ObjectId | null;
   deletedAt?: Date | null;
   createdAt: Date;
@@ -235,6 +241,12 @@ export const TenantSchema = new Schema<ITenant>(
     goLiveAt: { type: Date, default: null },
     goLiveBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     complianceCutoffDate: { type: Date, default: null },
+    complianceFeaturesEnabled: { type: Boolean, default: true },
+    l2ApprovalEnabled: { type: Boolean, default: false },
+    l2ApprovalRoleId: { type: Schema.Types.ObjectId, ref: 'Role', default: null },
+    fileDownloadPolicy: { type: String, enum: ['SYSTEM', 'EMAIL', 'BOTH'], default: 'BOTH' },
+    fileDownloadNotificationEmail: { type: String, default: null },
+    maxEmailFileSizeMb: { type: Number, default: 10 },
     createdById: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
   },

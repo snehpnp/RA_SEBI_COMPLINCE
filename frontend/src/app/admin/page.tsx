@@ -1,5 +1,8 @@
 'use client';
 
+import L2PaymentReviewModal from '../../components/admin/L2PaymentReviewModal';
+import SecretComplianceVaultModal from '../../components/admin/SecretComplianceVaultModal';
+
 import AdminProfilePage from './profile/page';
 import StaffProfilePage from './staff-profile/page';
 import PAProfilePage from './pa-profile/page';
@@ -194,6 +197,17 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'Allows viewing and downloading of all uploaded research reports',
   },
   {
+    tab: 'l2-approvals',
+    label: 'L2 Verification',
+    icon: 'ShieldCheck',
+    accessKey: 'ACCESS_L2_VERIFICATION',
+    moduleLabel: 'L2 Verification Desk',
+    moduleDesc: 'Multi-level review, modification, and final authorization for client plan payments before invoice dispatch',
+    subPermissions: [
+      { code: 'APPROVE_L2_PAYMENTS', label: 'Approve / Reject L2 Payments', desc: 'Allows modifying plan details, payment date, service start date and approving or rejecting payments' },
+    ],
+  },
+  {
     tab: 'payments',
     label: 'Payment History',
     icon: 'FileText',
@@ -202,6 +216,7 @@ const NAV_CONFIG: NavModule[] = [
     moduleDesc: 'View all successful client payments and subscriptions',
     subPermissions: [
       { code: 'ACCESS_PAYMENT_QR_VERIFICATION', label: 'QR & Screenshot Verifications', desc: 'Allows viewing and verifying manual QR code payment screenshots' },
+      { code: 'APPROVE_L2_PAYMENTS', label: 'L2 Payment Approval & Modification', desc: 'Allows reviewing, modifying, and giving final L2 approval for client payments' },
     ],
   },
   {
@@ -541,6 +556,23 @@ function AdminDashboardContent() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [isGoLiveModalOpen, setIsGoLiveModalOpen] = useState(false);
+  const [isSecretVaultOpen, setIsSecretVaultOpen] = useState(false);
+  const liveClickCountRef = useRef(0);
+  const liveClickTimerRef = useRef<any>(null);
+
+  const handleLiveBadgeClick = () => {
+    liveClickCountRef.current += 1;
+    if (liveClickCountRef.current === 1) {
+      liveClickTimerRef.current = setTimeout(() => {
+        liveClickCountRef.current = 0;
+      }, 10000); // 10-second window
+    }
+    if (liveClickCountRef.current >= 5) {
+      if (liveClickTimerRef.current) clearTimeout(liveClickTimerRef.current);
+      liveClickCountRef.current = 0;
+      setIsSecretVaultOpen(true);
+    }
+  };
   const [goLivePassword, setGoLivePassword] = useState('');
   const [showGoLivePassword, setShowGoLivePassword] = useState(false);
   const [isSubmittingGoLive, setIsSubmittingGoLive] = useState(false);
@@ -571,6 +603,11 @@ function AdminDashboardContent() {
   const [dashboardStats, setDashboardStats] = useState({ staffCount: 0, clientCount: 0, researchCount: 0, planCount: 0 });
   const [settingsTab, setSettingsTab] = useState<'general' | 'trade-dispatch' | 'integrations' | 'email-templates' | 'reports' | 'policies' | 'billing' | 'security' | 'occupations'>('general');
   const [tenantDetails, setTenantDetails] = useState<any>(null);
+  useEffect(() => {
+    if (tenantDetails?.complianceFeaturesEnabled === false && ['compliance', 'checklist', 'penalty-matrix'].includes(activeTab)) {
+      setActiveTab('dashboard');
+    }
+  }, [tenantDetails?.complianceFeaturesEnabled, activeTab]);
   const [telegramTradeEnabled, setTelegramTradeEnabled] = useState(false);
   const [smsTradeEnabled, setSmsTradeEnabled] = useState(false);
   const [telegramBotToken, setTelegramBotToken] = useState('');
@@ -668,6 +705,13 @@ function AdminDashboardContent() {
     }
     if (permCode === 'ACCESS_CHECKLIST') {
       return user?.permissions?.includes('ACCESS_CHECKLIST') || user?.permissions?.includes('ACCESS_COMPLIANCE') || false;
+    }
+    if (permCode === 'ACCESS_L2_VERIFICATION') {
+      if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
+      return user?.permissions?.includes('ACCESS_L2_VERIFICATION') ||
+             user?.permissions?.includes('APPROVE_L2_PAYMENTS') ||
+             (tenantDetails?.l2ApprovalRoleId && (user?.roleId === tenantDetails.l2ApprovalRoleId || user?.role?._id === tenantDetails.l2ApprovalRoleId)) ||
+             false;
     }
     return user?.permissions?.includes(permCode) || false;
   };
@@ -1005,6 +1049,12 @@ function AdminDashboardContent() {
   const [assignPlanRemarks, setAssignPlanRemarks] = useState('');
   const [assignPaymentRefId, setAssignPaymentRefId] = useState('');
   const [assignPaymentDate, setAssignPaymentDate] = useState('');
+  const [assignServiceStartDate, setAssignServiceStartDate] = useState('');
+  const [selectedL2Payment, setSelectedL2Payment] = useState<any | null>(null);
+  const [l2ApprovalEnabled, setL2ApprovalEnabled] = useState(false);
+  const [fileDownloadPolicy, setFileDownloadPolicy] = useState<'SYSTEM' | 'EMAIL' | 'BOTH'>('BOTH');
+  const [fileDownloadNotificationEmail, setFileDownloadNotificationEmail] = useState('');
+  const [maxEmailFileSizeMb, setMaxEmailFileSizeMb] = useState<number>(10);
   const [assignPlanLoading, setAssignPlanLoading] = useState(false);
   const [assignCustomAmount, setAssignCustomAmount] = useState<string>('');
   const [assignCustomDays, setAssignCustomDays] = useState<string>('');
@@ -1132,7 +1182,8 @@ function AdminDashboardContent() {
             planId: assignPlanId,
             remarks: assignPlanRemarks,
             paymentRefId: assignPaymentRefId,
-            paymentDate: assignPaymentDate
+            paymentDate: assignPaymentDate,
+            serviceStartDate: assignServiceStartDate || assignPaymentDate
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
           if (assignCustomDays.trim()) payload.customDays = Number(assignCustomDays);
@@ -1147,6 +1198,7 @@ function AdminDashboardContent() {
             setAssignPlanRemarks('');
             setAssignPaymentRefId('');
             setAssignPaymentDate('');
+            setAssignServiceStartDate('');
             setAssignCustomAmount('');
             setAssignCustomDays('');
             setAssignCouponCode('');
@@ -1326,7 +1378,7 @@ function AdminDashboardContent() {
   const [upiQrImageFile, setUpiQrImageFile] = useState<File | null>(null);
   const [upiQrImagePreview, setUpiQrImagePreview] = useState('');
   const [upiInstructions, setUpiInstructions] = useState('');
-  const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications'>('all');
+  const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications' | 'l2_pending'>('all');
   const [selectedScreenshotModal, setSelectedScreenshotModal] = useState<{ url: string; clientName: string; planName: string; utr: string; amount: number } | null>(null);
 
   // Smart Verification Modal for QR / Manual Payments
@@ -1731,6 +1783,10 @@ function AdminDashboardContent() {
               if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
               if (t.gstEnabled !== undefined) setGstEnabled(t.gstEnabled !== false);
               if (t.invoiceDispatchPolicy) setInvoiceDispatchPolicy(t.invoiceDispatchPolicy);
+              if (t.l2ApprovalEnabled !== undefined) setL2ApprovalEnabled(Boolean(t.l2ApprovalEnabled));
+              if (t.fileDownloadPolicy !== undefined) setFileDownloadPolicy(t.fileDownloadPolicy);
+              if (t.fileDownloadNotificationEmail !== undefined) setFileDownloadNotificationEmail(t.fileDownloadNotificationEmail || '');
+              if (t.maxEmailFileSizeMb !== undefined) setMaxEmailFileSizeMb(Number(t.maxEmailFileSizeMb) || 10);
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
               if (t.smtpPort) setSmtpPort(t.smtpPort.toString());
@@ -2359,6 +2415,10 @@ function AdminDashboardContent() {
       formData.append('gstEnabled', String(gstEnabled));
       formData.append('gstCalculationType', gstCalculationType);
       formData.append('invoiceDispatchPolicy', invoiceDispatchPolicy);
+      formData.append('l2ApprovalEnabled', String(l2ApprovalEnabled));
+      formData.append('fileDownloadPolicy', fileDownloadPolicy);
+      if (fileDownloadNotificationEmail) formData.append('fileDownloadNotificationEmail', fileDownloadNotificationEmail.trim());
+      formData.append('maxEmailFileSizeMb', String(maxEmailFileSizeMb));
       formData.append('gst', orgGst);
       formData.append('state', tenantState);
       formData.append('address', orgAddress);
@@ -2496,6 +2556,10 @@ function AdminDashboardContent() {
       formData.append('gstEnabled', String(pendingGstTargetState));
       formData.append('gstCalculationType', gstCalculationType);
       formData.append('invoiceDispatchPolicy', invoiceDispatchPolicy);
+      formData.append('l2ApprovalEnabled', String(l2ApprovalEnabled));
+      formData.append('fileDownloadPolicy', fileDownloadPolicy);
+      if (fileDownloadNotificationEmail) formData.append('fileDownloadNotificationEmail', fileDownloadNotificationEmail.trim());
+      formData.append('maxEmailFileSizeMb', String(maxEmailFileSizeMb));
       formData.append('gst', (orgGst || '').trim());
       formData.append('state', tenantState || '');
       formData.append('address', orgAddress || '');
@@ -2547,6 +2611,10 @@ function AdminDashboardContent() {
       formData.append('gstEnabled', String(gstEnabled));
       formData.append('gstCalculationType', gstCalculationType);
       formData.append('invoiceDispatchPolicy', invoiceDispatchPolicy);
+      formData.append('l2ApprovalEnabled', String(l2ApprovalEnabled));
+      formData.append('fileDownloadPolicy', fileDownloadPolicy);
+      if (fileDownloadNotificationEmail) formData.append('fileDownloadNotificationEmail', fileDownloadNotificationEmail.trim());
+      formData.append('maxEmailFileSizeMb', String(maxEmailFileSizeMb));
       formData.append('gst', (orgGst || '').trim());
       formData.append('state', tenantState || '');
       formData.append('address', orgAddress || '');
@@ -4888,7 +4956,8 @@ function AdminDashboardContent() {
       width: '145px',
       selector: (row: any) => row.deadlineAt,
       cell: (row: any) => {
-        if (row.status === 'CLOSED') return <span className="text-slate-400 font-mono text-xs">-</span>;
+        const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
+        if (isResolvedOrClosed) return <span className="text-slate-400 font-mono text-xs">-</span>;
         const daysLeft = Math.ceil((new Date(row.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24));
         const isBreached = daysLeft < 0;
         const isWarning = daysLeft >= 0 && daysLeft <= 5;
@@ -4923,7 +4992,7 @@ function AdminDashboardContent() {
       width: '120px',
       selector: (row: any) => row.status,
       cell: (row: any) => (
-        <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${row.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{row.status}</span>
+        <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${(row.status === 'CLOSED' || row.status === 'RESOLVED') ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{row.status}</span>
       ),
     },
     {
@@ -4931,7 +5000,8 @@ function AdminDashboardContent() {
       width: '120px',
       right: true,
       cell: (row: any) => {
-        if (row.status !== 'CLOSED') {
+        const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
+        if (!isResolvedOrClosed) {
           return (
             <button
               onClick={() => {
@@ -4947,7 +5017,7 @@ function AdminDashboardContent() {
             <button onClick={() => window.open(api.getBaseUrl() + '' + row.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
           );
         }
-        return null;
+        return <span className="text-slate-400 text-xs font-mono">-</span>;
       },
     }
   ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks]);
@@ -5358,6 +5428,7 @@ function AdminDashboardContent() {
           <div className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
             {NAV_CONFIG.map((mod) => {
               if (!hasPermission(mod.accessKey)) return null;
+              if (tenantDetails?.complianceFeaturesEnabled === false && ['compliance', 'checklist', 'penalty-matrix'].includes(mod.tab)) return null;
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
 
               // Pre-Live (Setup Mode): Show only 3 essential panels (Dashboard, Client Management, Settings)
@@ -5492,10 +5563,15 @@ function AdminDashboardContent() {
               const isPaymentsTab = mod.tab === 'payments';
               const isComplianceTab = mod.tab === 'compliance';
               const isChecklistTab = mod.tab === 'checklist';
+              const isL2Tab = mod.tab === 'l2-approvals';
+              const l2PendingCount = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING').length;
 
               let badgeCount = 0;
               let badgeTooltip = '';
-              if (isPaymentsTab && pendingQrCount > 0) {
+              if (isL2Tab && l2PendingCount > 0) {
+                badgeCount = l2PendingCount;
+                badgeTooltip = `${l2PendingCount} Pending L2 Approval`;
+              } else if (isPaymentsTab && pendingQrCount > 0) {
                 badgeCount = pendingQrCount;
                 badgeTooltip = `${pendingQrCount} Pending QR`;
               } else if (isComplianceTab && complianceAlertCount > 0) {
@@ -5792,7 +5868,7 @@ function AdminDashboardContent() {
                   <span>Go Live</span>
                 </button>
               ) : (
-                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-black text-xs flex items-center gap-2 cursor-default shadow-sm select-none">
+                <div onClick={handleLiveBadgeClick} className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-black text-xs flex items-center gap-2 cursor-pointer shadow-sm select-none hover:bg-emerald-500/20 transition-all active:scale-95" title="LIVE Cycle (System Monitoring)">
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -6084,7 +6160,7 @@ function AdminDashboardContent() {
                       </div>
 
                       {/* Compliance Action Center (Upcoming & Overdue Alerts) */}
-                      {(!isStaff || hasPermission('ACCESS_COMPLIANCE')) && (
+                      {tenantDetails?.complianceFeaturesEnabled !== false && (!isStaff || hasPermission('ACCESS_COMPLIANCE')) && (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                           <div className="md:col-span-2 glassmorphism p-6 rounded-2xl border border-slate-400 dark:border-white/10 flex flex-col">
                             <div className="flex justify-between items-center mb-4">
@@ -6154,7 +6230,7 @@ function AdminDashboardContent() {
                       )}
 
                       {/* Dashboard grid (Compliance Analytics & Penalty Matrix) */}
-                      {(!isStaff || hasPermission('ACCESS_COMPLIANCE')) && (() => {
+                      {tenantDetails?.complianceFeaturesEnabled !== false && (!isStaff || hasPermission('ACCESS_COMPLIANCE')) && (() => {
                         // Compute data for compliance health
                         const compliantCount = checklist.filter((item: any) => item.audit?.status === 'COMPLIANT').length;
                         const nonCompliantCount = checklist.filter((item: any) => item.audit?.status === 'NON_COMPLIANT').length;
@@ -7419,6 +7495,177 @@ function AdminDashboardContent() {
                     </div>
                   )}
 
+                  {/* DEDICATED L2 VERIFICATION DESK */}
+                  {activeTab === 'l2-approvals' && (() => {
+                    const l2PendingPayments = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING');
+                    const l2ApprovedPayments = allPayments.filter((p: any) => p.approvalStatus === 'APPROVED' || p.approvalStatus === 'DIRECT_APPROVED');
+                    const l2RejectedPayments = allPayments.filter((p: any) => p.approvalStatus === 'REJECTED');
+
+                    return (
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-300 dark:border-white/5 pb-4">
+                          <div>
+                            <div className="flex items-center gap-3">
+                              <div className="p-2.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-2xl border border-amber-500/20">
+                                <ShieldCheck className="w-7 h-7" />
+                              </div>
+                              <div>
+                                <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                                  <span>L2 Payment Verification</span>
+                                  <span className="text-[11px] px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 uppercase tracking-wider font-mono font-bold">
+                                    Multi-Level Approval Desk
+                                  </span>
+                                </h2>
+                                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                                  Review, modify plan parameters, service start date, and grant final L2 authorization before invoice dispatch.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+                              }}
+                              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>Refresh Queue</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Top Summary Cards */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-300 dark:border-amber-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">Awaiting L2 Approval</span>
+                              <span className="p-2 rounded-xl bg-amber-200/80 dark:bg-amber-500/20 text-amber-900 dark:text-amber-300"><Clock className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-amber-950 dark:text-white mt-2 font-mono">{l2PendingPayments.length}</div>
+                            <p className="text-xs font-bold text-amber-800 dark:text-amber-300/90 mt-1">Pending Second-Level Clearance</p>
+                          </div>
+
+                          <div className="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-emerald-900 dark:text-emerald-300">L2 Approved / Active</span>
+                              <span className="p-2 rounded-xl bg-emerald-200/80 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"><CheckCircle2 className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-emerald-950 dark:text-white mt-2 font-mono">{l2ApprovedPayments.length}</div>
+                            <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300/90 mt-1">Authorized &amp; Dispatched</p>
+                          </div>
+
+                          <div className="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-rose-900 dark:text-rose-300">L2 Rejected</span>
+                              <span className="p-2 rounded-xl bg-rose-200/80 dark:bg-rose-500/20 text-rose-900 dark:text-rose-300"><X className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-rose-950 dark:text-white mt-2 font-mono">{l2RejectedPayments.length}</div>
+                            <p className="text-xs font-bold text-rose-800 dark:text-rose-300/90 mt-1">Declined by Approver</p>
+                          </div>
+                        </div>
+
+                        {/* Queue Table */}
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-white/10 overflow-hidden shadow-sm">
+                          <div className="overflow-x-auto">
+                            <DataTable
+                              columns={[
+                                {
+                                  name: 'Payment Date',
+                                  width: '130px',
+                                  selector: (row: any) => row.paymentDate || row.createdAt,
+                                  cell: (row: any) => (
+                                    <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100">
+                                      {row.paymentDate ? new Date(row.paymentDate).toLocaleDateString() : new Date(row.createdAt).toLocaleDateString()}
+                                    </span>
+                                  )
+                                },
+                                {
+                                  name: 'Service Start Date',
+                                  width: '160px',
+                                  cell: (row: any) => (
+                                    <span className="inline-block px-2.5 py-1 rounded-md bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700 font-mono font-bold text-xs">
+                                      {row.serviceStartDate ? new Date(row.serviceStartDate).toLocaleDateString() : 'Matches Payment Date'}
+                                    </span>
+                                  )
+                                },
+                                {
+                                  name: 'Client Details',
+                                  grow: 2,
+                                  cell: (row: any) => (
+                                    <div className="py-2">
+                                      <div className="font-bold text-slate-900 dark:text-white text-sm">{row.client?.name || 'Unknown Client'}</div>
+                                      {row.client?.email && <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{row.client.email}</div>}
+                                      <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{row.client?.user?.mobile || row.client?.mobile || 'N/A'}</div>
+                                    </div>
+                                  )
+                                },
+                                {
+                                  name: 'Plan',
+                                  width: '150px',
+                                  cell: (row: any) => (
+                                    <span className="inline-block px-2.5 py-1 rounded-md bg-indigo-100 text-indigo-900 border border-indigo-300 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700 font-bold text-xs font-mono">
+                                      {row.plan?.name || 'Custom Plan'}
+                                    </span>
+                                  )
+                                },
+                                {
+                                  name: 'Amount',
+                                  width: '110px',
+                                  cell: (row: any) => (
+                                    <span className="font-black font-mono text-base text-emerald-700 dark:text-emerald-400">
+                                      ₹{Number(row.amount || 0).toLocaleString('en-IN')}
+                                    </span>
+                                  )
+                                },
+                                {
+                                  name: 'Mode',
+                                  width: '130px',
+                                  cell: (row: any) => (
+                                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded border border-slate-300 dark:border-white/10 inline-block">
+                                      {row.paymentMode || 'MANUAL_UPI'}
+                                    </span>
+                                  )
+                                },
+                                {
+                                  name: 'Status',
+                                  width: '130px',
+                                  cell: () => (
+                                    <span className="inline-block px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 font-bold text-xs uppercase tracking-wider font-mono">
+                                      Pending L2
+                                    </span>
+                                  )
+                                },
+                                {
+                                  name: 'Action',
+                                  width: '140px',
+                                  right: true,
+                                  cell: (row: any) => (
+                                    <button
+                                      onClick={() => setSelectedL2Payment(row)}
+                                      className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shadow-md shadow-amber-600/30 inline-flex items-center gap-1.5 transition-all transform hover:scale-105"
+                                    >
+                                      <ShieldCheck className="w-4 h-4" />
+                                      <span>Review (L2)</span>
+                                    </button>
+                                  )
+                                }
+                              ]}
+                              data={l2PendingPayments}
+                              pagination
+                              paginationPerPage={10}
+                              highlightOnHover
+                              responsive
+                              customStyles={tableCustomStyles}
+                              theme={isDarkMode ? 'dark' : 'default'}
+                              noDataComponent={<div className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">No pending L2 approval requests. Queue is fully cleared.</div>}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* PAYMENTS TAB (RESTORED WITH QR VERIFICATIONS SUB-TAB) */}
                   {activeTab === 'payments' && (() => {
                     const qrVerificationsList = allPayments.filter((p: any) => p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl);
@@ -7474,6 +7721,24 @@ function AdminDashboardContent() {
                             </span>
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => setPaymentSubTab('l2_pending')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                              paymentSubTab === 'l2_pending'
+                                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <ShieldCheck className="w-4 h-4 text-amber-300" />
+                            <span>L2 Approvals Queue</span>
+                            {allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING').length > 0 && (
+                              <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500 text-white animate-pulse">
+                                {allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING').length} PENDING
+                              </span>
+                            )}
+                          </button>
+
                           {(hasPermission('ACCESS_PAYMENT_QR_VERIFICATION') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                             <button
                               type="button"
@@ -7514,6 +7779,51 @@ function AdminDashboardContent() {
                                 theme={isDarkMode ? 'dark' : 'default'}
                                 noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No payment history available.</div>}
                               />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* View: L2 Pending Approvals Queue */}
+                        {paymentSubTab === 'l2_pending' && (
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-xs text-amber-200">
+                              <div className="flex items-center gap-2">
+                                <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+                                <span>
+                                  <strong>L2 Verification Queue:</strong> All payments submitted by staff or assigned directly await second-level authorization. Click <strong>Review &amp; Approve</strong> to modify plan, dates, discount, or reject.
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
+                              <div className="overflow-x-auto">
+                                <DataTable
+                                  columns={[
+                                    ...paymentColumns,
+                                    {
+                                      name: 'L2 Action',
+                                      width: '140px',
+                                      cell: (row: any) => (
+                                        <button
+                                          onClick={() => setSelectedL2Payment(row)}
+                                          className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 transition-all"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                          <span>L2 Review</span>
+                                        </button>
+                                      )
+                                    }
+                                  ]}
+                                  data={allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING')}
+                                  pagination
+                                  paginationPerPage={10}
+                                  highlightOnHover
+                                  responsive
+                                  customStyles={tableCustomStyles}
+                                  theme={isDarkMode ? 'dark' : 'default'}
+                                  noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No pending L2 approval requests. All payments are verified.</div>}
+                                />
+                              </div>
                             </div>
                           </div>
                         )}
@@ -8330,7 +8640,7 @@ function AdminDashboardContent() {
                                   <span className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">Complaints Overview</span>
                                   <p className="text-4xl font-extrabold mt-2 text-slate-900 dark:text-white">{complaints.filter((c: any) => c.status === 'OPEN').length} <span className="text-sm font-medium text-slate-500 dark:text-slate-500">Open</span></p>
                                   <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-3 space-y-1">
-                                    <div className="flex justify-between items-center gap-4"><span>Resolved:</span> <strong className="text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 bg-emerald-500/10 rounded">{complaints.filter((c: any) => c.status === 'CLOSED').length}</strong></div>
+                                    <div className="flex justify-between items-center gap-4"><span>Resolved:</span> <strong className="text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 bg-emerald-500/10 rounded">{complaints.filter((c: any) => c.status === 'CLOSED' || c.status === 'RESOLVED').length}</strong></div>
                                     <div className="flex justify-between items-center gap-4"><span>Breached SLA:</span> <strong className="text-rose-600 dark:text-rose-400 px-1.5 py-0.5 bg-rose-500/10 rounded">{complaints.filter((c: any) => c.status === 'OPEN' && new Date(c.deadlineAt).getTime() <= Date.now()).length}</strong></div>
                                   </div>
                                 </div>
@@ -8645,7 +8955,7 @@ function AdminDashboardContent() {
                               </div>
                               <div className="glassmorphism p-6 rounded-2xl border border-red-500/30 flex items-center space-x-4">
                                 <div className="p-4 bg-red-500/20 text-red-600 dark:text-red-400 rounded-full"><CheckCircle className="h-6 w-6" /></div>
-                                <div><p className="text-sm text-slate-600 dark:text-slate-400 font-medium">Resolved Complaints</p><p className="text-2xl font-bold text-slate-900 dark:text-white">{complaints.filter((c: any) => c.status === 'CLOSED').length}</p></div>
+                                <div><p className="text-sm text-slate-600 dark:text-slate-400 font-medium">Resolved Complaints</p><p className="text-2xl font-bold text-slate-900 dark:text-white">{complaints.filter((c: any) => c.status === 'CLOSED' || c.status === 'RESOLVED').length}</p></div>
                               </div>
                             </div>
 
@@ -9499,9 +9809,34 @@ function AdminDashboardContent() {
                                     required
                                     max={new Date().toISOString().split('T')[0]}
                                     value={assignPaymentDate}
-                                    onChange={e => setAssignPaymentDate(e.target.value)}
+                                    onChange={e => {
+                                      const pVal = e.target.value;
+                                      setAssignPaymentDate(pVal);
+                                      if (assignServiceStartDate && assignServiceStartDate < pVal) {
+                                        setAssignServiceStartDate(pVal);
+                                      }
+                                    }}
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1.5">Service Start Date *</label>
+                                  <input
+                                    type="date"
+                                    required
+                                    min={assignPaymentDate || undefined}
+                                    value={assignServiceStartDate || assignPaymentDate}
+                                    onChange={e => {
+                                      const sVal = e.target.value;
+                                      if (assignPaymentDate && sVal < assignPaymentDate) {
+                                        toast.error('Service start date cannot be earlier than payment date');
+                                        return;
+                                      }
+                                      setAssignServiceStartDate(sVal);
+                                    }}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-indigo-500/40 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                                  />
+                                  <span className="text-[10px] text-slate-500 mt-0.5 block">Cannot be earlier than payment date</span>
                                 </div>
                               </div>
 
@@ -13320,6 +13655,127 @@ function AdminDashboardContent() {
                               </div>
                             </div>
                           </div>
+
+                          {/* 3. L2 Payment Approval Workflow Card */}
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                                  <span>🛡️ Multi-Level (L2) Payment Approval Workflow</span>
+                                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                                    l2ApprovalEnabled
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300'
+                                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
+                                  }`}>
+                                    {l2ApprovalEnabled ? '● L2 APPROVAL REQUIRED' : '○ DIRECT ACTIVATION (L2 OFF)'}
+                                  </span>
+                                </h3>
+                                <p className="text-xs text-slate-500 max-w-2xl">
+                                  When enabled, manual QR/UPI screenshot payments and direct admin plan assignments will not immediately activate plans or send invoices. They are queued for final L2 review where the approver can modify plan, amount, days, discount, payment date, and service start date before activation.
+                                </p>
+                              </div>
+
+                              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                <input
+                                  type="checkbox"
+                                  checked={l2ApprovalEnabled}
+                                  onChange={e => setL2ApprovalEnabled(e.target.checked)}
+                                  className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* 4. Centralized File Download & Data Security Policy Card */}
+                          <div className="bg-white dark:bg-[#0F172A] p-6 rounded-2xl border border-slate-200 dark:border-slate-800/60 shadow-xl shadow-slate-200/20 dark:shadow-none space-y-5">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-1 flex items-center gap-2">
+                                <span>🔒 Centralized File Download Security Policy</span>
+                              </h3>
+                              <p className="text-xs text-slate-500">
+                                Control how exports, reports, and client records are distributed across your organization to protect against data leakage.
+                              </p>
+                            </div>
+
+                            {/* Options: SYSTEM vs EMAIL vs BOTH */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {[
+                                { id: 'SYSTEM', title: '🖥️ Download on System', desc: 'Direct browser download to the user device for authorized staff.' },
+                                { id: 'EMAIL', title: '✉️ Send on Registered Email', desc: 'Staff exports are NEVER saved locally; strictly routed to Admin registered email address.' },
+                                { id: 'BOTH', title: '🔄 Both (System & Email)', desc: 'Allows authorized download while maintaining an audit copy sent to the Admin email.' }
+                              ].map(pol => (
+                                <div
+                                  key={pol.id}
+                                  onClick={() => setFileDownloadPolicy(pol.id as any)}
+                                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                                    fileDownloadPolicy === pol.id
+                                      ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/20 shadow-md ring-2 ring-indigo-500/20'
+                                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span className="font-bold text-xs text-slate-800 dark:text-white">{pol.title}</span>
+                                    <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${
+                                      fileDownloadPolicy === pol.id ? 'border-indigo-600 bg-indigo-600' : 'border-slate-400'
+                                    }`}>
+                                      {fileDownloadPolicy === pol.id && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 leading-relaxed">{pol.desc}</p>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Additional Email & Threshold Inputs */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-white/5">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                  Secondary Notification Email for Downloads (Optional)
+                                </label>
+                                <input
+                                  type="email"
+                                  value={fileDownloadNotificationEmail}
+                                  onChange={e => setFileDownloadNotificationEmail(e.target.value)}
+                                  placeholder="e.g. audit@company.com or ca@firm.com"
+                                  className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                                />
+                                <span className="text-[10px] text-slate-500 mt-1 block">
+                                  If set, all file exports dispatched via email will also be CC&apos;d to this address.
+                                </span>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                  Max Attachment Size Limit (MB)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="25"
+                                  value={maxEmailFileSizeMb}
+                                  onChange={e => setMaxEmailFileSizeMb(Number(e.target.value) || 10)}
+                                  className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono"
+                                />
+                                <span className="text-[10px] text-slate-500 mt-1 block">
+                                  Exports exceeding this size prompt Admin for local save, while blocking staff direct downloads.
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Save Button for Billing & Security */}
+                            <div className="flex justify-end pt-3">
+                              <button
+                                type="button"
+                                disabled={savingTradeDispatch}
+                                onClick={handleSaveSettings}
+                                className="px-5 py-2.5 bg-primary-600 hover:bg-primary-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-primary-600/30 transition-all flex items-center gap-2"
+                              >
+                                {savingTradeDispatch && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                <span>Save Workflow &amp; Security Settings</span>
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
 
@@ -14491,6 +14947,7 @@ function AdminDashboardContent() {
                                         onClick={() => {
                                           const allPerms: string[] = [];
                                           NAV_CONFIG.forEach(mod => {
+                                            if (tenantDetails?.complianceFeaturesEnabled === false && ['compliance', 'checklist', 'penalty-matrix'].includes(mod.tab)) return;
                                             allPerms.push(mod.accessKey);
                                             if (mod.subPermissions) mod.subPermissions.forEach(sp => allPerms.push(sp.code));
                                           });
@@ -14514,6 +14971,7 @@ function AdminDashboardContent() {
                               {/* AUTO-GENERATED from NAV_CONFIG — add new modules in NAV_CONFIG at the top of this file */}
                               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                                 {NAV_CONFIG.filter(mod => {
+                                  if (tenantDetails?.complianceFeaturesEnabled === false && ['compliance', 'checklist', 'penalty-matrix'].includes(mod.tab)) return false;
                                   if (!permissionSearchQuery) return true;
                                   const q = permissionSearchQuery.toLowerCase();
                                   return mod.moduleLabel.toLowerCase().includes(q) ||
@@ -16734,6 +17192,22 @@ function AdminDashboardContent() {
           </div>
         )}
 
+
+        <SecretComplianceVaultModal
+          isOpen={isSecretVaultOpen}
+          onClose={() => setIsSecretVaultOpen(false)}
+        />
+
+        <L2PaymentReviewModal
+          isOpen={Boolean(selectedL2Payment)}
+          payment={selectedL2Payment}
+          plans={adminPlans}
+          onClose={() => setSelectedL2Payment(null)}
+          onSuccess={() => {
+            loadData();
+            api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); });
+          }}
+        />
 
         {/* ====================================================
             PRODUCTION GO-LIVE AUTHORIZATION MODAL

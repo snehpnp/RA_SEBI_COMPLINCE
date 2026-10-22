@@ -757,7 +757,8 @@ function SuperAdminDashboardContent() {
         adminMobile: data.admin?.mobile || '',
         adminEmail: data.admin?.email || '',
         adminStatus: data.admin?.status || 'ACTIVE',
-        adminPassword: ''
+        adminPassword: '',
+        complianceFeaturesEnabled: data.tenant?.complianceFeaturesEnabled !== false
       });
       setProvisionResultMsg(null);
       setApiSyncResultMsg(null);
@@ -2151,6 +2152,29 @@ function SuperAdminDashboardContent() {
                   <div className="col-span-2">
                     <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Address</label>
                     <input type="text" value={editData.address} onChange={e => setEditData({ ...editData, address: e.target.value })} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-900 dark:text-white" />
+                  </div>
+
+                  <div className="col-span-2 my-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-amber-500">SEBI Regulatory & Compliance Desk</span>
+                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${editData.complianceFeaturesEnabled !== false ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                          {editData.complianceFeaturesEnabled !== false ? 'ENABLED' : 'DISABLED / HIDDEN'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Disable to completely hide Compliance Desk, SEBI Checklist, and Penalty Matrix from this tenant admin portal, dashboard, and role permissions.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+                      <input
+                        type="checkbox"
+                        checked={editData.complianceFeaturesEnabled !== false}
+                        onChange={e => setEditData({ ...editData, complianceFeaturesEnabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
                   </div>
 
                   <div className="col-span-2 my-2 border-t border-slate-400 dark:border-white/10 pt-4">

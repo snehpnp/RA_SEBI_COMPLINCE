@@ -3072,6 +3072,21 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (ccAgreementEnabled !== undefined) dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
     if (ccAgreementEmail !== undefined) dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
     if (kycFirst !== undefined) dataToUpdate.kycFirst = kycFirst === 'true' || kycFirst === true;
+    if (req.body.l2ApprovalEnabled !== undefined) {
+      dataToUpdate.l2ApprovalEnabled = req.body.l2ApprovalEnabled === 'true' || req.body.l2ApprovalEnabled === true;
+    }
+    if (req.body.l2ApprovalRoleId !== undefined) {
+      dataToUpdate.l2ApprovalRoleId = req.body.l2ApprovalRoleId ? String(req.body.l2ApprovalRoleId).trim() : null;
+    }
+    if (req.body.fileDownloadPolicy !== undefined) {
+      dataToUpdate.fileDownloadPolicy = req.body.fileDownloadPolicy;
+    }
+    if (req.body.fileDownloadNotificationEmail !== undefined) {
+      dataToUpdate.fileDownloadNotificationEmail = req.body.fileDownloadNotificationEmail ? String(req.body.fileDownloadNotificationEmail).trim() : null;
+    }
+    if (req.body.maxEmailFileSizeMb !== undefined) {
+      dataToUpdate.maxEmailFileSizeMb = Number(req.body.maxEmailFileSizeMb) || 10;
+    }
     if (welcomeEmailText !== undefined) dataToUpdate.welcomeEmailText = welcomeEmailText;
     if (reportDisclaimer !== undefined) dataToUpdate.reportDisclaimer = reportDisclaimer;
     if (files?.logo && files.logo.length > 0) {
@@ -3596,7 +3611,7 @@ export const getTenantAuditLogs = async (req: AuthenticatedRequest, res: Respons
 export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   const clientId = req.params.id || req.params.clientId;
-  const { planId, remarks, paymentRefId, paymentDate, couponCode, customAmount, customDays } = req.body;
+  const { planId, remarks, paymentRefId, paymentDate, serviceStartDate, couponCode, customAmount, customDays } = req.body;
 
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   if (!planId) return res.status(400).json({ success: false, message: 'planId is required.' });
@@ -3732,17 +3747,68 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       endDate: { $gt: new Date() }
     }).sort({ endDate: -1 }).lean();
 
-    let startDate = new Date();
+    const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    const parsedServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : parsedPaymentDate;
+
+    // Strict validation: serviceStartDate >= paymentDate
+    const pDateOnly = new Date(parsedPaymentDate.getFullYear(), parsedPaymentDate.getMonth(), parsedPaymentDate.getDate()).getTime();
+    const sDateOnly = new Date(parsedServiceStartDate.getFullYear(), parsedServiceStartDate.getMonth(), parsedServiceStartDate.getDate()).getTime();
+    if (sDateOnly < pDateOnly) {
+      return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
+    }
+
+    let startDate = parsedServiceStartDate;
     if (existingSub) {
       startDate = new Date(existingSub.endDate);
-    } else if (paymentDate) {
-      const parsed = new Date(paymentDate);
-      if (!isNaN(parsed.getTime())) {
-        startDate = parsed;
-      }
     }
 
     const planValidityDays = customDays !== undefined ? customDays : (plan.durationMonths * 30 || 30);
+
+    // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval
+    if (tenantObj?.l2ApprovalEnabled === true) {
+      const pendingPayment: any = await dynamicDb.Payment.create({
+        tenantId: tenantId || client.tenantId,
+        clientId: actualClientId,
+        planId: plan._id || plan.id,
+        amount: parseFloat(finalTotalAmount.toFixed(2)),
+        paymentMode,
+        transactionRef: paymentRefId,
+        paymentDate: parsedPaymentDate,
+        serviceStartDate: parsedServiceStartDate,
+        status: 'PENDING',
+        approvalStatus: 'L2_PENDING',
+        remarks: finalRemark,
+        verifiedByStaffId: req.user!.id,
+        assignedByAdminName: isAdmin ? assignerName : null,
+        assignedByStaffName: !isAdmin ? assignerName : null,
+        clientCity: (clientProfile as any)?.city || null,
+        clientState: (clientProfile as any)?.state || null,
+        tenantState: tenantObj?.state || null,
+        planValidityDays,
+        paymentGatewayId: null,
+        couponId: appliedCouponId,
+        discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null,
+        l1Details: {
+          submittedBy: req.user!.id,
+          submittedByName: assignerName,
+          planId: plan._id || plan.id,
+          amount: parseFloat(finalTotalAmount.toFixed(2)),
+          validityDays: planValidityDays,
+          discount: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : 0,
+          paymentDate: parsedPaymentDate,
+          serviceStartDate: parsedServiceStartDate,
+          remarks: finalRemark,
+          submittedAt: new Date()
+        }
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Plan assignment request submitted successfully and queued for L2 Approval.',
+        isL2Queued: true,
+        data: pendingPayment
+      });
+    }
     const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
 
     const subscription = await dynamicDb.Subscription.create({

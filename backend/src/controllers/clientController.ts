@@ -1199,7 +1199,9 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
     approvalMode, // 'FULL' | 'PRORATED' | 'DISCOUNT'
     customValidityDays,
     discountApplied,
-    transactionRef
+    transactionRef,
+    paymentDate,
+    serviceStartDate
   } = req.body;
 
   try {
@@ -1215,6 +1217,8 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
     const plan: any = payment.planId ? await dynamicDb.Plan.findById(payment.planId).lean() : null;
     const defaultValidityDays = (plan?.durationMonths ? plan.durationMonths * 30 : 30);
     const fullPlanPrice = Number(plan?.amount || plan?.price || payment.amount || 0);
+
+
 
     if (status === 'SUCCESS') {
       if (receivedAmount !== undefined && fullPlanPrice > 0 && Number(receivedAmount) > fullPlanPrice) {
@@ -1253,8 +1257,23 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       ? Boolean(payment.gstEnabled)
       : (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') ? false : isTenantGst);
 
+    const pDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
+    const sDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : pDate);
+
+    // Validate: serviceStartDate >= paymentDate
+    const pDateOnly = new Date(pDate.getFullYear(), pDate.getMonth(), pDate.getDate()).getTime();
+    const sDateOnly = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate()).getTime();
+    if (status === 'SUCCESS' && sDateOnly < pDateOnly) {
+      return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
+    }
+
+    const isL2Required = Boolean(tenantDoc?.l2ApprovalEnabled === true);
+
     const paymentUpdatePayload: any = {
-      status,
+      status: isL2Required && status === 'SUCCESS' ? 'PENDING' : status,
+      approvalStatus: isL2Required && status === 'SUCCESS' ? 'L2_PENDING' : (status === 'SUCCESS' ? 'DIRECT_APPROVED' : 'REJECTED'),
+      paymentDate: pDate,
+      serviceStartDate: sDate,
       remarks: effectiveRemarks,
       verifiedByStaffId: req.user!.id,
       amount: effectiveAmount,
@@ -1265,6 +1284,21 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       gstCalculationType: payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE'
     };
 
+    if (isL2Required && status === 'SUCCESS') {
+      paymentUpdatePayload.l1Details = {
+        submittedBy: req.user!.id,
+        submittedByName: req.user?.email || 'Staff',
+        planId: payment.planId,
+        amount: effectiveAmount,
+        validityDays: effectiveValidityDays,
+        discount: effectiveDiscount,
+        paymentDate: pDate,
+        serviceStartDate: sDate,
+        remarks: effectiveRemarks,
+        submittedAt: new Date()
+      };
+    }
+
     if (transactionRef && typeof transactionRef === 'string' && transactionRef.trim()) {
       paymentUpdatePayload.transactionRef = transactionRef.trim();
     }
@@ -1274,6 +1308,15 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       { $set: paymentUpdatePayload },
       { returnDocument: 'after', lean: true }
     );
+
+    if (status === 'SUCCESS' && isL2Required) {
+      return res.status(200).json({
+        success: true,
+        message: 'Payment verified by L1. Queued for final L2 Approval.',
+        isL2Queued: true,
+        data: updatedPayment
+      });
+    }
 
     if (status === 'SUCCESS') {
       if (plan) {
