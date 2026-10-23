@@ -511,6 +511,8 @@ function AdminDashboardContent() {
   const [complaintAtrProof, setComplaintAtrProof] = useState<File | null>(null);
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
   const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
+  const [viewingComplaint, setViewingComplaint] = useState<any | null>(null);
+  const [viewingAuditDetail, setViewingAuditDetail] = useState<any | null>(null);
   const [allPayments, setAllPayments] = useState<any[]>([]);
   const [selectedL2Payment, setSelectedL2Payment] = useState<any | null>(null);
   const [paymentSearch, setPaymentSearch] = useState('');
@@ -1213,6 +1215,7 @@ function AdminDashboardContent() {
       if (tab === 'payments' || tab === 'l2-approvals') {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
         api.getAdminPlans().then(res => { if (res.success) setAdminPlans(res.data); }).catch(() => { });
+        api.getAdminCategories().then(res => { if (res.success) setCategories(res.data); }).catch(() => { });
       }
 
     } catch (err: any) {
@@ -4499,7 +4502,7 @@ function AdminDashboardContent() {
                               <tbody className="divide-y divide-slate-200 dark:divide-white/5 font-medium">
                                 {l2PendingPayments.length === 0 ? (
                                   <tr>
-                                    <td colSpan={7} className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">
+                                    <td colSpan={9} className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">
                                       No pending L2 approval requests. Queue is fully cleared.
                                     </td>
                                   </tr>
@@ -5490,7 +5493,7 @@ function AdminDashboardContent() {
                                 {(pageData) => (
                                   <table className="w-full text-left">
                                     <thead className="bg-slate-100 dark:bg-white/5 text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400 border-b border-slate-400 dark:border-white/10">
-                                      <tr><th className="px-6 py-4">Client</th><th className="px-6 py-4">Source</th><th className="px-6 py-4">Subject</th><th className="px-6 py-4">Received</th><th className="px-6 py-4">Deadline</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Action</th></tr>
+                                      <tr><th className="px-6 py-4">Client</th><th className="px-6 py-4">Source</th><th className="px-6 py-4">Subject</th><th className="px-6 py-4">Received</th><th className="px-6 py-4">Deadline</th><th className="px-6 py-4">Resolved Date</th><th className="px-6 py-4">Resolution SLA</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Action</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-sm">
                                       {pageData.length === 0 ? (
@@ -5505,16 +5508,36 @@ function AdminDashboardContent() {
                                             <td className="px-6 py-4 font-medium">{c.clientName}</td>
                                             <td className="px-6 py-4">{c.source} {c.scoresRefId && <span className="block text-xs text-slate-600 dark:text-slate-400">{c.scoresRefId}</span>}</td>
                                             <td className="px-6 py-4">{c.subject}</td>
-                                            <td className="px-6 py-4">{new Date(c.receivedAt).toLocaleDateString()}</td>
+                                            <td className="px-6 py-4">{c.receivedAt ? new Date(c.receivedAt).toLocaleDateString() : '-'}</td>
+                                            <td className="px-6 py-4">{c.deadlineAt ? new Date(c.deadlineAt).toLocaleDateString() : '-'}</td>
+                                            <td className="px-6 py-4 font-medium">{(c.status === 'CLOSED' || c.status === 'RESOLVED') && (c.resolvedAt || c.updatedAt) ? new Date(c.resolvedAt || c.updatedAt).toLocaleDateString() : '-'}</td>
                                             <td className="px-6 py-4">
-                                              {c.status === 'CLOSED' ? '-' : (
-                                                <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                                  {daysLeft} days left
-                                                </span>
+                                              {(c.status === 'CLOSED' || c.status === 'RESOLVED') ? (
+                                                (() => {
+                                                  const resDate = c.resolvedAt || c.updatedAt;
+                                                  if (!resDate || !c.deadlineAt) return <span className="text-slate-400 font-mono text-xs">-</span>;
+                                                  const diff = Math.ceil((new Date(resDate).getTime() - new Date(c.deadlineAt).getTime()) / (1000 * 3600 * 24));
+                                                  if (diff <= 0) {
+                                                    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 whitespace-nowrap"><CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> Resolved Timely</span>;
+                                                  } else {
+                                                    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 whitespace-nowrap"><AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" /> {diff} {diff === 1 ? 'day' : 'days'} Overdue</span>;
+                                                  }
+                                                })()
+                                              ) : (
+                                                (() => {
+                                                  const daysLeft = c.deadlineAt ? Math.ceil((new Date(c.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24)) : 0;
+                                                  if (daysLeft < 0) {
+                                                    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 whitespace-nowrap animate-pulse"><AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" /> {Math.abs(daysLeft)} days Overdue</span>;
+                                                  } else if (daysLeft === 0) {
+                                                    return <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 whitespace-nowrap">Due Today</span>;
+                                                  } else {
+                                                    return <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${daysLeft <= 5 ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/30' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'}`}>{daysLeft} days left</span>;
+                                                  }
+                                                })()
                                               )}
                                             </td>
                                             <td className="px-6 py-4">
-                                              <span className={`px-2 py-1 rounded-md text-xs font-bold ${c.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{c.status}</span>
+                                              <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${(c.status === 'CLOSED' || c.status === 'RESOLVED') ? (((c.resolvedAt || c.updatedAt) && c.deadlineAt && new Date(c.resolvedAt || c.updatedAt).getTime() > new Date(c.deadlineAt).getTime()) ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20') : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20'}`}>{c.status}</span>
                                             </td>
                                             <td className="px-6 py-4">
                                               {c.status !== 'CLOSED' ? (
@@ -9126,6 +9149,176 @@ function AdminDashboardContent() {
                 </div>
               )}
 
+              {/* COMPLAINT DETAILS & ATR RESOLUTION MODAL */}
+              {viewingComplaint && (() => {
+                const isClosed = viewingComplaint.status === 'CLOSED' || viewingComplaint.status === 'RESOLVED';
+                const resDate = viewingComplaint.resolvedAt || (isClosed ? viewingComplaint.updatedAt : null);
+                const resolvedTime = resDate ? new Date(resDate).getTime() : 0;
+                const deadlineTime = viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).getTime() : 0;
+                const diffDays = (isClosed && resolvedTime && deadlineTime)
+                  ? Math.ceil((resolvedTime - deadlineTime) / (1000 * 3600 * 24))
+                  : 0;
+                const isOverdueClosed = isClosed && diffDays > 0;
+                const fullProofUrl = viewingComplaint.atrProofUrl ? (`${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${viewingComplaint.atrProofUrl}`) : null;
+                const isImage = fullProofUrl && fullProofUrl.match(/\.(jpg|jpeg|png|webp|gif)$/i);
+
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white dark:bg-[#0f1523] border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-200">
+                      <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                            <ShieldAlert className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">Complaint & Resolution Details</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">SEBI Grievance / Action Taken Report (ATR)</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setViewingComplaint(null)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                        <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
+                          isClosed
+                            ? (isOverdueClosed ? 'bg-rose-500/10 border-rose-500/25 text-rose-700 dark:text-rose-300' : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300')
+                            : 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300'
+                        }`}>
+                          <div className="flex items-center gap-2.5">
+                            {isClosed ? (
+                              isOverdueClosed ? <AlertTriangle className="h-5 w-5 text-rose-500 shrink-0" /> : <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />
+                            ) : (
+                              <Clock className="h-5 w-5 text-amber-500 shrink-0" />
+                            )}
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-wider">
+                                {isClosed ? (isOverdueClosed ? `Resolved Overdue (${diffDays} days past deadline)` : 'Resolved Timely (Within SEBI 21-Day TAT)') : 'Complaint Status: OPEN'}
+                              </p>
+                              <p className="text-[11px] opacity-80 mt-0.5">
+                                {isClosed ? `Closed on ${new Date(resDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : `Resolution due by ${viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).toLocaleDateString() : 'N/A'}`}
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`px-2.5 py-1 rounded-md text-xs font-black uppercase ${
+                            isClosed
+                              ? (isOverdueClosed ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30')
+                              : 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                          }`}>
+                            {viewingComplaint.status}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Complainant & Grievance Information</h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Client Name</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.clientName || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Client PAN</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">{viewingComplaint.clientPan || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Source</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.source} {viewingComplaint.scoresRefId ? `(${viewingComplaint.scoresRefId})` : ''}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Date Received</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.receivedAt ? new Date(viewingComplaint.receivedAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">SEBI Deadline</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Contact</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">{viewingComplaint.clientMobile || viewingComplaint.clientEmail || '-'}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-200 dark:border-white/5 space-y-1.5">
+                            <span className="text-slate-500 block text-[10px]">Subject</span>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">{viewingComplaint.subject}</p>
+                            {viewingComplaint.description && (
+                              <>
+                                <span className="text-slate-500 block text-[10px] pt-1">Grievance Description</span>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900/60 p-2.5 rounded-lg border border-slate-200 dark:border-white/5 whitespace-pre-wrap">{viewingComplaint.description}</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Action Taken Report (ATR) & Resolution</h4>
+                          <div>
+                            <span className="text-slate-500 block text-[10px] mb-1 font-semibold">Action Taken Remarks (Entered during resolution):</span>
+                            <div className="p-3 bg-white dark:bg-slate-900/60 rounded-xl border border-primary-500/20 text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
+                              {viewingComplaint.resolutionNote || viewingComplaint.remarks ? (
+                                <p className="whitespace-pre-wrap">{viewingComplaint.resolutionNote || viewingComplaint.remarks}</p>
+                              ) : (
+                                <p className="text-slate-400 italic">No action taken remarks entered.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block text-[10px] mb-1.5 font-semibold">Attached ATR Proof Document:</span>
+                            {fullProofUrl ? (
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/5 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-xs block">
+                                    📎 {viewingComplaint.atrProofUrl.split('/').pop()}
+                                  </span>
+                                  <a
+                                    href={fullProofUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold flex items-center gap-1 transition"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" /> Open File
+                                  </a>
+                                </div>
+
+                                {isImage && (
+                                  <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-white/10 bg-black/5 dark:bg-black/30 p-2 flex justify-center">
+                                    <img
+                                      src={fullProofUrl}
+                                      alt="ATR Proof Attachment"
+                                      className="max-h-60 object-contain rounded cursor-pointer hover:opacity-95 transition"
+                                      onClick={() => window.open(fullProofUrl, '_blank')}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900/40 border border-dashed border-slate-300 dark:border-white/10 text-slate-400 text-xs italic">
+                                No ATR document was uploaded for this record.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end p-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <button
+                          type="button"
+                          onClick={() => setViewingComplaint(null)}
+                          className="px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* NON-ADMIN CLIENT VIEWS */}
               {activeTab === 'complaintDataView' && (
                 <CustomPageView page={{ slug: 'complaint-status', title: 'Complaint Data' }} />
@@ -9515,6 +9708,8 @@ function AdminDashboardContent() {
           isOpen={!!selectedL2Payment}
           payment={selectedL2Payment}
           plans={adminPlans}
+          categories={categories}
+          currentUser={user}
           onClose={() => setSelectedL2Payment(null)}
           onSuccess={() => {
             api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });

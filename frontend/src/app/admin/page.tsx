@@ -1,6 +1,7 @@
 'use client';
 
 import L2PaymentReviewModal from '../../components/admin/L2PaymentReviewModal';
+import L1L2AuditModal from '../../components/admin/L1L2AuditModal';
 import SecretComplianceVaultModal from '../../components/admin/SecretComplianceVaultModal';
 
 import AdminProfilePage from './profile/page';
@@ -957,11 +958,14 @@ function AdminDashboardContent() {
   const [complaintAtrProof, setComplaintAtrProof] = useState<File | null>(null);
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
   const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
+  const [viewingComplaint, setViewingComplaint] = useState<any | null>(null);
+  const [viewingAuditDetail, setViewingAuditDetail] = useState<any | null>(null);
   const [allPayments, setAllPayments] = useState<any[]>([]);
   const pendingQrCount = useMemo(() => {
     return allPayments.filter((p: any) =>
       (p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl) &&
-      (p.status || 'PENDING').toUpperCase() === 'PENDING'
+      (p.status || 'PENDING').toUpperCase() === 'PENDING' &&
+      p.approvalStatus !== 'L2_PENDING'
     ).length;
   }, [allPayments]);
 
@@ -1051,6 +1055,8 @@ function AdminDashboardContent() {
   const [assignPaymentDate, setAssignPaymentDate] = useState('');
   const [assignServiceStartDate, setAssignServiceStartDate] = useState('');
   const [selectedL2Payment, setSelectedL2Payment] = useState<any | null>(null);
+  const [l2FilterTab, setL2FilterTab] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
+  const [selectedL1L2Diff, setSelectedL1L2Diff] = useState<any | null>(null);
   const [l2ApprovalEnabled, setL2ApprovalEnabled] = useState(false);
   const [fileDownloadPolicy, setFileDownloadPolicy] = useState<'SYSTEM' | 'EMAIL' | 'BOTH'>('BOTH');
   const [fileDownloadNotificationEmail, setFileDownloadNotificationEmail] = useState('');
@@ -1955,7 +1961,7 @@ function AdminDashboardContent() {
         api.getComplianceChecklistHistory().then(res => { if (res.success) setChecklistHistory(res.data); }).catch(() => { });
       }
 
-      if (initStep || tab === 'payments' || tab === 'dashboard') {
+      if (initStep || tab === 'payments' || tab === 'l2-approvals' || tab === 'dashboard') {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
       }
 
@@ -1980,6 +1986,27 @@ function AdminDashboardContent() {
       loadData(false);
     }
   }, [activeTab]);
+
+  // Real-time auto-refresh for L2 queue and payments desk
+  useEffect(() => {
+    const pollTimer = setInterval(() => {
+      api.getAdminPayments().then(res => {
+        if (res?.success && Array.isArray(res.data)) {
+          setAllPayments(prev => {
+            if (
+              prev.length !== res.data.length ||
+              (prev[0] && res.data[0] && (prev[0].id !== res.data[0].id || prev[0].approvalStatus !== res.data[0].approvalStatus))
+            ) {
+              return res.data;
+            }
+            return prev;
+          });
+        }
+      }).catch(() => {});
+    }, 6000);
+
+    return () => clearInterval(pollTimer);
+  }, []);
 
   const salesAndClientChartData = useMemo(() => {
     const formatPeriod = (dateStr: string, timeframe: 'monthly' | 'yearly') => {
@@ -4349,7 +4376,7 @@ function AdminDashboardContent() {
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={() => {
-                    import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id || row._id, `Invoice_${row.transactionRef}.pdf`)).catch(() => toast.error('Failed to download invoice'));
+                    import('@/services/api').then(m => m.default.downloadInvoicePdf(row.id || row._id, `Invoice_${row.transactionRef}.pdf`)).catch((err: any) => toast.error(err?.message || 'Failed to download invoice'));
                   }}
                   className="text-[10px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded font-bold transition inline-flex items-center gap-1 border border-slate-300 dark:border-white/10 shadow-sm"
                   title="Download Official Tax Invoice PDF"
@@ -4359,6 +4386,10 @@ function AdminDashboardContent() {
                 </button>
                 <button
                   onClick={async () => {
+                    if (row.invoiceStatus === 'PENDING_AGREEMENT') {
+                      toast.error('Client Service Agreement is pending. Invoices cannot be sent until agreement is completed.');
+                      return;
+                    }
                     const pId = row.id || row._id;
                     const clientEmail = row.client?.email || row.clientEmail || 'Client';
                     setSendingInvoiceId(pId);
@@ -4420,6 +4451,19 @@ function AdminDashboardContent() {
                   <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800 inline-block">
                     ⏳ Agreement Pending
                   </span>
+                </div>
+              )}
+              {(row.l1Details || row.l2Details || row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED' || row.approvalStatus === 'REJECTED' || row.approvalStatus === 'L2_PENDING') && (
+                <div className="pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedL1L2Diff(row)}
+                    className="text-[10px] bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded font-bold transition inline-flex items-center gap-1 border border-amber-300 dark:border-amber-700/50 shadow-sm"
+                    title="View L1 Submission vs L2 Approval Details"
+                  >
+                    <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                    <span>L1/L2 Audit</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -4605,18 +4649,25 @@ function AdminDashboardContent() {
     },
     {
       name: 'Status',
-      width: '120px',
+      width: '140px',
       selector: (row: any) => row.status,
       cell: (row: any) => {
         const s = (row.status || 'PENDING').toUpperCase();
-        if (s === 'SUCCESS') {
+        if (row.approvalStatus === 'L2_PENDING') {
+          return (
+            <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-500/30 flex items-center gap-1 animate-pulse">
+              <ShieldCheck className="w-3 h-3 text-violet-500" /> L1 Verified (L2 Pending)
+            </span>
+          );
+        }
+        if (s === 'SUCCESS' || row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED') {
           return (
             <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" /> Verified
             </span>
           );
         }
-        if (s === 'FAILED') {
+        if (s === 'FAILED' || row.approvalStatus === 'REJECTED') {
           return (
             <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center gap-1">
               <X className="w-3 h-3" /> Rejected
@@ -4625,7 +4676,7 @@ function AdminDashboardContent() {
         }
         return (
           <span className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1 animate-pulse">
-            <Clock className="w-3 h-3" /> Pending
+            <Clock className="w-3 h-3" /> Pending Verification
           </span>
         );
       },
@@ -4636,6 +4687,29 @@ function AdminDashboardContent() {
       right: true,
       cell: (row: any) => {
         const s = (row.status || 'PENDING').toUpperCase();
+        if (row.approvalStatus === 'L2_PENDING') {
+          return (
+            <div className="flex items-center gap-1.5 justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedL2Payment(row)}
+                className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1"
+                title="Review and grant final L2 clearance"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>L2 Review</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedL1L2Diff(row)}
+                className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold border border-slate-300 dark:border-white/10"
+                title="View L1 Verification Audit"
+              >
+                Audit
+              </button>
+            </div>
+          );
+        }
         if (s === 'PENDING') {
           return (
             <div className="flex items-center gap-1.5">
@@ -4670,9 +4744,20 @@ function AdminDashboardContent() {
           );
         }
         return (
-          <span className="text-[11px] text-slate-400 font-medium">
-            {s === 'SUCCESS' ? 'Plan Assigned' : (row.remarks || 'Closed')}
-          </span>
+          <div className="flex items-center gap-1.5 justify-end">
+            <span className="text-[11px] text-slate-400 font-medium">
+              {s === 'SUCCESS' ? 'Plan Assigned' : (row.remarks || 'Closed')}
+            </span>
+            {(row.l1Details || row.l2Details) && (
+              <button
+                type="button"
+                onClick={() => setSelectedL1L2Diff(row)}
+                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded text-[10px] font-bold border border-amber-300 dark:border-amber-700/50"
+              >
+                L1/L2
+              </button>
+            )}
+          </div>
         );
       },
     },
@@ -4824,16 +4909,16 @@ function AdminDashboardContent() {
       cell: (row: any) => <span className="text-slate-600 dark:text-slate-400 max-w-xs truncate" title={row.officerRemarks}>{row.officerRemarks || '—'}</span>,
     },
     {
-      name: 'Proof',
-      width: '100px',
-      cell: (row: any) => row.proofDocumentUrl ? (
+      name: 'Proof / Details',
+      width: '130px',
+      cell: (row: any) => (
         <button
-          onClick={() => window.open(api.getBaseUrl() + '' + row.proofDocumentUrl, '_blank')}
-          className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium underline flex items-center"
+          onClick={() => setViewingAuditDetail(row)}
+          className="text-indigo-600 dark:text-indigo-400 hover:text-slate-900 dark:text-white font-semibold text-xs inline-flex items-center px-2 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition"
         >
-          <Eye className="h-3 w-3 mr-1" /> View
+          <Eye className="h-3 w-3 mr-1" /> View Details
         </button>
-      ) : <span className="text-slate-600">—</span>,
+      ),
     },
     {
       name: 'Updated By',
@@ -4930,34 +5015,73 @@ function AdminDashboardContent() {
   const activeComplaintsColumns = useMemo(() => [
     {
       name: 'Client',
-      width: '160px',
+      width: '150px',
       selector: (row: any) => row.clientName,
       cell: (row: any) => <span className="font-medium">{row.clientName}</span>,
     },
     {
       name: 'Source',
-      width: '140px',
+      width: '130px',
       selector: (row: any) => row.source,
       cell: (row: any) => <div>{row.source} {row.scoresRefId && <span className="block text-xs text-slate-600 dark:text-slate-400">{row.scoresRefId}</span>}</div>,
     },
     {
       name: 'Subject',
-      minWidth: '200px',
+      minWidth: '180px',
       selector: (row: any) => row.subject,
     },
     {
       name: 'Received',
-      width: '130px',
+      width: '110px',
       selector: (row: any) => row.receivedAt,
-      cell: (row: any) => <span>{new Date(row.receivedAt).toLocaleDateString()}</span>,
+      cell: (row: any) => <span>{row.receivedAt ? new Date(row.receivedAt).toLocaleDateString() : '-'}</span>,
     },
     {
       name: 'Deadline',
-      width: '145px',
+      width: '110px',
       selector: (row: any) => row.deadlineAt,
+      cell: (row: any) => <span>{row.deadlineAt ? new Date(row.deadlineAt).toLocaleDateString() : '-'}</span>,
+    },
+    {
+      name: 'Resolved Date',
+      width: '120px',
+      selector: (row: any) => row.resolvedAt || row.updatedAt,
       cell: (row: any) => {
         const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
-        if (isResolvedOrClosed) return <span className="text-slate-400 font-mono text-xs">-</span>;
+        const resDate = row.resolvedAt || (isResolvedOrClosed ? row.updatedAt : null);
+        return <span className="font-medium text-slate-700 dark:text-slate-300">{resDate ? new Date(resDate).toLocaleDateString() : '-'}</span>;
+      },
+    },
+    {
+      name: 'Resolution SLA',
+      width: '170px',
+      cell: (row: any) => {
+        const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
+        if (isResolvedOrClosed) {
+          const resDate = row.resolvedAt || row.updatedAt;
+          if (!resDate || !row.deadlineAt) return <span className="text-slate-400 font-mono text-xs">-</span>;
+          const resolvedTime = new Date(resDate).getTime();
+          const deadlineTime = new Date(row.deadlineAt).getTime();
+          const diffDays = Math.ceil((resolvedTime - deadlineTime) / (1000 * 3600 * 24));
+
+          if (diffDays <= 0) {
+            return (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                Resolved Timely
+              </span>
+            );
+          } else {
+            return (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 whitespace-nowrap">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                {diffDays} {diffDays === 1 ? 'day' : 'days'} Overdue
+              </span>
+            );
+          }
+        }
+
+        if (!row.deadlineAt) return <span className="text-slate-400 font-mono text-xs">-</span>;
         const daysLeft = Math.ceil((new Date(row.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24));
         const isBreached = daysLeft < 0;
         const isWarning = daysLeft >= 0 && daysLeft <= 5;
@@ -4991,36 +5115,64 @@ function AdminDashboardContent() {
       name: 'Status',
       width: '120px',
       selector: (row: any) => row.status,
-      cell: (row: any) => (
-        <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${(row.status === 'CLOSED' || row.status === 'RESOLVED') ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{row.status}</span>
-      ),
+      cell: (row: any) => {
+        const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
+        if (isResolvedOrClosed) {
+          const resDate = row.resolvedAt || row.updatedAt;
+          const resolvedTime = resDate ? new Date(resDate).getTime() : 0;
+          const deadlineTime = row.deadlineAt ? new Date(row.deadlineAt).getTime() : 0;
+          const isOverdue = resolvedTime > deadlineTime && deadlineTime > 0;
+          return (
+            <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${isOverdue ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'}`}>
+              {row.status}
+            </span>
+          );
+        }
+        return (
+          <span className="px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            {row.status}
+          </span>
+        );
+      },
     },
     {
       name: 'Action',
-      width: '120px',
+      width: '130px',
       right: true,
       cell: (row: any) => {
         const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
         if (!isResolvedOrClosed) {
           return (
-            <button
-              onClick={() => {
-                setComplaintResolveId(row.id);
-                setComplaintAtrProof(null);
-                setComplaintAtrRemarks('');
-              }}
-              className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
-            >Resolve</button>
-          );
-        } else if (row.atrProofUrl) {
-          return (
-            <button onClick={() => window.open(api.getBaseUrl() + '' + row.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setComplaintResolveId(row.id);
+                  setComplaintAtrProof(null);
+                  setComplaintAtrRemarks('');
+                }}
+                className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-semibold text-xs underline"
+              >Resolve</button>
+              <button
+                onClick={() => setViewingComplaint(row)}
+                className="text-slate-500 hover:text-slate-900 dark:hover:text-white font-medium text-xs inline-flex items-center"
+                title="View Complaint Details"
+              >
+                <Eye className="h-3 w-3 mr-0.5" /> Details
+              </button>
+            </div>
           );
         }
-        return <span className="text-slate-400 text-xs font-mono">-</span>;
+        return (
+          <button
+            onClick={() => setViewingComplaint(row)}
+            className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-bold text-xs inline-flex items-center px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition"
+          >
+            <Eye className="h-3.5 w-3.5 mr-1" /> View Details
+          </button>
+        );
       },
     }
-  ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks]);
+  ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks, setViewingComplaint]);
 
   const clientColumns = useMemo(() => [
     {
@@ -7501,6 +7653,12 @@ function AdminDashboardContent() {
                     const l2ApprovedPayments = allPayments.filter((p: any) => p.approvalStatus === 'APPROVED' || p.approvalStatus === 'DIRECT_APPROVED');
                     const l2RejectedPayments = allPayments.filter((p: any) => p.approvalStatus === 'REJECTED');
 
+                    const currentL2List = l2FilterTab === 'PENDING'
+                      ? l2PendingPayments
+                      : l2FilterTab === 'APPROVED'
+                      ? l2ApprovedPayments
+                      : l2RejectedPayments;
+
                     return (
                       <div className="space-y-6">
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-300 dark:border-white/5 pb-4">
@@ -7511,13 +7669,13 @@ function AdminDashboardContent() {
                               </div>
                               <div>
                                 <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
-                                  <span>L2 Payment Verification</span>
+                                  <span>L2 Payment Verification Desk</span>
                                   <span className="text-[11px] px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 uppercase tracking-wider font-mono font-bold">
-                                    Multi-Level Approval Desk
+                                    Multi-Level Clearance
                                   </span>
                                 </h2>
                                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                                  Review, modify plan parameters, service start date, and grant final L2 authorization before invoice dispatch.
+                                  Review, verify original L1 submissions, modify plan parameters, and compare L1 vs L2 clearance audits.
                                 </p>
                               </div>
                             </div>
@@ -7535,9 +7693,16 @@ function AdminDashboardContent() {
                           </div>
                         </div>
 
-                        {/* Top Summary Cards */}
+                        {/* Interactive Summary Cards */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-300 dark:border-amber-500/30 shadow-sm">
+                          <div 
+                            onClick={() => setL2FilterTab('PENDING')}
+                            className={`cursor-pointer transition p-5 rounded-2xl border-2 shadow-sm ${
+                              l2FilterTab === 'PENDING'
+                                ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-500 ring-2 ring-amber-400/50'
+                                : 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-500/30 hover:border-amber-400'
+                            }`}
+                          >
                             <div className="flex justify-between items-center">
                               <span className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">Awaiting L2 Approval</span>
                               <span className="p-2 rounded-xl bg-amber-200/80 dark:bg-amber-500/20 text-amber-900 dark:text-amber-300"><Clock className="w-4 h-4" /></span>
@@ -7546,7 +7711,14 @@ function AdminDashboardContent() {
                             <p className="text-xs font-bold text-amber-800 dark:text-amber-300/90 mt-1">Pending Second-Level Clearance</p>
                           </div>
 
-                          <div className="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-500/30 shadow-sm">
+                          <div 
+                            onClick={() => setL2FilterTab('APPROVED')}
+                            className={`cursor-pointer transition p-5 rounded-2xl border-2 shadow-sm ${
+                              l2FilterTab === 'APPROVED'
+                                ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-400/50'
+                                : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-500/30 hover:border-emerald-400'
+                            }`}
+                          >
                             <div className="flex justify-between items-center">
                               <span className="text-xs font-black uppercase tracking-wider text-emerald-900 dark:text-emerald-300">L2 Approved / Active</span>
                               <span className="p-2 rounded-xl bg-emerald-200/80 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"><CheckCircle2 className="w-4 h-4" /></span>
@@ -7555,7 +7727,14 @@ function AdminDashboardContent() {
                             <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300/90 mt-1">Authorized &amp; Dispatched</p>
                           </div>
 
-                          <div className="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-500/30 shadow-sm">
+                          <div 
+                            onClick={() => setL2FilterTab('REJECTED')}
+                            className={`cursor-pointer transition p-5 rounded-2xl border-2 shadow-sm ${
+                              l2FilterTab === 'REJECTED'
+                                ? 'bg-rose-100 dark:bg-rose-950/60 border-rose-500 ring-2 ring-rose-400/50'
+                                : 'bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-500/30 hover:border-rose-400'
+                            }`}
+                          >
                             <div className="flex justify-between items-center">
                               <span className="text-xs font-black uppercase tracking-wider text-rose-900 dark:text-rose-300">L2 Rejected</span>
                               <span className="p-2 rounded-xl bg-rose-200/80 dark:bg-rose-500/20 text-rose-900 dark:text-rose-300"><X className="w-4 h-4" /></span>
@@ -7563,6 +7742,57 @@ function AdminDashboardContent() {
                             <div className="text-3xl font-black text-rose-950 dark:text-white mt-2 font-mono">{l2RejectedPayments.length}</div>
                             <p className="text-xs font-bold text-rose-800 dark:text-rose-300/90 mt-1">Declined by Approver</p>
                           </div>
+                        </div>
+
+                        {/* Sub-tab Filter Switcher */}
+                        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => setL2FilterTab('PENDING')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                              l2FilterTab === 'PENDING'
+                                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <Clock className="w-4 h-4" />
+                            <span>Awaiting L2 Approval</span>
+                            <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
+                              {l2PendingPayments.length}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setL2FilterTab('APPROVED')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                              l2FilterTab === 'APPROVED'
+                                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>L2 Approved / Active</span>
+                            <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
+                              {l2ApprovedPayments.length}
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setL2FilterTab('REJECTED')}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                              l2FilterTab === 'REJECTED'
+                                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
+                                : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            <X className="w-4 h-4" />
+                            <span>L2 Rejected</span>
+                            <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] bg-black/20 dark:bg-white/10 font-mono">
+                              {l2RejectedPayments.length}
+                            </span>
+                          </button>
                         </div>
 
                         {/* Queue Table */}
@@ -7611,7 +7841,7 @@ function AdminDashboardContent() {
                                 },
                                 {
                                   name: 'Amount',
-                                  width: '110px',
+                                  width: '120px',
                                   cell: (row: any) => (
                                     <span className="font-black font-mono text-base text-emerald-700 dark:text-emerald-400">
                                       ₹{Number(row.amount || 0).toLocaleString('en-IN')}
@@ -7628,37 +7858,89 @@ function AdminDashboardContent() {
                                   )
                                 },
                                 {
-                                  name: 'Status',
-                                  width: '130px',
-                                  cell: () => (
-                                    <span className="inline-block px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 font-bold text-xs uppercase tracking-wider font-mono">
-                                      Pending L2
-                                    </span>
-                                  )
+                                  name: 'Approval Status',
+                                  width: '140px',
+                                  cell: (row: any) => {
+                                    if (row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED') {
+                                      return (
+                                        <span className="inline-block px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30 font-bold text-xs uppercase tracking-wider font-mono">
+                                          ✓ L2 Approved
+                                        </span>
+                                      );
+                                    }
+                                    if (row.approvalStatus === 'REJECTED') {
+                                      return (
+                                        <span className="inline-block px-2.5 py-1 rounded-full bg-rose-100 text-rose-900 border border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-500/30 font-bold text-xs uppercase tracking-wider font-mono">
+                                          ✗ L2 Rejected
+                                        </span>
+                                      );
+                                    }
+                                    return (
+                                      <span className="inline-block px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 font-bold text-xs uppercase tracking-wider font-mono">
+                                        Pending L2
+                                      </span>
+                                    );
+                                  }
                                 },
                                 {
-                                  name: 'Action',
-                                  width: '140px',
+                                  name: 'Actions',
+                                  width: '210px',
                                   right: true,
                                   cell: (row: any) => (
-                                    <button
-                                      onClick={() => setSelectedL2Payment(row)}
-                                      className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shadow-md shadow-amber-600/30 inline-flex items-center gap-1.5 transition-all transform hover:scale-105"
-                                    >
-                                      <ShieldCheck className="w-4 h-4" />
-                                      <span>Review (L2)</span>
-                                    </button>
+                                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                      {row.approvalStatus === 'L2_PENDING' ? (
+                                        <button
+                                          onClick={() => setSelectedL2Payment(row)}
+                                          className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shadow-md shadow-amber-600/30 inline-flex items-center gap-1.5 transition-all transform hover:scale-105"
+                                        >
+                                          <ShieldCheck className="w-4 h-4" />
+                                          <span>Review (L2)</span>
+                                        </button>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => setSelectedL1L2Diff(row)}
+                                            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-white/10 inline-flex items-center gap-1 transition"
+                                            title="View L1 vs L2 details"
+                                          >
+                                            <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                            <span>L1 vs L2</span>
+                                          </button>
+                                          {(row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED') && (
+                                            <button
+                                              onClick={() => {
+                                                api.downloadInvoicePdf(row.id || row._id, `Invoice_${row.transactionRef}.pdf`)
+                                                  .catch((err: any) => toast.error(err?.message || 'Failed to download invoice'));
+                                              }}
+                                              className="px-2.5 py-1.5 rounded-xl bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/40 dark:hover:bg-primary-900/40 text-primary-700 dark:text-primary-300 font-bold text-xs border border-primary-200 dark:border-primary-800 inline-flex items-center gap-1 transition"
+                                              title="Download Tax Invoice"
+                                            >
+                                              <FileText className="w-3.5 h-3.5" />
+                                              <span>Invoice</span>
+                                            </button>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
                                   )
                                 }
                               ]}
-                              data={l2PendingPayments}
+                              data={currentL2List}
                               pagination
                               paginationPerPage={10}
                               highlightOnHover
                               responsive
                               customStyles={tableCustomStyles}
                               theme={isDarkMode ? 'dark' : 'default'}
-                              noDataComponent={<div className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">No pending L2 approval requests. Queue is fully cleared.</div>}
+                              noDataComponent={
+                                <div className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">
+                                  {l2FilterTab === 'PENDING'
+                                    ? 'No pending L2 approval requests. Queue is fully cleared.'
+                                    : l2FilterTab === 'APPROVED'
+                                    ? 'No L2 approved payments recorded yet.'
+                                    : 'No L2 rejected payments recorded.'}
+                                </div>
+                              }
                             />
                           </div>
                         </div>
@@ -7666,7 +7948,7 @@ function AdminDashboardContent() {
                     );
                   })()}
 
-                  {/* PAYMENTS TAB (RESTORED WITH QR VERIFICATIONS SUB-TAB) */}
+                                    {/* PAYMENTS TAB (RESTORED WITH QR VERIFICATIONS SUB-TAB) */}
                   {activeTab === 'payments' && (() => {
                     const qrVerificationsList = allPayments.filter((p: any) => p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl);
                     const pendingQrCountLocal = pendingQrCount;
@@ -8006,7 +8288,8 @@ function AdminDashboardContent() {
                                     </div>
                                     <input
                                       type="number"
-                                      min={1}
+                                      step="any"
+                                      min={0.01}
                                       max={planAmount}
                                       value={verifyReceivedAmount || ''}
                                       onChange={(e) => {
@@ -8021,7 +8304,7 @@ function AdminDashboardContent() {
                                           val = planAmount;
                                         }
                                         setVerifyReceivedAmount(val);
-                                        const diff = planAmount - val;
+                                        const diff = Math.max(0, parseFloat((planAmount - val).toFixed(2)));
                                         if (diff > 0) {
                                           const prorated = Math.max(1, Math.round((val / planAmount) * planDays));
                                           setVerifyCustomDays(prorated);
@@ -8201,6 +8484,7 @@ function AdminDashboardContent() {
                                                 </label>
                                                 <input
                                                   type="number"
+                                                  step="any"
                                                   value={verifyCustomDiscount}
                                                   disabled
                                                   onChange={(e) => setVerifyCustomDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
@@ -9021,16 +9305,27 @@ function AdminDashboardContent() {
                                   cell: (p: any) => <div className="text-slate-500 dark:text-slate-500 font-medium"><span className="block max-w-[150px] truncate" title={p.remarks || '-'}>{p.remarks || '-'}</span></div>
                                 },
                                 {
-                                  name: 'Proof',
+                                  name: 'Proof / Details',
                                   cell: (p: any) => (
                                     <div className="text-sm py-2">
-                                      {p.proofUrl ? (
-                                        <a href={getFullUrl(p.proofUrl)} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:text-indigo-300 flex items-center gap-1 font-semibold text-xs">
-                                          <Eye className="w-3 h-3" /> View Image
-                                        </a>
-                                      ) : (
-                                        <span className="text-slate-500 dark:text-slate-500 text-xs">-</span>
-                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => setViewingAuditDetail({
+                                          requirement: p.audit?.requirement || { requirement: p.reason },
+                                          status: p.status,
+                                          officerRemarks: p.remarks || p.reason,
+                                          proofDocumentUrl: p.proofUrl,
+                                          paymentReference: p.paymentReference,
+                                          paidAt: p.paidAt,
+                                          amount: p.amount,
+                                          isPenalty: true,
+                                          reason: p.reason,
+                                          dueDate: p.audit?.dueDate || p.audit?.createdAt
+                                        })}
+                                        className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:text-indigo-300 flex items-center gap-1 font-semibold text-xs px-2 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" /> View Details
+                                      </button>
                                     </div>
                                   )
                                 },
@@ -9701,6 +9996,15 @@ function AdminDashboardContent() {
                                                 setAssignPlanId(p.id);
                                                 setAssignCustomAmount('');
                                                 setAssignCustomDays('');
+                                                const clickedSub = assignPlanClient?.subscriptions?.find((s: any) => {
+                                                  const sPId = String(s.planId?._id || s.planId?.id || s.planId || '');
+                                                  return sPId === String(p.id) && (s.status === 'ACTIVE' || s.status === 'active') && new Date(s.endDate) > new Date();
+                                                });
+                                                if (clickedSub) {
+                                                  const exp = new Date(clickedSub.endDate);
+                                                  const nextD = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate() + 1);
+                                                  setAssignServiceStartDate(nextD.toISOString().split('T')[0]);
+                                                }
                                               }}
                                               className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
                                             >
@@ -9774,7 +10078,7 @@ function AdminDashboardContent() {
                                           if (dVal > totalDays) dVal = totalDays;
                                           setAssignCustomDays(dVal.toString());
                                           if (totalDays > 0) {
-                                            setAssignCustomAmount(Math.round(dVal * (totalAmt / totalDays)).toString());
+                                            setAssignCustomAmount(parseFloat((dVal * (totalAmt / totalDays)).toFixed(2)).toString());
                                           }
                                         }
                                       }
@@ -9819,25 +10123,48 @@ function AdminDashboardContent() {
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
                                 </div>
-                                <div>
-                                  <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1.5">Service Start Date *</label>
-                                  <input
-                                    type="date"
-                                    required
-                                    min={assignPaymentDate || undefined}
-                                    value={assignServiceStartDate || assignPaymentDate}
-                                    onChange={e => {
-                                      const sVal = e.target.value;
-                                      if (assignPaymentDate && sVal < assignPaymentDate) {
-                                        toast.error('Service start date cannot be earlier than payment date');
-                                        return;
-                                      }
-                                      setAssignServiceStartDate(sVal);
-                                    }}
-                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-indigo-500/40 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-                                  />
-                                  <span className="text-[10px] text-slate-500 mt-0.5 block">Cannot be earlier than payment date</span>
-                                </div>
+                                {(() => {
+                                  const assignActiveSubForPlan = assignPlanClient?.subscriptions?.find((s: any) => {
+                                    const sPId = String(s.planId?._id || s.planId?.id || s.planId || '');
+                                    return sPId === String(assignPlanId) && (s.status === 'ACTIVE' || s.status === 'active') && new Date(s.endDate) > new Date();
+                                  });
+                                  const assignExpDate = assignActiveSubForPlan ? new Date(assignActiveSubForPlan.endDate) : null;
+                                  const assignNextDay = assignExpDate ? new Date(assignExpDate.getFullYear(), assignExpDate.getMonth(), assignExpDate.getDate() + 1) : null;
+                                  const assignMinDateStr = assignNextDay ? assignNextDay.toISOString().split('T')[0] : (assignPaymentDate || undefined);
+
+                                  return (
+                                    <div>
+                                      <label className="block text-xs font-semibold text-indigo-600 dark:text-indigo-400 mb-1.5">Service Start Date *</label>
+                                      <input
+                                        type="date"
+                                        required
+                                        min={assignMinDateStr}
+                                        value={assignServiceStartDate || (assignMinDateStr || assignPaymentDate)}
+                                        onChange={e => {
+                                          const sVal = e.target.value;
+                                          if (assignActiveSubForPlan && assignMinDateStr && sVal < assignMinDateStr) {
+                                            toast.error(`Service start date cannot be earlier than ${assignNextDay?.toLocaleDateString('en-IN')} (Current active plan expires on ${assignExpDate?.toLocaleDateString('en-IN')}).`);
+                                            return;
+                                          }
+                                          if (assignPaymentDate && sVal < assignPaymentDate) {
+                                            toast.error('Service start date cannot be earlier than payment date');
+                                            return;
+                                          }
+                                          setAssignServiceStartDate(sVal);
+                                        }}
+                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-indigo-500/40 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                                      />
+                                      {assignActiveSubForPlan && assignExpDate && assignNextDay ? (
+                                        <div className="mt-1.5 p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 text-[11px] text-amber-900 dark:text-amber-300">
+                                          <strong>Sequential Plan Renewal:</strong> Client already has an active subscription for this plan expiring on <strong>{assignExpDate.toLocaleDateString('en-IN')}</strong>.
+                                          Service date defaults to <strong>{assignNextDay.toLocaleDateString('en-IN')}</strong> (day after expiry) and cannot be earlier.
+                                        </div>
+                                      ) : (
+                                        <span className="text-[10px] text-slate-500 mt-0.5 block">Cannot be earlier than payment date</span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
 
                               {/* Custom Fields */}
@@ -9846,6 +10173,7 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Custom Amount (₹)</label>
                                   <input
                                     type="number"
+                                    step="any"
                                     min="0"
                                     value={assignCustomAmount}
                                     onChange={e => {
@@ -9861,14 +10189,19 @@ function AdminDashboardContent() {
                                         const basePrice = selectedPlan.price;
                                         const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, assignCouponCode);
 
-                                        let numericVal = Number(val);
-                                        if (numericVal > totalAmt) numericVal = totalAmt;
-                                        val = numericVal.toString();
-                                        setAssignCustomAmount(val);
-
-                                        if (totalAmt > 0) {
-                                          const costPerDay = totalAmt / totalDays;
-                                          setAssignCustomDays(Math.round(numericVal / costPerDay).toString());
+                                        let numericVal = parseFloat(val);
+                                        if (!isNaN(numericVal)) {
+                                          if (numericVal > totalAmt) {
+                                            numericVal = totalAmt;
+                                            val = numericVal.toString();
+                                          }
+                                          setAssignCustomAmount(val);
+                                          if (totalAmt > 0) {
+                                            const costPerDay = totalAmt / totalDays;
+                                            setAssignCustomDays(Math.max(1, Math.round(numericVal / costPerDay)).toString());
+                                          }
+                                        } else {
+                                          setAssignCustomAmount(val);
                                         }
                                       } else {
                                         setAssignCustomAmount(val);
@@ -9904,7 +10237,7 @@ function AdminDashboardContent() {
 
                                         if (totalDays > 0) {
                                           const costPerDay = totalAmt / totalDays;
-                                          setAssignCustomAmount(Math.round(numericVal * costPerDay).toString());
+                                          setAssignCustomAmount(parseFloat((numericVal * costPerDay).toFixed(2)).toString());
                                         }
                                       } else {
                                         setAssignCustomDays(val);
@@ -15096,7 +15429,7 @@ function AdminDashboardContent() {
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Price (₹)</label>
-                            <input type="number" value={planPrice} onChange={e => setPlanPrice(e.target.value)} required min="1" className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm font-semibold" placeholder="e.g. 15000" />
+                            <input type="number" step="any" value={planPrice} onChange={e => setPlanPrice(e.target.value)} required min="0.01" className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm font-semibold" placeholder="e.g. 15000" />
                           </div>
                         </div>
 
@@ -15611,6 +15944,340 @@ function AdminDashboardContent() {
                   </div>
                 </div>
               )}
+
+              {/* COMPLAINT DETAILS & ATR RESOLUTION MODAL */}
+              {viewingComplaint && (() => {
+                const isClosed = viewingComplaint.status === 'CLOSED' || viewingComplaint.status === 'RESOLVED';
+                const resDate = viewingComplaint.resolvedAt || (isClosed ? viewingComplaint.updatedAt : null);
+                const resolvedTime = resDate ? new Date(resDate).getTime() : 0;
+                const deadlineTime = viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).getTime() : 0;
+                const diffDays = (isClosed && resolvedTime && deadlineTime)
+                  ? Math.ceil((resolvedTime - deadlineTime) / (1000 * 3600 * 24))
+                  : 0;
+                const isOverdueClosed = isClosed && diffDays > 0;
+                const fullProofUrl = viewingComplaint.atrProofUrl ? getFullUrl(viewingComplaint.atrProofUrl) : null;
+                const isImage = fullProofUrl && fullProofUrl.match(/\.(jpg|jpeg|png|webp|gif)$/i);
+
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white dark:bg-[#0f1523] border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-200">
+                      {/* Modal Header */}
+                      <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                            <ShieldAlert className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">Complaint & Resolution Details</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">SEBI Grievance / Action Taken Report (ATR)</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setViewingComplaint(null)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      {/* Modal Content */}
+                      <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                        {/* Status & SLA Banner */}
+                        <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
+                          isClosed
+                            ? (isOverdueClosed ? 'bg-rose-500/10 border-rose-500/25 text-rose-700 dark:text-rose-300' : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300')
+                            : 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300'
+                        }`}>
+                          <div className="flex items-center gap-2.5">
+                            {isClosed ? (
+                              isOverdueClosed ? <AlertTriangle className="h-5 w-5 text-rose-500 shrink-0" /> : <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />
+                            ) : (
+                              <Clock className="h-5 w-5 text-amber-500 shrink-0" />
+                            )}
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-wider">
+                                {isClosed ? (isOverdueClosed ? `Resolved Overdue (${diffDays} days past deadline)` : 'Resolved Timely (Within SEBI 21-Day TAT)') : 'Complaint Status: OPEN'}
+                              </p>
+                              <p className="text-[11px] opacity-80 mt-0.5">
+                                {isClosed ? `Closed on ${new Date(resDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : `Resolution due by ${viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).toLocaleDateString() : 'N/A'}`}
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`px-2.5 py-1 rounded-md text-xs font-black uppercase ${
+                            isClosed
+                              ? (isOverdueClosed ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30')
+                              : 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                          }`}>
+                            {viewingComplaint.status}
+                          </span>
+                        </div>
+
+                        {/* Grievance Details Grid */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Complainant & Grievance Information</h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Client Name</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.clientName || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Client PAN</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">{viewingComplaint.clientPan || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Source</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.source} {viewingComplaint.scoresRefId ? `(${viewingComplaint.scoresRefId})` : ''}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Date Received</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.receivedAt ? new Date(viewingComplaint.receivedAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">SEBI Deadline</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Contact</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">{viewingComplaint.clientMobile || viewingComplaint.clientEmail || '-'}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-200 dark:border-white/5 space-y-1.5">
+                            <span className="text-slate-500 block text-[10px]">Subject</span>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">{viewingComplaint.subject}</p>
+                            {viewingComplaint.description && (
+                              <>
+                                <span className="text-slate-500 block text-[10px] pt-1">Grievance Description</span>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900/60 p-2.5 rounded-lg border border-slate-200 dark:border-white/5 whitespace-pre-wrap">{viewingComplaint.description}</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action Taken Report (ATR) / Resolution Details */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                            <span>Action Taken Report (ATR) & Resolution</span>
+                            {isClosed && (
+                              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold lowercase">
+                                closed on {resDate ? new Date(resDate).toLocaleDateString() : ''}
+                              </span>
+                            )}
+                          </h4>
+
+                          {/* Officer Remarks */}
+                          <div>
+                            <span className="text-slate-500 block text-[10px] mb-1 font-semibold">Action Taken Remarks (Entered during resolution):</span>
+                            <div className="p-3 bg-white dark:bg-slate-900/60 rounded-xl border border-primary-500/20 text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
+                              {viewingComplaint.resolutionNote || viewingComplaint.remarks ? (
+                                <p className="whitespace-pre-wrap">{viewingComplaint.resolutionNote || viewingComplaint.remarks}</p>
+                              ) : (
+                                <p className="text-slate-400 italic">No action taken remarks entered.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Attached ATR Document */}
+                          <div>
+                            <span className="text-slate-500 block text-[10px] mb-1.5 font-semibold">Attached ATR Proof Document:</span>
+                            {fullProofUrl ? (
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/5 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-xs block">
+                                    📎 {viewingComplaint.atrProofUrl.split('/').pop()}
+                                  </span>
+                                  <a
+                                    href={fullProofUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold flex items-center gap-1 transition"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" /> Open File
+                                  </a>
+                                </div>
+
+                                {isImage && (
+                                  <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-white/10 bg-black/5 dark:bg-black/30 p-2 flex justify-center">
+                                    <img
+                                      src={fullProofUrl}
+                                      alt="ATR Proof Attachment"
+                                      className="max-h-60 object-contain rounded cursor-pointer hover:opacity-95 transition"
+                                      onClick={() => window.open(fullProofUrl, '_blank')}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900/40 border border-dashed border-slate-300 dark:border-white/10 text-slate-400 text-xs italic">
+                                No ATR document was uploaded for this record.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Modal Footer */}
+                      <div className="flex items-center justify-end p-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <button
+                          type="button"
+                          onClick={() => setViewingComplaint(null)}
+                          className="px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* COMPLIANCE AUDIT & PENALTY DETAIL MODAL */}
+              {viewingAuditDetail && (() => {
+                const reqTitle = viewingAuditDetail.requirement?.requirement || viewingAuditDetail.requirement || viewingAuditDetail.audit?.requirement?.requirement || viewingAuditDetail.reason || 'SEBI Compliance Rule';
+                const serialNo = viewingAuditDetail.requirement?.serialNo || viewingAuditDetail.serialNo || viewingAuditDetail.audit?.requirement?.serialNo || null;
+                const status = viewingAuditDetail.newStatus || viewingAuditDetail.status || viewingAuditDetail.audit?.status || 'COMPLIANT';
+                const remarks = viewingAuditDetail.officerRemarks || viewingAuditDetail.remarks || viewingAuditDetail.audit?.officerRemarks || null;
+                const rawProof = viewingAuditDetail.proofDocumentUrl || viewingAuditDetail.proofUrl || viewingAuditDetail.audit?.proofDocumentUrl || null;
+                const fullProofUrl = rawProof ? getFullUrl(rawProof) : null;
+                const isImage = fullProofUrl && fullProofUrl.match(/\.(jpg|jpeg|png|webp|gif)$/i);
+                const updatedBy = viewingAuditDetail.updatedByName || (viewingAuditDetail.isPenalty ? 'SEBI Penalty System' : 'Compliance Officer');
+                const updateDate = viewingAuditDetail.createdAt || viewingAuditDetail.updatedAt || viewingAuditDetail.paidAt;
+
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white dark:bg-[#0f1523] border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-200">
+                      {/* Header */}
+                      <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                            <FileCheck className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">Compliance Audit & Verification Details</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">Official audit submission record and remarks</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setViewingAuditDetail(null)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      {/* Content */}
+                      <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                        {/* Requirement Info */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                              {serialNo ? `SR. ${serialNo}` : 'SEBI Rule'}
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase bg-primary-500/15 text-primary-600 dark:text-primary-400 border border-primary-500/30">
+                              {String(status).replace('_', ' ')}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-slate-900 dark:text-white leading-snug">{reqTitle}</p>
+                          {viewingAuditDetail.periodLabel && (
+                            <p className="text-xs text-primary-600 dark:text-primary-400 font-semibold">
+                              Cycle Period: {viewingAuditDetail.periodLabel}
+                            </p>
+                          )}
+                          {viewingAuditDetail.amount && (
+                            <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                              Penalty Amount: ₹{viewingAuditDetail.amount.toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Audit Details */}
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-white/5">
+                            <span className="text-slate-500 block text-[10px]">Updated By</span>
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">{updatedBy}</span>
+                          </div>
+                          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-white/5">
+                            <span className="text-slate-500 block text-[10px]">Updated Date & Time</span>
+                            <span className="font-semibold text-slate-800 dark:text-slate-200">
+                              {updateDate ? new Date(updateDate).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                            </span>
+                          </div>
+                          {viewingAuditDetail.paymentReference && (
+                            <div className="col-span-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-white/5">
+                              <span className="text-slate-500 block text-[10px]">Payment / Transaction Reference</span>
+                              <span className="font-semibold font-mono text-emerald-600 dark:text-emerald-400">{viewingAuditDetail.paymentReference}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Officer Remarks */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-2">
+                          <span className="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">
+                            Officer Observations / Remarks (Entered during update):
+                          </span>
+                          <div className="p-3 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
+                            {remarks ? (
+                              <p className="whitespace-pre-wrap">{remarks}</p>
+                            ) : (
+                              <p className="text-slate-400 italic">No remarks were entered for this update.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Proof Document */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-2.5">
+                          <span className="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">
+                            Uploaded Proof / Compliance Document:
+                          </span>
+                          {fullProofUrl ? (
+                            <div className="p-3 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/10 space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-xs block">
+                                  📎 {String(rawProof).split('/').pop()}
+                                </span>
+                                <a
+                                  href={fullProofUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold flex items-center gap-1 transition"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" /> Open File
+                                </a>
+                              </div>
+
+                              {isImage && (
+                                <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-white/10 bg-black/5 dark:bg-black/30 p-2 flex justify-center">
+                                  <img
+                                    src={fullProofUrl}
+                                    alt="Compliance Proof"
+                                    className="max-h-60 object-contain rounded cursor-pointer hover:opacity-95 transition"
+                                    onClick={() => window.open(fullProofUrl, '_blank')}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="p-3 rounded-xl bg-white dark:bg-slate-900/40 border border-dashed border-slate-300 dark:border-white/10 text-slate-400 text-xs italic">
+                              No document was attached for this record.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="flex items-center justify-end p-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <button
+                          type="button"
+                          onClick={() => setViewingAuditDetail(null)}
+                          className="px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ====================================================
                   ACTIVITY & AUDIT LOGS DESK TAB
@@ -17207,6 +17874,12 @@ function AdminDashboardContent() {
             loadData();
             api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); });
           }}
+        />
+
+        <L1L2AuditModal
+          isOpen={Boolean(selectedL1L2Diff)}
+          payment={selectedL1L2Diff}
+          onClose={() => setSelectedL1L2Diff(null)}
         />
 
         {/* ====================================================

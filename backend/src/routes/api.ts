@@ -1025,7 +1025,7 @@ router.delete(
 router.get(
   '/admin/categories',
   authenticateJWT,
-  requirePermission('ACCESS_PLANS'),
+  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getAdminCategories
 );
@@ -1055,7 +1055,7 @@ router.post(
 router.get(
   '/admin/plans',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH']),
+  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getAdminPlans
 );
@@ -1138,7 +1138,7 @@ router.delete(
 router.get(
   '/admin/coupons',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getCoupons
 );

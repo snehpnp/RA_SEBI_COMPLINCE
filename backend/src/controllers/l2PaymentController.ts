@@ -18,6 +18,8 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     discount,
     paymentDate,
     serviceStartDate,
+    paymentRefId,
+    transactionRef,
     remarks,
     rejectionReason
   } = req.body;
@@ -53,7 +55,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
 
     const userModel = dynamicDb?.User;
     const reviewer: any = userModel ? await userModel.findById(req.user?.id).lean() : null;
-    const reviewerName = reviewer ? `${reviewer.firstName || ''} ${reviewer.lastName || ''}`.trim() : (req.user?.email || 'L2 Approver');
+    const reviewerName = reviewer ? `${reviewer.firstName || ''} ${reviewer.lastName || ''}`.trim() || reviewer.name || reviewer.email : (req.user?.email || 'L2 Approver');
 
     // ─────────────────────────────────────────────────────────────
     // CASE A: REJECT ACTION
@@ -111,6 +113,27 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       });
     }
 
+    // Check if there is an existing active subscription for the same plan (sequential queueing)
+    const subscriptionModel = dynamicDb?.Subscription || Subscription;
+    const existingSub: any = await subscriptionModel.findOne({
+      $or: [{ clientId: client._id }, { clientId: client.userId }],
+      planId: selectedPlanId,
+      status: 'ACTIVE',
+      endDate: { $gt: finalPaymentDate }
+    }).sort({ endDate: -1 }).lean();
+
+    if (existingSub) {
+      const expDate = new Date(existingSub.endDate);
+      const minAllowedStartDate = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate() + 1);
+      const minDateOnly = minAllowedStartDate.getTime();
+      if (sDateOnly < minDateOnly) {
+        return res.status(400).json({
+          success: false,
+          message: `Validation Error: Client already has an active subscription for this plan expiring on ${expDate.toLocaleDateString('en-IN')}. The new service start date must be on or after ${minAllowedStartDate.toLocaleDateString('en-IN')}.`
+        });
+      }
+    }
+
     // Calculate subscription end date
     const endDate = new Date(finalServiceStartDate.getTime() + finalValidityDays * 24 * 60 * 60 * 1000);
 
@@ -121,7 +144,6 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     const amountGst = amountTotal - amountBase;
 
     // 1. Create or Activate Subscription
-    const subscriptionModel = dynamicDb?.Subscription || Subscription;
     const subscription = await subscriptionModel.create({
       clientId: client._id || client.id,
       planId: planDoc ? (planDoc._id || planDoc.id) : selectedPlanId,
@@ -133,6 +155,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       amountTotal: parseFloat(amountTotal.toFixed(2)),
       isGstInclusive: isGstActive && tenantObj?.gstCalculationType === 'INCLUSIVE'
     });
+    payment.subscriptionId = subscription._id;
 
     // 2. Invoice Dispatch Policy Check
     const activePolicy = tenantObj?.invoiceDispatchPolicy || 'AFTER_KYC_AGREEMENT';
@@ -148,6 +171,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     payment.status = 'SUCCESS';
     payment.approvalStatus = 'APPROVED';
     payment.planId = planDoc ? (planDoc._id || planDoc.id) : selectedPlanId;
+    if (paymentRefId || transactionRef) { payment.transactionRef = paymentRefId || transactionRef; }
     payment.amount = finalAmount;
     payment.planValidityDays = finalValidityDays;
     payment.discountApplied = finalDiscount;
@@ -162,11 +186,13 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       reviewedByName: reviewerName,
       action: 'APPROVED',
       finalPlanId: planDoc ? (planDoc._id || planDoc.id) : selectedPlanId,
+      finalPlanName: planDoc?.name || payment.plan?.name || 'Approved Plan',
       finalAmount,
       finalValidityDays,
       finalDiscount,
       finalPaymentDate,
       finalServiceStartDate,
+      finalTransactionRef: payment.transactionRef,
       remarks: remarks || 'Approved by L2 Authority',
       reviewedAt: new Date()
     };

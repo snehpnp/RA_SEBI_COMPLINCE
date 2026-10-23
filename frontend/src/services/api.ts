@@ -908,7 +908,12 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to download invoice');
+      let errMessage = 'Failed to download invoice';
+      try {
+        const errorJson = await response.json();
+        if (errorJson.message) errMessage = errorJson.message;
+      } catch (_) {}
+      throw new Error(errMessage);
     }
 
     const blob = await response.blob();

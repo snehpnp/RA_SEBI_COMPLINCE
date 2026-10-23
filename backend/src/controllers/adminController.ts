@@ -3415,6 +3415,26 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
     const coupons = await dynamicDb.Coupon.find({ _id: { $in: couponIds } }).lean();
     const couponMap = new Map(coupons.map((c: any) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
 
+    const userIds = clients.map((c: any) => c.userId?._id || c.userId?.id || c.userId).filter(Boolean);
+    const allLookupIds = [...new Set([...clientIds, ...userIds])];
+    const subscriptions = await dynamicDb.Subscription.find({
+      clientId: { $in: allLookupIds }
+    }).populate('planId').sort({ endDate: -1 }).lean();
+
+    const subMap = new Map<string, any[]>();
+    for (const sub of subscriptions) {
+      const cId = String(sub.clientId);
+      if (!subMap.has(cId)) subMap.set(cId, []);
+      subMap.get(cId)!.push({
+        ...sub,
+        id: String(sub._id || sub.id),
+        plan: sub.planId ? {
+          ...sub.planId,
+          id: String(sub.planId._id || sub.planId.id)
+        } : null
+      });
+    }
+
     const clientMap = new Map(clients.map((c: any) => [
       String(c._id || c.id),
       {
@@ -3424,7 +3444,8 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
         user: c.userId ? {
           ...c.userId,
           id: String(c.userId._id || c.userId.id)
-        } : null
+        } : null,
+        subscriptions: subMap.get(String(c._id || c.id)) || subMap.get(String(c.userId?._id || c.userId?.id || c.userId)) || []
       }
     ]));
     const planMap = new Map(plans.map((p: any) => [String(p._id || p.id), { ...p, id: String(p._id || p.id) }]));
@@ -3739,14 +3760,6 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
     const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
 
-    // Check if there is an existing active subscription for the same plan (sequential queueing)
-    const existingSub: any = await dynamicDb.Subscription.findOne({
-      $or: [{ clientId: actualClientId }, { clientId: client.userId }],
-      planId: plan._id || plan.id,
-      status: 'ACTIVE',
-      endDate: { $gt: new Date() }
-    }).sort({ endDate: -1 }).lean();
-
     const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
     const parsedServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : parsedPaymentDate;
 
@@ -3757,10 +3770,27 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
     }
 
-    let startDate = parsedServiceStartDate;
+    // Check if there is an existing active subscription for the same plan (sequential queueing)
+    const existingSub: any = await dynamicDb.Subscription.findOne({
+      $or: [{ clientId: actualClientId }, { clientId: client.userId }],
+      planId: plan._id || plan.id,
+      status: 'ACTIVE',
+      endDate: { $gt: parsedPaymentDate }
+    }).sort({ endDate: -1 }).lean();
+
     if (existingSub) {
-      startDate = new Date(existingSub.endDate);
+      const expDate = new Date(existingSub.endDate);
+      const minAllowedStartDate = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate() + 1);
+      const minDateOnly = minAllowedStartDate.getTime();
+      if (sDateOnly < minDateOnly) {
+        return res.status(400).json({
+          success: false,
+          message: `Validation Error: Client already has an active subscription for this plan expiring on ${expDate.toLocaleDateString('en-IN')}. The new service start date must be on or after ${minAllowedStartDate.toLocaleDateString('en-IN')}.`
+        });
+      }
     }
+
+    let startDate = parsedServiceStartDate;
 
     const planValidityDays = customDays !== undefined ? customDays : (plan.durationMonths * 30 || 30);
 
@@ -3788,10 +3818,15 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         paymentGatewayId: null,
         couponId: appliedCouponId,
         discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null,
+        couponCode: couponCode || null,
         l1Details: {
           submittedBy: req.user!.id,
           submittedByName: assignerName,
           planId: plan._id || plan.id,
+          planName: plan.name,
+          categoryId: plan.categoryId,
+          couponCode: couponCode || null,
+          transactionRef: paymentRefId,
           amount: parseFloat(finalTotalAmount.toFixed(2)),
           validityDays: planValidityDays,
           discount: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : 0,
@@ -5453,6 +5488,13 @@ export const sendPaymentInvoiceEmail = async (req: AuthenticatedRequest, res: Re
       if (!client) {
         client = await dynamicDb.Client.findOne({ userId: payment.clientId }).lean();
       }
+    }
+
+    if (payment.invoiceStatus === 'PENDING_AGREEMENT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Client Service Agreement is pending. In accordance with compliance policy, invoices cannot be emailed to clients until the agreement is executed.'
+      });
     }
 
     const clientEmail = client?.email || payment.clientEmail;

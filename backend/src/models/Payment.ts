@@ -52,6 +52,8 @@ export interface IPayment extends Document {
   } | null;
   couponId?: Types.ObjectId | null;
   discountApplied?: number | null;
+  couponCode?: string | null;
+  subscriptionId?: Types.ObjectId | null;
   gstEnabled?: boolean | null;
   gstCalculationType?: string | null;
   invoicePolicy?: 'IMMEDIATE_ON_PAYMENT' | 'AFTER_KYC_AGREEMENT';
@@ -88,6 +90,8 @@ export const PaymentSchema = new Schema<IPayment>(
     l2Details: { type: Schema.Types.Mixed, default: null },
     couponId: { type: Schema.Types.ObjectId, ref: 'Coupon', default: null },
     discountApplied: { type: Number, default: 0 },
+    couponCode: { type: String, default: null },
+    subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', default: null },
     gstEnabled: { type: Boolean, default: null },
     gstCalculationType: { type: String, default: null },
     invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },

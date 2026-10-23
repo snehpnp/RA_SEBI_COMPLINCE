@@ -1169,6 +1169,7 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
       transactionRef: transactionRef ? transactionRef.trim() : 'UPI-' + Date.now(),
       receiptUrl,
       status: 'PENDING',
+      approvalStatus: 'L1_PENDING',
       remarks: remarks || 'Client submitted QR / UPI payment screenshot for verification.',
       clientCity: profile?.city || null,
       clientState: profile?.state || null,
@@ -1284,11 +1285,17 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       gstCalculationType: payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE'
     };
 
+    const userDoc: any = await dynamicDb.User.findById(req.user!.id).lean();
+    const verifierName = userDoc ? `${userDoc.firstName || ''} ${userDoc.lastName || ''}`.trim() || userDoc.name || userDoc.email : (req.user?.email || 'Staff');
+
     if (isL2Required && status === 'SUCCESS') {
+      paymentUpdatePayload.assignedByStaffName = verifierName;
       paymentUpdatePayload.l1Details = {
         submittedBy: req.user!.id,
-        submittedByName: req.user?.email || 'Staff',
+        submittedByName: verifierName,
         planId: payment.planId,
+        planName: plan?.name || 'Assigned Plan',
+        categoryId: plan?.categoryId,
         amount: effectiveAmount,
         validityDays: effectiveValidityDays,
         discount: effectiveDiscount,
@@ -1808,7 +1815,8 @@ export const downloadInvoice = async (req: AuthenticatedRequest, res: Response) 
       payment = await dynamicDb.Payment.findOne({ transactionRef: paymentId }).lean();
     }
 
-    if (payment && payment.invoiceStatus === 'PENDING_AGREEMENT') {
+    const isClientRole = req.user?.role === 'CLIENT';
+    if (isClientRole && payment && payment.invoiceStatus === 'PENDING_AGREEMENT') {
       return res.status(400).json({
         success: false,
         message: 'Tax Invoice will be generated automatically once your Service Agreement is completed and signed.'

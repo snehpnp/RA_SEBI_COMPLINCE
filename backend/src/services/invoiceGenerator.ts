@@ -278,6 +278,14 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         } catch {}
       }
 
+      if (!subStartDate && payment.serviceStartDate) {
+        subStartDate = new Date(payment.serviceStartDate);
+      }
+      if (!subEndDate && payment.serviceStartDate) {
+        const valDays = payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30);
+        subEndDate = new Date(new Date(payment.serviceStartDate).getTime() + valDays * 24 * 60 * 60 * 1000);
+      }
+
       const paymentBaseDate = payment.paymentDate ? new Date(payment.paymentDate) : new Date(payment.createdAt || Date.now());
       const startDateFormatted = subStartDate ? subStartDate.toLocaleDateString('en-GB') : paymentBaseDate.toLocaleDateString('en-GB');
 
