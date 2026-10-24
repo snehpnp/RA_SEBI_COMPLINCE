@@ -1062,6 +1062,22 @@ function AdminDashboardContent() {
   const [fileDownloadNotificationEmail, setFileDownloadNotificationEmail] = useState('');
   const [maxEmailFileSizeMb, setMaxEmailFileSizeMb] = useState<number>(10);
   const [assignPlanLoading, setAssignPlanLoading] = useState(false);
+  const [assignPlanFeeSummary, setAssignPlanFeeSummary] = useState<any>(null);
+  const [isLoadingFeeSummary, setIsLoadingFeeSummary] = useState<boolean>(false);
+  useEffect(() => {
+    if (isAssignPlanModalOpen && assignPlanClient) {
+      const cId = assignPlanClient.id || assignPlanClient._id;
+      setIsLoadingFeeSummary(true);
+      api.get(`/admin/clients/${cId}/fee-summary`)
+        .then((res: any) => {
+          if (res.data?.success) setAssignPlanFeeSummary(res.data.data);
+        })
+        .catch(() => setAssignPlanFeeSummary(null))
+        .finally(() => setIsLoadingFeeSummary(false));
+    } else {
+      setAssignPlanFeeSummary(null);
+    }
+  }, [isAssignPlanModalOpen, assignPlanClient]);
   const [assignCustomAmount, setAssignCustomAmount] = useState<string>('');
   const [assignCustomDays, setAssignCustomDays] = useState<string>('');
   const [assignCouponCode, setAssignCouponCode] = useState('');
@@ -6675,6 +6691,17 @@ function AdminDashboardContent() {
                               {exportLoading === 'payments' ? <Loader2 className="w-5 h-5 animate-spin text-teal-500" /> : <Download className="w-5 h-5 text-slate-400 group-hover:text-teal-500 transition-colors" />}
                             </button>
 
+                            <button onClick={() => handleBulkExport('gst-sheet', false)} disabled={exportLoading === 'gst-sheet'} className="flex items-center justify-between p-4 rounded-xl bg-violet-50/60 dark:bg-violet-950/30 hover:bg-violet-100/70 dark:hover:bg-violet-900/40 border border-violet-300 dark:border-violet-500/30 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed">
+                              <div>
+                                <div className="font-bold text-sm text-violet-900 dark:text-violet-200 group-hover:text-violet-700 dark:group-hover:text-white flex items-center gap-1.5">
+                                  <span>GST Filing Ready Sheet</span>
+                                  <span className="text-[9px] bg-violet-600 text-white px-1.5 py-0.5 rounded-full font-mono font-bold">GSTR-1</span>
+                                </div>
+                                <div className="text-[10px] text-violet-700/80 dark:text-violet-300/70 mt-1">Direct CA Filing with CGST/SGST/IGST &amp; Place of Supply</div>
+                              </div>
+                              {exportLoading === 'gst-sheet' ? <Loader2 className="w-5 h-5 animate-spin text-violet-500" /> : <Download className="w-5 h-5 text-violet-500 group-hover:text-violet-700 dark:group-hover:text-white transition-colors" />}
+                            </button>
+
                             <button onClick={() => handleBulkExport('research-reports', true)} disabled={exportLoading === 'research-reports'} className="flex items-center justify-between p-4 rounded-xl bg-white dark:bg-slate-900/50 hover:bg-orange-50 dark:hover:bg-orange-900/20 border border-slate-300 dark:border-white/5 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed">
                               <div>
                                 <div className="font-bold text-sm text-slate-800 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400">All Research Reports</div>
@@ -9935,6 +9962,56 @@ function AdminDashboardContent() {
                                 </div>
                               </div>
 
+                              {/* SEBI Annual Fee Cap Banner */}
+                              {isLoadingFeeSummary ? (
+                                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 text-xs flex items-center gap-2 text-slate-500">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying SEBI annual fee limit...
+                                </div>
+                              ) : assignPlanFeeSummary ? (
+                                <div className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                                  assignPlanFeeSummary.isQuotaFull
+                                    ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+                                    : assignPlanFeeSummary.totalBasePaid >= 130000
+                                    ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                                    : 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-200'
+                                }`}>
+                                  <div className="flex items-center justify-between font-bold">
+                                    <span className="flex items-center gap-1.5">
+                                      <ShieldCheck className="w-3.5 h-3.5 text-current" />
+                                      <span>SEBI Fee Limit ({assignPlanFeeSummary.fyLabel}):</span>
+                                    </span>
+                                    <span className="font-mono">
+                                      ₹{assignPlanFeeSummary.totalBasePaid.toLocaleString('en-IN')} / ₹1,51,000 Base
+                                    </span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-current/15">
+                                    <div>
+                                      <span className="text-slate-500 dark:text-slate-400">Approved Paid: </span>
+                                      <span className="font-semibold font-mono">₹{assignPlanFeeSummary.totalApprovedBasePaid?.toLocaleString('en-IN') || 0}</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-amber-600 dark:text-amber-400">Pending in L2: </span>
+                                      <span className="font-semibold font-mono">₹{assignPlanFeeSummary.totalPendingBaseFee?.toLocaleString('en-IN') || 0}</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-current/15">
+                                    <span className="font-medium">Remaining Permissible Limit:</span>
+                                    <span className={`font-bold font-mono ${assignPlanFeeSummary.remainingBaseQuota <= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                                      ₹{assignPlanFeeSummary.remainingBaseQuota.toLocaleString('en-IN')} (+ GST)
+                                    </span>
+                                  </div>
+                                  {assignPlanFeeSummary.isQuotaFull ? (
+                                    <p className="text-[10px] text-rose-600 dark:text-rose-300 font-bold pt-0.5">
+                                      ⚠️ SEBI Annual Fee Limit Reached: Paid plan assignment is disabled. Only free promotional plans (100% coupon discount) can be assigned.
+                                    </p>
+                                  ) : assignPlanFeeSummary.totalBasePaid >= 130000 ? (
+                                    <p className="text-[10px] text-amber-700 dark:text-amber-300 font-bold pt-0.5">
+                                      ⚠️ High Quota Utilization: You can only charge up to ₹{assignPlanFeeSummary.remainingBaseQuota.toLocaleString('en-IN')} (+ GST) for this client in this financial year.
+                                    </p>
+                                  ) : null}
+                                </div>
+                              ) : null}
+
                               {/* Category selector */}
                               <div>
                                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -10276,17 +10353,41 @@ function AdminDashboardContent() {
                                 >
                                   Cancel
                                 </button>
-                                <button
-                                  type="submit"
-                                  disabled={assignPlanLoading || !assignPlanId}
-                                  className="px-5 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-900 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 dark:text-white rounded-xl text-xs font-bold transition flex items-center gap-2"
-                                >
-                                  {assignPlanLoading ? (
-                                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Assigning...</>
-                                  ) : (
-                                    <><CreditCard className="h-3.5 w-3.5" /> Assign Plan Now</>
-                                  )}
-                                </button>
+                                {(() => {
+                                  const selPlan = adminPlans.find(p => p.id === assignPlanId);
+                                  const rawBase = selPlan ? getPlanAmountWithCoupon(selPlan.price, selPlan.durationMonths, assignCouponCode) : 0;
+                                  const finalBase = assignCustomAmount ? (gstEnabled && gstCalculationType === 'EXCLUSIVE' ? Number(assignCustomAmount) / 1.18 : Number(assignCustomAmount)) : rawBase;
+                                  const isFeeExceeded = assignPlanFeeSummary && finalBase > 0 && (
+                                    assignPlanFeeSummary.isQuotaFull ||
+                                    (assignPlanFeeSummary.totalBasePaid + finalBase > assignPlanFeeSummary.maxBaseFeeCap) ||
+                                    (finalBase > assignPlanFeeSummary.remainingBaseQuota)
+                                  );
+                                  const isFreePromo = finalBase === 0 && Boolean(assignPlanId);
+
+                                  return (
+                                    <button
+                                      type="submit"
+                                      disabled={assignPlanLoading || !assignPlanId || isFeeExceeded}
+                                      className={`px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                                        isFeeExceeded
+                                          ? 'bg-rose-800 text-rose-200 cursor-not-allowed opacity-60'
+                                          : isFreePromo
+                                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                          : 'bg-violet-600 hover:bg-violet-500 disabled:bg-violet-900 disabled:opacity-50 disabled:cursor-not-allowed text-white'
+                                      }`}
+                                    >
+                                      {assignPlanLoading ? (
+                                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Assigning...</>
+                                      ) : isFeeExceeded ? (
+                                        <>{assignPlanFeeSummary?.isQuotaFull ? '⚠️ Annual Quota Full (Limit ₹1,51,000)' : `⚠️ Exceeds Remaining Limit (Max ₹${assignPlanFeeSummary?.remainingBaseQuota.toLocaleString('en-IN')})`}</>
+                                      ) : isFreePromo ? (
+                                        <><Check className="h-3.5 w-3.5" /> Assign Free Promotional Plan (₹0)</>
+                                      ) : (
+                                        <><CreditCard className="h-3.5 w-3.5" /> Assign Plan Now</>
+                                      )}
+                                    </button>
+                                  );
+                                })()}
                               </div>
                             </form>
                           </div>
@@ -13379,38 +13480,22 @@ function AdminDashboardContent() {
                                 </div>
                               </div>
 
-                              {/* Toggle Options (2-Way Segmented Control Cards) */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                                {/* Option 1: KYC Before Payment */}
-                                <div
-                                  onClick={() => handleTriggerKycFlowToggle(true)}
-                                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all relative ${
-                                    kycFirst
-                                      ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-600 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/30'
-                                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 opacity-75 hover:opacity-100'
-                                  }`}
-                                >
+                              {/* Single Locked Compliance Flow Card (KYC After Payment Hidden) */}
+                              <div className="max-w-xl">
+                                <div className="p-4 rounded-xl border-2 border-blue-600 bg-blue-50/70 dark:bg-blue-950/30 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/30 relative">
                                   <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                                        kycFirst ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                                      }`}>
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-600 text-white shadow-sm">
                                         <ShieldCheck className="w-4 h-4" />
                                       </div>
                                       <div>
                                         <span className="text-xs font-bold text-slate-900 dark:text-white block">KYC Before Payment</span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Strict Compliance Flow</span>
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Strict Compliance Standard Flow</span>
                                       </div>
                                     </div>
-                                    {kycFirst ? (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1 shadow-sm">
-                                        <Check className="w-3 h-3" /> Active Flow
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
-                                        Click to switch
-                                      </span>
-                                    )}
+                                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-600 text-white flex items-center gap-1 shadow-sm">
+                                      <Check className="w-3 h-3" /> Active &amp; Locked
+                                    </span>
                                   </div>
                                   <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mb-2.5">
                                     Client must verify PAN/KRA and sign Service Agreement <strong>first</strong>. Pricing &amp; payments unlock only after agreement.
@@ -13419,47 +13504,7 @@ function AdminDashboardContent() {
                                     <span>Welcome</span> ➔ <span>KYC</span> ➔ <span>Agreement</span> ➔ <span>Payment</span>
                                   </div>
                                 </div>
-
-                                {/* Option 2: KYC After Payment */}
-                                <div
-                                  onClick={() => handleTriggerKycFlowToggle(false)}
-                                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all relative ${
-                                    !kycFirst
-                                      ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-600 shadow-md shadow-indigo-500/10 ring-1 ring-indigo-500/30'
-                                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 opacity-75 hover:opacity-100'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-2">
-                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                                        !kycFirst ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                                      }`}>
-                                        <CreditCard className="w-4 h-4" />
-                                      </div>
-                                      <div>
-                                        <span className="text-xs font-bold text-slate-900 dark:text-white block">KYC After Payment</span>
-                                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Payment First Flow</span>
-                                      </div>
-                                    </div>
-                                    {!kycFirst ? (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-600 text-white flex items-center gap-1 shadow-sm">
-                                        <Check className="w-3 h-3" /> Active Flow
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] text-slate-400 font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
-                                        Click to switch
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed mb-2.5">
-                                    Client selects plan and pays <strong>first</strong>. After payment (or admin plan assignment), client completes KYC &amp; Agreement.
-                                  </p>
-                                  <div className="pt-2 border-t border-slate-200/60 dark:border-white/5 flex items-center gap-1.5 text-[10px] font-mono text-indigo-700 dark:text-indigo-300 font-semibold">
-                                    <span>Welcome</span> ➔ <span>Payment</span> ➔ <span>KYC</span> ➔ <span>Agreement</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
+                              </div>                            </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                               {/* Terms & Conditions PDF Card */}

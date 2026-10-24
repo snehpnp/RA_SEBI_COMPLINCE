@@ -91,6 +91,7 @@ export default function SubscriptionCenter({
   const isFullyOnboarded = !kycFirst || (isKycDone && isAgreementDone);
 
   const [checkoutPlan, setCheckoutPlan] = useState<any>(null);
+  const [feeSummary, setFeeSummary] = useState<any>(null);
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<any>(null);
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
@@ -238,6 +239,12 @@ export default function SubscriptionCenter({
         });
         setCheckoutPlan(null);
         setShowContactAdminModal(true);
+        setLoading(false);
+        return;
+      }
+
+      if (feeSummary && (feeSummary.isQuotaFull || feeSummary.remainingBaseQuota <= 0)) {
+        toast.error('SEBI Fee Limit Reached: Maximum annual advisory fee cap of ₹1,51,000 (+ GST) has been reached for this financial year.');
         setLoading(false);
         return;
       }
@@ -401,6 +408,11 @@ export default function SubscriptionCenter({
       return;
     }
 
+    if (feeSummary && (feeSummary.isQuotaFull || feeSummary.remainingBaseQuota <= 0)) {
+      toast.error('SEBI Fee Limit Reached: Maximum annual advisory fee cap of ₹1,51,000 (+ GST) has been reached for this financial year.');
+      return;
+    }
+
     setSubmittingProof(true);
     try {
       let price = checkoutPlan.amount || checkoutPlan.price;
@@ -537,6 +549,9 @@ export default function SubscriptionCenter({
         if (gwRes) {
           setGatewayConfig(gwRes);
         }
+        api.get('/client/fee-summary')
+          .then((res: any) => { if (res.data?.success) setFeeSummary(res.data.data); })
+          .catch(() => {});
 
         let subs: any[] = [];
         if (subRes.success && Array.isArray(subRes.data) && subRes.data.length > 0) {
@@ -976,6 +991,32 @@ export default function SubscriptionCenter({
                   </button>
                 </div>
               ) : (
+                <>
+                {/* SEBI Annual Fee Limit Banner for Client */}
+                {feeSummary && (
+                  <div className={`mb-6 p-4 rounded-2xl border text-sm flex items-start gap-3.5 ${
+                    feeSummary.isQuotaFull
+                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                      : feeSummary.totalBasePaid >= 130000
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                      : 'bg-premium-primary/10 border-premium-primary/20 text-premium-text'
+                  }`}>
+                    <Shield className="w-5 h-5 mt-0.5 shrink-0 text-premium-primary" />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center justify-between font-bold">
+                        <span>SEBI Annual Advisory Fee Limit ({feeSummary.fyLabel})</span>
+                        <span className="font-mono">
+                          ₹{feeSummary.totalBasePaid.toLocaleString('en-IN')} / ₹1,51,000 Base
+                        </span>
+                      </div>
+                      <p className="text-xs text-premium-text/70 leading-relaxed">
+                        {feeSummary.isQuotaFull
+                          ? 'Under SEBI regulations, you have reached the maximum annual advisory fee cap of ₹1,51,000 (+ GST) for this financial year. Further plan purchases are disabled until your active plan completes.'
+                          : `Remaining permissible subscription limit for this financial year is ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')} (+ GST).`}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                   {filteredPlans.map((plan, index) => {
                 const isMatched = Boolean(
@@ -1053,42 +1094,66 @@ export default function SubscriptionCenter({
                       </div>
                     </div>
 
-                    <button onClick={() => {
-                      if (kycFirst && !isKycDone) {
-                        toast.error('KYC Verification is required before purchasing a plan. Redirecting to KYC Center...');
-                        if (onNavigateToKyc) {
-                          onNavigateToKyc();
-                        } else if (onTriggerOnboarding) {
-                          onTriggerOnboarding();
-                        }
-                        return;
-                      }
-                      setCheckoutPlan(plan);
-                      setAppliedCoupon(null);
-                      setCouponCode('');
-                      setCheckoutPaymentMethod(null);
-                      setProofSuccess(false);
-                      setUpiUtr('');
-                      setUpiProofFile(null);
-                      setUpiProofPreview('');
-                      fetchGatewayStatus();
-                    }} className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md ${
-                      isMatched
-                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black shadow-amber-500/25 ring-2 ring-amber-400/50'
-                        : isPopular
-                        ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90'
-                        : 'bg-premium-primary hover:bg-premium-primary/90 text-white'
-                      }`}>
-                      {kycFirst && !isKycDone
-                        ? 'Complete KYC to Subscribe'
-                        : isMatched
-                        ? 'Unlock Trade • Subscribe Now'
-                        : 'Select Plan'} <ChevronRight className="w-4 h-4" />
-                    </button>
+                    {(() => {
+                      const planPrice = Number(plan.amount || plan.price || 0);
+                      const isFeeQuotaFull = Boolean(feeSummary?.isQuotaFull || (feeSummary && feeSummary.remainingBaseQuota <= 0));
+                      const isExceedingFee = Boolean(feeSummary && planPrice > feeSummary.remainingBaseQuota);
+                      const isBuyDisabled = isFeeQuotaFull || isExceedingFee;
+
+                      return (
+                        <button
+                          onClick={() => {
+                            if (isBuyDisabled) {
+                              toast.error(isFeeQuotaFull ? 'SEBI Annual Fee Limit Reached: You have reached the maximum annual limit of ₹1,51,000 (+ GST) for this financial year.' : 'Exceeds Annual Fee Limit: This plan exceeds your remaining annual subscription limit.');
+                              return;
+                            }
+                            if (kycFirst && !isKycDone) {
+                              toast.error('KYC Verification is required before purchasing a plan. Redirecting to KYC Center...');
+                              if (onNavigateToKyc) {
+                                onNavigateToKyc();
+                              } else if (onTriggerOnboarding) {
+                                onTriggerOnboarding();
+                              }
+                              return;
+                            }
+                            setCheckoutPlan(plan);
+                            setAppliedCoupon(null);
+                            setCouponCode('');
+                            setCheckoutPaymentMethod(null);
+                            setProofSuccess(false);
+                            setUpiUtr('');
+                            setUpiProofFile(null);
+                            setUpiProofPreview('');
+                            fetchGatewayStatus();
+                          }}
+                          disabled={isBuyDisabled}
+                          className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-md ${
+                            isBuyDisabled
+                              ? 'bg-rose-950/60 text-rose-300 border border-rose-800/60 cursor-not-allowed opacity-60'
+                              : isMatched
+                              ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black shadow-amber-500/25 ring-2 ring-amber-400/50'
+                              : isPopular
+                              ? 'bg-premium-warning text-premium-bg hover:bg-premium-warning/90'
+                              : 'bg-premium-primary hover:bg-premium-primary/90 text-white'
+                          }`}
+                        >
+                          {isFeeQuotaFull
+                            ? 'Annual Limit Reached (₹1,51,000)'
+                            : isExceedingFee
+                            ? 'Exceeds Annual Limit'
+                            : kycFirst && !isKycDone
+                            ? 'Complete KYC to Subscribe'
+                            : isMatched
+                            ? 'Unlock Trade • Subscribe Now'
+                            : 'Select Plan'} <ChevronRight className="w-4 h-4" />
+                        </button>
+                      );
+                    })()}
                   </div>
                 );
               })}
                 </div>
+                </>
               )}
             </div>
           )}

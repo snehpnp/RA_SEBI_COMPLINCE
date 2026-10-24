@@ -9,8 +9,8 @@ import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTen
 import { createTenant, getTenants, toggleTenantStatus, toggleTenantCompliance, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
-import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing } from '../controllers/clientController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, exportGstReadySheetCSV, getClientFeeSummaryEndpoint, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
+import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing, getClientFeeSummaryForSelf } from '../controllers/clientController';
 import { handleTelegramWebhook, setTelegramWebhookEndpoint, getTelegramWebhookStatus } from '../controllers/telegramController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -505,6 +505,7 @@ router.get('/admin/exports/kra', authenticateJWT, requireAnyPermission(['ACCESS_
 router.get('/admin/exports/clients', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportClientsCSV);
 router.get('/admin/exports/deleted-clients', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportDeletedClientsCSV);
 router.get('/admin/exports/payments', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportPaymentsCSV);
+router.get('/admin/exports/gst-sheet', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA', 'ACCESS_PAYMENTS']), exportGstReadySheetCSV);
 router.get('/admin/exports/research-reports', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportResearchReportsZip);
 
 // Custom Pages (Admin & Read-only for Staff/CO/PO)
@@ -910,6 +911,13 @@ router.post(
   assignPlanByAdmin
 );
 router.get(
+  '/admin/clients/:id/fee-summary',
+  authenticateJWT,
+  requirePermission('ACCESS_CLIENTS'),
+  enforceTenantIsolation,
+  getClientFeeSummaryEndpoint
+);
+router.get(
   '/admin/clients/:clientId/timeline',
   authenticateJWT,
   requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
@@ -1286,6 +1294,12 @@ router.post(
   requireRoles(['CLIENT']),
   upload.fields([{ name: 'receipt', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]),
   submitManualPayment
+);
+router.get(
+  '/client/fee-summary',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  getClientFeeSummaryForSelf
 );
 router.post(
   '/admin/payments/verify',

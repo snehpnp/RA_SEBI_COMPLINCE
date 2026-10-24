@@ -1,3 +1,4 @@
+import { getClientFyFeeSummary } from '../utils/feeCapHelper';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import path from 'path';
@@ -1160,6 +1161,18 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
       }
     }
 
+    // SEBI Annual Fee Cap Check
+    const feeSummary = await getClientFyFeeSummary(client._id || client.id, tenantId, dynamicDb);
+    const planBasePrice = planDoc ? Math.max(0, planDoc.price - discountApplied) : parsedAmount;
+    if (planBasePrice > 0 && (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + planBasePrice > feeSummary.maxBaseFeeCap))) {
+      return res.status(400).json({
+        success: false,
+        code: 'SEBI_FEE_CAP_EXCEEDED',
+        message: `SEBI Annual Limit Reached: You have reached the maximum annual subscription fee limit of ₹1,51,000 (+ GST) for ${feeSummary.fyLabel}. Cannot submit payment for this plan.`,
+        feeSummary
+      });
+    }
+
     const payment = await dynamicDb.Payment.create({
       tenantId,
       clientId: client._id || client.id,
@@ -1266,6 +1279,23 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
     const sDateOnly = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate()).getTime();
     if (status === 'SUCCESS' && sDateOnly < pDateOnly) {
       return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
+    }
+
+    const resolvedGstCalculationType = payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE';
+    if (status === 'SUCCESS') {
+      const isExcl = resolvedGstCalculationType === 'EXCLUSIVE';
+      const effectiveBase = isExcl ? (effectiveAmount / 1.18) : effectiveAmount;
+      if (effectiveBase > 0) {
+        const feeSummary = await getClientFyFeeSummary(payment.clientId, tenantId, dynamicDb);
+        if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + effectiveBase > feeSummary.maxBaseFeeCap)) {
+          return res.status(400).json({
+            success: false,
+            code: 'SEBI_FEE_CAP_EXCEEDED',
+            message: `SEBI Annual Fee Limit Exceeded: Verifying this payment of ₹${effectiveAmount} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Total already paid: ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')}, Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`,
+            feeSummary
+          });
+        }
+      }
     }
 
     const isL2Required = Boolean(tenantDoc?.l2ApprovalEnabled === true);
@@ -1883,6 +1913,17 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
       }
     }
 
+    // SEBI Annual Fee Cap Check
+    const feeSummary = await getClientFyFeeSummary(client._id || client.id, tenantId, dynamicDb);
+    if (finalPrice > 0 && (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalPrice > feeSummary.maxBaseFeeCap))) {
+      return res.status(400).json({
+        success: false,
+        code: 'SEBI_FEE_CAP_EXCEEDED',
+        message: `SEBI Annual Limit Reached: You have already paid ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')} base fee in ${feeSummary.fyLabel}. Maximum allowed limit is ₹1,51,000 (+ GST). Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}. Further plan purchases are disabled under SEBI regulations.`,
+        feeSummary
+      });
+    }
+
     const isGstActive = tenantObj?.gstEnabled !== false;
     if (isGstActive && tenantObj.gstCalculationType === 'EXCLUSIVE') {
       finalPrice = finalPrice * 1.18;
@@ -2428,3 +2469,16 @@ You will receive live trade alerts here whenever a recommendation matching your 
 };
 
 
+
+export const getClientFeeSummaryForSelf = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
+    const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+    const summary = await getClientFyFeeSummary(client._id || client.id, tenantId, dynamicDb);
+    return res.json({ success: true, data: summary });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};

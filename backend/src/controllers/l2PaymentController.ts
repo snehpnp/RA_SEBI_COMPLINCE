@@ -1,3 +1,4 @@
+import { getClientFyFeeSummary } from '../utils/feeCapHelper';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../middlewares/auth';
@@ -142,6 +143,18 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     const amountTotal = finalAmount;
     const amountBase = isExclusive ? (amountTotal / 1.18) : amountTotal;
     const amountGst = amountTotal - amountBase;
+
+    // SEBI Annual Fee Cap Validation
+    if (amountBase > 0) {
+      const feeSummary = await getClientFyFeeSummary(client._id || client.id, tenantId, dynamicDb, payment._id || id);
+      if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + amountBase > feeSummary.maxBaseFeeCap)) {
+        return res.status(400).json({
+          success: false,
+          code: 'SEBI_FEE_CAP_EXCEEDED',
+          message: `SEBI Annual Fee Limit Exceeded: Approving this payment of ₹${finalAmount} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Total already paid: ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')}, Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`
+        });
+      }
+    }
 
     // 1. Create or Activate Subscription
     const subscription = await subscriptionModel.create({

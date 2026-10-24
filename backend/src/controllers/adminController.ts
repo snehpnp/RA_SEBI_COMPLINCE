@@ -18,6 +18,7 @@ import { testDigioConnection } from '../services/digioService';
 import { getCamsCredentials, getCamsToken } from '../services/camsKraService';
 import { logActivity } from '../services/activityService';
 import { DEFAULT_EMAIL_TEMPLATES } from '../utils/defaultEmailTemplates';
+import { getClientFyFeeSummary } from '../utils/feeCapHelper';
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return email;
@@ -3071,7 +3072,8 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (ccInvoiceEmail !== undefined) dataToUpdate.ccInvoiceEmail = ccInvoiceEmail ? ccInvoiceEmail.trim() : null;
     if (ccAgreementEnabled !== undefined) dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
     if (ccAgreementEmail !== undefined) dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
-    if (kycFirst !== undefined) dataToUpdate.kycFirst = kycFirst === 'true' || kycFirst === true;
+    // Strict SEBI compliance: Always keep kycFirst = true (KYC Before Payment)
+    dataToUpdate.kycFirst = true;
     if (req.body.l2ApprovalEnabled !== undefined) {
       dataToUpdate.l2ApprovalEnabled = req.body.l2ApprovalEnabled === 'true' || req.body.l2ApprovalEnabled === true;
     }
@@ -3768,6 +3770,19 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const sDateOnly = new Date(parsedServiceStartDate.getFullYear(), parsedServiceStartDate.getMonth(), parsedServiceStartDate.getDate()).getTime();
     if (sDateOnly < pDateOnly) {
       return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
+    }
+
+    // SEBI Annual Fee Cap Check (Max ₹1,51,000 Base Fee per FY per Client)
+    if (finalBasePrice > 0) {
+      const feeSummary = await getClientFyFeeSummary(actualClientId, tenantId, dynamicDb);
+      if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalBasePrice > feeSummary.maxBaseFeeCap)) {
+        return res.status(400).json({
+          success: false,
+          code: 'SEBI_FEE_CAP_EXCEEDED',
+          message: `SEBI Annual Fee Limit Exceeded: Client has ₹${feeSummary.totalApprovedBasePaid.toLocaleString('en-IN')} approved + ₹${feeSummary.totalPendingBaseFee.toLocaleString('en-IN')} pending in L2 queue (Total committed: ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')}) in ${feeSummary.fyLabel}. Maximum allowed limit is ₹1,51,000 (+ GST). Remaining quota for new requests is ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')} (+ GST). Only up to this remaining limit can be assigned or requested.`,
+          feeSummary
+        });
+      }
     }
 
     // Check if there is an existing active subscription for the same plan (sequential queueing)
@@ -4530,6 +4545,124 @@ export const exportPaymentsCSV = async (req: AuthenticatedRequest, res: Response
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="Payments_Report.csv"');
+    res.send(arrayToCsv(csvData));
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const getClientFeeSummaryEndpoint = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  const { id } = req.params;
+  if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
+
+  try {
+    let actualClientId = id;
+    const clientDoc: any = await dynamicDb.Client.findOne({ $or: [{ _id: id }, { userId: id }] }).lean();
+    if (clientDoc) actualClientId = clientDoc._id || clientDoc.id;
+
+    const summary = await getClientFyFeeSummary(actualClientId, tenantId, dynamicDb);
+    return res.json({ success: true, data: summary });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const exportGstReadySheetCSV = async (req: AuthenticatedRequest, res: Response) => {
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant' });
+
+  try {
+    const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const tenantState = (tenant?.state || 'DELHI').trim().toUpperCase();
+
+    const dateFilter = getDateFilter(req);
+    const payFilter: any = { tenantId, status: 'SUCCESS' };
+    if (dateFilter) payFilter.createdAt = dateFilter;
+
+    const payments: any[] = await dynamicDb.Payment.find(payFilter)
+      .populate('planId')
+      .populate('clientId')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const subIds = payments.map(p => p.subscriptionId).filter(Boolean);
+    const subs: any[] = await dynamicDb.Subscription.find({ _id: { $in: subIds } }).lean();
+    const subMap = new Map(subs.map(s => [String(s._id || s.id), s]));
+
+    const csvData = payments.map((p: any, idx: number) => {
+      const client = p.clientId || {};
+      const sub = p.subscriptionId ? subMap.get(String(p.subscriptionId)) : null;
+
+      const clientState = (client.state || p.clientState || 'DELHI').trim().toUpperCase();
+      const isInterState = clientState !== tenantState;
+
+      let isGstActive = tenant?.gstEnabled !== false;
+      if (p.gstEnabled !== undefined && p.gstEnabled !== null) {
+        isGstActive = Boolean(p.gstEnabled);
+      }
+      const isInclusive = p.gstCalculationType === 'INCLUSIVE' || tenant?.gstCalculationType === 'INCLUSIVE';
+
+      const totalGross = Number(p.amount || 0);
+      let base = 0;
+      let gst = 0;
+
+      if (sub && sub.amountBase != null) {
+        base = Number(sub.amountBase);
+        gst = Number(sub.amountGst ?? (totalGross - base));
+      } else {
+        if (!isGstActive) {
+          base = totalGross;
+          gst = 0;
+        } else {
+          base = parseFloat((totalGross / 1.18).toFixed(2));
+          gst = parseFloat((totalGross - base).toFixed(2));
+        }
+      }
+
+      let cgst = 0;
+      let sgst = 0;
+      let igst = 0;
+
+      if (gst > 0) {
+        if (isInterState) {
+          igst = gst;
+        } else {
+          cgst = parseFloat((gst / 2).toFixed(2));
+          sgst = parseFloat((gst - cgst).toFixed(2));
+        }
+      }
+
+      const invNo = p.invoiceNumber || `INV-${new Date(p.createdAt || Date.now()).getFullYear()}-${String(idx + 1).padStart(4, '0')}`;
+
+      return {
+        'Invoice No': invNo,
+        'Invoice Date': p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '',
+        'Payment Date': p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-IN') : (p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : ''),
+        'Client Name': client.name || 'Unknown',
+        'Client Mobile': client.mobile || 'Unknown',
+        'Client Email': client.email || '',
+        'Client PAN': client.pan || 'N/A',
+        'Client State (POS)': clientState,
+        'Tenant State': tenantState,
+        'Tax Type': isInterState ? 'INTER-STATE (IGST)' : 'INTRA-STATE (CGST+SGST)',
+        'SAC Code': '998311',
+        'Service Description': p.planId?.name || 'Investment / Research Advisory Service',
+        'GST Status': !isGstActive ? 'GST DISABLED (0%)' : (isInclusive ? 'INCLUSIVE (18%)' : 'EXCLUSIVE (18%)'),
+        'Taxable Value (Base Amount)': base,
+        'GST Rate': isGstActive ? '18%' : '0%',
+        'CGST (9%)': cgst,
+        'SGST (9%)': sgst,
+        'IGST (18%)': igst,
+        'Total GST Amount': gst,
+        'Total Invoice Amount': totalGross,
+        'Payment Mode': p.paymentMode || 'ONLINE',
+        'Transaction Ref / UTR': p.transactionRef || 'N/A'
+      };
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="GSTR_Ready_Filing_Sheet.csv"');
     res.send(arrayToCsv(csvData));
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });

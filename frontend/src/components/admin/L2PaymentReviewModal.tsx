@@ -47,6 +47,7 @@ export default function L2PaymentReviewModal({
   const [rejectionReason, setRejectionReason] = useState('');
   const [isRejectMode, setIsRejectMode] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feeSummary, setFeeSummary] = useState<any>(null);
 
   // Fallback user from localStorage if not passed
   const activeUser = currentUser || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {});
@@ -111,6 +112,13 @@ export default function L2PaymentReviewModal({
   // Autofill L2 form on modal open with L1 submitted values
   useEffect(() => {
     if (payment && isOpen) {
+      const cId = payment.clientId?._id || payment.clientId?.id || payment.clientId;
+      if (cId) {
+        api.get(`/admin/clients/${cId}/fee-summary`)
+          .then((res: any) => { if (res.data?.success) setFeeSummary(res.data.data); })
+          .catch(() => setFeeSummary(null));
+      }
+
       const pPlanId = payment.planId ? String(payment.planId) : (payment.plan?.id || payment.plan?._id || '');
       setSelectedPlanId(pPlanId);
 
@@ -248,6 +256,13 @@ export default function L2PaymentReviewModal({
         ? parseFloat(Number(customAmount).toFixed(2))
         : parseFloat(discountedBase.toFixed(2));
 
+      if (feeSummary && finalAmountToSubmit > 0) {
+        if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalAmountToSubmit > feeSummary.maxBaseFeeCap)) {
+          toast.error(`SEBI Annual Fee Limit Exceeded: Approving this payment of ₹${finalAmountToSubmit} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`);
+          return;
+        }
+      }
+
       const res = await api.post(`/admin/payments/${payment.id || payment._id}/l2-action`, {
         action: 'APPROVED',
         planId: selectedPlanId,
@@ -377,6 +392,20 @@ export default function L2PaymentReviewModal({
               {activeSubName || 'No Active Plan'}
             </span>
           </div>
+          {feeSummary && (
+            <div className="text-right border-l border-slate-300 dark:border-white/10 pl-4 hidden sm:block">
+              <span className="text-slate-500 text-[10px] uppercase block font-semibold">SEBI FY Quota ({feeSummary.fyLabel})</span>
+              <span className={`font-mono font-bold text-xs ${
+                feeSummary.isQuotaFull
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : feeSummary.totalBasePaid >= 130000
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-violet-600 dark:text-violet-400'
+              }`}>
+                Paid: ₹{feeSummary.totalBasePaid.toLocaleString('en-IN')} / ₹1,51,000 (Bal: ₹{feeSummary.remainingBaseQuota.toLocaleString('en-IN')})
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Scrollable Side-by-Side Body */}
