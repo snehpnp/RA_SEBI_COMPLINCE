@@ -125,10 +125,12 @@ export function formatTradeTelegramMessage(
     companyName?: string;
     sebiRegistration?: string;
     isUpdate?: boolean;
+    isAlert?: boolean;
     updateStatus?: string;
     planName?: string;
   }
 ): string {
+  const isAlert = Boolean(meta.isAlert || data?.action === 'TRADE_ALERT');
   const isUpdate = Boolean(meta.isUpdate);
   const company = meta.companyName || 'SEBI Registered Research Analyst';
   const sebiReg = meta.sebiRegistration ? `SEBI Reg: <b>${meta.sebiRegistration}</b>` : '';
@@ -138,8 +140,22 @@ export function formatTradeTelegramMessage(
   const callType = (data?.callType || 'BUY').toUpperCase();
   const tradeDuration = data?.tradeDuration || 'INTRADAY';
 
+  if (isAlert) {
+    const alertMsg = data?.alertMessage || data?.message || '';
+    const planInfo = meta.planName ? `\n💼 <b>Service Plan:</b> ${meta.planName}` : '';
+    return `🚨 <b>TRADE ALERT</b>
+━━━━━━━━━━━━━━━━━━━━
+🏢 <b>${company}</b>
+${sebiReg ? `${sebiReg}\n` : ''}━━━━━━━━━━━━━━━━━━━━
+📊 <b>Symbol:</b> <code>${stockSymbol}</code> (${segment})${planInfo}
+📢 <b>Alert:</b> ${alertMsg}
+
+⚠️ <i>Notice: Please review your trade positions carefully.</i>`;
+  }
+
   if (isUpdate) {
-    const statusText = (meta.updateStatus || data?.closeStatus || 'CLOSED').toUpperCase();
+    const rawStatus = (meta.updateStatus || data?.closeStatus || 'CLOSED').toUpperCase();
+    const statusText = data?.targetLabel ? `${data.targetLabel.toUpperCase()} ACHIEVED (${rawStatus})` : rawStatus;
     const exitPrice = data?.exitPrice ? `₹${data.exitPrice}` : 'N/A';
     const remark = data?.closeRemark ? `\n📝 <b>Remark:</b> ${data.closeRemark}` : '';
 

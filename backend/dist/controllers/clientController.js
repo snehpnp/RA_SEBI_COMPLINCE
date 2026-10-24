@@ -1003,12 +1003,15 @@ const handleRazorpayWebhook = async (req, res) => {
                     startDate = new Date(existingSub.endDate);
                 }
                 const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
-                await db_1.default.Subscription.create({
+                const subscription = await db_1.default.Subscription.create({
                     clientId,
                     planId,
                     startDate,
                     endDate,
                     status: 'ACTIVE'
+                });
+                await db_1.default.Payment.findByIdAndUpdate(payment._id || payment.id, {
+                    $set: { subscriptionId: subscription._id }
                 });
                 await db_1.default.Client.findByIdAndUpdate(clientId, {
                     $set: { status: 'ACTIVE' }
@@ -1244,7 +1247,7 @@ const verifyManualPayment = async (req, res) => {
                 const amountTotal = Number(effectiveAmount || 0);
                 const amountBase = amountTotal / 1.18;
                 const amountGst = amountTotal - amountBase;
-                await db_1.default.Subscription.create({
+                const sub = await db_1.default.Subscription.create({
                     clientId: payment.clientId,
                     planId: plan._id || plan.id,
                     startDate,
@@ -1253,6 +1256,9 @@ const verifyManualPayment = async (req, res) => {
                     amountTotal: parseFloat(amountTotal.toFixed(2)),
                     amountBase: parseFloat(amountBase.toFixed(2)),
                     amountGst: parseFloat(amountGst.toFixed(2))
+                });
+                await db_1.default.Payment.findByIdAndUpdate(payment._id || payment.id, {
+                    $set: { subscriptionId: sub._id }
                 });
                 // Generate invoice PDF in background
                 (0, invoiceGenerator_1.generateInvoicePdf)(String(payment._id || payment.id)).catch(() => { });
@@ -1834,7 +1840,7 @@ const verifyRazorpayPayment = async (req, res) => {
             amountGst = finalPrice - amountBase;
         }
         const clientProfile = await db_1.default.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
-        await db_1.default.Payment.create({
+        const payment = await db_1.default.Payment.create({
             tenantId,
             clientId: client._id || client.id,
             planId: plan._id || plan.id,
@@ -1870,6 +1876,9 @@ const verifyRazorpayPayment = async (req, res) => {
             amountGst,
             amountTotal: finalPrice,
             isGstInclusive: !isExclusive
+        });
+        await db_1.default.Payment.findByIdAndUpdate(payment._id || payment.id, {
+            $set: { subscriptionId: subscription._id }
         });
         await db_1.default.Client.findByIdAndUpdate(client._id || client.id, {
             $set: { status: 'ACTIVE' }
@@ -1972,7 +1981,7 @@ const handleCCAvenueResponse = async (req, res) => {
             const plan = await db_1.default.Plan.findById(planId).lean();
             if (client && plan) {
                 const clientProfile = await db_1.default.ClientProfile.findOne({ clientId }).lean();
-                await db_1.default.Payment.create({
+                const payment = await db_1.default.Payment.create({
                     tenantId: tenantObj._id || tenantObj.id || tenantId,
                     clientId,
                     planId,
@@ -1997,13 +2006,16 @@ const handleCCAvenueResponse = async (req, res) => {
                     startDate = new Date(existingSub.endDate);
                 const duration = plan.durationMonths || plan.duration || 1;
                 const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
-                await db_1.default.Subscription.create({
+                const subscription = await db_1.default.Subscription.create({
                     clientId,
                     planId,
                     startDate,
                     endDate,
                     status: 'ACTIVE',
                     amountTotal: parseFloat(parsedData.amount) || 0
+                });
+                await db_1.default.Payment.findByIdAndUpdate(payment._id || payment.id, {
+                    $set: { subscriptionId: subscription._id }
                 });
                 await db_1.default.Client.findByIdAndUpdate(clientId, {
                     $set: { status: 'ACTIVE' }

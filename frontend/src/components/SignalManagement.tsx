@@ -282,6 +282,29 @@ export default function SignalManagement({
     };
   }, [matchedSmsTemplate, formattedInstrument, currentStockSymbol, entryPrice, formattedTargets, target1, target2, target3, stoploss, callType, tradeDuration, customVariableValues]);
 
+  // Active Trade Alert template and DLT variable character limit (1 var = max 30 chars, 2 vars = max 60 chars)
+  const activeAlertTemplate = useMemo(() => {
+    return smsTemplates.find((t: any) => 
+      (t.status === 'ACTIVE' || t.isActive) && 
+      (t.category === 'TRADE_ALERT' || t.type === 'TRADE_ALERT')
+    ) || null;
+  }, [smsTemplates]);
+
+  const alertVariableCount = useMemo(() => {
+    if (!activeAlertTemplate) return 1;
+    if (Array.isArray(activeAlertTemplate.variableMappings) && activeAlertTemplate.variableMappings.length > 0) {
+      return activeAlertTemplate.variableMappings.length;
+    }
+    const msg = activeAlertTemplate.content || activeAlertTemplate.message || '';
+    const matches = msg.match(/\{#(var|alp|num|val)\d*#\}|\{(var|alp|num|val)\d*\}/gi) || [];
+    return matches.length >= 2 ? 2 : 1;
+  }, [activeAlertTemplate]);
+
+  // 1 variable = max 30 characters; 2 variables = max 60 characters
+  const maxAlertChars = useMemo(() => {
+    return alertVariableCount >= 2 ? 60 : 30;
+  }, [alertVariableCount]);
+
   // Smart download helper — checks if file exists before downloading
   const BASE_URL = base_ra_url;
   const handleSafeDownload = async (reportUrl: string) => {
@@ -457,6 +480,10 @@ export default function SignalManagement({
 
   const handleSendAlert = async () => {
     if (!alertMessage.trim() || !alertTrade) return;
+    if (alertMessage.length > maxAlertChars) {
+      toast.error(`Alert message cannot exceed ${maxAlertChars} characters under active DLT template rules.`);
+      return;
+    }
     setSendingAlert(true);
     try {
       const res = await api.request(`/signals/${alertTrade.id}/messages`, {
@@ -1835,14 +1862,54 @@ export default function SignalManagement({
 
               {!isViewOnly && (
                 <div className="mb-4">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-2">New Alert Message</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">
+                      New Alert Message
+                    </label>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full transition-colors ${
+                      alertMessage.length >= maxAlertChars
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 font-bold'
+                        : alertMessage.length > maxAlertChars * 0.8
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    }`}>
+                      {alertMessage.length} / {maxAlertChars} chars
+                    </span>
+                  </div>
                   <textarea
                     value={alertMessage}
-                    onChange={(e) => setAlertMessage(e.target.value)}
+                    maxLength={maxAlertChars}
+                    onChange={(e) => {
+                      if (e.target.value.length <= maxAlertChars) {
+                        setAlertMessage(e.target.value);
+                      }
+                    }}
                     rows={4}
-                    className="w-full bg-slate-50 dark:bg-[#0f1523] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-colors resize-none"
-                    placeholder="Type your alert message here (e.g. Book partial profit)..."
+                    className="w-full bg-slate-50 dark:bg-[#0f1523] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors resize-none"
+                    placeholder={
+                      maxAlertChars === 60
+                        ? "Type your alert message (Max 60 characters for 2 variables)..."
+                        : "Type your alert message (Max 30 characters for 1 variable)..."
+                    }
                   />
+                  <div className="flex items-center justify-between mt-1.5 text-[11px]">
+                    <span className="text-slate-500 dark:text-slate-400 truncate max-w-[270px]" title={activeAlertTemplate?.name}>
+                      {activeAlertTemplate ? (
+                        <>
+                          DLT Template: <strong className="text-slate-700 dark:text-slate-200">{activeAlertTemplate.name}</strong> ({alertVariableCount} {alertVariableCount > 1 ? 'variables = 60' : 'variable = 30'} chars)
+                        </>
+                      ) : (
+                        'DLT Rule: Max 30 characters for 1 variable'
+                      )}
+                    </span>
+                    {alertMessage.length >= maxAlertChars ? (
+                      <span className="text-rose-500 font-bold">Max limit reached</span>
+                    ) : (
+                      <span className="text-slate-400">
+                        {maxAlertChars - alertMessage.length} left
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

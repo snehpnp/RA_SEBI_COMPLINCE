@@ -1478,7 +1478,16 @@ const getAdminClients = async (req, res) => {
                     id: String(uObj._id || uObj.id),
                     role: uObj.roleId
                 } : null,
-                profile: profileMap.get(cIdStr) || profileMap.get(uIdStr) || null,
+                profile: (() => {
+                    const rawP = profileMap.get(cIdStr) || profileMap.get(uIdStr) || {};
+                    return {
+                        ...rawP,
+                        addressLine1: rawP.addressLine1 || c.addressLine1 || c.address || null,
+                        city: rawP.city || c.city || null,
+                        state: rawP.state || c.state || null,
+                        zipCode: rawP.zipCode || c.zipCode || null
+                    };
+                })(),
                 subscriptions: clientSubs,
                 agreements: agMap.get(cIdStr) || agMap.get(uIdStr) || [],
                 documents: docMap.get(cIdStr) || docMap.get(uIdStr) || [],
@@ -1627,7 +1636,16 @@ const getAdminDeletedClients = async (req, res) => {
                     deletedAt: user.deletedAt,
                     deletedBy: user.deletedBy
                 } : null,
-                profile: profileMap.get(cIdStr) || profileMap.get(uIdStr) || null,
+                profile: (() => {
+                    const rawP = profileMap.get(cIdStr) || profileMap.get(uIdStr) || {};
+                    return {
+                        ...rawP,
+                        addressLine1: rawP.addressLine1 || c.addressLine1 || c.address || null,
+                        city: rawP.city || c.city || null,
+                        state: rawP.state || c.state || null,
+                        zipCode: rawP.zipCode || c.zipCode || null
+                    };
+                })(),
                 subscriptions: subMap.get(cIdStr) || subMap.get(uIdStr) || [],
                 agreements: agMap.get(cIdStr) || agMap.get(uIdStr) || [],
                 documents: docMap.get(cIdStr) || docMap.get(uIdStr) || []
@@ -1834,12 +1852,14 @@ const updateClient = async (req, res) => {
                 return res.status(400).json({ success: false, message: 'PAN already in use by another client.' });
             }
         }
-        // Validate Aadhaar if provided
-        if (aadhaar !== undefined && finalAadhaar && finalAadhaar !== 'N/A') {
-            if (!/^[0-9]{12}$/.test(finalAadhaar)) {
+        // Validate Aadhaar if provided (skip check if masked with X or dashes)
+        const isMaskedAadhaar = finalAadhaar ? /x/i.test(String(finalAadhaar).replace(/[\s-]/g, '')) : false;
+        if (aadhaar !== undefined && finalAadhaar && finalAadhaar !== 'N/A' && !isMaskedAadhaar) {
+            const cleanAadhaar = String(finalAadhaar).replace(/[\s-]/g, '');
+            if (!/^[0-9]{12}$/.test(cleanAadhaar)) {
                 return res.status(400).json({ success: false, message: 'Please enter a valid 12-digit Aadhaar number.' });
             }
-            const existingAadhaar = await db_1.default.Client.findOne({ aadhaar: finalAadhaar, _id: { $ne: actualClientId } }).lean();
+            const existingAadhaar = await db_1.default.Client.findOne({ aadhaar: cleanAadhaar, _id: { $ne: actualClientId } }).lean();
             if (existingAadhaar) {
                 return res.status(400).json({ success: false, message: 'Aadhaar number already in use by another client.' });
             }
@@ -1882,6 +1902,21 @@ const updateClient = async (req, res) => {
                 remarks: 'Updated by Admin / Compliance Officer'
             });
         }
+        let finalState = state;
+        if (finalState) {
+            const trimmedState = String(finalState).trim();
+            const numCode = trimmedState.replace(/^0+/, '');
+            const stateDoc = await db_1.default.State.findOne({
+                $or: [
+                    { name: { $regex: new RegExp(`^${trimmedState}$`, 'i') } },
+                    { gstCode: numCode },
+                    { gstCode: trimmedState }
+                ]
+            }).lean();
+            if (stateDoc) {
+                finalState = stateDoc.name;
+            }
+        }
         const clientUpdate = {};
         if (name !== undefined)
             clientUpdate.name = name.trim();
@@ -1892,7 +1927,15 @@ const updateClient = async (req, res) => {
         if (pan !== undefined)
             clientUpdate.pan = finalPan;
         if (aadhaar !== undefined)
-            clientUpdate.aadhaar = finalAadhaar;
+            clientUpdate.aadhaar = isMaskedAadhaar ? (client?.aadhaar || aadhaar) : finalAadhaar;
+        if (addressLine1 !== undefined)
+            clientUpdate.address = addressLine1;
+        if (city !== undefined)
+            clientUpdate.city = city;
+        if (finalState !== undefined)
+            clientUpdate.state = finalState;
+        if (zipCode !== undefined)
+            clientUpdate.zipCode = zipCode;
         if (category !== undefined)
             clientUpdate.category = category || 'INDIVIDUAL';
         if (occupation !== undefined)
@@ -1918,8 +1961,8 @@ const updateClient = async (req, res) => {
                 profileUpdate.addressLine1 = addressLine1;
             if (city !== undefined)
                 profileUpdate.city = city;
-            if (state !== undefined)
-                profileUpdate.state = state;
+            if (finalState !== undefined)
+                profileUpdate.state = finalState;
             if (zipCode !== undefined)
                 profileUpdate.zipCode = zipCode;
             await db_1.default.ClientProfile.findOneAndUpdate({ clientId: actualClientId }, {
@@ -3489,6 +3532,7 @@ const assignPlanByAdmin = async (req, res) => {
             tenantId: tenantId || client.tenantId,
             clientId: actualClientId,
             planId: plan._id || plan.id,
+            subscriptionId: subscription._id,
             amount: parseFloat(finalTotalAmount.toFixed(2)),
             paymentMode,
             transactionRef: paymentRefId,
@@ -3549,6 +3593,8 @@ const assignPlanByAdmin = async (req, res) => {
             channel: 'INAPP',
             title: 'New Plan Assigned',
             message: `Your account has been assigned the "${plan.name}" plan by your advisor. The plan is now active and valid until ${new Date(Date.now() + assignedDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-IN')}.`,
+            type: 'account',
+            data: { action: 'PLAN_ASSIGNED', planId: plan._id?.toString(), planName: plan.name },
             status: 'SENT'
         }).catch(() => { });
         await (0, auditService_1.logAudit)({
@@ -4525,6 +4571,7 @@ const getSmsTemplates = async (req, res) => {
                 applicableCombinations: combos,
                 content: t.message || t.content || '',
                 message: t.message || t.content || '',
+                variableMappings: t.variableMappings || [],
                 isActive: t.status === 'ACTIVE' || t.isActive === true,
                 status: t.status || (t.isActive ? 'ACTIVE' : 'INACTIVE')
             };
@@ -4553,6 +4600,7 @@ const createSmsTemplate = async (req, res) => {
         const applicableSegments = Array.isArray(req.body.applicableSegments)
             ? req.body.applicableSegments.map((s) => s.trim().toUpperCase())
             : [];
+        const variableMappings = Array.isArray(req.body.variableMappings) ? req.body.variableMappings.map((m, idx) => ({ index: typeof m.index === 'number' ? m.index : idx, placeholder: String(m.placeholder || '').trim(), fieldKey: String(m.fieldKey || '').trim(), selectedFields: Array.isArray(m.selectedFields) ? m.selectedFields.map(String) : (m.fieldKey ? [String(m.fieldKey)] : []), customLabel: String(m.customLabel || '').trim() })) : [];
         const applicableActions = Array.isArray(req.body.applicableActions)
             ? req.body.applicableActions.map((a) => a.trim().toUpperCase())
             : [];
@@ -4585,6 +4633,23 @@ const createSmsTemplate = async (req, res) => {
                 }
             }
         }
+        // Trade Alert single active template guard (only 1 active Trade Alert template allowed)
+        if (effectiveCategory === 'TRADE_ALERT' && effectiveStatus === 'ACTIVE') {
+            const tenantFilter = {
+                status: 'ACTIVE',
+                $or: [{ category: 'TRADE_ALERT' }, { type: 'TRADE_ALERT' }]
+            };
+            if (tenantId) {
+                tenantFilter.tenantId = tenantId;
+            }
+            const existingAlertTpl = await db_1.default.SmsTemplate.findOne(tenantFilter).lean();
+            if (existingAlertTpl) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Only 1 active Trade Alert template is allowed. Active template "${existingAlertTpl.name}" already exists. Please edit or deactivate it before adding a new one.`
+                });
+            }
+        }
         const template = await db_1.default.SmsTemplate.create({
             tenantId: tenantId || null,
             name,
@@ -4593,6 +4658,7 @@ const createSmsTemplate = async (req, res) => {
             applicableSegments,
             applicableActions,
             applicableCombinations,
+            variableMappings,
             dltTemplateId,
             message: effectiveMessage,
             status: effectiveStatus,
@@ -4607,6 +4673,7 @@ const createSmsTemplate = async (req, res) => {
             applicableSegments: tObj.applicableSegments || [],
             applicableActions: tObj.applicableActions || [],
             applicableCombinations: tObj.applicableCombinations || [],
+            variableMappings: tObj.variableMappings || [],
             content: tObj.message,
             isActive: tObj.status === 'ACTIVE'
         };
@@ -4645,6 +4712,9 @@ const updateSmsTemplate = async (req, res) => {
             template.status = req.body.status;
         if (typeof req.body.isActive === 'boolean')
             template.status = req.body.isActive ? 'ACTIVE' : 'INACTIVE';
+        if (req.body.variableMappings !== undefined) {
+            template.variableMappings = Array.isArray(req.body.variableMappings) ? req.body.variableMappings.map((m, idx) => ({ index: typeof m.index === 'number' ? m.index : idx, placeholder: String(m.placeholder || '').trim(), fieldKey: String(m.fieldKey || '').trim(), selectedFields: Array.isArray(m.selectedFields) ? m.selectedFields.map(String) : (m.fieldKey ? [String(m.fieldKey)] : []), customLabel: String(m.customLabel || '').trim() })) : [];
+        }
         if (req.body.applicableSegments !== undefined) {
             template.applicableSegments = Array.isArray(req.body.applicableSegments)
                 ? req.body.applicableSegments.map((s) => s.trim().toUpperCase())
@@ -4681,6 +4751,23 @@ const updateSmsTemplate = async (req, res) => {
                 return res.status(400).json({
                     success: false,
                     message: `Conflict: Trigger combination [${parts[0]} - ${parts[1]}] is already assigned to active template "${conflictCheck.conflictingTemplateName}". Each trigger combination can only be assigned to one active template.`
+                });
+            }
+        }
+        // Trade Alert single active template guard on update
+        if ((template.category === 'TRADE_ALERT' || template.type === 'TRADE_ALERT') && template.status === 'ACTIVE') {
+            const tenantFilter = {
+                _id: { $ne: template._id },
+                status: 'ACTIVE',
+                $or: [{ category: 'TRADE_ALERT' }, { type: 'TRADE_ALERT' }]
+            };
+            if (tenantId)
+                tenantFilter.tenantId = tenantId;
+            const existingAlertTpl = await db_1.default.SmsTemplate.findOne(tenantFilter).lean();
+            if (existingAlertTpl) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Only 1 active Trade Alert template is allowed. Active template "${existingAlertTpl.name}" already exists.`
                 });
             }
         }
@@ -4732,6 +4819,23 @@ const toggleSmsTemplateStatus = async (req, res) => {
                 return res.status(400).json({
                     success: false,
                     message: `Cannot activate template: Trigger combination [${parts[0]} - ${parts[1]}] is currently assigned to another active template "${conflictCheck.conflictingTemplateName}". Please deactivate that template first.`
+                });
+            }
+        }
+        // If activating a TRADE_ALERT template, check if an active one already exists
+        if (nextStatus === 'ACTIVE' && (template.category === 'TRADE_ALERT' || template.type === 'TRADE_ALERT')) {
+            const tenantFilter = {
+                _id: { $ne: template._id },
+                status: 'ACTIVE',
+                $or: [{ category: 'TRADE_ALERT' }, { type: 'TRADE_ALERT' }]
+            };
+            if (tenantId)
+                tenantFilter.tenantId = tenantId;
+            const existingAlertTpl = await db_1.default.SmsTemplate.findOne(tenantFilter).lean();
+            if (existingAlertTpl) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot activate template: Only 1 active Trade Alert template is allowed. Active template "${existingAlertTpl.name}" already exists. Please deactivate it first.`
                 });
             }
         }
@@ -4788,18 +4892,54 @@ exports.deleteSmsTemplate = deleteSmsTemplate;
 const testSmsGateway = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const { mobile, destMobile, message, dltTemplateId, username, password, senderId, entityId } = req.body;
+        const { mobile, destMobile, message, dltTemplateId, templateId, templateType, username, password, senderId, entityId, variables, orderedVariables } = req.body;
         const targetMobile = (mobile || destMobile || req.body.dest_mobileno || '').toString().trim();
         if (!targetMobile) {
             return res.status(400).json({ success: false, message: 'Mobile number is required for testing' });
         }
+        let targetTemplate = null;
+        if (templateId) {
+            targetTemplate = await db_1.default.SmsTemplate.findById(templateId).lean();
+        }
+        else if (dltTemplateId) {
+            targetTemplate = await db_1.default.SmsTemplate.findOne({ dltTemplateId: dltTemplateId.trim() }).lean();
+        }
+        const resolvedDltId = targetTemplate?.dltTemplateId || (dltTemplateId ? dltTemplateId.trim() : undefined);
+        const resolvedType = targetTemplate?.category || targetTemplate?.type || templateType || (resolvedDltId ? undefined : 'LOGIN_2FA');
+        const resolvedMessage = message ? message.trim() : (targetTemplate?.message || undefined);
+        const testVars = {
+            otp: '123456',
+            var: '123456',
+            num: '110',
+            alp: 'BUY RELIANCE 120',
+            code: '123456',
+            stock: 'RELIANCE',
+            symbol: 'RELIANCE',
+            action: 'BUY',
+            callType: 'BUY',
+            segment: 'CASH',
+            entryPrice: '120',
+            price: '120',
+            targets: '150/160',
+            target: '150',
+            target1: '150',
+            target2: '160',
+            stoploss: '110',
+            sl: '110',
+            duration: 'INTRADAY',
+            ...(variables || {})
+        };
+        const testOrderedVars = Array.isArray(orderedVariables) && orderedVariables.length > 0
+            ? orderedVariables
+            : (targetTemplate?.category === 'TRADE_SIGNAL' ? ['BUY RELIANCE 120', '150/160', '110'] : undefined);
         const result = await (0, smsService_1.sendSms)({
             tenantId,
             mobile: targetMobile,
-            templateType: 'LOGIN_2FA',
-            variables: { otp: '123456', var: '123456', num: '123456', alp: '123456', code: '123456' },
-            customMessage: message,
-            dltTemplateId,
+            templateType: resolvedType,
+            variables: testVars,
+            orderedVariables: testOrderedVars,
+            customMessage: resolvedMessage,
+            dltTemplateId: resolvedDltId,
             overrideCredentials: (username && senderId) ? {
                 username,
                 password,

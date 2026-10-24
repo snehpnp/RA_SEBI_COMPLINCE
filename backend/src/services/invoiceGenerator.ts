@@ -56,7 +56,7 @@ export const resolveLogoPath = (logoUrl?: string | null): string | null => {
     try {
       const parsed = new URL(cleanPath);
       cleanPath = parsed.pathname;
-    } catch {}
+    } catch { }
   }
 
   cleanPath = cleanPath.replace(/^[/\\]+/, '');
@@ -89,7 +89,7 @@ export const resolveLogoPath = (logoUrl?: string | null): string | null => {
           return candidate;
         }
       }
-    } catch {}
+    } catch { }
   }
 
   return null;
@@ -104,11 +104,11 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       if (isObjectId) {
         try {
           payment = await Payment.findById(paymentId).populate('coupon').populate('couponId').lean();
-        } catch {}
+        } catch { }
         if (!payment && dynamicDb?.Payment) {
           try {
             payment = await dynamicDb.Payment.findById(paymentId).populate('coupon').populate('couponId').lean();
-          } catch {}
+          } catch { }
         }
       }
 
@@ -117,11 +117,11 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         if (isObjectId) orConditions.unshift({ _id: paymentId });
         try {
           payment = await Payment.findOne({ $or: orConditions }).populate('coupon').populate('couponId').lean();
-        } catch {}
+        } catch { }
         if (!payment && dynamicDb?.Payment) {
           try {
             payment = await dynamicDb.Payment.findOne({ $or: orConditions }).populate('coupon').populate('couponId').lean();
-          } catch {}
+          } catch { }
         }
       }
 
@@ -133,11 +133,11 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       if (payment.clientId) {
         try {
           client = await Client.findById(payment.clientId).populate('user').populate('profile').lean();
-        } catch {}
+        } catch { }
         if (!client && dynamicDb?.Client) {
           try {
             client = await dynamicDb.Client.findById(payment.clientId).populate('user').populate('profile').lean();
-          } catch {}
+          } catch { }
         }
       }
       if (!client) {
@@ -154,27 +154,27 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       if (payment.tenantId) {
         try {
           tenant = await Tenant.findById(payment.tenantId).lean();
-        } catch {}
+        } catch { }
         if (!tenant && dynamicDb?.Tenant) {
           try {
             tenant = await dynamicDb.Tenant.findById(payment.tenantId).lean();
-          } catch {}
+          } catch { }
         }
       }
       if (!tenant) {
         try {
           tenant = await Tenant.findOne({ deletedAt: null }).lean();
-        } catch {}
+        } catch { }
       }
       if (!tenant && dynamicDb?.Tenant) {
         try {
           tenant = await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
-        } catch {}
+        } catch { }
       }
       if (!tenant) {
         try {
           tenant = await Tenant.findOne().lean();
-        } catch {}
+        } catch { }
       }
       if (!tenant) {
         tenant = {
@@ -190,12 +190,12 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       if (!tenant.logoUrl) {
         try {
           const sysSetting: any = await SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean() ||
-                                  (dynamicDb?.SystemSetting ? await dynamicDb.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean() : null);
+            (dynamicDb?.SystemSetting ? await dynamicDb.SystemSetting.findOne({ key: 'GLOBAL_BRANDING' }).lean() : null);
           if (sysSetting && sysSetting.value) {
             const parsed = typeof sysSetting.value === 'string' ? JSON.parse(sysSetting.value) : sysSetting.value;
             if (parsed.logoUrl) tenant.logoUrl = parsed.logoUrl;
           }
-        } catch {}
+        } catch { }
       }
 
       let categoryName = '';
@@ -204,9 +204,9 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
 
       if (payment.planId) {
         try {
-          planObj = await Plan.findById(payment.planId).populate('categoryId').lean() || 
+          planObj = await Plan.findById(payment.planId).populate('categoryId').lean() ||
             (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).populate('categoryId').lean() : null);
-        } catch {}
+        } catch { }
       }
 
       if (planObj) {
@@ -215,13 +215,13 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
           segments = planObj.researchSegments || planObj.categoryId.segments || '';
         } else if (planObj.categoryId) {
           try {
-            const cat: any = await PlanCategory.findById(planObj.categoryId).lean() || 
+            const cat: any = await PlanCategory.findById(planObj.categoryId).lean() ||
               (dynamicDb?.PlanCategory ? await dynamicDb.PlanCategory.findById(planObj.categoryId).lean() : null);
             if (cat) {
               categoryName = cat.name || '';
               segments = planObj.researchSegments || cat.segments || '';
             }
-          } catch {}
+          } catch { }
         }
         if (!segments && planObj.researchSegments) {
           segments = planObj.researchSegments;
@@ -252,45 +252,109 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
 
       if (payment.subscriptionId) {
         try {
-          const sub: any = await Subscription.findById(payment.subscriptionId).lean() || 
+          const sub: any = await Subscription.findById(payment.subscriptionId).lean() ||
             (dynamicDb?.Subscription ? await dynamicDb.Subscription.findById(payment.subscriptionId).lean() : null);
           if (sub) {
             if (sub.startDate) subStartDate = new Date(sub.startDate);
             if (sub.endDate) subEndDate = new Date(sub.endDate);
           }
-        } catch {}
+        } catch { }
       }
 
+      const validityDays = Number(payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30));
+      const paymentBaseDate = payment.paymentDate ? new Date(payment.paymentDate) : new Date(payment.createdAt || Date.now());
+
+      // If subscriptionId was not explicitly set on payment, find the BEST matching subscription for THIS payment
       if (!subStartDate && payment.clientId && payment.planId) {
         try {
-          const sub: any = await Subscription.findOne({
+          const query = {
             clientId: payment.clientId,
             planId: payment.planId
-          }).sort({ createdAt: -1 }).lean() || 
-            (dynamicDb?.Subscription ? await dynamicDb.Subscription.findOne({
-              clientId: payment.clientId,
-              planId: payment.planId
-            }).sort({ createdAt: -1 }).lean() : null);
-          if (sub) {
-            if (sub.startDate) subStartDate = new Date(sub.startDate);
-            if (sub.endDate) subEndDate = new Date(sub.endDate);
+          };
+          const allSubs: any[] = (await Subscription.find(query).sort({ createdAt: 1 }).lean() ||
+            (dynamicDb?.Subscription ? await dynamicDb.Subscription.find(query).sort({ createdAt: 1 }).lean() : [])) as any[];
+
+          if (allSubs && allSubs.length > 0) {
+            const payAmount = Number(payment.amount || 0);
+            const payCreatedAt = payment.createdAt ? new Date(payment.createdAt).getTime() : 0;
+            const payDate = payment.paymentDate ? new Date(payment.paymentDate).getTime() : 0;
+
+            let bestSub: any = null;
+            let bestScore = -1;
+
+            for (const s of allSubs) {
+              let score = 0;
+              const sStart = s.startDate ? new Date(s.startDate).getTime() : 0;
+              const sEnd = s.endDate ? new Date(s.endDate).getTime() : 0;
+              const sDays = (sStart && sEnd) ? Math.round((sEnd - sStart) / (1000 * 60 * 60 * 24)) : 0;
+              const sTotal = Number(s.amountTotal || 0);
+              const sCreated = s.createdAt ? new Date(s.createdAt).getTime() : 0;
+
+              // 1. Duration / validity match (crucial: 8-day vs 15-day)
+              if (validityDays > 0 && sDays > 0) {
+                if (sDays === validityDays) {
+                  score += 50;
+                } else if (Math.abs(sDays - validityDays) <= 1) {
+                  score += 35;
+                } else {
+                  // Heavy penalty if duration doesn't match the plan validity days
+                  score -= 60;
+                }
+              }
+
+              // 2. Amount match
+              if (payAmount > 0 && sTotal > 0) {
+                if (Math.abs(sTotal - payAmount) < 2) {
+                  score += 30;
+                }
+              }
+
+              // 3. Creation timestamp proximity
+              if (payCreatedAt > 0 && sCreated > 0) {
+                const diffSec = Math.abs(payCreatedAt - sCreated) / 1000;
+                if (diffSec < 120) {
+                  score += 30;
+                } else if (diffSec < 3600) {
+                  score += 15;
+                }
+              }
+
+              // 4. Start date matching payment date
+              if (payDate > 0 && sStart > 0) {
+                const payDateStr = new Date(payDate).toISOString().split('T')[0];
+                const sStartStr = new Date(sStart).toISOString().split('T')[0];
+                if (payDateStr === sStartStr) {
+                  score += 25;
+                }
+              }
+
+              if (score > bestScore) {
+                bestScore = score;
+                bestSub = s;
+              }
+            }
+
+            // Only accept if score > 0 (meaning a genuine match was found)
+            if (bestSub && bestScore > 0) {
+              if (bestSub.startDate) subStartDate = new Date(bestSub.startDate);
+              if (bestSub.endDate) subEndDate = new Date(bestSub.endDate);
+
+              // Auto-backfill subscriptionId on payment document for subsequent instant queries
+              try {
+                if (payment._id && bestSub._id) {
+                  (dynamicDb?.Payment || Payment).findByIdAndUpdate(payment._id, { $set: { subscriptionId: bestSub._id } }).catch(() => { });
+                }
+              } catch { }
+            }
           }
-        } catch {}
+        } catch { }
       }
 
-      if (!subStartDate && payment.serviceStartDate) {
-        subStartDate = new Date(payment.serviceStartDate);
-      }
-      if (!subEndDate && payment.serviceStartDate) {
-        const valDays = payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30);
-        subEndDate = new Date(new Date(payment.serviceStartDate).getTime() + valDays * 24 * 60 * 60 * 1000);
-      }
-
-      const paymentBaseDate = payment.paymentDate ? new Date(payment.paymentDate) : new Date(payment.createdAt || Date.now());
+      // If no valid subscription found or matched, use paymentBaseDate and validityDays directly
       const startDateFormatted = subStartDate ? subStartDate.toLocaleDateString('en-GB') : paymentBaseDate.toLocaleDateString('en-GB');
-
-      const validityDays = payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30);
-      const endDateFormatted = subEndDate ? subEndDate.toLocaleDateString('en-GB') : new Date(paymentBaseDate.getTime() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
+      const endDateFormatted = subEndDate
+        ? subEndDate.toLocaleDateString('en-GB')
+        : new Date(paymentBaseDate.getTime() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
 
       const doc = new PDFDocument({ margin: 30, size: 'A4', compress: false });
       const buffers: Buffer[] = [];
@@ -310,7 +374,7 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
           for (const p of candidatePaths) {
             try {
               if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
-            } catch {}
+            } catch { }
           }
         }
         return null;
@@ -328,19 +392,19 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         try {
           doc.registerFont('App-Regular', regularFontPath);
           regularFont = 'App-Regular';
-        } catch {}
+        } catch { }
       }
       if (boldFontPath) {
         try {
           doc.registerFont('App-Bold', boldFontPath);
           boldFont = 'App-Bold';
-        } catch {}
+        } catch { }
       }
       if (italicFontPath) {
         try {
           doc.registerFont('App-Italic', italicFontPath);
           italicFont = 'App-Italic';
-        } catch {}
+        } catch { }
       }
 
       doc.on('data', buffers.push.bind(buffers));
@@ -355,7 +419,7 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       if (payment.couponId && (!couponObj || typeof couponObj !== 'object' || !couponObj.code)) {
         try {
           couponObj = await dynamicDb.Coupon.findById(payment.couponId).lean();
-        } catch {}
+        } catch { }
       }
 
       const couponCodeText = couponObj?.code || payment.coupon?.code || payment.couponCode || '';
@@ -363,7 +427,7 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
       if (!planObj && payment.planId) {
         try {
           planObj = await Plan.findById(payment.planId).lean() || (dynamicDb?.Plan ? await dynamicDb.Plan.findById(payment.planId).lean() : null);
-        } catch {}
+        } catch { }
       }
 
       const fullPlanPrice = Number(planObj?.amount || planObj?.price || 0);
@@ -512,7 +576,7 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         try {
           doc.image(logoPath, 36, 36, { fit: [140, 48] });
           renderedLogo = true;
-        } catch {}
+        } catch { }
       }
 
       if (!renderedLogo) {

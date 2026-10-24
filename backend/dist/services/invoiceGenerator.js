@@ -279,29 +279,95 @@ const generateInvoicePdf = async (paymentId) => {
                 }
                 catch { }
             }
+            const validityDays = Number(payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30));
+            const paymentBaseDate = payment.paymentDate ? new Date(payment.paymentDate) : new Date(payment.createdAt || Date.now());
+            // If subscriptionId was not explicitly set on payment, find the BEST matching subscription for THIS payment
             if (!subStartDate && payment.clientId && payment.planId) {
                 try {
-                    const sub = await db_1.Subscription.findOne({
+                    const query = {
                         clientId: payment.clientId,
                         planId: payment.planId
-                    }).sort({ createdAt: -1 }).lean() ||
-                        (db_1.dynamicDb?.Subscription ? await db_1.dynamicDb.Subscription.findOne({
-                            clientId: payment.clientId,
-                            planId: payment.planId
-                        }).sort({ createdAt: -1 }).lean() : null);
-                    if (sub) {
-                        if (sub.startDate)
-                            subStartDate = new Date(sub.startDate);
-                        if (sub.endDate)
-                            subEndDate = new Date(sub.endDate);
+                    };
+                    const allSubs = (await db_1.Subscription.find(query).sort({ createdAt: 1 }).lean() ||
+                        (db_1.dynamicDb?.Subscription ? await db_1.dynamicDb.Subscription.find(query).sort({ createdAt: 1 }).lean() : []));
+                    if (allSubs && allSubs.length > 0) {
+                        const payAmount = Number(payment.amount || 0);
+                        const payCreatedAt = payment.createdAt ? new Date(payment.createdAt).getTime() : 0;
+                        const payDate = payment.paymentDate ? new Date(payment.paymentDate).getTime() : 0;
+                        let bestSub = null;
+                        let bestScore = -1;
+                        for (const s of allSubs) {
+                            let score = 0;
+                            const sStart = s.startDate ? new Date(s.startDate).getTime() : 0;
+                            const sEnd = s.endDate ? new Date(s.endDate).getTime() : 0;
+                            const sDays = (sStart && sEnd) ? Math.round((sEnd - sStart) / (1000 * 60 * 60 * 24)) : 0;
+                            const sTotal = Number(s.amountTotal || 0);
+                            const sCreated = s.createdAt ? new Date(s.createdAt).getTime() : 0;
+                            // 1. Duration / validity match (crucial: 8-day vs 15-day)
+                            if (validityDays > 0 && sDays > 0) {
+                                if (sDays === validityDays) {
+                                    score += 50;
+                                }
+                                else if (Math.abs(sDays - validityDays) <= 1) {
+                                    score += 35;
+                                }
+                                else {
+                                    // Heavy penalty if duration doesn't match the plan validity days
+                                    score -= 60;
+                                }
+                            }
+                            // 2. Amount match
+                            if (payAmount > 0 && sTotal > 0) {
+                                if (Math.abs(sTotal - payAmount) < 2) {
+                                    score += 30;
+                                }
+                            }
+                            // 3. Creation timestamp proximity
+                            if (payCreatedAt > 0 && sCreated > 0) {
+                                const diffSec = Math.abs(payCreatedAt - sCreated) / 1000;
+                                if (diffSec < 120) {
+                                    score += 30;
+                                }
+                                else if (diffSec < 3600) {
+                                    score += 15;
+                                }
+                            }
+                            // 4. Start date matching payment date
+                            if (payDate > 0 && sStart > 0) {
+                                const payDateStr = new Date(payDate).toISOString().split('T')[0];
+                                const sStartStr = new Date(sStart).toISOString().split('T')[0];
+                                if (payDateStr === sStartStr) {
+                                    score += 25;
+                                }
+                            }
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestSub = s;
+                            }
+                        }
+                        // Only accept if score > 0 (meaning a genuine match was found)
+                        if (bestSub && bestScore > 0) {
+                            if (bestSub.startDate)
+                                subStartDate = new Date(bestSub.startDate);
+                            if (bestSub.endDate)
+                                subEndDate = new Date(bestSub.endDate);
+                            // Auto-backfill subscriptionId on payment document for subsequent instant queries
+                            try {
+                                if (payment._id && bestSub._id) {
+                                    (db_1.dynamicDb?.Payment || db_1.Payment).findByIdAndUpdate(payment._id, { $set: { subscriptionId: bestSub._id } }).catch(() => { });
+                                }
+                            }
+                            catch { }
+                        }
                     }
                 }
                 catch { }
             }
-            const paymentBaseDate = payment.paymentDate ? new Date(payment.paymentDate) : new Date(payment.createdAt || Date.now());
+            // If no valid subscription found or matched, use paymentBaseDate and validityDays directly
             const startDateFormatted = subStartDate ? subStartDate.toLocaleDateString('en-GB') : paymentBaseDate.toLocaleDateString('en-GB');
-            const validityDays = payment.planValidityDays || (planObj?.durationMonths ? planObj.durationMonths * 30 : 30);
-            const endDateFormatted = subEndDate ? subEndDate.toLocaleDateString('en-GB') : new Date(paymentBaseDate.getTime() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
+            const endDateFormatted = subEndDate
+                ? subEndDate.toLocaleDateString('en-GB')
+                : new Date(paymentBaseDate.getTime() + validityDays * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB');
             const doc = new pdfkit_1.default({ margin: 30, size: 'A4', compress: false });
             const buffers = [];
             // Resolve TrueType fonts for full Unicode support (e.g. ₹ Indian Rupee sign)

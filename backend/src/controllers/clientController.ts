@@ -1050,12 +1050,16 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
 
         const endDate = new Date(startDate.getTime() + plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
 
-        await dynamicDb.Subscription.create({
+        const subscription = await dynamicDb.Subscription.create({
           clientId,
           planId,
           startDate,
           endDate,
           status: 'ACTIVE'
+        });
+
+        await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+          $set: { subscriptionId: subscription._id }
         });
 
         await dynamicDb.Client.findByIdAndUpdate(clientId, {
@@ -1398,7 +1402,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
         const amountBase = amountTotal / 1.18;
         const amountGst = amountTotal - amountBase;
 
-        await dynamicDb.Subscription.create({
+        const sub = await dynamicDb.Subscription.create({
           clientId: payment.clientId,
           planId: plan._id || plan.id,
           startDate,
@@ -1407,6 +1411,10 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
           amountTotal: parseFloat(amountTotal.toFixed(2)),
           amountBase: parseFloat(amountBase.toFixed(2)),
           amountGst: parseFloat(amountGst.toFixed(2))
+        });
+
+        await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+          $set: { subscriptionId: sub._id }
         });
 
         // Generate invoice PDF in background
@@ -2025,7 +2033,7 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
 
     const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
 
-    await dynamicDb.Payment.create({
+    const payment = await dynamicDb.Payment.create({
       tenantId,
       clientId: client._id || client.id,
       planId: plan._id || plan.id,
@@ -2063,6 +2071,10 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
       amountGst,
       amountTotal: finalPrice,
       isGstInclusive: !isExclusive
+    });
+
+    await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+      $set: { subscriptionId: subscription._id }
     });
 
     await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
@@ -2179,7 +2191,7 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
 
       if (client && plan) {
         const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId }).lean();
-        await dynamicDb.Payment.create({
+        const payment = await dynamicDb.Payment.create({
           tenantId: tenantObj._id || tenantObj.id || tenantId,
           clientId,
           planId,
@@ -2206,13 +2218,17 @@ export const handleCCAvenueResponse = async (req: Request, res: Response) => {
         const duration = plan.durationMonths || plan.duration || 1;
         const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
 
-        await dynamicDb.Subscription.create({
+        const subscription = await dynamicDb.Subscription.create({
           clientId,
           planId,
           startDate,
           endDate,
           status: 'ACTIVE',
           amountTotal: parseFloat(parsedData.amount as string) || 0
+        });
+
+        await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+          $set: { subscriptionId: subscription._id }
         });
 
         await dynamicDb.Client.findByIdAndUpdate(clientId, {

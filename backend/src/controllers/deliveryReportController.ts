@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import dynamicDb from '../config/db';
 import { testTelegramBot } from '../services/telegramService';
+import { checkSmsDlrStatus } from '../services/smsService';
 import { AuthenticatedRequest } from '../middlewares/auth';
 
 /**
@@ -30,7 +31,16 @@ function buildReportQuery(tenantId: any, query: any, defaultChannel?: string) {
   }
 
   if (query.status && query.status !== 'ALL') {
-    where.status = query.status.toUpperCase();
+    const st = query.status.toUpperCase();
+    if (st === 'FAILED') {
+      where.status = { $in: ['FAILED', 'ERROR'] };
+    } else if (st === 'DELIVERED') {
+      where.status = { $in: ['DELIVERED', 'SENT'] };
+    } else if (st === 'SKIPPED_CLIENT_DISABLED') {
+      where.status = { $in: ['SKIPPED_CLIENT_DISABLED', 'SKIPPED'] };
+    } else {
+      where.status = st;
+    }
   }
 
   // Date Range Filtering
@@ -191,6 +201,10 @@ async function enrichDeliveryRecords(records: any[]) {
     const isExit = d.action === 'TRADE_UPDATE' || log.type === 'update' || !!d.closeStatus || !!d.exitPrice || (matchedSignal && matchedSignal.status === 'CLOSED');
     const tradeAction = isExit ? 'EXIT' : 'ENTRY';
 
+    const rawSched = d.scheduleId || (typeof d.rawResponse === 'string' && /^\d+-\d{4}/.test(d.rawResponse.trim()) ? d.rawResponse.trim() : null);
+    const dlrCode = d.dlrCode || d.dlrStatus || (log.channel === 'SMS' && log.status === 'DELIVERED' ? 'DELIVRD' : (log.status === 'FAILED' ? 'FAILED' : null));
+    const dlrLabel = d.dlrLabel || (dlrCode === 'DELIVRD' ? 'Delivered' : (dlrCode === 'REJECTD' ? 'Rejected' : (dlrCode === 'EXPIRED' ? 'Expired' : (dlrCode === 'NCPR' ? 'DND (NCPR)' : (dlrCode === 'PENDING' ? 'Pending' : log.status)))));
+
     return {
       id: log._id?.toString() || log.id,
       channel: log.channel,
@@ -219,6 +233,12 @@ async function enrichDeliveryRecords(records: any[]) {
       planName,
       failureReason: d.error || d.reason || (log.status === 'FAILED' ? log.message : null),
       telegramMessageId: d.telegramMessageId || null,
+      scheduleId: rawSched,
+      dlrCode,
+      dlrLabel,
+      dlrDescription: d.dlrDescription || null,
+      dlrRawResponse: d.dlrRawResponse || (d.rawResponse && d.rawResponse.includes(' ') ? d.rawResponse : null),
+      dlrCheckedAt: d.dlrCheckedAt || null,
       createdAt: log.createdAt,
       updatedAt: log.updatedAt
     };
@@ -300,7 +320,7 @@ export const getMasterDeliveryReport = async (req: AuthenticatedRequest, res: Re
         else if (st === 'FAILED' || st === 'SKIPPED_CLIENT_DISABLED') stats.telegramFailed += count;
       } else if (ch === 'SMS') {
         if (st === 'DELIVERED') stats.smsDelivered += count;
-        else if (st === 'FAILED' || st === 'SKIPPED_CLIENT_DISABLED') stats.smsFailed += count;
+        else if (st === 'FAILED' || st === 'SKIPPED_CLIENT_DISABLED' || st === 'REJECTED' || st === 'EXPIRED' || st === 'UNDELIVERED' || st === 'NCPR_DND') stats.smsFailed += count;
       } else if (ch === 'INAPP') {
         stats.inAppSent += count;
       }
@@ -407,3 +427,89 @@ export const testTelegramBotConnection = async (req: AuthenticatedRequest, res: 
     return res.status(500).json({ success: false, message: error.message || 'Test connection error' });
   }
 };
+
+/**
+ * POST /api/v1/signals/delivery-reports/sync-dlr
+ * Synchronizes real-time delivery reports from Pinnacle / SMSJust gateway
+ * using /sms/user/response.php?Scheduleid=XXXXX according to Pinnacle eZeeSMS documentation.
+ */
+export const syncSmsDeliveryReports = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const { logId } = req.body || {};
+
+    const query: any = { channel: 'SMS' };
+    if (tenantId) {
+      const validTenantObjId = mongoose.Types.ObjectId.isValid(tenantId) ? new mongoose.Types.ObjectId(tenantId) : null;
+      query.$or = [
+        { tenantId: { $in: [tenantId, validTenantObjId].filter(Boolean) } },
+        { tenantId: null },
+        { tenantId: { $exists: false } }
+      ];
+    }
+
+    if (logId) {
+      query._id = logId;
+    } else {
+      query.$and = [
+        {
+          $or: [
+            { 'data.scheduleId': { $exists: true, $ne: null } },
+            { 'data.rawResponse': { $regex: /^\d+-\d{4}/ } }
+          ]
+        }
+      ];
+    }
+
+    const logs = await dynamicDb.NotificationLog.find(query)
+      .sort({ createdAt: -1 })
+      .limit(logId ? 1 : 100);
+
+    let updatedCount = 0;
+    const results: any[] = [];
+
+    for (const log of logs) {
+      const d = log.data || {};
+      const schedId = d.scheduleId || (typeof d.rawResponse === 'string' && /^\d+-\d{4}/.test(d.rawResponse.trim()) ? d.rawResponse.trim() : null);
+      if (!schedId) continue;
+
+      const dlr = await checkSmsDlrStatus(schedId, log.tenantId?.toString() || tenantId);
+      if (dlr) {
+        log.status = dlr.status;
+        log.data = {
+          ...d,
+          scheduleId: schedId,
+          dlrStatus: dlr.dlrCode,
+          dlrCode: dlr.dlrCode,
+          dlrLabel: dlr.label,
+          dlrDescription: dlr.description,
+          dlrRawResponse: dlr.rawResponse,
+          dlrCheckedAt: new Date(),
+          failureReason: dlr.status !== 'DELIVERED' ? dlr.description : null,
+          error: dlr.status !== 'DELIVERED' ? dlr.description : null
+        };
+        await log.save();
+        updatedCount++;
+        results.push({
+          id: log._id.toString(),
+          scheduleId: schedId,
+          status: dlr.status,
+          dlrCode: dlr.dlrCode,
+          label: dlr.label,
+          description: dlr.description
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Synchronized ${updatedCount} SMS delivery report(s) from Pinnacle gateway`,
+      updatedCount,
+      data: results
+    });
+  } catch (error: any) {
+    console.error('Error syncing SMS delivery reports:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Failed to sync delivery reports' });
+  }
+};
+

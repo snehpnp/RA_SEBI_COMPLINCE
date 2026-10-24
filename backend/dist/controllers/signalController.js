@@ -122,8 +122,19 @@ const createSignal = async (req, res) => {
                     target3,
                     stoploss,
                     segment,
+                    expiryDate: expiryDate || null,
+                    strikePrice: strikePrice || null,
+                    optionType: optionType || null,
                     tradeDuration,
-                    action: 'NEW_TRADE'
+                    action: 'NEW_TRADE',
+                    smsOrderedVariables: req.body.smsOrderedVariables ? ((() => {
+                        try {
+                            return typeof req.body.smsOrderedVariables === 'string' ? JSON.parse(req.body.smsOrderedVariables) : req.body.smsOrderedVariables;
+                        }
+                        catch (e) {
+                            return undefined;
+                        }
+                    })()) : undefined
                 },
                 adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
                 adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`
@@ -221,7 +232,10 @@ const listSignals = async (req, res) => {
                         createdAt: { $gte: sub.startDate }
                     };
                     if (sub.endDate) {
-                        conditions.createdAt.$lte = sub.endDate;
+                        const end = new Date(sub.endDate);
+                        const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+                        const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+                        conditions.createdAt.$lte = new Date(Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime()));
                     }
                     return conditions;
                 });
@@ -451,7 +465,7 @@ const closeSignal = async (req, res) => {
         const { id } = req.params;
         const { closeStatus, exitPrice, closeRemark, closeTargets, isFinalClose } = req.body;
         const signal = await db_1.default.Signal.findOne({ _id: id, tenantId })
-            .populate('stock')
+            .populate('stockId')
             .lean();
         if (!signal) {
             return res.status(404).json({ success: false, message: 'Signal not found' });
@@ -466,31 +480,93 @@ const closeSignal = async (req, res) => {
                 closedAt: isFinalClose ? new Date() : null
             }
         }, { returnDocument: 'after', lean: true });
+        // Determine specific target achieved (e.g. Target 1, Target 2, Target 3)
+        const targetList = typeof closeTargets === 'string' ? closeTargets.split(',').map((s) => s.trim().toUpperCase()) : [];
+        let targetLabel = '';
+        let specificTargetPrice = exitPrice ? parseFloat(exitPrice) : null;
+        if (targetList.includes('TARGET3')) {
+            targetLabel = 'Target 3';
+            if (!specificTargetPrice && signal.target3)
+                specificTargetPrice = signal.target3;
+        }
+        else if (targetList.includes('TARGET2')) {
+            targetLabel = 'Target 2';
+            if (!specificTargetPrice && signal.target2)
+                specificTargetPrice = signal.target2;
+        }
+        else if (targetList.includes('TARGET1')) {
+            targetLabel = 'Target 1';
+            if (!specificTargetPrice && signal.target1)
+                specificTargetPrice = signal.target1;
+        }
+        const targetPlanId = signal.planId ? (signal.planId._id?.toString() || signal.planId.toString()) : null;
+        const planIdsToNotify = targetPlanId ? [targetPlanId] : [];
         // Notify eligible subscribers and Admin
         try {
             const sig = signal;
-            const stock = sig.stockId || sig.stock || {};
-            const stockSymbol = stock.symbol || 'Stock';
+            let stockSymbol = 'Stock';
+            if (sig.stockId && typeof sig.stockId === 'object' && sig.stockId.symbol) {
+                stockSymbol = sig.stockId.symbol;
+            }
+            else if (sig.stockId) {
+                const stockDoc = await db_1.default.Stock.findById(sig.stockId).lean();
+                if (stockDoc?.symbol)
+                    stockSymbol = stockDoc.symbol;
+            }
             const user = req.user;
             const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+            let notifTitle = `🎯 Trade Update: ${stockSymbol}`;
+            let notifMessage = `Trade ${stockSymbol} status: ${closeStatus}.${exitPrice ? ` Exit Price: ₹${exitPrice}.` : ''} ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+            if (closeStatus === 'Partially Closed') {
+                if (targetLabel) {
+                    notifTitle = `🎯 ${targetLabel} Achieved: ${stockSymbol}`;
+                    notifMessage = `${stockSymbol} hit ${targetLabel} at ₹${specificTargetPrice || exitPrice}! Book partial profit. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+                }
+                else {
+                    notifTitle = `🎯 Partially Closed: ${stockSymbol}`;
+                    notifMessage = `${stockSymbol} partially closed at ₹${exitPrice}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+                }
+            }
+            else if (closeStatus === 'Fully Closed') {
+                notifTitle = `🎯 Trade Closed: ${stockSymbol}`;
+                notifMessage = `${stockSymbol} trade fully closed at ₹${exitPrice}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+            }
+            else if (closeStatus === 'SL Hit') {
+                notifTitle = `🛑 Stoploss Hit: ${stockSymbol}`;
+                notifMessage = `Stoploss triggered for ${stockSymbol} at ₹${exitPrice || signal.stoploss}. Exit position immediately. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+            }
+            else if (closeStatus === 'Avoid Signal') {
+                notifTitle = `⚠️ Trade Avoided: ${stockSymbol}`;
+                notifMessage = `Recommendation to avoid ${stockSymbol}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+            }
             await (0, notificationService_1.broadcastSignalNotification)({
                 tenantId,
-                planIds: [signal.planId],
-                title: `🎯 Trade Update: ${stockSymbol}`,
-                message: `Trade ${stockSymbol} status: ${closeStatus}.${exitPrice ? ` Exit Price: ₹${exitPrice}.` : ''} ${closeRemark ? `Remark: ${closeRemark}` : ''}`,
+                planIds: planIdsToNotify,
+                title: notifTitle,
+                message: notifMessage,
                 type: 'update',
                 data: {
                     signalId: id,
                     stockSymbol,
                     segment: signal.segment,
                     callType: signal.callType,
+                    entryPrice: signal.entryPrice,
+                    entryType: signal.entryType,
+                    target1: signal.target1,
+                    target2: signal.target2,
+                    target3: signal.target3,
+                    targetLabel,
+                    specificTargetPrice,
+                    closedTargetVal: specificTargetPrice ? String(specificTargetPrice) : '',
+                    stoploss: signal.stoploss,
+                    tradeDuration: signal.tradeDuration,
                     closeStatus,
                     exitPrice,
                     closeRemark,
+                    closeTargets,
                     isFinalClose,
                     action: 'TRADE_UPDATE'
                 },
-                signalCreatedAt: signal.createdAt,
                 adminTitle: `🎯 Trade Status Updated: ${stockSymbol}`,
                 adminMessage: `${researcherName} updated trade ${stockSymbol} to status: ${closeStatus}.${closeRemark ? ` (${closeRemark})` : ''}`
             });
@@ -628,6 +704,7 @@ const addSignalMessage = async (req, res) => {
             message
         });
         const signal = await db_1.default.Signal.findById(id)
+            .populate('stockId')
             .populate('stock')
             .lean();
         if (signal) {
@@ -637,20 +714,24 @@ const addSignalMessage = async (req, res) => {
             const stockSymbol = stock.symbol || 'Trade Signal';
             const user = req.user;
             const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+            const targetPlanId = signal.planId ? (signal.planId._id?.toString() || signal.planId.toString()) : null;
             try {
                 await (0, notificationService_1.broadcastSignalNotification)({
                     tenantId,
-                    planIds: [signal.planId],
+                    planIds: targetPlanId ? [targetPlanId] : [],
                     title: `🚨 Trade Alert: ${stockSymbol}`,
                     message: `${message}`,
                     type: 'alert',
                     data: {
                         signalId: id,
                         stockSymbol,
+                        segment: signal.segment,
+                        callType: signal.callType,
+                        entryPrice: signal.entryPrice,
                         alertMessage: message,
+                        message: message,
                         action: 'TRADE_ALERT'
                     },
-                    signalCreatedAt: signal.createdAt,
                     adminTitle: `🚨 Trade Alert Sent: ${stockSymbol}`,
                     adminMessage: `${researcherName} sent alert for ${stockSymbol}: ${message}`
                 });

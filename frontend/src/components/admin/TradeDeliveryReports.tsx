@@ -23,7 +23,8 @@ import {
   Check,
   FileText,
   User,
-  Users
+  Users,
+  Clock
 } from 'lucide-react';
 import api from '../../services/api';
 import toast from 'react-hot-toast';
@@ -75,6 +76,8 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
 
   const [selectedRecord, setSelectedRecord] = useState<any>(null);
   const [copiedMessage, setCopiedMessage] = useState(false);
+  const [syncingDlr, setSyncingDlr] = useState(false);
+  const [syncingLogId, setSyncingLogId] = useState<string | null>(null);
 
   // Configuration per channel
   const channelConfig = {
@@ -174,6 +177,140 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
     fetchReports();
   }, [fetchReports]);
 
+  // Synchronize live DLR statuses from Pinnacle gateway for all recent SMS
+  const handleSyncAllDlr = async () => {
+    setSyncingDlr(true);
+    try {
+      const res: any = await api.syncSmsDeliveryReports();
+      if (res?.success) {
+        toast.success(res.message || 'SMS delivery reports synchronized from Pinnacle');
+        await fetchReports();
+      } else {
+        toast.error(res?.message || 'Failed to sync SMS delivery reports');
+      }
+    } catch (err: any) {
+      console.error('Error syncing SMS DLR:', err);
+      toast.error(err.message || 'Failed to sync SMS delivery reports');
+    } finally {
+      setSyncingDlr(false);
+    }
+  };
+
+  // Synchronize live DLR for a single SMS record
+  const handleSyncSingleDlr = async (logId: string) => {
+    setSyncingLogId(logId);
+    try {
+      const res: any = await api.syncSmsDeliveryReports(logId);
+      if (res?.success) {
+        toast.success('Live SMS delivery report fetched from Pinnacle gateway');
+        await fetchReports();
+        if (selectedRecord && selectedRecord.id === logId && res.data && res.data.length > 0) {
+          const updated = res.data[0];
+          setSelectedRecord((prev: any) => ({
+            ...prev,
+            status: updated.status,
+            dlrCode: updated.dlrCode,
+            dlrLabel: updated.label,
+            dlrDescription: updated.description,
+            failureReason: updated.status !== 'DELIVERED' ? updated.description : null
+          }));
+        }
+      } else {
+        toast.error(res?.message || 'Failed to fetch DLR');
+      }
+    } catch (err: any) {
+      console.error('Error syncing single DLR:', err);
+      toast.error(err.message || 'Failed to fetch DLR');
+    } finally {
+      setSyncingLogId(null);
+    }
+  };
+
+  // Render status badge matching Pinnacle eZeeSMS URL API documentation
+  const renderStatusBadge = (record: any) => {
+    const isSms = record.channel === 'SMS';
+    const status = record.status;
+    const dlrCode = (record.dlrCode || '').toUpperCase();
+
+    if (isSms) {
+      if (dlrCode === 'DELIVRD' || status === 'DELIVERED') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <CheckCircle2 className="w-3 h-3" /> Delivered (DELIVRD)
+          </span>
+        );
+      }
+      if (dlrCode === 'PENDING' || status === 'PENDING') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <Clock className="w-3 h-3" /> Pending DLR (PENDING)
+          </span>
+        );
+      }
+      if (dlrCode === 'REJECTD' || dlrCode === 'REJECTED' || status === 'REJECTED') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+            <XCircle className="w-3 h-3" /> Rejected (REJECTD)
+          </span>
+        );
+      }
+      if (dlrCode === 'UNDELIV' || status === 'UNDELIVERED') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+            <XCircle className="w-3 h-3" /> Undelivered (UNDELIV)
+          </span>
+        );
+      }
+      if (dlrCode === 'EXPIRED' || status === 'EXPIRED') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+            <AlertCircle className="w-3 h-3" /> Expired (EXPIRED)
+          </span>
+        );
+      }
+      if (dlrCode === 'NCPR' || status === 'NCPR_DND') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+            <ShieldAlert className="w-3 h-3" /> DND Blocked (NCPR)
+          </span>
+        );
+      }
+      if (status === 'SKIPPED_CLIENT_DISABLED' || status === 'SKIPPED') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <AlertCircle className="w-3 h-3" /> Opted Out
+          </span>
+        );
+      }
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+          <XCircle className="w-3 h-3" /> Failed
+        </span>
+      );
+    }
+
+    // Telegram & In-App channels
+    if (status === 'DELIVERED' || status === 'SENT') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+          <CheckCircle2 className="w-3 h-3" /> Delivered
+        </span>
+      );
+    }
+    if (status === 'SKIPPED_CLIENT_DISABLED' || status === 'SKIPPED') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+          <AlertCircle className="w-3 h-3" /> Opted Out
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+        <XCircle className="w-3 h-3" /> Failed
+      </span>
+    );
+  };
+
   // Client-side action filter (ENTRY vs EXIT)
   const filteredReports = reports.filter(r => {
     if (actionFilter === 'ALL') return true;
@@ -209,6 +346,9 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
       'Client Email',
       'Telegram Chat ID',
       'Dispatch Channel',
+      'Pinnacle Schedule ID',
+      'Telecom DLR Code',
+      'Telecom Status Description',
       'Delivery Status',
       'Dispatched Message Body',
       'Failure / Skip Reason'
@@ -238,6 +378,9 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
         `"${r.clientEmail || ''}"`,
         `"${r.telegramChatId || ''}"`,
         `"${r.channel || ''}"`,
+        `"${r.scheduleId || ''}"`,
+        `"${r.dlrCode || ''}"`,
+        `"${(r.dlrDescription || '').replace(/"/g, '""')}"`,
         `"${r.status || ''}"`,
         `"${cleanMsg.replace(/"/g, '""')}"`,
         `"${(r.failureReason || '').replace(/"/g, '""')}"`
@@ -318,6 +461,15 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
           >
             <RefreshCcw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
+          </button>
+          <button
+            onClick={handleSyncAllDlr}
+            disabled={syncingDlr || loading}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition disabled:opacity-50"
+            title="Fetch real-time telecom delivery report (DELIVRD, REJECTD, EXPIRED, etc.) from Pinnacle SMS Gateway"
+          >
+            <RefreshCcw className={`w-3.5 h-3.5 ${syncingDlr ? 'animate-spin' : ''}`} />
+            {syncingDlr ? 'Syncing DLR...' : 'Sync SMS DLR'}
           </button>
           <button
             onClick={handleExportCsv}
@@ -580,13 +732,17 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-lime-500"
+              className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-lime-500 font-semibold"
             >
               <option value="ALL">All Delivery Statuses</option>
-              <option value="DELIVERED">Delivered</option>
-              <option value="SENT">Sent</option>
-              <option value="FAILED">Failed</option>
-              <option value="SKIPPED_CLIENT_DISABLED">Opted Out (Client)</option>
+              <option value="DELIVERED">✅ Delivered (DELIVRD)</option>
+              <option value="PENDING">⏳ Pending DLR (PENDING)</option>
+              <option value="REJECTED">🚫 Rejected (REJECTD)</option>
+              <option value="UNDELIVERED">❌ Undelivered (UNDELIV)</option>
+              <option value="EXPIRED">⌛ Expired (EXPIRED)</option>
+              <option value="NCPR_DND">🛡️ DND Blocked (NCPR)</option>
+              <option value="FAILED">⚠️ Failed (Gateway Error)</option>
+              <option value="SKIPPED_CLIENT_DISABLED">⛔ Opted Out (Client)</option>
             </select>
           </div>
 
@@ -847,6 +1003,25 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                             <span className="text-[9px] text-slate-500 font-mono">
                               {row.clientMobile || row.recipient}
                             </span>
+                            {row.scheduleId && (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span className="text-[8.5px] text-slate-400 font-mono" title={`Pinnacle Schedule ID: ${row.scheduleId}`}>
+                                  ID: {row.scheduleId.split('-')[0]}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSyncSingleDlr(row.id);
+                                  }}
+                                  disabled={syncingLogId === row.id}
+                                  className="text-[8.5px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-0.5 font-bold"
+                                  title="Check Live DLR with Pinnacle"
+                                >
+                                  <RefreshCcw className={`w-2.5 h-2.5 ${syncingLogId === row.id ? 'animate-spin' : ''}`} />
+                                  Check
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                         {row.channel === 'INAPP' && (
@@ -858,23 +1033,15 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
 
                       {/* Status & Message Body Preview */}
                       <td className="py-3.5 px-4 max-w-xs">
-                        <div className="flex items-center gap-2 mb-1">
-                          {isDelivered && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              <CheckCircle2 className="w-3 h-3" /> Delivered
-                            </span>
-                          )}
-                          {isFailed && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                              <XCircle className="w-3 h-3" /> Failed
-                            </span>
-                          )}
-                          {isOptedOut && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                              <AlertCircle className="w-3 h-3" /> {row.status === 'SKIPPED_CLIENT_DISABLED' ? 'Opted Out' : 'Skipped'}
-                            </span>
-                          )}
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          {renderStatusBadge(row)}
                         </div>
+
+                        {row.channel === 'SMS' && row.dlrDescription && row.status !== 'DELIVERED' && (
+                          <div className="text-[9.5px] text-rose-600 dark:text-rose-400 font-medium leading-tight mb-1 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded">
+                            Telecom: {row.dlrDescription}
+                          </div>
+                        )}
 
                         {messagePreview ? (
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed" title={messagePreview}>
@@ -884,7 +1051,7 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                           <span className="text-[10px] text-slate-400 italic">No message body</span>
                         )}
 
-                        {(isFailed || isOptedOut) && row.failureReason && (
+                        {(isFailed || isOptedOut) && row.failureReason && row.failureReason !== row.dlrDescription && (
                           <div className="text-[9.5px] text-rose-600 dark:text-rose-400 font-semibold truncate max-w-[260px] mt-1 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded" title={row.failureReason}>
                             ⚠️ {row.failureReason}
                           </div>
@@ -1054,9 +1221,92 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-black">Delivery Status</span>
-                  <p className="font-semibold text-slate-800 dark:text-slate-200">{selectedRecord.status}</p>
+                  <div className="mt-0.5">
+                    {renderStatusBadge(selectedRecord)}
+                  </div>
                 </div>
               </div>
+
+              {/* Pinnacle SMS Delivery Report (DLR) Details Card */}
+              {selectedRecord.channel === 'SMS' && (
+                <div className="bg-indigo-50/70 dark:bg-indigo-950/30 p-4 rounded-xl border border-indigo-200 dark:border-indigo-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                        <Smartphone className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Pinnacle eZeeSMS Delivery Report (DLR)</span>
+                          <span className="text-[9px] px-2 py-0.2 rounded-full font-bold bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+                            Telecom Operator Verified
+                          </span>
+                        </h4>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          SEBI compliance tracking matching Pinnacle URL API specification (response.php)
+                        </p>
+                      </div>
+                    </div>
+                    {selectedRecord.scheduleId && 
+                     selectedRecord.status !== 'DELIVERED' && 
+                     String(selectedRecord.dlrCode || '').toUpperCase() !== 'DELIVRD' && (
+                      <button
+                        onClick={() => handleSyncSingleDlr(selectedRecord.id)}
+                        disabled={syncingLogId === selectedRecord.id}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-xs transition disabled:opacity-50"
+                        title="Query Pinnacle live response.php endpoint"
+                      >
+                        <RefreshCcw className={`w-3 h-3 ${syncingLogId === selectedRecord.id ? 'animate-spin' : ''}`} />
+                        {syncingLogId === selectedRecord.id ? 'Checking...' : 'Check Live DLR Now'}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2.5 border-t border-indigo-200/60 dark:border-indigo-500/20 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-semibold">Pinnacle Schedule ID</span>
+                      <p className="font-mono font-bold text-slate-900 dark:text-white select-all text-[11px] mt-0.5">
+                        {selectedRecord.scheduleId || 'N/A'}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-semibold">Telecom Status Code</span>
+                      <div className="mt-0.5">
+                        {renderStatusBadge(selectedRecord)}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-semibold">Recipient Mobile</span>
+                      <p className="font-mono font-bold text-slate-900 dark:text-white mt-0.5">
+                        {selectedRecord.clientMobile || selectedRecord.recipient}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white/80 dark:bg-black/30 p-3 rounded-lg border border-indigo-100 dark:border-white/5 space-y-1.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] gap-1">
+                      <span className="text-slate-500 font-semibold">Documentation Definition:</span>
+                      <span className="font-bold text-slate-900 dark:text-slate-200">
+                        {selectedRecord.dlrDescription || (selectedRecord.status === 'DELIVERED' ? 'Message successfully delivered to handset' : (selectedRecord.failureReason || 'Status reported by telecom operator'))}
+                      </span>
+                    </div>
+                    {selectedRecord.dlrRawResponse && (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] gap-1 pt-1 border-t border-slate-200/50 dark:border-white/5">
+                        <span className="text-slate-500 font-semibold">Raw Gateway String:</span>
+                        <code className="text-[10.5px] font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                          {selectedRecord.dlrRawResponse}
+                        </code>
+                      </div>
+                    )}
+                    {selectedRecord.dlrCheckedAt && (
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200/50 dark:border-white/5">
+                        <span>Last Verified with Telecom:</span>
+                        <span>{new Date(selectedRecord.dlrCheckedAt).toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Failure Error Notice */}
               {selectedRecord.failureReason && (

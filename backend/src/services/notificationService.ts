@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import dynamicDb from '../config/db';
-import { sendSms } from './smsService';
+import { sendSms, checkSmsDlrStatus } from './smsService';
 import { sendTelegramMessage, formatTradeTelegramMessage } from './telegramService';
 
 export interface BroadcastNotificationOptions {
@@ -89,9 +89,8 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       ];
     }
 
-    if (signalCreatedAt) {
-      subQuery.startDate = { $lte: signalCreatedAt };
-    }
+    const now = new Date();
+    subQuery.startDate = { $lte: now };
 
     const subscriptions = await dynamicDb.Subscription.find(subQuery)
       .populate({
@@ -102,7 +101,6 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
 
     // STRICT EXPIRY FILTER: Filter out expired subscriptions if endDate exists
     // Ensures subscription remains active throughout the entire end date (inclusive up to 23:59:59.999)
-    const checkDate = signalCreatedAt || new Date();
     const eligibleSubs = subscriptions.filter((sub: any) => {
       if (!sub.endDate) return true;
       const end = new Date(sub.endDate);
@@ -110,14 +108,14 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
       const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
       const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
       const effectiveEnd = Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime());
-      return effectiveEnd >= checkDate.getTime();
+      return effectiveEnd >= now.getTime();
     });
 
     const notifiedRecipients = new Set<string>();
 
     const isTenantTelegramEnabled = Boolean(tenantDoc?.telegramTradeEnabled);
     const botToken = tenantDoc?.telegramBotToken;
-    const isTenantSmsEnabled = Boolean(tenantDoc?.smsTradeEnabled && tenantDoc?.smsGatewayEnabled);
+    const isTenantSmsEnabled = Boolean(tenantDoc?.smsGatewayEnabled && tenantDoc?.smsTradeEnabled !== false);
 
     for (const sub of (eligibleSubs as any[])) {
       let client = (sub.clientId || sub.client) as any;
@@ -252,6 +250,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
             companyName: tenantDoc?.companyName,
             sebiRegistration: tenantDoc?.sebiRegistration,
             isUpdate: type === 'update' || data?.action === 'TRADE_UPDATE',
+            isAlert: type === 'alert' || data?.action === 'TRADE_ALERT',
             updateStatus: data?.closeStatus,
             planName
           });
@@ -357,21 +356,28 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
           });
         } else {
           try {
+            const isTradeAlert = type === 'alert' || data?.action === 'TRADE_ALERT';
             const tradeSegment = data?.segment ? String(data.segment).trim().toUpperCase() : '';
 
             let tradeAction = '';
-            if (type === 'signal' || data?.action === 'NEW_TRADE') {
+            if (isTradeAlert) {
+              tradeAction = 'ALERT';
+            } else if (type === 'signal' || data?.action === 'NEW_TRADE') {
               tradeAction = (data?.callType || 'BUY').trim().toUpperCase();
             } else if (type === 'update' || data?.action === 'TRADE_UPDATE') {
               const cStatus = (data?.closeStatus || '').toUpperCase();
               if (cStatus.includes('SL') || cStatus.includes('STOPLOSS')) {
                 tradeAction = 'STOPLOSS';
+              } else if (cStatus.includes('AVOID')) {
+                tradeAction = 'AVOID';
+              } else if (cStatus.includes('FULLY') || cStatus.includes('CLOSED')) {
+                tradeAction = 'CLOSE';
               } else {
                 tradeAction = 'TARGET';
               }
             }
 
-            if (tradeSegment && tradeAction) {
+            if ((tradeSegment && tradeAction) || isTradeAlert) {
               let futMonth = '';
               if (data?.expiryDate) {
                 try {
@@ -393,40 +399,57 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                 .filter((v: any) => v !== undefined && v !== null && String(v).trim() !== '')
                 .join('/');
 
+              const isTradeUpdate = type === 'update' || data?.action === 'TRADE_UPDATE';
+              const singleTargetVal = data?.closedTargetVal || (data?.specificTargetPrice ? String(data.specificTargetPrice) : '') || (isTradeUpdate && data?.exitPrice ? String(data.exitPrice) : '');
+              const targetValToUse = isTradeUpdate && singleTargetVal ? singleTargetVal : targetsJoined;
+              const alertMsg = data?.alertMessage || data?.message || message || '';
+
               const smsResult = await sendSms({
                 tenantId: currentTenantId,
                 mobile: destMobile,
-                templateType: 'TRADE_SIGNAL',
+                templateType: isTradeAlert ? 'TRADE_ALERT' : 'TRADE_SIGNAL',
                 segment: tradeSegment,
                 action: tradeAction,
                 variables: {
                   stock: data?.stockSymbol || '',
                   symbol: data?.stockSymbol || '',
                   fullInstrument,
-                  action: tradeAction,
-                  callType: tradeAction,
+                  alertMessage: alertMsg,
+                  alert: alertMsg,
+                  message: alertMsg,
+                  planName: planName || '',
+                  plan: planName || '',
+                  action: isTradeAlert ? 'ALERT' : (isTradeUpdate ? (data?.targetLabel ? `${data.targetLabel} ACHIEVED` : (data?.closeStatus || tradeAction)) : tradeAction),
+                  callType: isTradeAlert ? 'ALERT' : (isTradeUpdate ? (data?.targetLabel ? `${data.targetLabel} ACHIEVED` : (data?.closeStatus || tradeAction)) : tradeAction),
                   segment: tradeSegment,
-                  price: data?.entryPrice || data?.exitPrice || '',
+                  price: data?.exitPrice || data?.entryPrice || '',
                   entryPrice: data?.entryPrice || '',
                   entry: data?.entryPrice || '',
-                  exit: data?.exitPrice || '',
-                  targets: targetsJoined,
-                  target: data?.target1 || '',
-                  target1: data?.target1 || '',
-                  target2: data?.target2 || '',
-                  target3: data?.target3 || '',
+                  exit: data?.exitPrice || singleTargetVal || '',
+                  exitPrice: data?.exitPrice || singleTargetVal || '',
+                  targets: targetValToUse,
+                  target: targetValToUse,
+                  targetLabel: data?.targetLabel || '',
+                  target1: singleTargetVal || (data?.target1 || ''),
+                  target2: singleTargetVal || (data?.target2 || ''),
+                  target3: singleTargetVal || (data?.target3 || ''),
                   stoploss: data?.stoploss || '',
                   sl: data?.stoploss || '',
+                  closeStatus: data?.closeStatus || tradeAction,
+                  closeRemark: data?.closeRemark || '',
                   duration: data?.tradeDuration || '',
                   tradeDuration: data?.tradeDuration || '',
-                  instrumentWithPrice: `${fullInstrument} @ ${data?.entryPrice || data?.exitPrice || ''}`.trim()
+                  instrumentWithPrice: `${fullInstrument} @ ${data?.exitPrice || data?.entryPrice || ''}`.trim()
                 },
                 orderedVariables: Array.isArray(data?.smsOrderedVariables) && data.smsOrderedVariables.length > 0
                   ? data.smsOrderedVariables
                   : undefined
               });
 
-              await dynamicDb.NotificationLog.create({
+              const scheduleId = (smsResult.rawResponse || '').trim();
+              const isSchedId = /^\d+-\d{4}/.test(scheduleId);
+
+              const createdLog = await dynamicDb.NotificationLog.create({
                 tenantId: currentTenantId,
                 recipient: destMobile,
                 channel: 'SMS',
@@ -434,7 +457,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                 message: smsResult.sentMessage || smsResult.message || `SMS dispatched for ${data?.stockSymbol}`,
                 type,
                 isRead: false,
-                status: smsResult.success ? 'DELIVERED' : 'FAILED',
+                status: smsResult.success ? (isSchedId ? 'PENDING' : 'DELIVERED') : 'FAILED',
                 data: {
                   ...data,
                   clientId: clientDbId,
@@ -442,11 +465,39 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
                   mobile: destMobile,
                   planId: sub.planId,
                   planName,
+                  scheduleId: isSchedId ? scheduleId : undefined,
                   rawResponse: smsResult.rawResponse,
                   error: smsResult.success ? null : (smsResult.message || smsResult.reason),
                   reason: smsResult.success ? null : (smsResult.message || smsResult.reason)
                 }
               });
+
+              // Background DLR verification after 3.5s per Pinnacle DLR API documentation
+              if (smsResult.success && isSchedId && createdLog?._id) {
+                setTimeout(async () => {
+                  try {
+                    const dlr = await checkSmsDlrStatus(scheduleId, currentTenantId);
+                    if (dlr && dlr.status) {
+                      await dynamicDb.NotificationLog.updateOne(
+                        { _id: createdLog._id },
+                        {
+                          $set: {
+                            status: dlr.status,
+                            'data.dlrStatus': dlr.dlrCode,
+                            'data.dlrCode': dlr.dlrCode,
+                            'data.dlrLabel': dlr.label,
+                            'data.dlrDescription': dlr.description,
+                            'data.dlrRawResponse': dlr.rawResponse,
+                            'data.dlrCheckedAt': new Date()
+                          }
+                        }
+                      );
+                    }
+                  } catch (e) {
+                    // background check catch
+                  }
+                }, 3500);
+              }
             }
           } catch (smsCatchErr: any) {
             console.warn('[Notification Service] SMS send attempt error:', smsCatchErr?.message);

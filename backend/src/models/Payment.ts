@@ -60,6 +60,7 @@ export interface IPayment extends Document {
   invoiceStatus?: 'PENDING_AGREEMENT' | 'GENERATED';
   invoiceSentAt?: Date | null;
   lastEmailedTo?: string | null;
+  subscriptionId?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +70,7 @@ export const PaymentSchema = new Schema<IPayment>(
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true },
     planId: { type: Schema.Types.ObjectId, ref: 'Plan', default: null },
+    subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', default: null },
     amount: { type: Number, required: true },
     paymentMode: { type: String, required: true },
     transactionRef: { type: String, required: true, unique: true },

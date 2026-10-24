@@ -89,7 +89,8 @@ import {
 import {
   getMasterDeliveryReport,
   getChannelDeliveryReport,
-  testTelegramBotConnection
+  testTelegramBotConnection,
+  syncSmsDeliveryReports
 } from '../controllers/deliveryReportController';
 
 const router = Router();
@@ -1689,6 +1690,12 @@ router.get(
   getChannelDeliveryReport
 );
 router.post(
+  '/signals/delivery-reports/sync-dlr',
+  authenticateJWT,
+  enforceTenantIsolation,
+  syncSmsDeliveryReports
+);
+router.post(
   '/admin/telegram/test',
   authenticateJWT,
   enforceTenantIsolation,
@@ -1778,12 +1785,12 @@ router.post(
 
 // Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
 router.get('/dsc-bridge/ping', dscBridgePing);
-router.get('/dsc-bridge/token-status', dscBridgeTokenStatus);
-router.post('/dsc-bridge/sign-pdf', dscBridgeSignPdf);
+router.get('/dsc-bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
+router.post('/dsc-bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
 
 router.get('/researcher/dsc/bridge/ping', dscBridgePing);
-router.get('/researcher/dsc/bridge/token-status', dscBridgeTokenStatus);
-router.post('/researcher/dsc/bridge/sign-pdf', dscBridgeSignPdf);
+router.get('/researcher/dsc/bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
+router.post('/researcher/dsc/bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
 
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES
