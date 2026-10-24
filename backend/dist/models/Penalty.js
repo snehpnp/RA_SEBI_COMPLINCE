@@ -45,7 +45,10 @@ exports.PenaltySchema = new mongoose_1.Schema({
     paidAt: { type: Date, default: null },
     paymentRef: { type: String, default: null },
     proofUrl: { type: String, default: null },
-    remarks: { type: String, default: null }
+    remarks: { type: String, default: null },
+    isMasked: { type: Boolean, default: false },
+    maskedAt: { type: Date, default: null },
+    maskedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Penalty' });
 exports.PenaltySchema.virtual('audit', {
     ref: 'ComplianceAudit',

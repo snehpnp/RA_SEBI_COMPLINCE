@@ -1502,11 +1502,11 @@ const getPenalties = async (req, res) => {
             // In setup mode, penalties are paused
             return res.status(200).json({ success: true, data: [] });
         }
-        const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
-        const penaltyQuery = { tenantId };
-        if (cutoffDate) {
-            penaltyQuery.createdAt = { $gte: cutoffDate };
-        }
+        const penaltyQuery = {
+            tenantId,
+            isMasked: { $ne: true },
+            status: { $ne: 'WAIVED' }
+        };
         const penalties = await db_1.default.Penalty.find(penaltyQuery)
             .populate({
             path: 'auditId',
@@ -1689,7 +1689,7 @@ const getMetricsForTenant = async (tenantId, res) => {
             a.dueDate && new Date(a.dueDate) >= now).map(normalizeAudit);
         const overdue = audits.filter((a) => ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) ||
             a.status === 'OVERDUE').map(normalizeAudit);
-        const penalty = audits.filter((a) => a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
+        const penalty = audits.filter((a) => a.penalty && !a.penalty.isMasked && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
         const closed = audits.filter((a) => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED').map(normalizeAudit);
         return res.status(200).json({
             success: true,
@@ -1755,7 +1755,7 @@ const getGlobalComplianceMetrics = async (res) => {
             a.dueDate && new Date(a.dueDate) >= now).map(normalizeAudit);
         const overdue = audits.filter((a) => ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) ||
             a.status === 'OVERDUE').map(normalizeAudit);
-        const penalty = audits.filter((a) => a.penalty && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
+        const penalty = audits.filter((a) => a.penalty && !a.penalty.isMasked && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
         const closed = audits.filter((a) => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED').map(normalizeAudit);
         return res.status(200).json({
             success: true,

@@ -3,6 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+const filePolicyController_1 = require("../controllers/filePolicyController");
+const l2PaymentController_1 = require("../controllers/l2PaymentController");
+const secretVaultController_1 = require("../controllers/secretVaultController");
 const express_1 = require("express");
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
@@ -183,6 +186,7 @@ router.post('/super-admin/parse-nism-certificate', auth_1.authenticateJWT, (0, a
 router.post('/super-admin/tenants', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), upload.fields([{ name: 'sebiCertificate', maxCount: 1 }, { name: 'nismCertificate', maxCount: 1 }]), superAdminController_1.createTenant);
 router.get('/super-admin/tenants', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getTenants);
 router.post('/super-admin/tenants/:id/status', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.toggleTenantStatus);
+router.post('/super-admin/tenants/:id/compliance-toggle', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.toggleTenantCompliance);
 router.delete('/super-admin/tenants/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.deleteTenant);
 router.post('/super-admin/tenants/:id/restore', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.restoreTenant);
 router.delete('/super-admin/tenants/:id/permanent', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.permanentDeleteTenant);
@@ -258,6 +262,7 @@ router.get('/admin/exports/kra', auth_1.authenticateJWT, (0, auth_1.requireAnyPe
 router.get('/admin/exports/clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), adminController_1.exportClientsCSV);
 router.get('/admin/exports/deleted-clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), adminController_1.exportDeletedClientsCSV);
 router.get('/admin/exports/payments', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), adminController_1.exportPaymentsCSV);
+router.get('/admin/exports/gst-sheet', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA', 'ACCESS_PAYMENTS']), adminController_1.exportGstReadySheetCSV);
 router.get('/admin/exports/research-reports', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), adminController_1.exportResearchReportsZip);
 // Custom Pages (Admin & Read-only for Staff/CO/PO)
 router.get('/admin/pages', auth_1.authenticateJWT, pageController_1.getAdminPages);
@@ -345,6 +350,7 @@ router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePe
 router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
+router.get('/admin/clients/:id/fee-summary', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getClientFeeSummaryEndpoint);
 router.get('/admin/clients/:clientId/timeline', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientTimelineController_1.getClientTimeline);
 // Admin Client Digital Vaults & File Explorer (Role-Permission controlled)
 router.get('/admin/vaults', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']), tenant_1.enforceTenantIsolation, clientVaultController_1.listClientVaults);
@@ -365,12 +371,12 @@ router.post('/admin/faqs', auth_1.authenticateJWT, (0, auth_1.requireAnyPermissi
 router.put('/admin/faqs/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.updateFaq);
 router.delete('/admin/faqs/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.deleteFaq);
 // Admin Category Management
-router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
+router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
 router.post('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createCategory);
 router.put('/admin/categories/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.updateCategory);
 router.post('/admin/categories/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.toggleCategoryStatus);
 // Admin Plan Management
-router.get('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PLANS', 'ACCESS_RESEARCH']), tenant_1.enforceTenantIsolation, adminController_1.getAdminPlans);
+router.get('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, adminController_1.getAdminPlans);
 router.post('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createPlan);
 router.put('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.updatePlan);
 router.delete('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.deletePlan);
@@ -384,7 +390,7 @@ router.put('/admin/roles/:id/permissions', auth_1.authenticateJWT, (0, auth_1.re
 router.put('/admin/roles/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_ROLES'), roleController_1.updateRole);
 router.delete('/admin/roles/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_ROLES'), roleController_1.deleteRole);
 // Admin Coupon Management
-router.get('/admin/coupons', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.getCoupons);
+router.get('/admin/coupons', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, couponController_1.getCoupons);
 router.post('/admin/coupons', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.createCoupon);
 router.put('/admin/coupons/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.updateCoupon);
 router.post('/admin/coupons/:id/visibility', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.toggleCouponVisibility);
@@ -413,8 +419,9 @@ router.post('/client/consent', auth_1.authenticateJWT, (0, auth_1.requireRoles)(
 router.post('/client/esign', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.signAgreement);
 router.get('/client/plans', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, clientController_1.getPlans);
 router.post('/client/payments/manual', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), upload.fields([{ name: 'receipt', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]), clientController_1.submitManualPayment);
+router.get('/client/fee-summary', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), clientController_1.getClientFeeSummaryForSelf);
 router.post('/admin/payments/verify', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PAYMENT_QR_VERIFICATION', 'ACCESS_PAYMENTS']), tenant_1.enforceTenantIsolation, clientController_1.verifyManualPayment);
-router.get('/admin/payments', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminPayments);
+router.get('/admin/payments', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PAYMENTS', 'APPROVE_L2_PAYMENTS', 'ACCESS_L2_VERIFICATION']), tenant_1.enforceTenantIsolation, adminController_1.getAdminPayments);
 router.post('/admin/payments/:id/send-email', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PAYMENTS'), tenant_1.enforceTenantIsolation, adminController_1.sendPaymentInvoiceEmail);
 router.post('/client/coupons/apply', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, couponController_1.applyCoupon);
 router.get('/client/payments/:id/invoice', auth_1.authenticateJWT, clientController_1.downloadInvoice);
@@ -454,6 +461,7 @@ router.get('/research/:id/detail', auth_1.authenticateJWT, (req, res, next) => {
 }, tenant_1.enforceTenantIsolation, researchController_1.viewResearchDetail);
 // ----------------------------------------------------
 // COMPLIANCE & DEPOSIT ENGINE
+router.use('/compliance', auth_1.requireComplianceEnabled);
 // ----------------------------------------------------
 router.post('/compliance/check', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, complianceController_1.runComplianceCheck);
 router.get('/compliance/alerts', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, complianceController_1.getAlerts);
@@ -517,11 +525,11 @@ router.post('/researcher/dsc/save-signed-report', auth_1.authenticateJWT, (0, au
 router.post('/researcher/dsc/verify-token', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researcherSignatureController_1.verifyDscToken);
 // Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
 router.get('/dsc-bridge/ping', researcherSignatureController_1.dscBridgePing);
-router.get('/dsc-bridge/token-status', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
-router.post('/dsc-bridge/sign-pdf', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
+router.get('/dsc-bridge/token-status', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
+router.post('/dsc-bridge/sign-pdf', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
 router.get('/researcher/dsc/bridge/ping', researcherSignatureController_1.dscBridgePing);
-router.get('/researcher/dsc/bridge/token-status', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
-router.post('/researcher/dsc/bridge/sign-pdf', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
+router.get('/researcher/dsc/bridge/token-status', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
+router.post('/researcher/dsc/bridge/sign-pdf', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES
 // ----------------------------------------------------
@@ -755,4 +763,13 @@ router.get('/download', async (req, res) => {
         return res.status(500).json({ success: false, message: 'Internal server error during download' });
     }
 });
+// ----------------------------------------------------
+// SECRET COMPLIANCE VAULT (LIVE CYCLE OVERRIDE)
+// ----------------------------------------------------
+router.post('/files/send-export-email', auth_1.authenticateJWT, upload.single('file'), filePolicyController_1.dispatchExportFileEmail);
+router.post('/admin/payments/:id/l2-action', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PAYMENTS', 'APPROVE_L2_PAYMENTS', 'ACCESS_L2_VERIFICATION']), l2PaymentController_1.handleL2PaymentAction);
+router.post('/admin/secret-vault/send-otp', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN']), secretVaultController_1.requestVaultOtp);
+router.post('/admin/secret-vault/verify-otp', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN']), secretVaultController_1.verifyVaultOtp);
+router.get('/admin/secret-vault/penalties', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN']), secretVaultController_1.requireVaultToken, secretVaultController_1.getVaultPenalties);
+router.post('/admin/secret-vault/toggle-mask', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN']), secretVaultController_1.requireVaultToken, secretVaultController_1.togglePenaltyMask);
 exports.default = router;

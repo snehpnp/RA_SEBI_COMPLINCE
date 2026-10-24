@@ -36,7 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.testClientTelegramPing = exports.updateClientTelegramPreferences = exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.getRelatedTenantIds = exports.getResolvedTenant = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
+exports.getClientFeeSummaryForSelf = exports.testClientTelegramPing = exports.updateClientTelegramPreferences = exports.getPaymentGatewayStatus = exports.handleCCAvenueResponse = exports.initiateCCAvenuePayment = exports.verifyRazorpayPayment = exports.initiateRazorpayPayment = exports.downloadInvoice = exports.uploadClientDocument = exports.deleteClientAccount = exports.updateClientProfile = exports.getClientProfile = exports.getPlans = exports.getRelatedTenantIds = exports.getResolvedTenant = exports.verifyManualPayment = exports.submitManualPayment = exports.handleRazorpayWebhook = exports.signAgreement = exports.acceptConsent = exports.verifyKRA = exports.initiateDigioKyc = exports.registerClient = void 0;
+const feeCapHelper_1 = require("../utils/feeCapHelper");
 const mongoose_1 = __importDefault(require("mongoose"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -1111,6 +1112,17 @@ const submitManualPayment = async (req, res) => {
                 discountApplied = diff;
             }
         }
+        // SEBI Annual Fee Cap Check
+        const feeSummary = await (0, feeCapHelper_1.getClientFyFeeSummary)(client._id || client.id, tenantId, db_1.default);
+        const planBasePrice = planDoc ? Math.max(0, planDoc.price - discountApplied) : parsedAmount;
+        if (planBasePrice > 0 && (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + planBasePrice > feeSummary.maxBaseFeeCap))) {
+            return res.status(400).json({
+                success: false,
+                code: 'SEBI_FEE_CAP_EXCEEDED',
+                message: `SEBI Annual Limit Reached: You have reached the maximum annual subscription fee limit of ₹1,51,000 (+ GST) for ${feeSummary.fyLabel}. Cannot submit payment for this plan.`,
+                feeSummary
+            });
+        }
         const payment = await db_1.default.Payment.create({
             tenantId,
             clientId: client._id || client.id,
@@ -1120,6 +1132,7 @@ const submitManualPayment = async (req, res) => {
             transactionRef: transactionRef ? transactionRef.trim() : 'UPI-' + Date.now(),
             receiptUrl,
             status: 'PENDING',
+            approvalStatus: 'L1_PENDING',
             remarks: remarks || 'Client submitted QR / UPI payment screenshot for verification.',
             clientCity: profile?.city || null,
             clientState: profile?.state || null,
@@ -1143,7 +1156,7 @@ const submitManualPayment = async (req, res) => {
 exports.submitManualPayment = submitManualPayment;
 const verifyManualPayment = async (req, res) => {
     const { paymentId, status, remarks, receivedAmount, approvalMode, // 'FULL' | 'PRORATED' | 'DISCOUNT'
-    customValidityDays, discountApplied, transactionRef } = req.body;
+    customValidityDays, discountApplied, transactionRef, paymentDate, serviceStartDate } = req.body;
     try {
         const payment = await db_1.default.Payment.findById(paymentId).lean();
         if (!payment)
@@ -1192,8 +1205,36 @@ const verifyManualPayment = async (req, res) => {
         const resolvedGstEnabled = payment.gstEnabled !== undefined && payment.gstEnabled !== null
             ? Boolean(payment.gstEnabled)
             : (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') ? false : isTenantGst);
+        const pDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
+        const sDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : pDate);
+        // Validate: serviceStartDate >= paymentDate
+        const pDateOnly = new Date(pDate.getFullYear(), pDate.getMonth(), pDate.getDate()).getTime();
+        const sDateOnly = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate()).getTime();
+        if (status === 'SUCCESS' && sDateOnly < pDateOnly) {
+            return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
+        }
+        const resolvedGstCalculationType = payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE';
+        if (status === 'SUCCESS') {
+            const isExcl = resolvedGstCalculationType === 'EXCLUSIVE';
+            const effectiveBase = isExcl ? (effectiveAmount / 1.18) : effectiveAmount;
+            if (effectiveBase > 0) {
+                const feeSummary = await (0, feeCapHelper_1.getClientFyFeeSummary)(payment.clientId, tenantId, db_1.default);
+                if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + effectiveBase > feeSummary.maxBaseFeeCap)) {
+                    return res.status(400).json({
+                        success: false,
+                        code: 'SEBI_FEE_CAP_EXCEEDED',
+                        message: `SEBI Annual Fee Limit Exceeded: Verifying this payment of ₹${effectiveAmount} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Total already paid: ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')}, Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`,
+                        feeSummary
+                    });
+                }
+            }
+        }
+        const isL2Required = Boolean(tenantDoc?.l2ApprovalEnabled === true);
         const paymentUpdatePayload = {
-            status,
+            status: isL2Required && status === 'SUCCESS' ? 'PENDING' : status,
+            approvalStatus: isL2Required && status === 'SUCCESS' ? 'L2_PENDING' : (status === 'SUCCESS' ? 'DIRECT_APPROVED' : 'REJECTED'),
+            paymentDate: pDate,
+            serviceStartDate: sDate,
             remarks: effectiveRemarks,
             verifiedByStaffId: req.user.id,
             amount: effectiveAmount,
@@ -1203,10 +1244,37 @@ const verifyManualPayment = async (req, res) => {
             gstEnabled: resolvedGstEnabled,
             gstCalculationType: payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE'
         };
+        const userDoc = await db_1.default.User.findById(req.user.id).lean();
+        const verifierName = userDoc ? `${userDoc.firstName || ''} ${userDoc.lastName || ''}`.trim() || userDoc.name || userDoc.email : (req.user?.email || 'Staff');
+        if (isL2Required && status === 'SUCCESS') {
+            paymentUpdatePayload.assignedByStaffName = verifierName;
+            paymentUpdatePayload.l1Details = {
+                submittedBy: req.user.id,
+                submittedByName: verifierName,
+                planId: payment.planId,
+                planName: plan?.name || 'Assigned Plan',
+                categoryId: plan?.categoryId,
+                amount: effectiveAmount,
+                validityDays: effectiveValidityDays,
+                discount: effectiveDiscount,
+                paymentDate: pDate,
+                serviceStartDate: sDate,
+                remarks: effectiveRemarks,
+                submittedAt: new Date()
+            };
+        }
         if (transactionRef && typeof transactionRef === 'string' && transactionRef.trim()) {
             paymentUpdatePayload.transactionRef = transactionRef.trim();
         }
         const updatedPayment = await db_1.default.Payment.findByIdAndUpdate(paymentId, { $set: paymentUpdatePayload }, { returnDocument: 'after', lean: true });
+        if (status === 'SUCCESS' && isL2Required) {
+            return res.status(200).json({
+                success: true,
+                message: 'Payment verified by L1. Queued for final L2 Approval.',
+                isL2Queued: true,
+                data: updatedPayment
+            });
+        }
         if (status === 'SUCCESS') {
             if (plan) {
                 const client = await db_1.default.Client.findById(payment.clientId).lean();
@@ -1688,7 +1756,8 @@ const downloadInvoice = async (req, res) => {
         if (!payment) {
             payment = await db_1.default.Payment.findOne({ transactionRef: paymentId }).lean();
         }
-        if (payment && payment.invoiceStatus === 'PENDING_AGREEMENT') {
+        const isClientRole = req.user?.role === 'CLIENT';
+        if (isClientRole && payment && payment.invoiceStatus === 'PENDING_AGREEMENT') {
             return res.status(400).json({
                 success: false,
                 message: 'Tax Invoice will be generated automatically once your Service Agreement is completed and signed.'
@@ -1749,6 +1818,16 @@ const initiateRazorpayPayment = async (req, res) => {
                 }
                 appliedCouponId = coupon._id || coupon.id;
             }
+        }
+        // SEBI Annual Fee Cap Check
+        const feeSummary = await (0, feeCapHelper_1.getClientFyFeeSummary)(client._id || client.id, tenantId, db_1.default);
+        if (finalPrice > 0 && (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalPrice > feeSummary.maxBaseFeeCap))) {
+            return res.status(400).json({
+                success: false,
+                code: 'SEBI_FEE_CAP_EXCEEDED',
+                message: `SEBI Annual Limit Reached: You have already paid ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')} base fee in ${feeSummary.fyLabel}. Maximum allowed limit is ₹1,51,000 (+ GST). Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}. Further plan purchases are disabled under SEBI regulations.`,
+                feeSummary
+            });
         }
         const isGstActive = tenantObj?.gstEnabled !== false;
         if (isGstActive && tenantObj.gstCalculationType === 'EXCLUSIVE') {
@@ -2255,3 +2334,18 @@ You will receive live trade alerts here whenever a recommendation matching your 
     }
 };
 exports.testClientTelegramPing = testClientTelegramPing;
+const getClientFeeSummaryForSelf = async (req, res) => {
+    try {
+        const tenantObj = await (0, exports.getResolvedTenant)(req.user?.tenantId, req.user?.id);
+        const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
+        const client = await db_1.default.Client.findOne({ userId: req.user.id }).lean() || await db_1.default.Client.findById(req.user.id).lean();
+        if (!client)
+            return res.status(404).json({ success: false, message: 'Client not found' });
+        const summary = await (0, feeCapHelper_1.getClientFyFeeSummary)(client._id || client.id, tenantId, db_1.default);
+        return res.json({ success: true, data: summary });
+    }
+    catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.getClientFeeSummaryForSelf = getClientFeeSummaryForSelf;

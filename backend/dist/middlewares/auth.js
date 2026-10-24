@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requireAnyPermission = exports.requirePermission = exports.requireRoles = exports.optionalAuthenticateJWT = exports.authenticateJWT = void 0;
+exports.requireComplianceEnabled = exports.requireAnyPermission = exports.requirePermission = exports.requireRoles = exports.optionalAuthenticateJWT = exports.authenticateJWT = void 0;
 const jwt = __importStar(require("jsonwebtoken"));
 const db_1 = require("../config/db");
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
@@ -277,3 +277,27 @@ const requireAnyPermission = (permissions) => {
     };
 };
 exports.requireAnyPermission = requireAnyPermission;
+const requireComplianceEnabled = async (req, res, next) => {
+    if (req.user?.role === 'SUPER_ADMIN') {
+        return next();
+    }
+    const tenantId = req.user?.tenantId;
+    if (!tenantId)
+        return next();
+    try {
+        const tenantModel = db_1.dynamicDb?.Tenant || db_1.Tenant;
+        const tenant = await tenantModel.findById(tenantId).select('complianceFeaturesEnabled').lean();
+        if (tenant && tenant.complianceFeaturesEnabled === false) {
+            return res.status(403).json({
+                success: false,
+                message: 'Compliance and SEBI Regulatory modules are disabled for this portal by Super Admin.',
+                errors: ['MODULE_DISABLED']
+            });
+        }
+        next();
+    }
+    catch (err) {
+        next();
+    }
+};
+exports.requireComplianceEnabled = requireComplianceEnabled;

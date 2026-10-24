@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.updateResearcherDscPermission = exports.getResearcherDscPermissions = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-exports.goLiveTenant = exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = void 0;
+exports.exportResearchReportsZip = exports.exportGstReadySheetCSV = exports.getClientFeeSummaryEndpoint = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.updateResearcherDscPermission = exports.getResearcherDscPermissions = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.goLiveTenant = exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -56,6 +56,7 @@ const digioService_1 = require("../services/digioService");
 const camsKraService_1 = require("../services/camsKraService");
 const activityService_1 = require("../services/activityService");
 const defaultEmailTemplates_1 = require("../utils/defaultEmailTemplates");
+const feeCapHelper_1 = require("../utils/feeCapHelper");
 const maskEmail = (email) => {
     if (!email)
         return email;
@@ -2903,8 +2904,23 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
         if (ccAgreementEmail !== undefined)
             dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
-        if (kycFirst !== undefined)
-            dataToUpdate.kycFirst = kycFirst === 'true' || kycFirst === true;
+        // Strict SEBI compliance: Always keep kycFirst = true (KYC Before Payment)
+        dataToUpdate.kycFirst = true;
+        if (req.body.l2ApprovalEnabled !== undefined) {
+            dataToUpdate.l2ApprovalEnabled = req.body.l2ApprovalEnabled === 'true' || req.body.l2ApprovalEnabled === true;
+        }
+        if (req.body.l2ApprovalRoleId !== undefined) {
+            dataToUpdate.l2ApprovalRoleId = req.body.l2ApprovalRoleId ? String(req.body.l2ApprovalRoleId).trim() : null;
+        }
+        if (req.body.fileDownloadPolicy !== undefined) {
+            dataToUpdate.fileDownloadPolicy = req.body.fileDownloadPolicy;
+        }
+        if (req.body.fileDownloadNotificationEmail !== undefined) {
+            dataToUpdate.fileDownloadNotificationEmail = req.body.fileDownloadNotificationEmail ? String(req.body.fileDownloadNotificationEmail).trim() : null;
+        }
+        if (req.body.maxEmailFileSizeMb !== undefined) {
+            dataToUpdate.maxEmailFileSizeMb = Number(req.body.maxEmailFileSizeMb) || 10;
+        }
         if (welcomeEmailText !== undefined)
             dataToUpdate.welcomeEmailText = welcomeEmailText;
         if (reportDisclaimer !== undefined)
@@ -3195,6 +3211,25 @@ const getAdminPayments = async (req, res) => {
         const plans = await db_1.default.Plan.find({ _id: { $in: planIds } }).lean();
         const coupons = await db_1.default.Coupon.find({ _id: { $in: couponIds } }).lean();
         const couponMap = new Map(coupons.map((c) => [String(c._id || c.id), { ...c, id: String(c._id || c.id) }]));
+        const userIds = clients.map((c) => c.userId?._id || c.userId?.id || c.userId).filter(Boolean);
+        const allLookupIds = [...new Set([...clientIds, ...userIds])];
+        const subscriptions = await db_1.default.Subscription.find({
+            clientId: { $in: allLookupIds }
+        }).populate('planId').sort({ endDate: -1 }).lean();
+        const subMap = new Map();
+        for (const sub of subscriptions) {
+            const cId = String(sub.clientId);
+            if (!subMap.has(cId))
+                subMap.set(cId, []);
+            subMap.get(cId).push({
+                ...sub,
+                id: String(sub._id || sub.id),
+                plan: sub.planId ? {
+                    ...sub.planId,
+                    id: String(sub.planId._id || sub.planId.id)
+                } : null
+            });
+        }
         const clientMap = new Map(clients.map((c) => [
             String(c._id || c.id),
             {
@@ -3204,7 +3239,8 @@ const getAdminPayments = async (req, res) => {
                 user: c.userId ? {
                     ...c.userId,
                     id: String(c.userId._id || c.userId.id)
-                } : null
+                } : null,
+                subscriptions: subMap.get(String(c._id || c.id)) || subMap.get(String(c.userId?._id || c.userId?.id || c.userId)) || []
             }
         ]));
         const planMap = new Map(plans.map((p) => [String(p._id || p.id), { ...p, id: String(p._id || p.id) }]));
@@ -3381,7 +3417,7 @@ exports.getTenantAuditLogs = getTenantAuditLogs;
 const assignPlanByAdmin = async (req, res) => {
     const tenantId = req.user.tenantId;
     const clientId = req.params.id || req.params.clientId;
-    const { planId, remarks, paymentRefId, paymentDate, couponCode, customAmount, customDays } = req.body;
+    const { planId, remarks, paymentRefId, paymentDate, serviceStartDate, couponCode, customAmount, customDays } = req.body;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     if (!planId)
@@ -3492,24 +3528,95 @@ const assignPlanByAdmin = async (req, res) => {
         const isCustomAssignment = customAmount !== undefined || customDays !== undefined;
         const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
         const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
+        const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+        const parsedServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : parsedPaymentDate;
+        // Strict validation: serviceStartDate >= paymentDate
+        const pDateOnly = new Date(parsedPaymentDate.getFullYear(), parsedPaymentDate.getMonth(), parsedPaymentDate.getDate()).getTime();
+        const sDateOnly = new Date(parsedServiceStartDate.getFullYear(), parsedServiceStartDate.getMonth(), parsedServiceStartDate.getDate()).getTime();
+        if (sDateOnly < pDateOnly) {
+            return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
+        }
+        // SEBI Annual Fee Cap Check (Max ₹1,51,000 Base Fee per FY per Client)
+        if (finalBasePrice > 0) {
+            const feeSummary = await (0, feeCapHelper_1.getClientFyFeeSummary)(actualClientId, tenantId, db_1.default);
+            if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalBasePrice > feeSummary.maxBaseFeeCap)) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'SEBI_FEE_CAP_EXCEEDED',
+                    message: `SEBI Annual Fee Limit Exceeded: Client has ₹${feeSummary.totalApprovedBasePaid.toLocaleString('en-IN')} approved + ₹${feeSummary.totalPendingBaseFee.toLocaleString('en-IN')} pending in L2 queue (Total committed: ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')}) in ${feeSummary.fyLabel}. Maximum allowed limit is ₹1,51,000 (+ GST). Remaining quota for new requests is ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')} (+ GST). Only up to this remaining limit can be assigned or requested.`,
+                    feeSummary
+                });
+            }
+        }
         // Check if there is an existing active subscription for the same plan (sequential queueing)
         const existingSub = await db_1.default.Subscription.findOne({
             $or: [{ clientId: actualClientId }, { clientId: client.userId }],
             planId: plan._id || plan.id,
             status: 'ACTIVE',
-            endDate: { $gt: new Date() }
+            endDate: { $gt: parsedPaymentDate }
         }).sort({ endDate: -1 }).lean();
-        let startDate = new Date();
         if (existingSub) {
-            startDate = new Date(existingSub.endDate);
-        }
-        else if (paymentDate) {
-            const parsed = new Date(paymentDate);
-            if (!isNaN(parsed.getTime())) {
-                startDate = parsed;
+            const expDate = new Date(existingSub.endDate);
+            const minAllowedStartDate = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate() + 1);
+            const minDateOnly = minAllowedStartDate.getTime();
+            if (sDateOnly < minDateOnly) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Validation Error: Client already has an active subscription for this plan expiring on ${expDate.toLocaleDateString('en-IN')}. The new service start date must be on or after ${minAllowedStartDate.toLocaleDateString('en-IN')}.`
+                });
             }
         }
+        let startDate = parsedServiceStartDate;
         const planValidityDays = customDays !== undefined ? customDays : (plan.durationMonths * 30 || 30);
+        // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval
+        if (tenantObj?.l2ApprovalEnabled === true) {
+            const pendingPayment = await db_1.default.Payment.create({
+                tenantId: tenantId || client.tenantId,
+                clientId: actualClientId,
+                planId: plan._id || plan.id,
+                amount: parseFloat(finalTotalAmount.toFixed(2)),
+                paymentMode,
+                transactionRef: paymentRefId,
+                paymentDate: parsedPaymentDate,
+                serviceStartDate: parsedServiceStartDate,
+                status: 'PENDING',
+                approvalStatus: 'L2_PENDING',
+                remarks: finalRemark,
+                verifiedByStaffId: req.user.id,
+                assignedByAdminName: isAdmin ? assignerName : null,
+                assignedByStaffName: !isAdmin ? assignerName : null,
+                clientCity: clientProfile?.city || null,
+                clientState: clientProfile?.state || null,
+                tenantState: tenantObj?.state || null,
+                planValidityDays,
+                paymentGatewayId: null,
+                couponId: appliedCouponId,
+                discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null,
+                couponCode: couponCode || null,
+                l1Details: {
+                    submittedBy: req.user.id,
+                    submittedByName: assignerName,
+                    planId: plan._id || plan.id,
+                    planName: plan.name,
+                    categoryId: plan.categoryId,
+                    couponCode: couponCode || null,
+                    transactionRef: paymentRefId,
+                    amount: parseFloat(finalTotalAmount.toFixed(2)),
+                    validityDays: planValidityDays,
+                    discount: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : 0,
+                    paymentDate: parsedPaymentDate,
+                    serviceStartDate: parsedServiceStartDate,
+                    remarks: finalRemark,
+                    submittedAt: new Date()
+                }
+            });
+            return res.status(201).json({
+                success: true,
+                message: 'Plan assignment request submitted successfully and queued for L2 Approval.',
+                isL2Queued: true,
+                data: pendingPayment
+            });
+        }
         const endDate = new Date(startDate.getTime() + planValidityDays * 24 * 60 * 60 * 1000);
         const subscription = await db_1.default.Subscription.create({
             clientId: actualClientId,
@@ -4149,6 +4256,117 @@ const exportPaymentsCSV = async (req, res) => {
     }
 };
 exports.exportPaymentsCSV = exportPaymentsCSV;
+const getClientFeeSummaryEndpoint = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    const { id } = req.params;
+    if (!tenantId)
+        return res.status(400).json({ success: false, message: 'Invalid tenant' });
+    try {
+        let actualClientId = id;
+        const clientDoc = await db_1.default.Client.findOne({ $or: [{ _id: id }, { userId: id }] }).lean();
+        if (clientDoc)
+            actualClientId = clientDoc._id || clientDoc.id;
+        const summary = await (0, feeCapHelper_1.getClientFyFeeSummary)(actualClientId, tenantId, db_1.default);
+        return res.json({ success: true, data: summary });
+    }
+    catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.getClientFeeSummaryEndpoint = getClientFeeSummaryEndpoint;
+const exportGstReadySheetCSV = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    if (!tenantId)
+        return res.status(400).json({ success: false, message: 'Invalid tenant' });
+    try {
+        const tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        const tenantState = (tenant?.state || 'DELHI').trim().toUpperCase();
+        const dateFilter = getDateFilter(req);
+        const payFilter = { tenantId, status: 'SUCCESS' };
+        if (dateFilter)
+            payFilter.createdAt = dateFilter;
+        const payments = await db_1.default.Payment.find(payFilter)
+            .populate('planId')
+            .populate('clientId')
+            .sort({ createdAt: -1 })
+            .lean();
+        const subIds = payments.map(p => p.subscriptionId).filter(Boolean);
+        const subs = await db_1.default.Subscription.find({ _id: { $in: subIds } }).lean();
+        const subMap = new Map(subs.map(s => [String(s._id || s.id), s]));
+        const csvData = payments.map((p, idx) => {
+            const client = p.clientId || {};
+            const sub = p.subscriptionId ? subMap.get(String(p.subscriptionId)) : null;
+            const clientState = (client.state || p.clientState || 'DELHI').trim().toUpperCase();
+            const isInterState = clientState !== tenantState;
+            let isGstActive = tenant?.gstEnabled !== false;
+            if (p.gstEnabled !== undefined && p.gstEnabled !== null) {
+                isGstActive = Boolean(p.gstEnabled);
+            }
+            const isInclusive = p.gstCalculationType === 'INCLUSIVE' || tenant?.gstCalculationType === 'INCLUSIVE';
+            const totalGross = Number(p.amount || 0);
+            let base = 0;
+            let gst = 0;
+            if (sub && sub.amountBase != null) {
+                base = Number(sub.amountBase);
+                gst = Number(sub.amountGst ?? (totalGross - base));
+            }
+            else {
+                if (!isGstActive) {
+                    base = totalGross;
+                    gst = 0;
+                }
+                else {
+                    base = parseFloat((totalGross / 1.18).toFixed(2));
+                    gst = parseFloat((totalGross - base).toFixed(2));
+                }
+            }
+            let cgst = 0;
+            let sgst = 0;
+            let igst = 0;
+            if (gst > 0) {
+                if (isInterState) {
+                    igst = gst;
+                }
+                else {
+                    cgst = parseFloat((gst / 2).toFixed(2));
+                    sgst = parseFloat((gst - cgst).toFixed(2));
+                }
+            }
+            const invNo = p.invoiceNumber || `INV-${new Date(p.createdAt || Date.now()).getFullYear()}-${String(idx + 1).padStart(4, '0')}`;
+            return {
+                'Invoice No': invNo,
+                'Invoice Date': p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '',
+                'Payment Date': p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-IN') : (p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : ''),
+                'Client Name': client.name || 'Unknown',
+                'Client Mobile': client.mobile || 'Unknown',
+                'Client Email': client.email || '',
+                'Client PAN': client.pan || 'N/A',
+                'Client State (POS)': clientState,
+                'Tenant State': tenantState,
+                'Tax Type': isInterState ? 'INTER-STATE (IGST)' : 'INTRA-STATE (CGST+SGST)',
+                'SAC Code': '998311',
+                'Service Description': p.planId?.name || 'Investment / Research Advisory Service',
+                'GST Status': !isGstActive ? 'GST DISABLED (0%)' : (isInclusive ? 'INCLUSIVE (18%)' : 'EXCLUSIVE (18%)'),
+                'Taxable Value (Base Amount)': base,
+                'GST Rate': isGstActive ? '18%' : '0%',
+                'CGST (9%)': cgst,
+                'SGST (9%)': sgst,
+                'IGST (18%)': igst,
+                'Total GST Amount': gst,
+                'Total Invoice Amount': totalGross,
+                'Payment Mode': p.paymentMode || 'ONLINE',
+                'Transaction Ref / UTR': p.transactionRef || 'N/A'
+            };
+        });
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="GSTR_Ready_Filing_Sheet.csv"');
+        res.send(arrayToCsv(csvData));
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+exports.exportGstReadySheetCSV = exportGstReadySheetCSV;
 const exportResearchReportsZip = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
@@ -5078,6 +5296,12 @@ const sendPaymentInvoiceEmail = async (req, res) => {
             if (!client) {
                 client = await db_1.default.Client.findOne({ userId: payment.clientId }).lean();
             }
+        }
+        if (payment.invoiceStatus === 'PENDING_AGREEMENT') {
+            return res.status(400).json({
+                success: false,
+                message: 'Client Service Agreement is pending. In accordance with compliance policy, invoices cannot be emailed to clients until the agreement is executed.'
+            });
         }
         const clientEmail = client?.email || payment.clientEmail;
         if (!clientEmail) {

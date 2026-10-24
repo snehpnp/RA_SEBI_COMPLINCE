@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runCompanyComplianceSweep = exports.getCompanyCompliance = exports.getCompanyStaff = exports.getCompanyClients = exports.testMongoConnection = exports.verifyDomainUrl = exports.syncAllTenantsApi = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.getCompanyPanelStats = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
+exports.runCompanyComplianceSweep = exports.getCompanyCompliance = exports.getCompanyStaff = exports.getCompanyClients = exports.testMongoConnection = exports.verifyDomainUrl = exports.syncAllTenantsApi = exports.syncTenantApi = exports.provisionTenantDb = exports.updateComplianceRule = exports.getComplianceRules = exports.parseNismCertificate = exports.parseSebiCertificate = exports.updateSuperAdminPassword = exports.updateTenantDetails = exports.getTenantDetails = exports.getGlobalTelemetry = exports.getAuditLogs = exports.getCompanyPanelStats = exports.impersonateTenant = exports.permanentDeleteTenant = exports.restoreTenant = exports.deleteTenant = exports.toggleTenantCompliance = exports.toggleTenantStatus = exports.getTenants = exports.getTenantDocumentHistory = exports.createTenant = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const mongodb_1 = require("mongodb");
 const db_1 = __importStar(require("../config/db"));
@@ -423,6 +423,30 @@ const toggleTenantStatus = async (req, res) => {
     }
 };
 exports.toggleTenantStatus = toggleTenantStatus;
+const toggleTenantCompliance = async (req, res) => {
+    const { id } = req.params;
+    const { enabled } = req.body;
+    try {
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(id.trim());
+        const query = isObjectId ? { $or: [{ _id: id }, { tenantId: id }] } : { tenantId: id };
+        if (db_1.default.Tenant) {
+            await db_1.default.Tenant.findOneAndUpdate(query, { $set: { complianceFeaturesEnabled: Boolean(enabled) } }, { returnDocument: 'after', lean: true });
+        }
+        if (db_1.centralModels?.AllCompany) {
+            await db_1.centralModels.AllCompany.findOneAndUpdate(query, { $set: { complianceFeaturesEnabled: Boolean(enabled) } });
+        }
+        await tenantConnectionManager_1.tenantConnectionManager.evictTenant(id);
+        return res.status(200).json({
+            success: true,
+            message: `Compliance modules have been ${enabled ? 'ENABLED' : 'DISABLED'} for this tenant portal.`,
+            complianceFeaturesEnabled: Boolean(enabled)
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, errors: [error.message] });
+    }
+};
+exports.toggleTenantCompliance = toggleTenantCompliance;
 const deleteTenant = async (req, res) => {
     const { id } = req.params;
     try {
@@ -1046,6 +1070,9 @@ const updateTenantDetails = async (req, res) => {
             tenantUpdateData.state = state ? String(state).trim() : null;
         if (status !== undefined && status !== '')
             tenantUpdateData.status = status;
+        if (req.body.complianceFeaturesEnabled !== undefined) {
+            tenantUpdateData.complianceFeaturesEnabled = req.body.complianceFeaturesEnabled === 'true' || req.body.complianceFeaturesEnabled === true;
+        }
         const incomingMobile = supportMobile || req.body.tenantMobile || req.body.mobile;
         if (incomingMobile !== undefined && incomingMobile !== '') {
             tenantUpdateData.mobile = String(incomingMobile).trim();

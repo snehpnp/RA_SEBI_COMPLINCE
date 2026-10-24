@@ -150,6 +150,12 @@ exports.TenantSchema = new mongoose_1.Schema({
     goLiveAt: { type: Date, default: null },
     goLiveBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
     complianceCutoffDate: { type: Date, default: null },
+    complianceFeaturesEnabled: { type: Boolean, default: true },
+    l2ApprovalEnabled: { type: Boolean, default: false },
+    l2ApprovalRoleId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Role', default: null },
+    fileDownloadPolicy: { type: String, enum: ['SYSTEM', 'EMAIL', 'BOTH'], default: 'BOTH' },
+    fileDownloadNotificationEmail: { type: String, default: null },
+    maxEmailFileSizeMb: { type: Number, default: 10 },
     createdById: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', default: null },
     deletedAt: { type: Date, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Tenant' });
