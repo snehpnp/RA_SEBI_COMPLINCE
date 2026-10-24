@@ -60,7 +60,6 @@ export interface IPayment extends Document {
   invoiceStatus?: 'PENDING_AGREEMENT' | 'GENERATED';
   invoiceSentAt?: Date | null;
   lastEmailedTo?: string | null;
-  subscriptionId?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -93,7 +92,6 @@ export const PaymentSchema = new Schema<IPayment>(
     couponId: { type: Schema.Types.ObjectId, ref: 'Coupon', default: null },
     discountApplied: { type: Number, default: 0 },
     couponCode: { type: String, default: null },
-    subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', default: null },
     gstEnabled: { type: Boolean, default: null },
     gstCalculationType: { type: String, default: null },
     invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },

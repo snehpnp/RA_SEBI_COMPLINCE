@@ -49,7 +49,8 @@ const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const stateService_1 = require("../services/stateService");
 const jwt = __importStar(require("jsonwebtoken"));
 const pdfOcr_1 = require("../utils/pdfOcr");
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+const jwtSecret_1 = require("../config/jwtSecret");
+const JWT_SECRET = (0, jwtSecret_1.getJwtSecret)();
 const createTenant = async (req, res) => {
     const { companyName, panelName, domainUrl, mongoDbUrl, dbName, companyType, raType, ownerName, sebiRegistration, bseEnrollment, email, mobile, address, pan, gst, website, certificateValidity, nismValidity, depositAmount, adminEmail, adminPassword, password, adminName, adminMobile, state } = req.body;
     if (!companyName || !ownerName || !sebiRegistration || !email || !mobile || !pan || !address) {

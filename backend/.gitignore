@@ -28,3 +28,5 @@ yarn-error.log*
 dist
 ./dist
 /dist
+.jwt_secret
+.refresh_secret

@@ -6,7 +6,8 @@ import { sendEmail } from '../services/emailService';
 import { sendSms } from '../services/smsService';
 import axios from 'axios';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+import { getJwtSecret } from '../config/jwtSecret';
+const JWT_SECRET = getJwtSecret();
 
 // In-memory OTP storage: key -> { otp, expiresAt, attempts }
 const vaultOtpStore: Map<string, { otp: string; expiresAt: number; attempts: number }> = new Map();

@@ -99,6 +99,7 @@ export interface ITenant extends Document {
   lockedTradesPreviewCount?: number;
   showOpenTradePotential?: boolean;
   showLockedTradePotential?: boolean;
+  showCategoryClientCountToResearcher?: boolean;
   smsGatewayEnabled?: boolean;
   smsGatewayUrl?: string | null;
   smsUsername?: string | null;
@@ -224,6 +225,7 @@ export const TenantSchema = new Schema<ITenant>(
       default: 'I, {{clientName}}, confirm that I have voluntarily subscribed to the research services of {{companyName}}. I have reviewed and signed the SEBI Research Analyst Service Agreement and confirm that my PAN card is {{pan}}.'
     },
     lockedTradesPreviewCount: { type: Number, default: 5 },
+    showCategoryClientCountToResearcher: { type: Boolean, default: false },
     showOpenTradePotential: { type: Boolean, default: true },
     showLockedTradePotential: { type: Boolean, default: true },
     smsGatewayEnabled: { type: Boolean, default: false },

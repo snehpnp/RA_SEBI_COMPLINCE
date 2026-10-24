@@ -1036,9 +1036,14 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
     if (payStatus === 'SUCCESS') {
       const plan: any = await dynamicDb.Plan.findById(planId).lean();
       if (plan) {
+        let matchingPlanIds = [planId];
+        if (plan.categoryId) {
+          const categoryPlans = await dynamicDb.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+          if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+        }
         const existingSub: any = await dynamicDb.Subscription.findOne({
           clientId,
-          planId,
+          planId: { $in: matchingPlanIds },
           status: 'ACTIVE',
           endDate: { $gt: new Date() }
         }).sort({ endDate: -1 }).lean();
@@ -1378,10 +1383,15 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
           }
         }
 
-        // Check if there is an existing active subscription for this client and plan (sequential queueing)
+        // Check if there is an existing active subscription for this client and category/plan (sequential queueing)
+        let matchingPlanIds = [plan._id || plan.id];
+        if (plan.categoryId) {
+          const categoryPlans = await dynamicDb.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+          if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+        }
         const existingSub: any = await dynamicDb.Subscription.findOne({
           clientId: payment.clientId,
-          planId: plan._id || plan.id,
+          planId: { $in: matchingPlanIds },
           status: 'ACTIVE',
           endDate: { $gt: new Date() }
         }).sort({ endDate: -1 }).lean();
@@ -2049,9 +2059,14 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
       paymentDate: new Date()
     });
 
+    let matchingPlanIds = [plan._id || plan.id];
+    if (plan.categoryId) {
+      const categoryPlans = await dynamicDb.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+      if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+    }
     const existingSub: any = await dynamicDb.Subscription.findOne({
       clientId: client._id || client.id,
-      planId: plan._id || plan.id,
+      planId: { $in: matchingPlanIds },
       status: 'ACTIVE',
       endDate: { $gt: new Date() }
     }).sort({ endDate: -1 }).lean();

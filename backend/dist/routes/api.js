@@ -163,8 +163,6 @@ router.get('/auth/me', auth_1.authenticateJWT, authController_1.getMe);
 router.post('/auth/change-password', auth_1.authenticateJWT, authController_1.changePassword);
 router.post('/auth/logout', auth_1.authenticateJWT, authController_1.logout);
 router.get('/public/tenants', authController_1.getPublicTenants);
-router.get('/public/clients', third_party_api_1.getThirdPartyClients);
-router.get('/clients', third_party_api_1.getThirdPartyClients);
 router.post('/public/request-otp', authController_1.requestOtp);
 router.post('/public/verify-otp', authController_1.verifyOtp);
 router.post('/public/telegram/webhook/:tokenOrTenant?', telegramController_1.handleTelegramWebhook);
@@ -324,23 +322,10 @@ router.put('/admin/researcher-dsc-permissions/:id', auth_1.authenticateJWT, (0, 
 router.post('/admin/parse-nism-certificate', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_STAFF', 'ACCESS_DASHBOARD']), upload.single('nismCertificate'), superAdminController_1.parseNismCertificate);
 // Admin Client Management
 router.get('/admin/clients', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, adminController_1.getAdminClients);
-// Admin / Client KYC Reset API (Supports name, username, email, mobile, PAN, ID via POST body or GET query)
-router.post('/admin/clients/reset-kyc', adminController_1.resetClientKyc);
-router.get('/admin/clients/reset-kyc', adminController_1.resetClientKyc);
-router.post('/clients/reset-kyc', adminController_1.resetClientKyc);
-router.get('/clients/reset-kyc', adminController_1.resetClientKyc);
-router.post('/reset-kyc', adminController_1.resetClientKyc);
-router.get('/reset-kyc', adminController_1.resetClientKyc);
-// Permanent Delete User/Client API (Completely wipes client, user, PAN, profile, KYC, agreements, subscriptions, payments from DB)
-router.post('/admin/clients/permanent-delete', adminController_1.permanentDeleteClient);
-router.delete('/admin/clients/permanent-delete', adminController_1.permanentDeleteClient);
-router.get('/admin/clients/permanent-delete', adminController_1.permanentDeleteClient);
-router.post('/clients/permanent-delete', adminController_1.permanentDeleteClient);
-router.delete('/clients/permanent-delete', adminController_1.permanentDeleteClient);
-router.get('/clients/permanent-delete', adminController_1.permanentDeleteClient);
-router.post('/permanent-delete', adminController_1.permanentDeleteClient);
-router.delete('/permanent-delete', adminController_1.permanentDeleteClient);
-router.get('/permanent-delete', adminController_1.permanentDeleteClient);
+// Admin / Client KYC Reset API - Strictly authenticated
+router.post('/admin/clients/reset-kyc', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN']), tenant_1.enforceTenantIsolation, adminController_1.resetClientKyc);
+// Permanent Delete User/Client API - Strictly authenticated (Super Admin & Admin only)
+router.post('/admin/clients/permanent-delete', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN', 'ADMIN']), tenant_1.enforceTenantIsolation, adminController_1.permanentDeleteClient);
 router.get('/admin/clients/deleted', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getAdminDeletedClients);
 router.post('/admin/clients/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.toggleClientStatus);
 router.get('/admin/clients/:id/communications', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getClientCommunications);
@@ -525,11 +510,11 @@ router.post('/researcher/dsc/save-signed-report', auth_1.authenticateJWT, (0, au
 router.post('/researcher/dsc/verify-token', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researcherSignatureController_1.verifyDscToken);
 // Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
 router.get('/dsc-bridge/ping', researcherSignatureController_1.dscBridgePing);
-router.get('/dsc-bridge/token-status', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
-router.post('/dsc-bridge/sign-pdf', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
+router.get('/dsc-bridge/token-status', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
+router.post('/dsc-bridge/sign-pdf', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
 router.get('/researcher/dsc/bridge/ping', researcherSignatureController_1.dscBridgePing);
-router.get('/researcher/dsc/bridge/token-status', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
-router.post('/researcher/dsc/bridge/sign-pdf', optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
+router.get('/researcher/dsc/bridge/token-status', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
+router.post('/researcher/dsc/bridge/sign-pdf', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES
 // ----------------------------------------------------

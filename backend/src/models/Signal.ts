@@ -6,7 +6,8 @@ export interface ISignal extends Document {
   id: string;
   tenantId: Types.ObjectId;
   segment: string;
-  planId: Types.ObjectId;
+  categoryId?: Types.ObjectId | null;
+  planId?: Types.ObjectId | null;
   callType: string;
   tradeDuration: string;
   stockId: Types.ObjectId;
@@ -39,7 +40,8 @@ export const SignalSchema = new Schema<ISignal>(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     segment: { type: String, required: true },
-    planId: { type: Schema.Types.ObjectId, ref: 'Plan', required: true },
+    categoryId: { type: Schema.Types.ObjectId, ref: 'PlanCategory', default: null },
+    planId: { type: Schema.Types.ObjectId, ref: 'Plan', default: null },
     callType: { type: String, required: true },
     tradeDuration: { type: String, required: true },
     stockId: { type: Schema.Types.ObjectId, ref: 'Stock', required: true },
@@ -82,6 +84,13 @@ SignalSchema.virtual('tenant', {
 SignalSchema.virtual('stock', {
   ref: 'Stock',
   localField: 'stockId',
+  foreignField: '_id',
+  justOne: true
+});
+
+SignalSchema.virtual('category', {
+  ref: 'PlanCategory',
+  localField: 'categoryId',
   foreignField: '_id',
   justOne: true
 });

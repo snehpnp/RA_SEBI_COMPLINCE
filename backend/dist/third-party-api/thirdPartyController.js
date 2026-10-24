@@ -43,87 +43,31 @@ const db_1 = __importStar(require("../config/db"));
  * Helper to resolve Tenant from route params, query, or headers without requiring JWT auth
  */
 const resolveTenantFromRequest = async (req) => {
-    const paramId = req.params.tenantId || req.params.adminId || req.params.companyId;
-    const queryTenantId = (req.query.tenantId || req.query.companyId || req.query.id);
-    const queryAdminId = (req.query.adminId || req.query.userId);
-    const queryEmail = (req.query.email || req.query.adminEmail);
     const apiKey = req.headers['x-tenant-api-key'] || req.headers['x-api-key'] || req.query.apiKey;
-    const domainHeader = req.headers['x-tenant-domain'] || req.query.domain || req.headers.host;
-    const headerTenantId = req.headers['x-tenant-id'] || req.headers['tenant-id'];
-    // 1. Try by API Key
-    if (apiKey) {
-        let tenant = await db_1.default.Tenant.findOne({ tenantApiKey: apiKey }).lean();
-        if (!tenant && db_1.centralModels.CentralTenant) {
-            tenant = await db_1.centralModels.CentralTenant.findOne({ tenantApiKey: apiKey }).lean();
-        }
-        if (!tenant && db_1.centralModels.AllCompany) {
-            tenant = await db_1.centralModels.AllCompany.findOne({ apiKey: apiKey }).lean();
-        }
-        if (tenant)
-            return tenant;
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+        return null;
     }
-    // 2. Try by Tenant ID (Header / Param / Query)
-    const directTenantId = headerTenantId || paramId || queryTenantId;
-    if (directTenantId) {
-        let tenant = null;
-        if (mongoose_1.default.Types.ObjectId.isValid(directTenantId)) {
-            tenant = await db_1.default.Tenant.findById(directTenantId).lean().catch(() => null);
-            if (!tenant && db_1.centralModels.CentralTenant) {
-                tenant = await db_1.centralModels.CentralTenant.findById(directTenantId).lean().catch(() => null);
-            }
-        }
-        if (!tenant && db_1.centralModels.AllCompany) {
-            tenant = await db_1.centralModels.AllCompany.findOne({
-                $or: [
-                    ...(mongoose_1.default.Types.ObjectId.isValid(directTenantId) ? [{ _id: directTenantId }] : []),
-                    { companyId: directTenantId }
-                ]
-            }).lean().catch(() => null);
-        }
-        if (tenant)
-            return tenant;
+    // 1. Authenticate via Tenant API Key
+    const trimmedKey = apiKey.trim();
+    let tenant = await db_1.default.Tenant.findOne({ tenantApiKey: trimmedKey }).lean();
+    if (!tenant && db_1.centralModels.CentralTenant) {
+        tenant = await db_1.centralModels.CentralTenant.findOne({ tenantApiKey: trimmedKey }).lean();
     }
-    // 3. Try by Admin User ID / Email
-    const adminIdentifier = queryEmail || paramId || queryAdminId;
-    if (adminIdentifier) {
-        const isOid = mongoose_1.default.Types.ObjectId.isValid(adminIdentifier);
-        const adminUser = await db_1.default.User.findOne({
-            $or: [
-                ...(isOid ? [{ _id: adminIdentifier }] : []),
-                { email: String(adminIdentifier).toLowerCase().trim() }
-            ]
-        }).populate('tenant').lean().catch(() => null);
-        if (adminUser?.tenant)
-            return adminUser.tenant;
+    if (!tenant && db_1.centralModels.AllCompany) {
+        tenant = await db_1.centralModels.AllCompany.findOne({ apiKey: trimmedKey }).lean();
     }
-    // 4. Try by Domain Name / Website / Host
-    if (domainHeader) {
-        const cleanDomain = domainHeader.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '').toLowerCase().trim();
-        if (cleanDomain && cleanDomain !== 'localhost' && cleanDomain !== '127.0.0.1') {
-            let tenant = await db_1.default.Tenant.findOne({
-                $or: [
-                    { domainUrl: { $regex: cleanDomain, $options: 'i' } },
-                    { website: { $regex: cleanDomain, $options: 'i' } }
-                ]
-            }).lean();
-            if (!tenant && db_1.centralModels.CentralTenant) {
-                tenant = await db_1.centralModels.CentralTenant.findOne({
-                    $or: [
-                        { domainUrl: { $regex: cleanDomain, $options: 'i' } },
-                        { website: { $regex: cleanDomain, $options: 'i' } }
-                    ]
-                }).lean();
-            }
-            if (tenant)
-                return tenant;
+    if (!tenant)
+        return null;
+    // Optional: If tenantId param was passed, verify it matches the authenticated tenant
+    const paramId = req.params.tenantId || req.params.adminId || req.params.companyId;
+    const requestedTenantId = req.headers['x-tenant-id'] || paramId || req.query.tenantId;
+    if (requestedTenantId) {
+        const actualTenantId = (tenant._id || tenant.id || tenant.tenantId || tenant.companyId)?.toString();
+        if (actualTenantId && actualTenantId !== requestedTenantId && requestedTenantId !== 'clients' && requestedTenantId !== 'staff') {
+            return null; // Mismatch protection
         }
     }
-    // 5. Fallback for Single-Tenant standalone instance
-    const tenantCount = await db_1.default.Tenant.countDocuments({ deletedAt: null });
-    if (tenantCount === 1) {
-        return await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
-    }
-    return null;
+    return tenant;
 };
 exports.resolveTenantFromRequest = resolveTenantFromRequest;
 /**
@@ -133,6 +77,9 @@ exports.resolveTenantFromRequest = resolveTenantFromRequest;
 const getThirdPartyClients = async (req, res) => {
     try {
         const tenant = await (0, exports.resolveTenantFromRequest)(req);
+        if (!tenant) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or missing API key.' });
+        }
         const tenantIdStr = tenant ? (tenant._id || tenant.id || tenant.tenantId).toString() : null;
         const isObjectId = tenantIdStr && mongoose_1.default.Types.ObjectId.isValid(tenantIdStr);
         const tenantIds = tenantIdStr ? [

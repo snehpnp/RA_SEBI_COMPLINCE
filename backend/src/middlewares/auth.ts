@@ -2,7 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { User, Role, Permission, RolePermission, centralModels, Tenant, dynamicDb } from '../config/db';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+import { getJwtSecret } from '../config/jwtSecret';
+const JWT_SECRET = getJwtSecret();
 
 export interface AuthenticatedRequest extends Request {
   user?: {

@@ -1,4 +1,9 @@
 import 'dotenv/config';
+import { getJwtSecret, getRefreshSecret } from './config/jwtSecret';
+
+// Synchronize global JWT and refresh secrets with secure machine-persistent secrets
+process.env.JWT_SECRET = getJwtSecret();
+process.env.REFRESH_SECRET = getRefreshSecret();
 
 process.on('uncaughtException', (err) => {
   console.error('UNCAUGHT EXCEPTION:', err);
@@ -89,7 +94,6 @@ app.use(tenantResolverMiddleware);
 // Routes mapping
 app.use('/api/v1', router);
 app.use('/third-party-api', thirdPartyRoutes);
-app.get('/clients', getThirdPartyClients);
 
 // Health check endpoint
 app.get('/health', async (req: express.Request, res: express.Response) => {

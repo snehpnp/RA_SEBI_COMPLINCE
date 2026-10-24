@@ -7403,7 +7403,7 @@ function AdminDashboardContent() {
           SIGNAL MANAGEMENT TAB
          ==================================================== */}
                   {activeTab === 'research' && hasPermission('ACCESS_RESEARCH') && (
-                    <SignalManagement adminPlans={adminPlans} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
+                    <SignalManagement adminPlans={adminPlans} categories={categories} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
                   )}
 
                   {/* ====================================================

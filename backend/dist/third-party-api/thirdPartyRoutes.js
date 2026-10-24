@@ -3,6 +3,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const thirdPartyController_1 = require("./thirdPartyController");
 const router = (0, express_1.Router)();
+// Enforce valid API Key header on all third-party routes
+router.use((req, res, next) => {
+    const apiKey = req.headers['x-tenant-api-key'] || req.headers['x-api-key'] || req.query.apiKey;
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+        return res.status(401).json({
+            success: false,
+            message: 'Unauthorized: A valid API key is required to access third-party services. Provide via x-tenant-api-key or x-api-key header.'
+        });
+    }
+    next();
+});
 // Dynamic routes supporting query params or headers
 router.get('/clients', thirdPartyController_1.getThirdPartyClients);
 router.get('/staff', thirdPartyController_1.getThirdPartyStaff);

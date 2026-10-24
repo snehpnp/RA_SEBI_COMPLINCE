@@ -12,8 +12,9 @@ import { AuthenticatedRequest } from '../middlewares/auth';
 import { sendForgotPasswordEmail, sendOtpEmail, sendTwoFactorLoginOtpEmail } from '../services/emailService';
 import { sendSms } from '../services/smsService';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
-const REFRESH_SECRET = process.env.REFRESH_SECRET || 'super-refresh-key-54321';
+import { getJwtSecret, getRefreshSecret } from '../config/jwtSecret';
+const JWT_SECRET = getJwtSecret();
+const REFRESH_SECRET = getRefreshSecret();
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return '';

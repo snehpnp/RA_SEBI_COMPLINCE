@@ -59,11 +59,13 @@ import toast from 'react-hot-toast';
 
 export default function SignalManagement({
   adminPlans,
+  categories,
   user,
   hasPermission,
   showMobilePreview = false
 }: {
   adminPlans: any[];
+  categories?: any[];
   user?: any;
   hasPermission?: (permCode: string) => boolean;
   showMobilePreview?: boolean;
@@ -93,6 +95,52 @@ export default function SignalManagement({
   // Add Signal Form
   const [segment, setSegment] = useState('');
   const [planIds, setPlanIds] = useState<string[]>([]);
+  const [categoriesList, setCategoriesList] = useState<any[]>(Array.isArray(categories) ? categories : []);
+
+  useEffect(() => {
+    if (Array.isArray(categories) && categories.length > 0) {
+      setCategoriesList(categories);
+    }
+  }, [categories]);
+
+  const availableCategories = useMemo(() => {
+    if (categoriesList && categoriesList.length > 0) return categoriesList;
+    const source = (adminPlans && adminPlans.length > 0) ? adminPlans : localPlans;
+    const map = new Map<string, any>();
+    source.forEach((p: any) => {
+      if (p.category && (p.category.id || p.category._id)) {
+        const cId = p.category.id || p.category._id;
+        if (!map.has(cId)) {
+          map.set(cId, {
+            id: cId,
+            _id: cId,
+            name: p.category.name || 'Category',
+            segments: p.category.segments || p.researchSegments || ''
+          });
+        }
+      }
+    });
+    const allCategories = Array.from(map.values());
+    return allCategories.filter((c: any) => {
+      const pCount = (c.plansBreakdown && c.plansBreakdown.length) || c.plansCount || 0;
+      if (pCount > 0) return true;
+      return allPlans.some((p: any) => String(p.categoryId || p.category?._id || p.category?.id) === String(c.id || c._id));
+    });
+  }, [categoriesList, adminPlans, localPlans]);
+
+  const filteredCategories = useMemo(() => {
+    if (!segment) return availableCategories;
+    const segLower = segment.toLowerCase().trim();
+    const filtered = availableCategories.filter((cat: any) => {
+      const rawSegs = cat.segments || '';
+      const segList = Array.isArray(rawSegs)
+        ? rawSegs.map((s: string) => s.toLowerCase().trim())
+        : String(rawSegs).toLowerCase().split(',').map((s: string) => s.trim());
+      if (segList.length === 0 || (segList.length === 1 && !segList[0])) return true;
+      return segList.includes(segLower) || segList.includes('all');
+    });
+    return filtered.length > 0 ? filtered : availableCategories;
+  }, [availableCategories, segment]);
   const [callType, setCallType] = useState('');
   const [tradeDuration, setTradeDuration] = useState('');
   const [stockId, setStockId] = useState('');
@@ -376,6 +424,11 @@ export default function SignalManagement({
         setLocalPlans(res.data);
       }
     }).catch(() => { });
+    api.getAdminCategories().then(res => {
+      if (res && res.success && Array.isArray(res.data)) {
+        setCategoriesList(res.data);
+      }
+    }).catch(() => { });
     api.getSmsTemplates().then(res => {
       if (res && res.success && Array.isArray(res.data)) {
         setSmsTemplates(res.data);
@@ -385,7 +438,12 @@ export default function SignalManagement({
 
   useEffect(() => {
     if (view === 'ADD') {
-      api.getSmsTemplates().then(res => {
+      api.getAdminCategories().then(res => {
+      if (res && res.success && Array.isArray(res.data)) {
+        setCategoriesList(res.data);
+      }
+    }).catch(() => { });
+    api.getSmsTemplates().then(res => {
         if (res && res.success && Array.isArray(res.data)) {
           setSmsTemplates(res.data);
         }
@@ -511,7 +569,7 @@ export default function SignalManagement({
     const newErrors: any = {};
     if (!segment) newErrors.segment = "Please Select a Segment";
     if (!stockId) newErrors.stockId = "Please Select a Stock";
-    if (planIds.length === 0) newErrors.planId = "Please Select at least one Plan";
+    if (planIds.length === 0) newErrors.planId = "Please Select at least one Plan Category";
     if (!callType) newErrors.callType = "Please Select a Call Type";
     if (!tradeDuration) newErrors.tradeDuration = "Please Select Trade Duration";
     if (!entryPrice) newErrors.entryPrice = "Please Select a Price";
@@ -1024,7 +1082,7 @@ export default function SignalManagement({
                     {errors.segment && <p className="text-red-600 dark:text-red-500 text-xs mt-1">{errors.segment}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-bold mb-1">Plan<span className="text-red-600 dark:text-red-500">*</span></label>
+                    <label className="block text-sm font-bold mb-1">Plan Category / Service<span className="text-red-600 dark:text-red-500">*</span></label>
                     <div className="relative">
                       {!segment ? (
                         <div className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-500 italic">
@@ -1037,14 +1095,18 @@ export default function SignalManagement({
                             onClick={() => setPlanDropdownOpen(!planDropdownOpen)}
                           >
                             {planIds.length === 0 ? (
-                              <span className="text-slate-500 text-sm px-1 py-1.5">Select Plans</span>
+                              <span className="text-slate-500 text-sm px-1 py-1.5">Select Plan Category</span>
                             ) : (
                               planIds.map(id => {
-                                const availablePlans = (adminPlans && adminPlans.length > 0) ? adminPlans : localPlans;
-                                const p = availablePlans.find((ap: any) => (ap.id || ap._id) === id);
-                                return p ? (
+                                const c = availableCategories.find((cat: any) => (cat.id || cat._id) === id);
+                                return c ? (
                                   <span key={id} className="bg-primary-500/10 dark:bg-slate-800 border border-primary-500/30 text-primary-700 dark:text-primary-300 font-bold text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
-                                    {p.name}
+                                    {c.name}
+                                    {typeof c.activeClientCount === 'number' && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-semibold">
+                                        👥 {c.activeClientCount}
+                                      </span>
+                                    )}
                                     <X className="w-3 h-3 hover:text-red-500 cursor-pointer" onClick={(e) => { e.stopPropagation(); setPlanIds(planIds.filter(pid => pid !== id)); }} />
                                   </span>
                                 ) : null;
@@ -1059,50 +1121,40 @@ export default function SignalManagement({
                           </div>
                           {planDropdownOpen && (
                             <div className="absolute z-50 w-full mt-2 bg-white dark:bg-[#1A2235] border border-slate-400 dark:border-white/10 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                              {(() => {
-                                const availablePlans = (adminPlans && adminPlans.length > 0) ? adminPlans : localPlans;
-                                const filtered = availablePlans.filter((p: any) => {
-                                  if (!segment) return true;
-                                  const segLower = segment.toLowerCase().trim();
-                                  const rSegs = Array.isArray(p.researchSegments)
-                                    ? p.researchSegments.map((s: string) => s.toLowerCase().trim())
-                                    : typeof p.researchSegments === 'string'
-                                      ? p.researchSegments.toLowerCase().split(',').map((s: string) => s.trim())
-                                      : [];
-                                  const cSegs = Array.isArray(p.category?.segments)
-                                    ? p.category.segments.map((s: string) => s.toLowerCase().trim())
-                                    : [];
-                                  if (rSegs.length === 0 && cSegs.length === 0) return true;
-                                  return rSegs.includes(segLower) || cSegs.includes(segLower);
-                                });
-
-                                const finalPlans = filtered.length > 0 ? filtered : availablePlans;
-
-                                if (finalPlans.length === 0) {
-                                  return <div className="px-4 py-3 text-sm text-slate-500 italic">No plans available</div>;
-                                }
-
-                                return finalPlans.map((p: any) => {
-                                  const pId = p.id || p._id;
+                              {filteredCategories.length === 0 ? (
+                                <div className="px-4 py-3 text-sm text-slate-500 italic">No categories available for {segment}</div>
+                              ) : (
+                                filteredCategories.map((c: any) => {
+                                  const cId = c.id || c._id;
                                   return (
                                     <div
-                                      key={pId}
+                                      key={cId}
                                       className="px-4 py-3 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between text-sm transition-colors border-b border-slate-200 dark:border-white/5 last:border-0"
                                       onClick={() => {
-                                        if (planIds.includes(pId)) {
-                                          setPlanIds(planIds.filter(id => id !== pId));
+                                        if (planIds.includes(cId)) {
+                                          setPlanIds(planIds.filter(id => id !== cId));
                                         } else {
-                                          setPlanIds([...planIds, pId]);
+                                          setPlanIds([...planIds, cId]);
                                         }
                                         setErrors((prev: any) => ({ ...prev, planId: '' }));
                                       }}
                                     >
-                                      <span className={planIds.includes(pId) ? 'font-bold text-lime-700 dark:text-[#d4f23b]' : ''}>{p.name}</span>
-                                      {planIds.includes(pId) && <Check className="w-4 h-4 text-lime-700 dark:text-[#d4f23b]" />}
+                                      <div className="flex items-center gap-2">
+                                        <span className={planIds.includes(cId) ? 'font-bold text-lime-700 dark:text-[#d4f23b]' : ''}>
+                                          {c.name} {c.segments ? `(${c.segments})` : ''}
+                                        </span>
+                                        {typeof c.activeClientCount === 'number' && (
+                                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                            <span>👥</span>
+                                            <span>{c.activeClientCount} Active</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                      {planIds.includes(cId) && <Check className="w-4 h-4 text-lime-700 dark:text-[#d4f23b]" />}
                                     </div>
                                   );
-                                });
-                              })()}
+                                })
+                              )}
                             </div>
                           )}
                         </>
@@ -1335,7 +1387,7 @@ export default function SignalManagement({
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5 text-blue-500 shrink-0" />
                       <span>
-                        Target Audience: Automatically dispatched only to clients holding an <strong>ACTIVE subscription</strong> to the selected plan(s).
+                        Target Audience: Automatically dispatched to all clients holding an <strong>ACTIVE subscription</strong> in the selected category (regardless of 1M, 2M, 3M or 6M plan duration).
                       </span>
                     </div>
                   </div>

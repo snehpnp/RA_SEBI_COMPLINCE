@@ -50,11 +50,7 @@ import ComplianceCalendarModal from '../../components/compliance/ComplianceCalen
 import VideoKycDesk from '../../components/admin/VideoKycDesk';
 import { SebiPenaltiesMatrixView } from '../../components/SebiPenaltiesMatrixView';
 
-const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
-let ClassicEditor: any;
-if (typeof window !== 'undefined') {
-  ClassicEditor = require('@ckeditor/ckeditor5-build-classic');
-}
+import RichTextEditor from '../../components/common/RichTextEditor';
 
 
 const formatAlertDescription = (description: string) => {
@@ -614,6 +610,7 @@ function AdminDashboardContent() {
   const [telegramBotToken, setTelegramBotToken] = useState('');
   const [telegramBotUsername, setTelegramBotUsername] = useState('');
   const [telegramJoinRule, setTelegramJoinRule] = useState<'ALL' | 'KYC_AGREEMENT_VERIFIED' | 'ACTIVE_PLAN_ONLY'>('ACTIVE_PLAN_ONLY');
+  const [showCategoryClientCountToResearcher, setShowCategoryClientCountToResearcher] = useState<boolean>(false);
   const [testingBot, setTestingBot] = useState(false);
   const [savingTradeDispatch, setSavingTradeDispatch] = useState(false);
   const [botTestResult, setBotTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -1856,6 +1853,8 @@ function AdminDashboardContent() {
               if (t.telegramBotToken) setTelegramBotToken(t.telegramBotToken);
               if (t.telegramBotUsername) setTelegramBotUsername(t.telegramBotUsername);
               if (t.telegramJoinRule) setTelegramJoinRule(t.telegramJoinRule);
+              if (t.showCategoryClientCountToResearcher !== undefined) setShowCategoryClientCountToResearcher(Boolean(t.showCategoryClientCountToResearcher));
+              api.getAdminCategories().then(res => { if (res.success) setCategories(res.data); }).catch(() => { });
 
               if (t.agreementContent) setAgreementContent(t.agreementContent);
               if (t.welcomeEmailText) setWelcomeEmailText(t.welcomeEmailText);
@@ -2527,6 +2526,7 @@ function AdminDashboardContent() {
       if (telegramBotToken) formData.append('telegramBotToken', telegramBotToken.trim());
       if (telegramBotUsername) formData.append('telegramBotUsername', telegramBotUsername.trim().replace(/^@/, ''));
       formData.append('telegramJoinRule', telegramJoinRule);
+      formData.append('showCategoryClientCountToResearcher', String(showCategoryClientCountToResearcher));
 
       const data = await api.updateTenantSettings(formData);
       if (data.success) {
@@ -2701,6 +2701,7 @@ function AdminDashboardContent() {
       formData.append('telegramBotToken', telegramBotToken.trim());
       formData.append('telegramBotUsername', telegramBotUsername.trim().replace(/^@/, ''));
       formData.append('telegramJoinRule', telegramJoinRule);
+      formData.append('showCategoryClientCountToResearcher', String(showCategoryClientCountToResearcher));
 
       const res = await api.updateTenantSettings(formData);
       if (res && res.success) {
@@ -4469,7 +4470,7 @@ function AdminDashboardContent() {
                   </span>
                 </div>
               )}
-              {(row.l1Details || row.l2Details || row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED' || row.approvalStatus === 'REJECTED' || row.approvalStatus === 'L2_PENDING') && (
+              {(row.l2Details || (row.l1Details && (row.approvalStatus === 'L2_PENDING' || row.approvalStatus === 'APPROVED' || row.approvalStatus === 'REJECTED'))) && (
                 <div className="pt-0.5">
                   <button
                     type="button"
@@ -6713,6 +6714,156 @@ function AdminDashboardContent() {
                         </div>
                       )}
 
+                      {/* Category-wise Active Subscribers Section */}
+                      {(!isStaff || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                        <div className="mt-8 bg-white dark:bg-[#0F172A] rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                                <Layers className="w-5 h-5 text-emerald-600 dark:text-[#d4f23b]" />
+                                Category-wise Active Subscribers
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-1">
+                                Real-time active paid client counts for each category and duration plans.
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-3">
+                              {/* Toggle Researcher Visibility */}
+                              <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                                <span className="text-slate-600 dark:text-slate-300 font-medium">Researcher Add-Signal View:</span>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const newVal = !showCategoryClientCountToResearcher;
+                                    setShowCategoryClientCountToResearcher(newVal);
+                                    try {
+                                      const fd = new FormData();
+                                      fd.append('showCategoryClientCountToResearcher', String(newVal));
+                                      const res = await api.updateTenantSettings(fd);
+                                      if (res?.success) {
+                                        toast.success(newVal ? 'Researcher count visibility enabled (ON)' : 'Researcher count visibility disabled (OFF)');
+                                      } else {
+                                        toast.error('Failed to update setting');
+                                      }
+                                    } catch (e: any) {
+                                      toast.error(e.message || 'Error updating setting');
+                                    }
+                                  }}
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                                    showCategoryClientCountToResearcher
+                                      ? 'bg-emerald-600 text-white shadow-sm'
+                                      : 'bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                                  }`}
+                                >
+                                  {showCategoryClientCountToResearcher ? '✓ ON' : '✕ OFF'}
+                                </button>
+                              </div>
+
+                              {/* Refresh button */}
+                              <button
+                                onClick={() => {
+                                  api.getAdminCategories().then(res => {
+                                    if (res.success) setCategories(res.data);
+                                    toast.success('Category counts refreshed');
+                                  });
+                                }}
+                                className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                title="Refresh active subscriber counts"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Categories Cards */}
+                          {(() => {
+                            const categoriesWithPlans = categories.filter((cat: any) => (cat.plansBreakdown && cat.plansBreakdown.length > 0) || (cat.plansCount > 0));
+                            if (categoriesWithPlans.length === 0) {
+                              return (
+                                <div className="text-center py-8 text-sm text-slate-500">
+                                  No active categories with plans found. Create plans under Subscription Plans & Categories.
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {categoriesWithPlans.map((cat: any) => {
+                                  const count = typeof cat.activeClientCount === 'number' ? cat.activeClientCount : 0;
+                                  const expiredCount = typeof cat.expiredClientCount === 'number' ? cat.expiredClientCount : 0;
+                                  const plans = cat.plansBreakdown || [];
+                                  return (
+                                    <div
+                                      key={cat.id || cat._id}
+                                      className="bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition shadow-sm"
+                                    >
+                                      <div>
+                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                          <div>
+                                            <h4 className="font-bold text-slate-800 dark:text-white text-base">
+                                              {cat.name}
+                                            </h4>
+                                            {cat.segments && (
+                                              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                                Segments: {cat.segments}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex flex-col items-end gap-1 shrink-0">
+                                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold flex items-center gap-1 ${
+                                              count > 0
+                                                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20'
+                                                : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                                            }`}>
+                                              👥 {count} Active
+                                            </span>
+                                            {typeof cat.expiredClientCount === 'number' && (
+                                              <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 ${
+                                                expiredCount > 0
+                                                  ? 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20'
+                                                  : 'bg-slate-100 dark:bg-slate-800/60 text-slate-400'
+                                              }`}>
+                                                ⏳ {expiredCount} Expired
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Underlying Plans Breakdown */}
+                                        <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
+                                          <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                                            Plans in Category ({plans.length})
+                                          </div>
+                                          {plans.length === 0 ? (
+                                            <div className="text-xs text-slate-400 italic">No plans assigned to this category</div>
+                                          ) : (
+                                            plans.map((p: any) => (
+                                              <div key={p.planId} className="flex justify-between items-center text-xs py-1 px-2 rounded bg-white dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-700/40">
+                                                <span className="text-slate-700 dark:text-slate-300 font-medium truncate max-w-[160px]" title={p.planName}>{p.planName}</span>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                  <span className="font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/30 px-1.5 py-0.5 rounded text-[10px]">
+                                                    {p.activeClientCount} active
+                                                  </span>
+                                                  {typeof p.expiredClientCount === 'number' && (
+                                                    <span className="font-bold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/30 px-1.5 py-0.5 rounded text-[10px]">
+                                                      {p.expiredClientCount} exp
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            ))
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+
                       {/* Active Client Summary Button */}
                       {(hasPermission('ACCESS_ACTIVE_CLIENT_SUMMARY') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                         <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-100 dark:border-blue-800/30 flex items-center justify-between shadow-sm">
@@ -7677,7 +7828,7 @@ function AdminDashboardContent() {
                   {/* DEDICATED L2 VERIFICATION DESK */}
                   {activeTab === 'l2-approvals' && (() => {
                     const l2PendingPayments = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING');
-                    const l2ApprovedPayments = allPayments.filter((p: any) => p.approvalStatus === 'APPROVED' || p.approvalStatus === 'DIRECT_APPROVED');
+                    const l2ApprovedPayments = allPayments.filter((p: any) => p.approvalStatus === 'APPROVED');
                     const l2RejectedPayments = allPayments.filter((p: any) => p.approvalStatus === 'REJECTED');
 
                     const currentL2List = l2FilterTab === 'PENDING'
@@ -7925,14 +8076,16 @@ function AdminDashboardContent() {
                                         </button>
                                       ) : (
                                         <>
-                                          <button
-                                            onClick={() => setSelectedL1L2Diff(row)}
-                                            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-white/10 inline-flex items-center gap-1 transition"
-                                            title="View L1 vs L2 details"
-                                          >
-                                            <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                                            <span>L1 vs L2</span>
-                                          </button>
+                                          {(row.l1Details || row.l2Details) && (
+                                            <button
+                                              onClick={() => setSelectedL1L2Diff(row)}
+                                              className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-white/10 inline-flex items-center gap-1 transition"
+                                              title="View L1 vs L2 details"
+                                            >
+                                              <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                              <span>L1 vs L2</span>
+                                            </button>
+                                          )}
                                           {(row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED') && (
                                             <button
                                               onClick={() => {
@@ -9954,10 +10107,19 @@ function AdminDashboardContent() {
                                   <div className="font-bold text-slate-900 dark:text-white">{assignPlanClient.name}</div>
                                   <div className="text-slate-600 dark:text-slate-400 text-[10px]">{assignPlanClient.email}</div>
                                 </div>
-                                <div className="text-right">
-                                  <div className="text-slate-600 dark:text-slate-400 text-[10px]">Current Plan</div>
-                                  <div className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px]">
-                                    {assignPlanClient.subscriptions?.find((s: any) => s.status === 'ACTIVE')?.plan?.name || 'No Active Plan'}
+                                <div className="text-right max-w-[50%]">
+                                  <div className="text-slate-600 dark:text-slate-400 text-[10px]">Current Active Plan(s)</div>
+                                  <div className="font-semibold text-emerald-600 dark:text-emerald-400 text-[11px] truncate">
+                                    {(() => {
+                                      const liveClient = clients.find((c: any) => c.id === assignPlanClient.id) || assignPlanClient;
+                                      const activeSubs = (liveClient?.subscriptions || []).filter((s: any) => s.status === 'ACTIVE');
+                                      if (activeSubs.length === 0) return 'No Active Plan';
+                                      return activeSubs.map((s: any) => {
+                                        const pName = s.plan?.name || 'Active Plan';
+                                        const expStr = s.endDate ? ' (Exp: ' + new Date(s.endDate).toLocaleDateString('en-IN') + ')' : '';
+                                        return pName + expStr;
+                                      }).join(', ');
+                                    })()}
                                   </div>
                                 </div>
                               </div>
@@ -12828,7 +12990,7 @@ function AdminDashboardContent() {
                     SIGNAL MANAGEMENT TAB
                       ==================================================== */}
                   {activeTab === 'research' && hasPermission('ACCESS_RESEARCH') && (
-                    <SignalManagement adminPlans={adminPlans} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
+                    <SignalManagement adminPlans={adminPlans} categories={categories} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
                   )}
 
                   {/* ====================================================
@@ -13272,6 +13434,31 @@ function AdminDashboardContent() {
                                   </div>
                                 </label>
                               </div>
+
+                              {/* Researcher Add-Signal Active Client Count Toggle */}
+                              <div className={`p-4 rounded-xl border transition-all md:col-span-2 ${
+                                showCategoryClientCountToResearcher
+                                  ? 'bg-emerald-500/5 border-emerald-500/30'
+                                  : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                              }`}>
+                                <label className="flex items-start gap-3 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={showCategoryClientCountToResearcher}
+                                    onChange={e => setShowCategoryClientCountToResearcher(e.target.checked)}
+                                    className="mt-1 h-5 w-5 rounded accent-[#d4f23b] border-gray-300"
+                                  />
+                                  <div>
+                                    <span className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                      <Users className="w-4 h-4 text-emerald-500" />
+                                      Show Active Client Count to Researchers (Add Signal Screen)
+                                    </span>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                                      When enabled (ON), researchers can see live active subscriber counts next to each Plan Category in the Add Signal screen so they know how many clients will receive the recommendation. When disabled (OFF), subscriber counts are hidden from researchers.
+                                    </p>
+                                  </div>
+                                </label>
+                              </div>
                             </div>
 
                             {/* Telegram Bot Configuration */}
@@ -13707,26 +13894,12 @@ function AdminDashboardContent() {
                                     })}
                                   </div>
                                 </div>
-                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
-                                  {ClassicEditor ? (
-                                    <CKEditor
-                                      editor={ClassicEditor as any}
-                                      data={agreementContent}
-                                      onChange={(event: any, editor: any) => {
-                                        const data = editor.getData();
-                                        setAgreementContent(data);
-                                      }}
-                                    />
-                                  ) : (
-                                    <textarea
-                                      value={agreementContent}
-                                      onChange={e => setAgreementContent(e.target.value)}
-                                      rows={6}
-                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                    />
-                                  )}
-                                </div>
+                                <RichTextEditor
+                                  data={agreementContent}
+                                  onChange={(val: string) => setAgreementContent(val)}
+                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                  rows={6}
+                                />
                               </div>
 
                               {/* Welcome Email link to Email Templates (Centralized management) */}
@@ -13759,20 +13932,12 @@ function AdminDashboardContent() {
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
-                                  {ClassicEditor ? (
-                                    <CKEditor
-                                      editor={ClassicEditor as any}
-                                      data={reportDisclaimer}
-                                      onChange={(event: any, editor: any) => {
-                                        const data = editor.getData();
-                                        setReportDisclaimer(data);
-                                      }}
-                                    />
-                                  ) : (
-                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
-                                  )}
-                                </div>
+                                <RichTextEditor
+                                  data={reportDisclaimer}
+                                  onChange={(val: string) => setReportDisclaimer(val)}
+                                  placeholder="Type your full research report disclaimer and disclosure here..."
+                                  rows={4}
+                                />
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -15506,18 +15671,11 @@ function AdminDashboardContent() {
 
                         <div>
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Description</label>
-                          <div className="text-black bg-white rounded-xl overflow-hidden">
-                            {ClassicEditor && (
-                              <CKEditor
-                                editor={ClassicEditor as any}
-                                data={planDesc}
-                                onChange={(event: any, editor: any) => {
-                                  const data = editor.getData();
-                                  setPlanDesc(data);
-                                }}
-                              />
-                            )}
-                          </div>
+                          <RichTextEditor
+                            data={planDesc}
+                            onChange={(val: string) => setPlanDesc(val)}
+                            rows={3}
+                          />
                         </div>
 
                       </form>

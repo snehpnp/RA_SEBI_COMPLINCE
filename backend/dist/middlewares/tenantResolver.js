@@ -37,7 +37,8 @@ exports.tenantResolverMiddleware = tenantResolverMiddleware;
 const jwt = __importStar(require("jsonwebtoken"));
 const tenantContext_1 = require("../config/tenantContext");
 const tenantConnectionManager_1 = require("../services/tenantConnectionManager");
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+const jwtSecret_1 = require("../config/jwtSecret");
+const JWT_SECRET = (0, jwtSecret_1.getJwtSecret)();
 /**
  * Global Middleware: Automatically resolves the Tenant Database from Domain, Headers, or JWT.
  * Sets the active Tenant Mongoose Connection & Models in AsyncLocalStorage context for transparent isolation.

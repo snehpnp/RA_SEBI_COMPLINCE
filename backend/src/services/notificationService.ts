@@ -5,7 +5,8 @@ import { sendTelegramMessage, formatTradeTelegramMessage } from './telegramServi
 
 export interface BroadcastNotificationOptions {
   tenantId: any;
-  planIds: string[] | any[];
+  planIds?: string[] | any[];
+  categoryIds?: string[] | any[];
   title: string;
   message: string;
   type?: 'signal' | 'alert' | 'report' | 'update';
@@ -30,6 +31,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
   const {
     tenantId,
     planIds,
+    categoryIds,
     title,
     message,
     type = 'signal',
@@ -40,12 +42,59 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
   } = options;
 
   try {
-    if (!planIds || (Array.isArray(planIds) && planIds.length === 0)) return;
+    const hasPlans = planIds && (!Array.isArray(planIds) || planIds.length > 0);
+    const hasCategories = categoryIds && (!Array.isArray(categoryIds) || categoryIds.length > 0);
+    if (!hasPlans && !hasCategories) return;
 
-    // Normalize planIds to array
-    const normalizedPlanIds = (Array.isArray(planIds) ? planIds : [planIds])
+    // Collect all category IDs from categoryIds and planIds
+    let allCatIds: string[] = [];
+    if (categoryIds) {
+      const arr = Array.isArray(categoryIds) ? categoryIds : [categoryIds];
+      allCatIds.push(...arr.map((c: any) => (c ? (c._id?.toString() || c.id || c.toString()) : null)).filter(Boolean));
+    }
+
+    const rawPlanIds = (Array.isArray(planIds) ? planIds : (planIds ? [planIds] : []))
       .map((p: any) => (p ? (p._id?.toString() || p.id || p.toString()) : null))
       .filter(Boolean);
+
+
+
+    // If any ID in planIds is actually a PlanCategory, detect and treat it as category
+    if (rawPlanIds.length > 0) {
+      const potentialCategoryObjectIds = rawPlanIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+      const matchedCats = await dynamicDb.PlanCategory.find({
+        $or: [
+          { _id: { $in: potentialCategoryObjectIds } },
+          { id: { $in: rawPlanIds } }
+        ]
+      }).select('_id id').lean();
+      if (matchedCats && matchedCats.length > 0) {
+        allCatIds.push(...matchedCats.map((c: any) => c._id?.toString() || c.id?.toString()));
+      }
+    }
+
+    // Now resolve all Plans under these categories
+    let allPlanIds: string[] = [...rawPlanIds];
+    if (allCatIds.length > 0) {
+      const validCatObjectIds = allCatIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+      const plansInCategories = await dynamicDb.Plan.find({
+        $or: [
+          { categoryId: { $in: validCatObjectIds } },
+          { categoryId: { $in: allCatIds } }
+        ]
+      }).select('_id id').lean();
+
+      plansInCategories.forEach((p: any) => {
+        allPlanIds.push(p._id?.toString());
+        if (p.id) allPlanIds.push(p.id.toString());
+      });
+    }
+
+    // Normalize planIds to unique array
+    const normalizedPlanIds = [...new Set(allPlanIds.filter(Boolean))] as string[];
+
+
+
 
     if (normalizedPlanIds.length === 0) return;
 

@@ -11,6 +11,18 @@ import {
 
 const router = Router();
 
+// Enforce valid API Key header on all third-party routes
+router.use((req, res, next) => {
+  const apiKey = (req.headers['x-tenant-api-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.apiKey as string);
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+    return res.status(401).json({
+      success: false,
+      message: 'Unauthorized: A valid API key is required to access third-party services. Provide via x-tenant-api-key or x-api-key header.'
+    });
+  }
+  next();
+});
+
 // Dynamic routes supporting query params or headers
 router.get('/clients', getThirdPartyClients);
 router.get('/staff', getThirdPartyStaff);

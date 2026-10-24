@@ -18,6 +18,37 @@ import {
 import api from '../../services/api';
 import toast from 'react-hot-toast';
 
+// Format dates safely without creating "Invalid Date"
+const formatComparableDate = (d: any) => {
+  if (!d || d === 'N/A' || d === 'null' || d === 'undefined') return 'N/A';
+  if (typeof d === 'string') {
+    const trimmed = d.trim();
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(trimmed)) return trimmed;
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) return parsed.toLocaleDateString('en-IN');
+    return trimmed;
+  }
+  try {
+    const parsed = new Date(d);
+    if (!isNaN(parsed.getTime())) return parsed.toLocaleDateString('en-IN');
+    return String(d);
+  } catch {
+    return String(d);
+  }
+};
+
+const formatDateTime = (d: any) => {
+  if (!d || d === 'N/A' || d === 'null' || d === 'undefined') return 'N/A';
+  if (typeof d === 'string' && /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(d)) return d;
+  try {
+    const parsed = new Date(d);
+    if (!isNaN(parsed.getTime())) return parsed.toLocaleString('en-IN');
+    return String(d);
+  } catch {
+    return String(d);
+  }
+};
+
 interface L1L2AuditModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -41,14 +72,14 @@ export default function L1L2AuditModal({
     submittedByName: (payment.l1Details?.submittedByName && !payment.l1Details.submittedByName.includes('@'))
       ? payment.l1Details.submittedByName
       : (payment.assignedByAdminName || payment.assignedByStaffName || payment.l1Details?.submittedByName || 'Staff (Maker)'),
-    submittedAt: payment.l1Details?.submittedAt ? new Date(payment.l1Details.submittedAt).toLocaleString('en-IN') : (payment.createdAt ? new Date(payment.createdAt).toLocaleString('en-IN') : 'N/A'),
+    submittedAt: formatDateTime(payment.l1Details?.submittedAt || payment.createdAt),
     planName: payment.l1Details?.planName || payment.plan?.name || payment.planName || 'Assigned Plan',
     amount: payment.l1Details?.amount ?? payment.amount,
     validityDays: payment.l1Details?.validityDays ?? (payment.planValidityDays || 30),
     discount: payment.l1Details?.discount ?? (payment.discountApplied || payment.discount || 0),
     couponCode: payment.l1Details?.couponCode || payment.couponCode || '',
-    paymentDate: payment.l1Details?.paymentDate ? new Date(payment.l1Details.paymentDate).toLocaleDateString('en-IN') : (payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-IN') : 'N/A'),
-    serviceStartDate: payment.l1Details?.serviceStartDate ? new Date(payment.l1Details.serviceStartDate).toLocaleDateString('en-IN') : (payment.serviceStartDate ? new Date(payment.serviceStartDate).toLocaleDateString('en-IN') : 'N/A'),
+    paymentDate: formatComparableDate(payment.l1Details?.paymentDate || payment.paymentDate),
+    serviceStartDate: formatComparableDate(payment.l1Details?.serviceStartDate || payment.serviceStartDate),
     remarks: payment.l1Details?.remarks || payment.remarks || 'Verified by Compliance Staff'
   };
 
@@ -57,31 +88,24 @@ export default function L1L2AuditModal({
     reviewedByName: (payment.l2Details?.reviewedByName && !payment.l2Details.reviewedByName.includes('@'))
       ? payment.l2Details.reviewedByName
       : (payment.approvedByName || payment.l2Details?.reviewedByName || (payment.approvalStatus === 'APPROVED' ? 'Admin / Approver' : 'Pending Review')),
-    reviewedAt: payment.l2Details?.reviewedAt ? new Date(payment.l2Details.reviewedAt).toLocaleString('en-IN') : (payment.updatedAt ? new Date(payment.updatedAt).toLocaleString('en-IN') : 'N/A'),
+    reviewedAt: formatDateTime(payment.l2Details?.reviewedAt || payment.updatedAt),
     action: payment.l2Details?.action || payment.approvalStatus || 'L2_PENDING',
     finalPlanName: payment.l2Details?.finalPlanName || payment.plan?.name || payment.planName || l1.planName,
     finalAmount: payment.l2Details?.finalAmount ?? (payment.amount ?? l1.amount),
     finalValidityDays: payment.l2Details?.finalValidityDays ?? (payment.planValidityDays ?? l1.validityDays),
     finalDiscount: payment.l2Details?.finalDiscount ?? (payment.discountApplied ?? l1.discount),
-    finalPaymentDate: payment.l2Details?.finalPaymentDate ? new Date(payment.l2Details.finalPaymentDate).toLocaleDateString('en-IN') : (payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-IN') : l1.paymentDate),
-    finalServiceStartDate: payment.l2Details?.finalServiceStartDate ? new Date(payment.l2Details.finalServiceStartDate).toLocaleDateString('en-IN') : (payment.serviceStartDate ? new Date(payment.serviceStartDate).toLocaleDateString('en-IN') : l1.serviceStartDate),
+    finalPaymentDate: formatComparableDate(payment.l2Details?.finalPaymentDate || payment.paymentDate || l1.paymentDate),
+    finalServiceStartDate: formatComparableDate(payment.l2Details?.finalServiceStartDate || payment.serviceStartDate || l1.serviceStartDate),
     remarks: payment.l2Details?.remarks || payment.l2Remarks || payment.adminRemarks || (payment.approvalStatus === 'APPROVED' ? 'Approved by L2 Reviewer' : 'Awaiting clearance'),
     rejectionReason: payment.l2Details?.rejectionReason || payment.rejectionReason || ''
   };
 
   const isL2Pending = payment.approvalStatus === 'L2_PENDING';
-  const isL2Approved = payment.approvalStatus === 'APPROVED' || payment.approvalStatus === 'DIRECT_APPROVED';
+  const isL2Approved = payment.approvalStatus === 'APPROVED';
   const isL2Rejected = payment.approvalStatus === 'REJECTED';
+  const isDirectApproved = payment.approvalStatus === 'DIRECT_APPROVED';
 
-  // Format dates for comparison
-  const formatComparableDate = (d: any) => {
-    if (!d || d === 'N/A') return 'N/A';
-    try {
-      return new Date(d).toLocaleDateString('en-IN');
-    } catch {
-      return String(d);
-    }
-  };
+
 
   const l1ServiceDate = formatComparableDate(l1.serviceStartDate);
   const l2ServiceDate = formatComparableDate(l2.finalServiceStartDate || payment.serviceStartDate);
@@ -137,7 +161,7 @@ export default function L1L2AuditModal({
                 ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-700'
                 : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700'
             }`}>
-              {isL2Approved ? '✓ L2 APPROVED' : isL2Rejected ? '✗ L2 REJECTED' : '⏳ AWAITING L2'}
+              {isL2Approved ? '✓ L2 APPROVED' : isL2Rejected ? '✗ L2 REJECTED' : isDirectApproved ? '✓ DIRECT APPROVED' : '⏳ AWAITING L2'}
             </span>
             <button
               onClick={onClose}

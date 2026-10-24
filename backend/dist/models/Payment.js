@@ -63,7 +63,6 @@ exports.PaymentSchema = new mongoose_1.Schema({
     couponId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Coupon', default: null },
     discountApplied: { type: Number, default: 0 },
     couponCode: { type: String, default: null },
-    subscriptionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Subscription', default: null },
     gstEnabled: { type: Boolean, default: null },
     gstCalculationType: { type: String, default: null },
     invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },

@@ -42,7 +42,7 @@ export const createSignal = async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
 
     const {
-      segment, planIds, callType, tradeDuration, stockId,
+      segment, categoryIds, planCategoryIds, planIds, callType, tradeDuration, stockId,
       expiryDate, strikePrice, optionType, entryPrice, entryType, suggestedQuantity,
       target1, target2, target3, stoploss, description
     } = req.body;
@@ -68,22 +68,79 @@ export const createSignal = async (req: Request, res: Response) => {
       }
     }
 
-    let parsedPlanIds: string[] = [];
+    let rawTargetIds: string[] = [];
+    const sourceParam = categoryIds || planCategoryIds || planIds;
     try {
-      parsedPlanIds = JSON.parse(planIds);
+      rawTargetIds = JSON.parse(sourceParam);
     } catch (e) {
-      if (typeof planIds === 'string') parsedPlanIds = [planIds];
+      if (typeof sourceParam === 'string') rawTargetIds = [sourceParam];
+    }
+    if (!Array.isArray(rawTargetIds)) rawTargetIds = [rawTargetIds].filter(Boolean);
+    rawTargetIds = [...new Set(rawTargetIds.map((id: any) => (id ? (id._id?.toString() || id.id || id.toString()) : null)).filter(Boolean))];
+
+    if (!rawTargetIds || rawTargetIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'Please select at least one plan category.' });
     }
 
-    if (!parsedPlanIds || parsedPlanIds.length === 0) {
-      return res.status(400).json({ success: false, message: 'Please select at least one plan.' });
-    }
+    // Match which IDs are categories vs plans
+    const validObjectIds = rawTargetIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+    const matchedCategories = await dynamicDb.PlanCategory.find({
+      $or: [
+        { _id: { $in: validObjectIds } },
+        { id: { $in: rawTargetIds } }
+      ]
+    }).lean();
+
+    const categoryMap = new Map<string, any>();
+    matchedCategories.forEach((c: any) => {
+      categoryMap.set(c._id.toString(), c);
+      if (c.id) categoryMap.set(c.id.toString(), c);
+    });
 
     const createdSignals: any[] = [];
-    for (const pId of parsedPlanIds) {
+    const allPlanIdsToNotify: string[] = [];
+    const allCategoryIdsToNotify: string[] = [];
+
+    for (const tId of rawTargetIds) {
+      let catId: any = null;
+      let pId: any = null;
+
+      if (categoryMap.has(tId)) {
+        const matchedCat = categoryMap.get(tId);
+        catId = matchedCat._id;
+        allCategoryIdsToNotify.push(catId.toString());
+
+        const plansUnderCategory = await dynamicDb.Plan.find({
+          $or: [
+            { categoryId: catId },
+            { categoryId: catId.toString() }
+          ]
+        }).select('_id id').lean();
+
+        if (plansUnderCategory.length > 0) {
+          pId = plansUnderCategory[0]._id;
+          plansUnderCategory.forEach((p: any) => {
+            allPlanIdsToNotify.push(p._id.toString());
+            if (p.id) allPlanIdsToNotify.push(p.id.toString());
+          });
+        }
+      } else {
+        const planDoc = await dynamicDb.Plan.findById(tId).lean() || await dynamicDb.Plan.findOne({ id: tId }).lean();
+        if (planDoc) {
+          pId = planDoc._id || planDoc.id;
+          catId = planDoc.categoryId || null;
+          allPlanIdsToNotify.push(pId.toString());
+          if (catId) allCategoryIdsToNotify.push(catId.toString());
+        } else {
+          pId = tId;
+          allPlanIdsToNotify.push(tId.toString());
+        }
+      }
+
       const newSignal = await dynamicDb.Signal.create({
         tenantId,
         segment,
+        categoryId: catId,
         planId: pId,
         callType,
         tradeDuration,
@@ -119,7 +176,8 @@ export const createSignal = async (req: Request, res: Response) => {
 
       await broadcastSignalNotification({
         tenantId,
-        planIds: parsedPlanIds,
+        planIds: allPlanIdsToNotify.length > 0 ? allPlanIdsToNotify : rawTargetIds,
+        categoryIds: allCategoryIdsToNotify,
         title: `🚀 New Trade Alert: ${stockSymbol} (${segment})`,
         message: `New ${callType} recommendation for ${stockSymbol} at ₹${entryPrice}. Target: ${target1}${target2 ? `/${target2}` : ''}, SL: ₹${stoploss}. View: ${tradeDuration || 'INTRADAY'}.`,
         type: 'signal',
@@ -248,11 +306,40 @@ export const listSignals = async (req: Request, res: Response) => {
 
       let unlockedSignals: any[] = [];
       const subscribedPlanIds = allSubs.map((s: any) => s.planId.toString());
+      const validSubPlanObjectIds = subscribedPlanIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+      const subscribedPlans = await dynamicDb.Plan.find({
+        $or: [
+          ...(validSubPlanObjectIds.length > 0 ? [{ _id: { $in: validSubPlanObjectIds } }] : []),
+          { id: { $in: subscribedPlanIds } }
+        ]
+      }).select('categoryId').lean();
+
+      const planCategoryMap = new Map<string, string>();
+      const subscribedCategoryIds: string[] = [];
+      subscribedPlans.forEach((p: any) => {
+        if (p.categoryId) {
+          const cId = p.categoryId.toString();
+          subscribedCategoryIds.push(cId);
+          planCategoryMap.set(p._id.toString(), cId);
+          if (p.id) planCategoryMap.set(p.id.toString(), cId);
+        }
+      });
+      const validSubCatObjectIds = subscribedCategoryIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
 
       if (allSubs.length > 0) {
         const subConditions = allSubs.map((sub: any) => {
+          const subPlanIdStr = sub.planId.toString();
+          const subCatId = planCategoryMap.get(subPlanIdStr);
+
+          const orConditions: any[] = [{ planId: sub.planId }];
+          if (subCatId && mongoose.Types.ObjectId.isValid(subCatId)) {
+            orConditions.push({ categoryId: new mongoose.Types.ObjectId(subCatId) });
+          } else if (subCatId) {
+            orConditions.push({ categoryId: subCatId });
+          }
+
           const conditions: any = {
-            planId: sub.planId,
+            $or: orConditions,
             createdAt: { $gte: sub.startDate }
           };
           if (sub.endDate) {
@@ -280,8 +367,15 @@ export const listSignals = async (req: Request, res: Response) => {
           tenantId,
           status: 'OPEN'
         };
+        const excludeFilters: any[] = [];
         if (subscribedPlanIds.length > 0) {
-          lockedWhere.planId = { $nin: subscribedPlanIds };
+          excludeFilters.push({ planId: { $nin: [...validSubPlanObjectIds, ...subscribedPlanIds] } });
+        }
+        if (subscribedCategoryIds.length > 0) {
+          excludeFilters.push({ categoryId: { $nin: [...validSubCatObjectIds, ...subscribedCategoryIds] } });
+        }
+        if (excludeFilters.length > 0) {
+          lockedWhere.$and = excludeFilters;
         }
 
         lockedSignals = await dynamicDb.Signal.find(lockedWhere)
@@ -368,7 +462,7 @@ export const listSignals = async (req: Request, res: Response) => {
           symbol: matchedStock?.symbol || s.symbol || '',
           stockName: matchedStock?.name || s.stockName || '',
           planId: pIdStr || (s.planId ? s.planId.toString() : ''),
-          planName: (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
+          planName: (s.categoryId && planMap.get(s.categoryId.toString())) || (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
           createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
           ...potential
         };
@@ -397,7 +491,7 @@ export const listSignals = async (req: Request, res: Response) => {
           callType: s.callType || 'BUY',
           tradeDuration: s.tradeDuration || 'INTRADAY',
           planId: pIdStr || (s.planId ? s.planId.toString() : ''),
-          planName: (pIdStr && planMap.get(pIdStr)) || 'Premium Service Plan',
+          planName: (s.categoryId && planMap.get(s.categoryId.toString())) || (pIdStr && planMap.get(pIdStr)) || 'Premium Service Plan',
           entryPrice: null,
           target1: null,
           target2: null,
@@ -452,8 +546,10 @@ export const listSignals = async (req: Request, res: Response) => {
       .lean();
 
     const planIds = signals.map((s: any) => s.planId).filter(Boolean);
-    const plans = await dynamicDb.Plan.find({ _id: { $in: planIds } }).lean();
-    const categories = await dynamicDb.PlanCategory.find({ _id: { $in: planIds } }).lean();
+    const categoryIds = signals.map((s: any) => s.categoryId).filter(Boolean);
+    const allLookupIds = [...new Set([...planIds, ...categoryIds])];
+    const plans = await dynamicDb.Plan.find({ _id: { $in: allLookupIds } }).lean();
+    const categories = await dynamicDb.PlanCategory.find({ _id: { $in: allLookupIds } }).lean();
 
     const map = new Map<string, string>();
     plans.forEach((p: any) => map.set(p._id.toString(), p.name));
@@ -501,7 +597,7 @@ export const listSignals = async (req: Request, res: Response) => {
         stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
         symbol: matchedStock?.symbol || '',
         stockName: matchedStock?.name || '',
-        planName: (pIdStr && map.get(pIdStr)) || pIdStr || '',
+        planName: (s.categoryId && map.get(s.categoryId.toString())) || (pIdStr && map.get(pIdStr)) || pIdStr || '',
         createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
         ...potential
       };

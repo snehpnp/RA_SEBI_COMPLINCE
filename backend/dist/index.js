@@ -76,7 +76,6 @@ app.use(tenantResolver_1.default);
 // Routes mapping
 app.use('/api/v1', api_1.default);
 app.use('/third-party-api', third_party_api_1.thirdPartyRoutes);
-app.get('/clients', third_party_api_1.getThirdPartyClients);
 // Health check endpoint
 app.get('/health', async (req, res) => {
     try {

@@ -6,89 +6,34 @@ import dynamicDb, { centralModels } from '../config/db';
  * Helper to resolve Tenant from route params, query, or headers without requiring JWT auth
  */
 export const resolveTenantFromRequest = async (req: Request) => {
-  const paramId = req.params.tenantId || req.params.adminId || (req.params as any).companyId;
-  const queryTenantId = (req.query.tenantId || req.query.companyId || req.query.id) as string;
-  const queryAdminId = (req.query.adminId || req.query.userId) as string;
-  const queryEmail = (req.query.email || req.query.adminEmail) as string;
   const apiKey = (req.headers['x-tenant-api-key'] as string) || (req.headers['x-api-key'] as string) || (req.query.apiKey as string);
-  const domainHeader = (req.headers['x-tenant-domain'] as string) || (req.query.domain as string) || (req.headers.host as string);
-  const headerTenantId = (req.headers['x-tenant-id'] as string) || (req.headers['tenant-id'] as string);
-
-  // 1. Try by API Key
-  if (apiKey) {
-    let tenant: any = await dynamicDb.Tenant.findOne({ tenantApiKey: apiKey }).lean();
-    if (!tenant && centralModels.CentralTenant) {
-      tenant = await centralModels.CentralTenant.findOne({ tenantApiKey: apiKey }).lean();
-    }
-    if (!tenant && centralModels.AllCompany) {
-      tenant = await centralModels.AllCompany.findOne({ apiKey: apiKey }).lean();
-    }
-    if (tenant) return tenant;
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
+    return null;
   }
 
-  // 2. Try by Tenant ID (Header / Param / Query)
-  const directTenantId = headerTenantId || paramId || queryTenantId;
-  if (directTenantId) {
-    let tenant: any = null;
-    if (mongoose.Types.ObjectId.isValid(directTenantId)) {
-      tenant = await dynamicDb.Tenant.findById(directTenantId).lean().catch(() => null);
-      if (!tenant && centralModels.CentralTenant) {
-        tenant = await centralModels.CentralTenant.findById(directTenantId).lean().catch(() => null);
-      }
-    }
-    if (!tenant && centralModels.AllCompany) {
-      tenant = await centralModels.AllCompany.findOne({
-        $or: [
-          ...(mongoose.Types.ObjectId.isValid(directTenantId) ? [{ _id: directTenantId }] : []),
-          { companyId: directTenantId }
-        ]
-      }).lean().catch(() => null);
-    }
-    if (tenant) return tenant;
+  // 1. Authenticate via Tenant API Key
+  const trimmedKey = apiKey.trim();
+  let tenant: any = await dynamicDb.Tenant.findOne({ tenantApiKey: trimmedKey }).lean();
+  if (!tenant && centralModels.CentralTenant) {
+    tenant = await centralModels.CentralTenant.findOne({ tenantApiKey: trimmedKey }).lean();
+  }
+  if (!tenant && centralModels.AllCompany) {
+    tenant = await centralModels.AllCompany.findOne({ apiKey: trimmedKey }).lean();
   }
 
-  // 3. Try by Admin User ID / Email
-  const adminIdentifier = queryEmail || paramId || queryAdminId;
-  if (adminIdentifier) {
-    const isOid = mongoose.Types.ObjectId.isValid(adminIdentifier);
-    const adminUser: any = await dynamicDb.User.findOne({
-      $or: [
-        ...(isOid ? [{ _id: adminIdentifier }] : []),
-        { email: String(adminIdentifier).toLowerCase().trim() }
-      ]
-    }).populate('tenant').lean().catch(() => null);
-    if (adminUser?.tenant) return adminUser.tenant;
-  }
+  if (!tenant) return null;
 
-  // 4. Try by Domain Name / Website / Host
-  if (domainHeader) {
-    const cleanDomain = domainHeader.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '').toLowerCase().trim();
-    if (cleanDomain && cleanDomain !== 'localhost' && cleanDomain !== '127.0.0.1') {
-      let tenant: any = await dynamicDb.Tenant.findOne({
-        $or: [
-          { domainUrl: { $regex: cleanDomain, $options: 'i' } },
-          { website: { $regex: cleanDomain, $options: 'i' } }
-        ]
-      }).lean();
-      if (!tenant && centralModels.CentralTenant) {
-        tenant = await centralModels.CentralTenant.findOne({
-          $or: [
-            { domainUrl: { $regex: cleanDomain, $options: 'i' } },
-            { website: { $regex: cleanDomain, $options: 'i' } }
-          ]
-        }).lean();
-      }
-      if (tenant) return tenant;
+  // Optional: If tenantId param was passed, verify it matches the authenticated tenant
+  const paramId = req.params.tenantId || req.params.adminId || (req.params as any).companyId;
+  const requestedTenantId = (req.headers['x-tenant-id'] as string) || paramId || (req.query.tenantId as string);
+  if (requestedTenantId) {
+    const actualTenantId = (tenant._id || tenant.id || tenant.tenantId || tenant.companyId)?.toString();
+    if (actualTenantId && actualTenantId !== requestedTenantId && requestedTenantId !== 'clients' && requestedTenantId !== 'staff') {
+      return null; // Mismatch protection
     }
   }
 
-  // 5. Fallback for Single-Tenant standalone instance
-  const tenantCount = await dynamicDb.Tenant.countDocuments({ deletedAt: null });
-  if (tenantCount === 1) {
-    return await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
-  }
-
-  return null;
+  return tenant;
 };
 
 /**
@@ -98,6 +43,9 @@ export const resolveTenantFromRequest = async (req: Request) => {
 export const getThirdPartyClients = async (req: Request, res: Response) => {
   try {
     const tenant: any = await resolveTenantFromRequest(req);
+    if (!tenant) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: Invalid or missing API key.' });
+    }
 
     const tenantIdStr = tenant ? (tenant._id || tenant.id || tenant.tenantId).toString() : null;
     const isObjectId = tenantIdStr && mongoose.Types.ObjectId.isValid(tenantIdStr);

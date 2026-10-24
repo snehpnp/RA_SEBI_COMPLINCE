@@ -36,7 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireComplianceEnabled = exports.requireAnyPermission = exports.requirePermission = exports.requireRoles = exports.optionalAuthenticateJWT = exports.authenticateJWT = void 0;
 const jwt = __importStar(require("jsonwebtoken"));
 const db_1 = require("../config/db");
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+const jwtSecret_1 = require("../config/jwtSecret");
+const JWT_SECRET = (0, jwtSecret_1.getJwtSecret)();
 const authenticateJWT = (req, res, next) => {
     const authHeader = req.headers.authorization;
     if (authHeader) {

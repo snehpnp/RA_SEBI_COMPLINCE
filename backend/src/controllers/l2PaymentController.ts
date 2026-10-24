@@ -114,11 +114,16 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       });
     }
 
-    // Check if there is an existing active subscription for the same plan (sequential queueing)
+    // Check if there is an existing active subscription for the same category or plan (sequential queueing)
     const subscriptionModel = dynamicDb?.Subscription || Subscription;
+    let matchingPlanIds = [selectedPlanId];
+    if (planDoc?.categoryId) {
+      const categoryPlans = await planModel.find({ categoryId: planDoc.categoryId }).select('_id').lean();
+      if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+    }
     const existingSub: any = await subscriptionModel.findOne({
       $or: [{ clientId: client._id }, { clientId: client.userId }],
-      planId: selectedPlanId,
+      planId: { $in: matchingPlanIds },
       status: 'ACTIVE',
       endDate: { $gt: finalPaymentDate }
     }).sort({ endDate: -1 }).lean();

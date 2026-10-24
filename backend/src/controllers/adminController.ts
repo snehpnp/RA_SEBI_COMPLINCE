@@ -2519,11 +2519,129 @@ export const getAdminCategories = async (req: AuthenticatedRequest, res: Respons
       .sort({ createdAt: -1 })
       .lean();
 
-    const formatted = (rawCategories as any[]).map(c => ({
-      ...c,
-      id: String(c._id || c.id),
-      _id: c._id
-    }));
+    const isFullAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
+    let includeCounts = isFullAdmin;
+
+    if (!isFullAdmin) {
+      let tenantObj: any = null;
+      if (tenantId && mongoose.Types.ObjectId.isValid(tenantId)) {
+        tenantObj = await dynamicDb.Tenant.findById(tenantId).select('showCategoryClientCountToResearcher').lean();
+      }
+      if (!tenantObj && tenantId) {
+        tenantObj = await dynamicDb.Tenant.findOne({
+          $or: [{ id: tenantId }, { tenantId: tenantId }]
+        }).select('showCategoryClientCountToResearcher').lean();
+      }
+      includeCounts = tenantObj?.showCategoryClientCountToResearcher === true;
+    }
+
+    let plans: any[] = [];
+    let validSubs: any[] = [];
+    let allSubs: any[] = [];
+
+    if (includeCounts && rawCategories.length > 0) {
+      const categoryIds = rawCategories.map((c: any) => c._id);
+      plans = await dynamicDb.Plan.find({
+        tenantId: { $in: relatedTenantIds },
+        categoryId: { $in: categoryIds },
+        deletedAt: null
+      }).select('_id name categoryId').lean();
+
+      if (plans.length > 0) {
+        const now = new Date();
+        allSubs = await dynamicDb.Subscription.find({
+          $or: [
+            { tenantId: { $in: relatedTenantIds } },
+            { tenantId: null },
+            { tenantId: { $exists: false } }
+          ],
+          planId: { $in: plans.map((p: any) => p._id) }
+        }).select('_id clientId planId startDate endDate status').lean();
+
+        validSubs = allSubs.filter((sub: any) => {
+          if (!['ACTIVE', 'active'].includes(sub.status)) return false;
+          if (!sub.endDate) return false;
+          const end = new Date(sub.endDate);
+          const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+          const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+          return Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime()) >= now.getTime();
+        });
+      }
+    }
+
+    const formatted = (rawCategories as any[]).map(c => {
+      const catPlans = plans.filter((p: any) => String(p.categoryId) === String(c._id));
+      const plansCount = catPlans.length;
+
+      if (!includeCounts) {
+        return {
+          ...c,
+          id: String(c._id || c.id),
+          _id: c._id,
+          plansCount,
+          activeClientCount: null,
+          expiredClientCount: null,
+          plansBreakdown: []
+        };
+      }
+
+      const catPlanIds = catPlans.map((p: any) => String(p._id));
+      const catActiveSubs = validSubs.filter((sub: any) => catPlanIds.includes(String(sub.planId)));
+      const distinctActiveClients = new Set(catActiveSubs.map((sub: any) => String(sub.clientId)));
+
+      // Expired clients for this category (Only for full admin)
+      let expiredCount: number | null = null;
+      if (isFullAdmin) {
+        const now = new Date();
+        const catAllSubs = allSubs.filter((sub: any) => catPlanIds.includes(String(sub.planId)));
+        const catExpiredSubs = catAllSubs.filter((sub: any) => {
+          if (['EXPIRED', 'expired'].includes(sub.status)) return true;
+          if (!sub.endDate) return true;
+          return new Date(sub.endDate).getTime() < now.getTime();
+        });
+        const distinctExpired = new Set(
+          catExpiredSubs.map((sub: any) => String(sub.clientId)).filter(cid => !distinctActiveClients.has(cid))
+        );
+        expiredCount = distinctExpired.size;
+      }
+
+      const plansBreakdown = catPlans.map((p: any) => {
+        const pSubs = catActiveSubs.filter((sub: any) => String(sub.planId) === String(p._id));
+        const pDistinctClients = new Set(pSubs.map((sub: any) => String(sub.clientId)));
+
+        let pExpiredCount: number | undefined = undefined;
+        if (isFullAdmin) {
+          const now = new Date();
+          const pAllSubs = allSubs.filter((sub: any) => String(sub.planId) === String(p._id));
+          const pExpSubs = pAllSubs.filter((sub: any) => {
+            if (['EXPIRED', 'expired'].includes(sub.status)) return true;
+            if (!sub.endDate) return true;
+            return new Date(sub.endDate).getTime() < now.getTime();
+          });
+          const pDistinctExp = new Set(
+            pExpSubs.map((sub: any) => String(sub.clientId)).filter(cid => !pDistinctClients.has(cid))
+          );
+          pExpiredCount = pDistinctExp.size;
+        }
+
+        return {
+          planId: String(p._id),
+          planName: p.name,
+          activeClientCount: pDistinctClients.size,
+          expiredClientCount: isFullAdmin ? pExpiredCount : undefined
+        };
+      });
+
+      return {
+        ...c,
+        id: String(c._id || c.id),
+        _id: c._id,
+        plansCount,
+        activeClientCount: distinctActiveClients.size,
+        expiredClientCount: isFullAdmin ? expiredCount : null,
+        plansBreakdown
+      };
+    });
 
     return res.status(200).json({ success: true, data: formatted });
   } catch (error: any) {
@@ -3072,6 +3190,9 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (ccInvoiceEmail !== undefined) dataToUpdate.ccInvoiceEmail = ccInvoiceEmail ? ccInvoiceEmail.trim() : null;
     if (ccAgreementEnabled !== undefined) dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
     if (ccAgreementEmail !== undefined) dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
+    if (req.body.showCategoryClientCountToResearcher !== undefined) {
+      dataToUpdate.showCategoryClientCountToResearcher = req.body.showCategoryClientCountToResearcher === 'true' || req.body.showCategoryClientCountToResearcher === true;
+    }
     // Strict SEBI compliance: Always keep kycFirst = true (KYC Before Payment)
     dataToUpdate.kycFirst = true;
     if (req.body.l2ApprovalEnabled !== undefined) {
@@ -3785,10 +3906,15 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       }
     }
 
-    // Check if there is an existing active subscription for the same plan (sequential queueing)
+    // Check if there is an existing active subscription for the same category or plan (sequential queueing)
+    let matchingPlanIds = [plan._id || plan.id];
+    if (plan.categoryId) {
+      const categoryPlans = await dynamicDb.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+      if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+    }
     const existingSub: any = await dynamicDb.Subscription.findOne({
       $or: [{ clientId: actualClientId }, { clientId: client.userId }],
-      planId: plan._id || plan.id,
+      planId: { $in: matchingPlanIds },
       status: 'ACTIVE',
       endDate: { $gt: parsedPaymentDate }
     }).sort({ endDate: -1 }).lean();

@@ -3,7 +3,8 @@ import * as jwt from 'jsonwebtoken';
 import { runWithTenantContext } from '../config/tenantContext';
 import { tenantConnectionManager, centralConnection, centralModels } from '../services/tenantConnectionManager';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+import { getJwtSecret } from '../config/jwtSecret';
+const JWT_SECRET = getJwtSecret();
 
 export interface TenantRequest extends Request {
   tenant?: any;

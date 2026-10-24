@@ -14,7 +14,8 @@ import { detectStateFromGst, detectStateFromText } from '../services/stateServic
 import * as jwt from 'jsonwebtoken';
 import { extractTextFromPdf } from '../utils/pdfOcr';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+import { getJwtSecret } from '../config/jwtSecret';
+const JWT_SECRET = getJwtSecret();
 
 export const createTenant = async (req: AuthenticatedRequest, res: Response) => {
   const {

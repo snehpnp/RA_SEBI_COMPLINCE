@@ -24,7 +24,7 @@ import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCoupo
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
 import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord, fetchCamsRecord, getCamsKraPdf } from '../controllers/kycController';
-import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission, requireComplianceEnabled } from '../middlewares/auth';
+import { authenticateJWT, optionalAuthenticateJWT, requireRoles, requirePermission, requireAnyPermission, requireComplianceEnabled } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
@@ -199,8 +199,6 @@ router.get('/auth/me', authenticateJWT, getMe);
 router.post('/auth/change-password', authenticateJWT, changePassword);
 router.post('/auth/logout', authenticateJWT, logout);
 router.get('/public/tenants', getPublicTenants);
-router.get('/public/clients', getThirdPartyClients);
-router.get('/clients', getThirdPartyClients);
 router.post('/public/request-otp', requestOtp);
 router.post('/public/verify-otp', verifyOtp);
 router.post('/public/telegram/webhook/:tokenOrTenant?', handleTelegramWebhook);
@@ -830,24 +828,23 @@ router.get(
   enforceTenantIsolation,
   getAdminClients
 );
-// Admin / Client KYC Reset API (Supports name, username, email, mobile, PAN, ID via POST body or GET query)
-router.post('/admin/clients/reset-kyc', resetClientKyc);
-router.get('/admin/clients/reset-kyc', resetClientKyc);
-router.post('/clients/reset-kyc', resetClientKyc);
-router.get('/clients/reset-kyc', resetClientKyc);
-router.post('/reset-kyc', resetClientKyc);
-router.get('/reset-kyc', resetClientKyc);
+// Admin / Client KYC Reset API - Strictly authenticated
+router.post(
+  '/admin/clients/reset-kyc',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN', 'ADMIN']),
+  enforceTenantIsolation,
+  resetClientKyc
+);
 
-// Permanent Delete User/Client API (Completely wipes client, user, PAN, profile, KYC, agreements, subscriptions, payments from DB)
-router.post('/admin/clients/permanent-delete', permanentDeleteClient);
-router.delete('/admin/clients/permanent-delete', permanentDeleteClient);
-router.get('/admin/clients/permanent-delete', permanentDeleteClient);
-router.post('/clients/permanent-delete', permanentDeleteClient);
-router.delete('/clients/permanent-delete', permanentDeleteClient);
-router.get('/clients/permanent-delete', permanentDeleteClient);
-router.post('/permanent-delete', permanentDeleteClient);
-router.delete('/permanent-delete', permanentDeleteClient);
-router.get('/permanent-delete', permanentDeleteClient);
+// Permanent Delete User/Client API - Strictly authenticated (Super Admin & Admin only)
+router.post(
+  '/admin/clients/permanent-delete',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN', 'ADMIN']),
+  enforceTenantIsolation,
+  permanentDeleteClient
+);
 router.get(
   '/admin/clients/deleted',
   authenticateJWT,
