@@ -40,6 +40,7 @@ exports.PaymentSchema = new mongoose_1.Schema({
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', required: true },
     clientId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Client', required: true },
     planId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Plan', default: null },
+    subscriptionId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Subscription', default: null },
     amount: { type: Number, required: true },
     paymentMode: { type: String, required: true },
     transactionRef: { type: String, required: true, unique: true },

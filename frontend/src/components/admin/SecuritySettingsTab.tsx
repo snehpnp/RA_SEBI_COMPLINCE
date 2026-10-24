@@ -22,13 +22,14 @@ import {
   MessageSquare,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Zap
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import api from '@/services/api';
 
 export const AVAILABLE_SEGMENTS = ['CASH', 'FUTURE', 'OPTION'] as const;
-export const AVAILABLE_ACTIONS = ['BUY', 'SELL', 'TARGET', 'STOPLOSS'] as const;
+export const AVAILABLE_ACTIONS = ['BUY', 'SELL', 'TARGET', 'STOPLOSS', 'CLOSE', 'AVOID'] as const;
 
 export interface VariableMappingItem {
   index: number;
@@ -43,7 +44,7 @@ export interface SmsTemplateItem {
   _id?: string;
   name: string;
   dltTemplateId: string;
-  category: 'TRADE_SIGNAL' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM';
+  category: 'TRADE_SIGNAL' | 'TRADE_ALERT' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM';
   applicableSegments?: string[];
   applicableActions?: string[];
   applicableCombinations?: string[];
@@ -129,7 +130,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   const [editingTemplate, setEditingTemplate] = useState<SmsTemplateItem | null>(null);
   const [tplName, setTplName] = useState('');
   const [tplDltId, setTplDltId] = useState('');
-  const [tplCategory, setTplCategory] = useState<'TRADE_SIGNAL' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'>('TRADE_SIGNAL');
+  const [tplCategory, setTplCategory] = useState<'TRADE_SIGNAL' | 'TRADE_ALERT' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'>('TRADE_SIGNAL');
   const [tplSelectedCombos, setTplSelectedCombos] = useState<string[]>([]);
   const [tplContent, setTplContent] = useState('');
   const [tplDescription, setTplDescription] = useState('');
@@ -140,6 +141,8 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   const AVAILABLE_FIELD_PILLS = [
     { key: 'callType', label: 'Call Type', sample: 'BUY' },
     { key: 'stock', label: 'Stock Name', sample: 'NIFTY' },
+    { key: 'alertMessage', label: 'Alert Message', sample: 'Book partial profit now' },
+    { key: 'planName', label: 'Plan Name', sample: 'Cash Intraday' },
     { key: 'strikePrice', label: 'Strike Price', sample: '24500' },
     { key: 'optionType', label: 'Option Type (CE/PE)', sample: 'CE' },
     { key: 'expiryDate', label: 'Expiry Date', sample: '28OCT' },
@@ -150,6 +153,9 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
     { key: 'target2', label: 'Target 2', sample: '200' },
     { key: 'target3', label: 'Target 3', sample: '250' },
     { key: 'stoploss', label: 'Stoploss', sample: '120' },
+    { key: 'exitPrice', label: 'Exit Price', sample: '200' },
+    { key: 'closeStatus', label: 'Close Status / Action', sample: 'TARGET 2 ACHIEVED' },
+    { key: 'closeRemark', label: 'Close Remark', sample: 'Book Profit' },
     { key: 'duration', label: 'Trade Duration', sample: 'INTRADAY' }
   ];
 
@@ -177,7 +183,20 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
           return { ...existing, placeholder: dVar.placeholder };
         }
         let defaultFields: string[] = [];
-        if (idx === 0) {
+        if (tplCategory === 'TRADE_ALERT') {
+          const raw = dVar.rawType.toLowerCase();
+          if (raw.includes('stock') || raw.includes('symbol')) {
+            defaultFields = ['stock'];
+          } else if (raw.includes('alert') || raw.includes('msg') || raw.includes('message')) {
+            defaultFields = ['alertMessage'];
+          } else if (raw.includes('plan')) {
+            defaultFields = ['planName'];
+          } else if (idx === 0) {
+            defaultFields = ['stock'];
+          } else {
+            defaultFields = ['alertMessage'];
+          }
+        } else if (idx === 0) {
           defaultFields = tplSelectedCombos.some(c => c.startsWith('OPTION'))
             ? ['callType', 'stock', 'strikePrice', 'optionType', 'entryPrice']
             : ['callType', 'stock', 'entryPrice'];
@@ -256,6 +275,16 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       }
     });
     return map;
+  }, [templates, editingTemplate]);
+
+  // Check if an active TRADE_ALERT template already exists (only 1 active allowed)
+  const existingActiveAlertTemplate = useMemo(() => {
+    const currentEditId = editingTemplate ? (editingTemplate.id || (editingTemplate as any)._id) : null;
+    return templates.find(t => 
+      t.isActive && 
+      (t.category === 'TRADE_ALERT' || (t as any).type === 'TRADE_ALERT') &&
+      (!currentEditId || (t.id !== currentEditId && (t as any)._id !== currentEditId))
+    ) || null;
   }, [templates, editingTemplate]);
 
   // Sync state from tenantData props
@@ -407,6 +436,11 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
       }
     }
 
+    if (tplCategory === 'TRADE_ALERT' && tplIsActive && existingActiveAlertTemplate) {
+      toast.error(`Only 1 active Trade Alert template is allowed. Active template "${existingActiveAlertTemplate.name}" already exists.`);
+      return;
+    }
+
     setSavingTemplate(true);
     try {
       const applicableSegments = tplCategory === 'TRADE_SIGNAL'
@@ -453,6 +487,18 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
   // Toggle Template Status
   const handleToggleTemplateStatus = async (tpl: SmsTemplateItem) => {
     const id = tpl.id || (tpl as any)._id;
+    if (!tpl.isActive && (tpl.category === 'TRADE_ALERT' || (tpl as any).type === 'TRADE_ALERT')) {
+      const activeOther = templates.find(t => 
+        t.isActive && 
+        (t.id || (t as any)._id) !== id && 
+        (t.category === 'TRADE_ALERT' || (t as any).type === 'TRADE_ALERT')
+      );
+      if (activeOther) {
+        toast.error(`Cannot activate: Only 1 active Trade Alert template is allowed. Active template "${activeOther.name}" already exists.`);
+        return;
+      }
+    }
+
     setTogglingTemplateId(id);
     try {
       const res = await api.toggleSmsTemplateStatus(id);
@@ -1099,6 +1145,11 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                               })}
                             </div>
                           </div>
+                        ) : tpl.category === 'TRADE_ALERT' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 inline-flex items-center gap-1">
+                            <AlertCircle className="h-2.5 w-2.5" />
+                            TRADE ALERT
+                          </span>
                         ) : (
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1237,7 +1288,8 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                     onChange={e => setTplCategory(e.target.value as any)}
                     className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-white focus:outline-none focus:border-primary-500 font-semibold"
                   >
-                    <option value="TRADE_SIGNAL">Trade Signal (BUY, SELL, TARGET, STOPLOSS)</option>
+                    <option value="TRADE_SIGNAL">Trade Signal & Updates (BUY, SELL, TARGET, STOPLOSS, CLOSE, AVOID)</option>
+                    <option value="TRADE_ALERT">Trade Alert / Signal Message (Researcher Alert)</option>
                     <option value="LOGIN_2FA">Client Login 2FA OTP</option>
                     <option value="REGISTRATION_OTP">Registration OTP</option>
                     <option value="CUSTOM">Custom Notification</option>
@@ -1378,6 +1430,37 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                 </div>
               )}
 
+              {/* TRADE ALERT SINGLE ACTIVE TEMPLATE & DLT RULES BANNER */}
+              {tplCategory === 'TRADE_ALERT' && (
+                <div className="bg-amber-500/10 dark:bg-amber-950/20 rounded-xl p-3.5 border border-amber-300/60 dark:border-amber-800/60 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-900 dark:text-amber-200">
+                      <strong className="font-bold">Trade Alert Policy (Only 1 Active Template Allowed):</strong>
+                      <p className="text-[11px] text-amber-800/90 dark:text-amber-300/80 mt-0.5">
+                        Only <strong>1 active Trade Alert template</strong> can exist across the platform.
+                        {existingActiveAlertTemplate && (
+                          <span className="block mt-1 text-rose-600 dark:text-rose-400 font-semibold">
+                            ⚠️ Active template &quot;{existingActiveAlertTemplate.name}&quot; already exists. To activate this new template, please deactivate or edit the existing template first.
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="bg-white/80 dark:bg-slate-900/60 rounded-lg p-2.5 text-[11px] text-slate-700 dark:text-slate-300 border border-amber-200/50 dark:border-amber-900/30 space-y-1">
+                    <div className="font-bold text-slate-900 dark:text-white">
+                      TRAI DLT Rules for Trade Alert:
+                    </div>
+                    <div>
+                      • <strong>1 Variable (max 30 chars):</strong> e.g. <code className="text-primary-500 font-mono">{"Infoline Alert: {#var#}"}</code> &rarr; Researcher modal restricts input to <strong>30 characters maximum</strong>.
+                    </div>
+                    <div>
+                      • <strong>2 Variables (max 60 chars):</strong> e.g. <code className="text-primary-500 font-mono">{"Infoline Alert: {#var#} {#var#}"}</code> &rarr; Researcher modal allows typing up to <strong>60 characters</strong> (automatically split into 30 + 30 chars across both variables so telecom gateways never reject the SMS).
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   DLT Approved Template Content *
@@ -1389,26 +1472,32 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                   placeholder={
                     tplCategory === 'TRADE_SIGNAL'
                       ? "Infoline Research: {#stock#} {#action#} at ₹{#price#}, Target: ₹{#target#}, SL: ₹{#sl#}. https://infolineequity.com"
+                      : tplCategory === 'TRADE_ALERT'
+                      ? "Infoline Alert: {#var#} {#var#}"
                       : "Infoline Equity Research, {#alp#}{#alp#} .TRADE WITH PROPER STOPLOSS AND TARGET. https://infolineequity.com/ - info@infolineequity.com"
                   }
                   required
                   className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 dark:text-white focus:outline-none focus:border-primary-500"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">
+                <div className="text-[10px] text-slate-400 mt-1">
                   {tplCategory === 'TRADE_SIGNAL' ? (
                     <>
                       Available variables: <code className="text-primary-500">{"{#stock#}"}</code>, <code className="text-primary-500">{"{#action#}"}</code>, <code className="text-primary-500">{"{#price#}"}</code>, <code className="text-primary-500">{"{#target#}"}</code>, <code className="text-primary-500">{"{#sl#}"}</code> or sequential <code className="text-primary-500">{"{#var#}"}</code> / <code className="text-primary-500">{"{#alp#}"}</code>.
                     </>
+                  ) : tplCategory === 'TRADE_ALERT' ? (
+                    <div className="space-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span>Use DLT sequential variables: <code className="text-primary-500 font-mono">{"{#var#}"}</code> (up to 30 chars) or <code className="text-primary-500 font-mono">{"{#var#} {#var#}"}</code> (up to 60 chars).</span>
+                    </div>
                   ) : (
                     <>
                       Use DLT approved variables: <code className="text-primary-500">{"{#alp#}{#alp#}"}</code> or <code className="text-primary-500">{"{#var#}"}</code> or <code className="text-primary-500">{"{OTP}"}</code> where the 6-digit code will be inserted.
                     </>
                   )}
-                </p>
+                </div>
               </div>
 
               {/* DYNAMIC MULTI-FIELD VARIABLE MAPPING (Like Buy/Sell Grid) */}
-              {tplCategory === 'TRADE_SIGNAL' && detectedVariables.length > 0 && (
+              {(tplCategory === 'TRADE_SIGNAL' || tplCategory === 'TRADE_ALERT') && detectedVariables.length > 0 && (
                 <div className="bg-slate-50 dark:bg-slate-900/70 rounded-xl p-4 border border-slate-200 dark:border-slate-800 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1417,7 +1506,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                         Multi-Field Variable Mapping ({detectedVariables.length} Variable{detectedVariables.length > 1 ? 's' : ''} Detected)
                       </h5>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        Har variable ke liye trade fields select karein (jaise Buy/Sell buttons). Selected fields auto-space ke sath join hongi.
+                        Select trade fields for each variable (similar to Buy/Sell buttons). Selected fields will be combined with automatic spaces.
                       </p>
                     </div>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
@@ -1536,7 +1625,7 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                       {liveSamplePreview.text || 'Type template content to preview...'}
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      * Multiple selected fields ke beech auto-space add ho jayega. Form me bhare gaye inputs yahan live replace honge.
+                      * Spaces are automatically added between multiple selected fields. Form values will replace placeholders in real time.
                     </p>
                   </div>
                 </div>
@@ -1566,6 +1655,12 @@ export default function SecuritySettingsTab({ tenantData, onUpdate }: SecuritySe
                   <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Template Active
                   </span>
+                  {tplCategory === 'TRADE_ALERT' && existingActiveAlertTemplate && tplIsActive && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1 ml-2">
+                      <Lock className="h-3 w-3" />
+                      (Conflict: &quot;{existingActiveAlertTemplate.name}&quot; is already active)
+                    </span>
+                  )}
                 </label>
 
                 <div className="flex items-center gap-2">

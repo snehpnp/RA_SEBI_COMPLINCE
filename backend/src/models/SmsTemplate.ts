@@ -14,8 +14,8 @@ export interface ISmsTemplate extends Document {
   id: string;
   tenantId?: Types.ObjectId | null;
   name: string;
-  type: string; // 'TRADE_SIGNAL' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'
-  category: string; // 'TRADE_SIGNAL' | 'AUTH_OTP' | 'CUSTOM'
+  type: string; // 'TRADE_SIGNAL' | 'TRADE_ALERT' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'
+  category: string; // 'TRADE_SIGNAL' | 'TRADE_ALERT' | 'LOGIN_2FA' | 'REGISTRATION_OTP' | 'CUSTOM'
   applicableSegments: string[]; // e.g. ['CASH', 'FUTURE', 'OPTION']
   applicableActions: string[]; // e.g. ['BUY', 'SELL', 'TARGET', 'STOPLOSS']
   applicableCombinations: string[]; // e.g. ['CASH_BUY', 'CASH_SELL']

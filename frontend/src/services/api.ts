@@ -1108,6 +1108,13 @@ class ApiClient {
     return this.request(`/signals/delivery-reports/channel/${channel}${qs ? `?${qs}` : ''}`);
   }
 
+  async syncSmsDeliveryReports(logId?: string) {
+    return this.request('/signals/delivery-reports/sync-dlr', {
+      method: 'POST',
+      body: JSON.stringify(logId ? { logId } : {})
+    });
+  }
+
   async testTelegramBot(botToken?: string) {
     return this.request('/admin/telegram/test', {
       method: 'POST',

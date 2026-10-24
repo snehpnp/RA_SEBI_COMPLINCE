@@ -86,7 +86,8 @@ import {
 import {
   getMasterDeliveryReport,
   getChannelDeliveryReport,
-  testTelegramBotConnection
+  testTelegramBotConnection,
+  syncSmsDeliveryReports
 } from '../controllers/deliveryReportController';
 
 const router = Router();
@@ -1663,6 +1664,12 @@ router.get(
   authenticateJWT,
   enforceTenantIsolation,
   getChannelDeliveryReport
+);
+router.post(
+  '/signals/delivery-reports/sync-dlr',
+  authenticateJWT,
+  enforceTenantIsolation,
+  syncSmsDeliveryReports
 );
 router.post(
   '/admin/telegram/test',

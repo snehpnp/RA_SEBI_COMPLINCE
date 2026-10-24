@@ -3532,6 +3532,7 @@ const assignPlanByAdmin = async (req, res) => {
             tenantId: tenantId || client.tenantId,
             clientId: actualClientId,
             planId: plan._id || plan.id,
+            subscriptionId: subscription._id,
             amount: parseFloat(finalTotalAmount.toFixed(2)),
             paymentMode,
             transactionRef: paymentRefId,
@@ -4632,6 +4633,23 @@ const createSmsTemplate = async (req, res) => {
                 }
             }
         }
+        // Trade Alert single active template guard (only 1 active Trade Alert template allowed)
+        if (effectiveCategory === 'TRADE_ALERT' && effectiveStatus === 'ACTIVE') {
+            const tenantFilter = {
+                status: 'ACTIVE',
+                $or: [{ category: 'TRADE_ALERT' }, { type: 'TRADE_ALERT' }]
+            };
+            if (tenantId) {
+                tenantFilter.tenantId = tenantId;
+            }
+            const existingAlertTpl = await db_1.default.SmsTemplate.findOne(tenantFilter).lean();
+            if (existingAlertTpl) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Only 1 active Trade Alert template is allowed. Active template "${existingAlertTpl.name}" already exists. Please edit or deactivate it before adding a new one.`
+                });
+            }
+        }
         const template = await db_1.default.SmsTemplate.create({
             tenantId: tenantId || null,
             name,
@@ -4640,6 +4658,7 @@ const createSmsTemplate = async (req, res) => {
             applicableSegments,
             applicableActions,
             applicableCombinations,
+            variableMappings,
             dltTemplateId,
             message: effectiveMessage,
             status: effectiveStatus,
@@ -4735,6 +4754,23 @@ const updateSmsTemplate = async (req, res) => {
                 });
             }
         }
+        // Trade Alert single active template guard on update
+        if ((template.category === 'TRADE_ALERT' || template.type === 'TRADE_ALERT') && template.status === 'ACTIVE') {
+            const tenantFilter = {
+                _id: { $ne: template._id },
+                status: 'ACTIVE',
+                $or: [{ category: 'TRADE_ALERT' }, { type: 'TRADE_ALERT' }]
+            };
+            if (tenantId)
+                tenantFilter.tenantId = tenantId;
+            const existingAlertTpl = await db_1.default.SmsTemplate.findOne(tenantFilter).lean();
+            if (existingAlertTpl) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Only 1 active Trade Alert template is allowed. Active template "${existingAlertTpl.name}" already exists.`
+                });
+            }
+        }
         await template.save();
         const tObj = template.toObject ? template.toObject() : template;
         const formatted = {
@@ -4783,6 +4819,23 @@ const toggleSmsTemplateStatus = async (req, res) => {
                 return res.status(400).json({
                     success: false,
                     message: `Cannot activate template: Trigger combination [${parts[0]} - ${parts[1]}] is currently assigned to another active template "${conflictCheck.conflictingTemplateName}". Please deactivate that template first.`
+                });
+            }
+        }
+        // If activating a TRADE_ALERT template, check if an active one already exists
+        if (nextStatus === 'ACTIVE' && (template.category === 'TRADE_ALERT' || template.type === 'TRADE_ALERT')) {
+            const tenantFilter = {
+                _id: { $ne: template._id },
+                status: 'ACTIVE',
+                $or: [{ category: 'TRADE_ALERT' }, { type: 'TRADE_ALERT' }]
+            };
+            if (tenantId)
+                tenantFilter.tenantId = tenantId;
+            const existingAlertTpl = await db_1.default.SmsTemplate.findOne(tenantFilter).lean();
+            if (existingAlertTpl) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot activate template: Only 1 active Trade Alert template is allowed. Active template "${existingAlertTpl.name}" already exists. Please deactivate it first.`
                 });
             }
         }
