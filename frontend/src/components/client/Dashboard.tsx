@@ -38,6 +38,10 @@ export default function Dashboard({
     }
   }, [profile]);
 
+  const isTenantTelegramEnabled = Boolean(
+    localProfile?.tenant?.telegramTradeEnabled === true ||
+    localProfile?.user?.tenant?.telegramTradeEnabled === true
+  );
   const botUsername = localProfile?.user?.tenant?.telegramBotUsername || localProfile?.tenant?.telegramBotUsername || '';
   const cleanBotUsername = (botUsername || '').replace(/^@/, '').trim();
   const isBotConfigured = Boolean(cleanBotUsername);
@@ -79,6 +83,7 @@ export default function Dashboard({
   };
 
   useEffect(() => {
+    if (!isTenantTelegramEnabled) return;
     // When client returns to window/tab after opening Telegram
     const handleFocus = () => {
       checkTelegramStatus(true);
@@ -97,7 +102,7 @@ export default function Dashboard({
       window.removeEventListener('focus', handleFocus);
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [localProfile?.telegramChatId, isBotConfigured]);
+  }, [localProfile?.telegramChatId, isBotConfigured, isTenantTelegramEnabled]);
 
   const handleTelegramCardClick = () => {
     // If already connected, no action (link is permanent, button is not clickable again)
@@ -276,7 +281,7 @@ export default function Dashboard({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 ${isTenantTelegramEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-6`}>
         {/* Card 1: KYC Status */}
         <div
           className="bg-premium-cards border border-premium-border p-6 rounded-3xl flex items-center gap-4 cursor-pointer hover:border-premium-primary/40 transition-colors"
@@ -314,94 +319,96 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* Card 3: Telegram Trade Alerts */}
-        <div
-          className={`bg-premium-cards border p-6 rounded-3xl flex items-center justify-between gap-4 transition-all ${
-            localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false
-              ? 'border-sky-500/40 bg-gradient-to-br from-sky-500/[0.07] to-transparent shadow-sm cursor-default'
-              : !hasActivePlan
-                ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-br from-amber-500/[0.04] to-transparent cursor-pointer'
-                : !isKycRuleSatisfied
-                  ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-br from-amber-500/[0.04] to-transparent cursor-pointer'
-                  : !isBotConfigured
-                    ? 'border-slate-800 bg-gradient-to-br from-slate-800/40 to-transparent cursor-not-allowed opacity-75'
-                    : 'border-premium-border hover:border-sky-500/60 bg-gradient-to-br from-sky-500/[0.05] to-transparent cursor-pointer shadow-sm hover:shadow-sky-500/10'
-          }`}
-          onClick={handleTelegramCardClick}
-        >
-          <div className="flex items-center gap-4 min-w-0">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${
+        {/* Card 3: Telegram Trade Alerts (Shown only if Admin enabled Telegram Trade Delivery) */}
+        {isTenantTelegramEnabled && (
+          <div
+            className={`bg-premium-cards border p-6 rounded-3xl flex items-center justify-between gap-4 transition-all ${
               localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false
-                ? 'bg-sky-500/20 text-sky-400 ring-2 ring-sky-500/30'
+                ? 'border-sky-500/40 bg-gradient-to-br from-sky-500/[0.07] to-transparent shadow-sm cursor-default'
                 : !hasActivePlan
-                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                  ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-br from-amber-500/[0.04] to-transparent cursor-pointer'
                   : !isKycRuleSatisfied
-                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    ? 'border-amber-500/30 hover:border-amber-500/60 bg-gradient-to-br from-amber-500/[0.04] to-transparent cursor-pointer'
                     : !isBotConfigured
-                      ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                      : 'bg-slate-800 text-sky-400 border border-sky-500/20'
-            }`}>
-              <Send className="w-6 h-6 transform -translate-x-0.5 translate-y-0.5" />
+                      ? 'border-slate-800 bg-gradient-to-br from-slate-800/40 to-transparent cursor-not-allowed opacity-75'
+                      : 'border-premium-border hover:border-sky-500/60 bg-gradient-to-br from-sky-500/[0.05] to-transparent cursor-pointer shadow-sm hover:shadow-sky-500/10'
+            }`}
+            onClick={handleTelegramCardClick}
+          >
+            <div className="flex items-center gap-4 min-w-0">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 ${
+                localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false
+                  ? 'bg-sky-500/20 text-sky-400 ring-2 ring-sky-500/30'
+                  : !hasActivePlan
+                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    : !isKycRuleSatisfied
+                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                      : !isBotConfigured
+                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                        : 'bg-slate-800 text-sky-400 border border-sky-500/20'
+              }`}>
+                <Send className="w-6 h-6 transform -translate-x-0.5 translate-y-0.5" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm text-premium-text/60">Telegram Alerts</p>
+                {localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false ? (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-sky-400">Connected</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    </div>
+                    <p className="text-xs text-slate-300 font-mono truncate max-w-[150px] mt-0.5">
+                      {localProfile.telegramUsername ? `@${localProfile.telegramUsername}` : `ID: ${localProfile.telegramChatId}`}
+                    </p>
+                  </div>
+                ) : !hasActivePlan ? (
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-lg font-bold text-amber-400">Plan Required</span>
+                    </div>
+                    <p className="text-xs text-sky-400 hover:underline font-medium mt-0.5 flex items-center gap-1">
+                      Buy Plan to Connect ⚡
+                    </p>
+                  </div>
+                ) : !isKycRuleSatisfied ? (
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-lg font-bold text-amber-400">KYC Required</span>
+                    </div>
+                    <p className="text-xs text-amber-400/90 font-medium mt-0.5 flex items-center gap-1">
+                      Complete KYC to Join ⚡
+                    </p>
+                  </div>
+                ) : !isBotConfigured ? (
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-lg font-bold text-slate-400">Setup Pending</span>
+                    </div>
+                    <p className="text-xs text-amber-400/80 font-medium mt-0.5">
+                      Bot setup pending by admin
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-lg font-bold text-sky-400">Not Linked</span>
+                    </div>
+                    <p className="text-xs text-sky-400 hover:text-sky-300 font-semibold mt-0.5 flex items-center gap-1">
+                      Connect Telegram Bot ⚡
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-sm text-premium-text/60">Telegram Alerts</p>
-              {localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false ? (
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold text-sky-400">Connected</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  </div>
-                  <p className="text-xs text-slate-300 font-mono truncate max-w-[150px] mt-0.5">
-                    {localProfile.telegramUsername ? `@${localProfile.telegramUsername}` : `ID: ${localProfile.telegramChatId}`}
-                  </p>
-                </div>
-              ) : !hasActivePlan ? (
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg font-bold text-amber-400">Plan Required</span>
-                  </div>
-                  <p className="text-xs text-sky-400 hover:underline font-medium mt-0.5 flex items-center gap-1">
-                    Buy Plan to Connect ⚡
-                  </p>
-                </div>
-              ) : !isKycRuleSatisfied ? (
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg font-bold text-amber-400">KYC Required</span>
-                  </div>
-                  <p className="text-xs text-amber-400/90 font-medium mt-0.5 flex items-center gap-1">
-                    Complete KYC to Join ⚡
-                  </p>
-                </div>
-              ) : !isBotConfigured ? (
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg font-bold text-slate-400">Setup Pending</span>
-                  </div>
-                  <p className="text-xs text-amber-400/80 font-medium mt-0.5">
-                    Bot setup pending by admin
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg font-bold text-sky-400">Not Linked</span>
-                  </div>
-                  <p className="text-xs text-sky-400 hover:text-sky-300 font-semibold mt-0.5 flex items-center gap-1">
-                    Connect Telegram Bot ⚡
-                  </p>
-                </div>
-              )}
-            </div>
+            {localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false ? (
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full font-bold flex-shrink-0">
+                ACTIVE
+              </span>
+            ) : (
+              <ChevronRight className="w-5 h-5 text-premium-text/40 flex-shrink-0" />
+            )}
           </div>
-          {localProfile?.telegramChatId && localProfile?.isTelegramTradeEnabled !== false ? (
-            <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full font-bold flex-shrink-0">
-              ACTIVE
-            </span>
-          ) : (
-            <ChevronRight className="w-5 h-5 text-premium-text/40 flex-shrink-0" />
-          )}
-        </div>
+        )}
       </div>
 
 

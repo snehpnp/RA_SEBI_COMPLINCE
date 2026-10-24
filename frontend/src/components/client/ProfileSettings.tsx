@@ -21,6 +21,7 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
   const [telegramChatId, setTelegramChatId] = useState('');
   const [telegramUsername, setTelegramUsername] = useState('');
   const [isTelegramTradeEnabled, setIsTelegramTradeEnabled] = useState(true);
+  const [isTenantTelegramEnabled, setIsTenantTelegramEnabled] = useState(false);
   const [botUsername, setBotUsername] = useState('');
   const [telegramJoinRule, setTelegramJoinRule] = useState('ACTIVE_PLAN_ONLY');
   const [clientId, setClientId] = useState('');
@@ -110,6 +111,7 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
         setTelegramChatId(client.telegramChatId || '');
         setTelegramUsername(client.telegramUsername || '');
         setIsTelegramTradeEnabled(client.isTelegramTradeEnabled !== false);
+        setIsTenantTelegramEnabled(Boolean(client.tenant?.telegramTradeEnabled === true || client.user?.tenant?.telegramTradeEnabled === true));
         setClientId(String(client.id || client._id || ''));
         const bUser = client.user?.tenant?.telegramBotUsername || client.tenant?.telegramBotUsername || '';
         setBotUsername(bUser ? bUser.replace(/^@/, '').trim() : '');
@@ -546,6 +548,7 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
           </div>
 
           {/* SECTION 4: Live Trade Delivery Channels & Telegram Bot */}
+          {isTenantTelegramEnabled && (
           <div>
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3 mb-5">
               <div className="flex items-center gap-2.5">
@@ -679,6 +682,7 @@ export default function ProfileSettings({ onNavigateToKyc }: ProfileSettingsProp
               )}
             </div>
           </div>
+          )}
 
           {/* Form Actions */}
 
