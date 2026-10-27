@@ -1,0 +1,316 @@
+import { useState, useEffect } from 'react';
+import { Download, CreditCard, Clock, Search, Loader2 } from 'lucide-react';
+import api from '../../services/api';
+import { toast } from 'react-hot-toast';
+import DataTable from 'react-data-table-component';
+const tableCustomStyles = {
+    table: { style: { backgroundColor: 'transparent', color: 'inherit' } },
+    headRow: {
+        style: {
+            backgroundColor: 'transparent',
+            borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+            minHeight: '44px',
+            color: 'inherit',
+        },
+    },
+    headCells: {
+        style: {
+            fontSize: '10px', fontWeight: '800', textTransform: 'uppercase',
+            color: 'inherit', paddingLeft: '16px', paddingRight: '16px',
+            opacity: 0.7,
+        },
+    },
+    cells: {
+        style: {
+            paddingLeft: '16px', paddingRight: '16px',
+            fontSize: '12px', color: 'inherit',
+        },
+    },
+    rows: {
+        style: {
+            backgroundColor: 'transparent',
+            borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+            color: 'inherit',
+            '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
+        },
+    },
+    pagination: {
+        style: { backgroundColor: 'transparent', borderTopColor: 'rgba(255, 255, 255, 0.1)', color: 'inherit' },
+    },
+};
+export default function PaymentCenter({ profile }) {
+    const [transactions, setTransactions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [downloadingId, setDownloadingId] = useState(null);
+    const [gstEnabled, setGstEnabled] = useState(profile?.user?.tenant?.gstEnabled !== false);
+    const handleDownloadInvoice = async (paymentId, transactionRef) => {
+        try {
+            setDownloadingId(paymentId);
+            await api.downloadInvoicePdf(paymentId, `Invoice_${transactionRef}.pdf`);
+        }
+        catch (error) {
+            console.error('Download failed', error);
+            toast.error('Failed to download invoice. Please try again.');
+        }
+        finally {
+            setDownloadingId(null);
+        }
+    };
+    const [isDarkMode, setIsDarkMode] = useState(true);
+    const columns = [
+        {
+            name: 'Transaction',
+            cell: (txn) => (<div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-premium-bg flex items-center justify-center shrink-0">
+            <CreditCard className="w-4 h-4 text-premium-text/60"/>
+          </div>
+          <div>
+            <p className="font-semibold text-sm">{txn.transactionRef || txn.receiptNo || txn.id || txn._id || 'TXN-UNKNOWN'}</p>
+            <p className="text-xs text-premium-text/50">{txn.paymentMode || txn.method || 'Online'}</p>
+          </div>
+        </div>),
+            sortable: true,
+            minWidth: '200px',
+        },
+        {
+            name: 'Billed To',
+            cell: (txn) => (<div>
+          <p className="font-semibold text-sm text-premium-text">{profile?.name || txn.clientName || 'User'}</p>
+          <p className="text-xs text-premium-text/50">{profile?.email || 'N/A'}</p>
+        </div>),
+            sortable: true,
+            minWidth: '150px',
+        },
+        {
+            name: 'Date & Time',
+            cell: (txn) => (<div>
+          <p className="text-sm">{new Date(txn.createdAt || Date.now()).toLocaleDateString()}</p>
+          <p className="text-xs text-premium-text/50">{new Date(txn.createdAt || Date.now()).toLocaleTimeString()}</p>
+        </div>),
+            sortable: true,
+            sortFunction: (a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime(),
+            minWidth: '130px',
+        },
+        {
+            name: 'Plan',
+            cell: (txn) => {
+                const planName = typeof txn.plan === 'object' ? txn.plan?.name : (txn.planName || 'VIP');
+                const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+                return (<div>
+            <span className="text-sm font-bold text-premium-text block">{planName}</span>
+            {couponCode && (<span className="inline-block mt-0.5 text-[10px] font-bold text-emerald-500 font-mono">
+                Coupon: {couponCode}
+              </span>)}
+          </div>);
+            },
+            sortable: true,
+            minWidth: '130px',
+        },
+        {
+            name: 'Coupon',
+            cell: (txn) => {
+                const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+                const discount = txn.discountApplied || txn.discountAmount || txn.discount || txn.coupon?.discountValue || 0;
+                if (!couponCode && (!discount || discount === 0)) {
+                    return <span className="text-premium-text/40 text-xs font-mono">-</span>;
+                }
+                return (<div className="space-y-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-mono">
+              🎟️ {couponCode || 'APPLIED'}
+            </span>
+            {discount > 0 && (<span className="block text-[10px] font-semibold text-emerald-500">
+                -₹{discount}
+              </span>)}
+          </div>);
+            },
+            sortable: true,
+            minWidth: '120px',
+        },
+        {
+            name: 'Amount',
+            cell: (txn) => {
+                const totalAmount = Number(txn.amount || txn.amountPaid || 0);
+                const discount = Number(txn.discountApplied || txn.discountAmount || txn.discount || 0);
+                const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+                // Check if GST is active for this tenant or transaction
+                const txnGstActive = txn.gstEnabled !== undefined ? Boolean(txn.gstEnabled) : gstEnabled;
+                if (!txnGstActive) {
+                    // GST DISABLED (0% Non-GST Mode)
+                    return (<div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
+              {discount > 0 && (<>
+                  <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                    <span>Plan Price:</span> <span className="font-mono">₹{(totalAmount + discount).toFixed(2)}</span>
+                  </div>
+                  <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
+                    <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
+                  </div>
+                </>)}
+              <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
+                <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
+              </div>
+            </div>);
+                }
+                // GST ENABLED
+                const basePrice = totalAmount > 0 ? Number((totalAmount / 1.18).toFixed(2)) : 0;
+                const gst = Number((totalAmount - basePrice).toFixed(2));
+                return (<div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
+            {discount > 0 ? (<>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>Gross Base:</span> <span className="font-mono">₹{(basePrice + discount).toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
+                  <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
+                </div>
+              </>) : (<>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>Base:</span> <span className="font-mono">₹{basePrice.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
+                </div>
+              </>)}
+            <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
+              <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
+            </div>
+          </div>);
+            },
+            sortable: true,
+            minWidth: '185px',
+        },
+        {
+            name: 'Status',
+            cell: (txn) => (txn.status === 'successful' || txn.status === 'SUCCESS' ? (<span className="px-2.5 py-1 bg-premium-success/20 text-premium-success rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
+            Success
+          </span>) : (<span className="px-2.5 py-1 bg-premium-danger/20 text-premium-danger rounded-md text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1">
+            {txn.status || 'Failed'}
+          </span>)),
+            sortable: true,
+        },
+        {
+            name: 'Invoice',
+            cell: (txn) => {
+                if (txn.status !== 'successful' && txn.status !== 'SUCCESS') {
+                    return (<button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
+              N/A
+            </button>);
+                }
+                if (txn.invoiceStatus === 'PENDING_AGREEMENT') {
+                    return (<span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg text-xs font-medium" title="Invoice will be generated and available once your KYC Agreement is completed">
+              <Clock className="w-3.5 h-3.5 text-amber-500"/> Agreement Pending
+            </span>);
+                }
+                return (<button onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')} disabled={downloadingId === (txn.id || txn._id)} className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-primary/10 hover:bg-premium-primary/20 text-premium-primary rounded-lg text-xs font-medium transition-colors disabled:opacity-50">
+            {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Download className="w-3.5 h-3.5"/>} 
+            {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
+          </button>);
+            },
+            right: true,
+            minWidth: '150px',
+        },
+    ];
+    useEffect(() => {
+        const fetchPayments = async () => {
+            try {
+                const res = await api.getClientPayments();
+                if (res.success) {
+                    setTransactions(res.data?.docs || res.data || []);
+                    if (res.gstEnabled !== undefined) {
+                        setGstEnabled(Boolean(res.gstEnabled));
+                    }
+                }
+            }
+            catch (err) {
+                console.error('Failed to fetch payments', err);
+            }
+            finally {
+                setLoading(false);
+            }
+        };
+        fetchPayments();
+    }, []);
+    return (<div className="space-y-6 font-sans text-premium-text animate-in fade-in duration-500 h-full flex flex-col">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold">Payment History</h1>
+          <p className="text-sm text-premium-text/60 mt-1">View your past transactions and download {gstEnabled ? 'GST ' : ''}invoices.</p>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-premium-cards border border-premium-border p-4 rounded-2xl">
+        <div className="relative w-full md:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-premium-text/40"/>
+          <input type="text" placeholder="Search by Transaction ID..." className="w-full bg-premium-bg border border-premium-border rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-premium-primary focus:ring-1 focus:ring-premium-primary transition-all"/>
+        </div>
+        <div className="flex gap-3 w-full md:w-auto">
+          <select className="bg-premium-bg border border-premium-border rounded-xl px-4 py-2.5 text-sm focus:outline-none w-full md:w-auto appearance-none">
+            <option>All Time</option>
+            <option>Last 30 Days</option>
+            <option>Last 6 Months</option>
+            <option>Current Financial Year</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="bg-premium-cards border border-premium-border rounded-3xl overflow-hidden flex-1">
+        <div className="hidden md:block">
+          <DataTable columns={columns} data={transactions} pagination paginationPerPage={10} highlightOnHover responsive customStyles={tableCustomStyles} theme={isDarkMode ? 'dark' : 'default'} progressPending={loading} progressComponent={<div className="p-12 text-center">
+                <Loader2 className="w-8 h-8 text-premium-primary animate-spin mx-auto mb-4"/>
+                <p className="text-sm text-premium-text/60">Loading payment history...</p>
+              </div>} noDataComponent={<div className="p-12 text-center text-premium-text/40">
+                No transactions found.
+              </div>}/>
+        </div>
+        
+        {/* Mobile View */}
+        <div className="md:hidden flex flex-col divide-y divide-premium-border">
+          {loading ? (<div className="p-12 text-center">
+              <Loader2 className="w-8 h-8 text-premium-primary animate-spin mx-auto mb-4"/>
+              <p className="text-sm text-premium-text/60">Loading payment history...</p>
+            </div>) : transactions.length === 0 ? (<div className="p-12 text-center text-premium-text/40">
+              No transactions found.
+            </div>) : (transactions.map((txn, index) => (<div key={txn.id || txn._id || index} className="p-4 flex flex-col gap-3 hover:bg-premium-bg/50 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-premium-bg flex items-center justify-center shrink-0">
+                      <CreditCard className="w-4 h-4 text-premium-text/60"/>
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-premium-text">{txn.transactionRef || txn.receiptNo || txn.id || txn._id || 'TXN-UNKNOWN'}</p>
+                      <p className="text-xs text-premium-text/60">{new Date(txn.createdAt || Date.now()).toLocaleDateString()} {new Date(txn.createdAt || Date.now()).toLocaleTimeString()}</p>
+                    </div>
+                  </div>
+                  <div>
+                    {txn.status === 'successful' || txn.status === 'SUCCESS' ? (<span className="px-2 py-1 bg-premium-success/20 text-premium-success rounded text-[10px] font-bold uppercase">
+                        Success
+                      </span>) : (<span className="px-2 py-1 bg-premium-danger/20 text-premium-danger rounded text-[10px] font-bold uppercase">
+                        {txn.status || 'Failed'}
+                      </span>)}
+                  </div>
+                </div>
+                
+                <div className="bg-premium-bg rounded-xl p-3 space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-premium-text/60">Plan</span>
+                    <span className="font-medium">{typeof txn.plan === 'object' ? txn.plan?.name : 'Premium Plan'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm border-t border-premium-border pt-2">
+                    <span className="text-premium-text/60">Amount</span>
+                    <span className="font-bold text-premium-primary">₹{(txn.amount || txn.amountPaid || txn.plan?.price || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+                
+                {txn.status === 'successful' || txn.status === 'SUCCESS' ? (txn.invoiceStatus === 'PENDING_AGREEMENT' ? (<div className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl text-xs font-semibold mt-1">
+                      <Clock className="w-3.5 h-3.5 text-amber-500"/>
+                      <span>Invoice available after KYC Agreement</span>
+                    </div>) : (<button onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')} disabled={downloadingId === (txn.id || txn._id)} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-premium-primary/10 text-premium-primary hover:bg-premium-primary/20 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 mt-1">
+                      {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>} 
+                      {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
+                    </button>)) : null}
+              </div>)))}
+        </div>
+      </div>
+    </div>);
+}

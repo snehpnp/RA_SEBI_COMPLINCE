@@ -1,0 +1,228 @@
+import { useState, useEffect } from 'react';
+import { FileText, Download, Loader2 } from 'lucide-react';
+import api from '../../services/api';
+import DataTable from 'react-data-table-component';
+const getTableCustomStyles = (isDark) => ({
+    table: {
+        style: {
+            backgroundColor: 'transparent',
+        },
+    },
+    headRow: {
+        style: {
+            backgroundColor: isDark ? 'rgba(15, 23, 42, 0.6)' : 'rgba(241, 245, 249, 0.5)',
+            borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(203, 213, 225, 0.5)',
+            minHeight: '44px',
+        },
+    },
+    headCells: {
+        style: {
+            fontSize: '11px',
+            fontWeight: '800',
+            textTransform: 'uppercase',
+            color: isDark ? '#94a3b8' : '#475569',
+            paddingLeft: '14px',
+            paddingRight: '14px',
+            letterSpacing: '0.05em',
+        },
+    },
+    cells: {
+        style: {
+            paddingLeft: '14px',
+            paddingRight: '14px',
+            fontSize: '12px',
+            color: isDark ? '#cbd5e1' : '#334155',
+        },
+    },
+    rows: {
+        style: {
+            backgroundColor: 'transparent',
+            borderBottomColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(203, 213, 225, 0.5)',
+            '&:hover': {
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(241, 245, 249, 0.8)',
+            },
+        },
+    },
+    pagination: {
+        style: {
+            backgroundColor: 'transparent',
+            borderTopColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(203, 213, 225, 0.5)',
+            color: isDark ? '#94a3b8' : '#475569',
+        },
+        pageButtonsStyle: {
+            color: isDark ? '#94a3b8' : '#475569',
+            fill: isDark ? '#94a3b8' : '#475569',
+            '&:disabled': {
+                color: isDark ? '#475569' : '#cbd5e1',
+                fill: isDark ? '#475569' : '#cbd5e1',
+            },
+        },
+    },
+});
+export default function AdminResearchReports() {
+    const [activeCategory, setActiveCategory] = useState('all');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [signals, setSignals] = useState([]);
+    const [loading, setLoading] = useState(true);
+    // Check for dark mode to pass to DataTable theme
+    const [isDarkMode, setIsDarkMode] = useState(false);
+    useEffect(() => {
+        setIsDarkMode(document.documentElement.classList.contains('dark'));
+        const observer = new MutationObserver(() => {
+            setIsDarkMode(document.documentElement.classList.contains('dark'));
+        });
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        return () => observer.disconnect();
+    }, []);
+    const renderDate = (dateString) => {
+        if (!dateString)
+            return <span className="text-slate-400">-</span>;
+        const d = new Date(dateString);
+        return (<div className="flex flex-col">
+            <span className="font-medium text-slate-800 dark:text-slate-200">{d.toLocaleDateString()}</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">{d.toLocaleTimeString()}</span>
+        </div>);
+    };
+    const columns = [
+        {
+            name: 'Entry Date',
+            cell: (row) => renderDate(row.createdAt),
+            sortable: true,
+            sortFunction: (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+            minWidth: '130px',
+        },
+        {
+            name: 'Exit Date',
+            cell: (row) => renderDate(row.closedAt),
+            sortable: true,
+            sortFunction: (a, b) => new Date(a.closedAt || 0).getTime() - new Date(b.closedAt || 0).getTime(),
+            minWidth: '120px',
+        },
+        {
+            name: 'Report Date',
+            cell: (row) => renderDate(row.updatedAt),
+            sortable: true,
+            sortFunction: (a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(),
+            minWidth: '130px',
+        },
+        {
+            name: 'Trade Name',
+            cell: (row) => (<span className="font-bold tracking-wide text-slate-900 dark:text-white">
+                {row.stock?.symbol}
+                {row.segment === 'OPTION' && row.strikePrice && ` ${row.strikePrice}`}
+                {row.segment === 'OPTION' && row.optionType && ` ${row.optionType}`}
+            </span>),
+            sortable: true,
+            minWidth: '140px',
+        },
+        {
+            name: 'Status',
+            cell: (row) => (<span className={`px-2 py-1 rounded-md text-xs font-bold ${row.status === 'OPEN' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/10 dark:text-amber-500 border border-amber-200 dark:border-amber-500/20' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-500 border border-emerald-200 dark:border-emerald-500/20'}`}>
+                {row.status}
+            </span>),
+            sortable: true,
+            minWidth: '95px',
+        },
+        {
+            name: 'Segment',
+            cell: (row) => (<span className="bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-md text-xs border border-slate-200 dark:border-slate-700 font-semibold">{row.segment}</span>),
+            sortable: true,
+            minWidth: '100px',
+        },
+        {
+            name: 'Plan Name',
+            cell: (row) => <span className="text-slate-700 dark:text-slate-300 font-medium">{row.planName || '-'}</span>,
+            sortable: true,
+            minWidth: '220px',
+        },
+        {
+            name: 'Researcher Name',
+            cell: (row) => <span className="text-slate-600 dark:text-slate-400">{row.createdByName || '-'}</span>,
+            sortable: true,
+            minWidth: '170px',
+        },
+        {
+            name: 'Action',
+            cell: (row) => (<a href={api.getDownloadUrl(row.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-500/10 dark:hover:bg-blue-600 dark:text-blue-400 dark:hover:text-white rounded-lg text-xs font-bold transition-all duration-300 whitespace-nowrap">
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span>Download</span>
+            </a>),
+            minWidth: '140px',
+            center: true,
+            ignoreRowClick: true,
+            button: true,
+        },
+    ];
+    const categories = [
+        { id: 'all', label: 'All Reports' },
+        { id: 'cash', label: 'Cash' },
+        { id: 'future', label: 'Future' },
+        { id: 'option', label: 'Option' },
+    ];
+    useEffect(() => {
+        const fetchReports = async () => {
+            try {
+                const res = await api.getSignals();
+                if (res.success) {
+                    // Filter to only include signals that have an attached report
+                    const signalsWithReports = res.data.filter((s) => s.reportUrl);
+                    setSignals(signalsWithReports);
+                }
+            }
+            catch (err) {
+                console.error('Failed to fetch signals for research reports', err);
+            }
+            finally {
+                setLoading(false);
+            }
+        };
+        fetchReports();
+    }, []);
+    const filteredSignals = signals.filter(s => {
+        const matchesCategory = activeCategory === 'all' || s.segment?.toLowerCase() === activeCategory;
+        const matchesStatus = statusFilter === 'all' || s.status?.toLowerCase() === statusFilter;
+        const tradeName = `${s.stock?.symbol || ''} ${s.strikePrice || ''} ${s.optionType || ''}`.trim().toLowerCase();
+        const matchesSearch = tradeName.includes(searchQuery.toLowerCase());
+        return matchesCategory && matchesStatus && matchesSearch;
+    });
+    return (<div className="space-y-6 font-sans text-slate-800 dark:text-slate-200 animate-in fade-in duration-500 h-full flex flex-col">
+        <div className="flex justify-between items-center bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+            <div>
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <FileText className="w-6 h-6 text-blue-600 dark:text-blue-500" /> Research Reports
+                </h1>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">View and manage all uploaded research reports across all segments.</p>
+            </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex overflow-x-auto pb-2 hide-scrollbar gap-2">
+                {categories.map(c => (<button key={c.id} onClick={() => setActiveCategory(c.id)} className={`whitespace-nowrap px-5 py-2 rounded-xl text-sm font-medium transition-all ${activeCategory === c.id
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-blue-500 hover:text-blue-600'}`}>
+                    {c.label}
+                </button>))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+                <input type="text" placeholder="Search trade name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="px-4 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none w-48" />
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-4 py-2 text-sm rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 outline-none">
+                    <option value="all">All Status</option>
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
+                </select>
+            </div>
+        </div>
+
+        {loading ? (<div className="flex-1 flex flex-col items-center justify-center min-h-[400px] bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+            <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-4" />
+            <p className="text-sm text-slate-500">Loading research reports...</p>
+        </div>) : filteredSignals.length === 0 ? (<div className="flex-1 flex flex-col items-center justify-center min-h-[400px] bg-white dark:bg-slate-900 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
+            <FileText className="w-12 h-12 text-slate-300 dark:text-slate-600 mb-4" />
+            <p className="text-slate-500">No research reports found in this category.</p>
+        </div>) : (<div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm glassmorphism">
+            <DataTable columns={columns} data={filteredSignals} pagination paginationPerPage={10} highlightOnHover responsive customStyles={getTableCustomStyles(isDarkMode)} theme={isDarkMode ? 'dark' : 'default'} noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No research reports found in this category.</div>} />
+        </div>)}
+    </div>);
+}
