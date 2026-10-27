@@ -993,24 +993,27 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
     let discountAmount = 0;
     let appliedCouponId: any = null;
     if (couponCode) {
-      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
       const plan: any = await dynamicDb.Plan.findById(planId).lean();
       if (coupon && plan && coupon.status === 'ACTIVE') {
-        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
-          discountAmount = coupon.discountValue;
-        } else if (coupon.discountType === 'PERCENTAGE') {
-          discountAmount = (plan.price * coupon.discountValue) / 100;
-          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
-            discountAmount = coupon.maxDiscountValue;
+        const rawBase = plan.price || plan.amount || 0;
+        if (!coupon.minPurchaseValue || rawBase >= coupon.minPurchaseValue) {
+          if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+            discountAmount = coupon.discountValue;
+          } else if (coupon.discountType === 'PERCENTAGE') {
+            discountAmount = (rawBase * coupon.discountValue) / 100;
+            if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
+              discountAmount = coupon.maxDiscountValue;
+            }
           }
-        }
-        if (discountAmount > plan.price) discountAmount = plan.price;
-        appliedCouponId = coupon._id || coupon.id;
+          if (discountAmount > rawBase) discountAmount = rawBase;
+          appliedCouponId = coupon._id || coupon.id;
 
-        if (statusInput !== 'FAILED') {
-          await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
-            $inc: { usedCount: 1 }
-          });
+          if (statusInput !== 'FAILED') {
+            await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
+              $inc: { usedCount: 1 }
+            });
+          }
         }
       }
     }
@@ -1024,6 +1027,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
       planId,
       amount: parseFloat(amount) || 0,
       couponId: appliedCouponId,
+      couponCode: couponCode ? String(couponCode).trim().toUpperCase() : null,
       discountApplied: discountAmount || 0,
       paymentMode: paymentMode || 'ONLINE_RAZORPAY',
       transactionRef: transactionRef || 'TXN-' + Math.floor(100000 + Math.random() * 900000),
@@ -1146,8 +1150,11 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
       }).lean();
 
       if (coupon) {
+        const basePrice = planDoc ? (planDoc.price || planDoc.amount) : parsedAmount;
+        if (coupon.minPurchaseValue && basePrice < coupon.minPurchaseValue) {
+          return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required for coupon ${coupon.code}` });
+        }
         appliedCouponId = coupon._id || coupon.id;
-        const basePrice = planDoc ? planDoc.price : parsedAmount;
         if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           discountApplied = coupon.discountValue;
         } else if (coupon.discountType === 'PERCENTAGE') {
@@ -1157,16 +1164,6 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
           }
         }
         if (discountApplied > basePrice) discountApplied = basePrice;
-      }
-    }
-
-    // If amount is less than standard total, infer discount difference
-    if (planDoc && planDoc.price) {
-      const isExclusive = tenantObj?.gstCalculationType === 'EXCLUSIVE';
-      const expectedTotal = isExclusive ? (planDoc.price * 1.18) : planDoc.price;
-      const diff = expectedTotal - parsedAmount;
-      if (diff > 0 && discountApplied <= 0) {
-        discountApplied = diff;
       }
     }
 
@@ -1182,11 +1179,19 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
       });
     }
 
+    const tenantGstNum = (tenantObj?.gst || tenantObj?.gstNumber || tenantObj?.gstin || '').trim();
+    const isGstActive = tenantObj?.gstEnabled !== false && tenantGstNum.length >= 15;
+    const amountBase = isGstActive ? parseFloat((parsedAmount / 1.18).toFixed(2)) : parsedAmount;
+    const amountGst = isGstActive ? parseFloat((parsedAmount - amountBase).toFixed(2)) : 0;
+
     const payment = await dynamicDb.Payment.create({
       tenantId,
       clientId: client._id || client.id,
       planId: planDoc ? (planDoc._id || planDoc.id) : (planId || null),
       amount: parsedAmount,
+      baseAmount: amountBase,
+      gstAmount: amountGst,
+      gstRate: isGstActive ? 18 : 0,
       paymentMode: paymentMode || 'UPI_QR',
       transactionRef: transactionRef ? transactionRef.trim() : 'UPI-' + Date.now(),
       receiptUrl,
@@ -1198,8 +1203,9 @@ export const submitManualPayment = async (req: AuthenticatedRequest, res: Respon
       tenantState: tenantObj?.state || null,
       planValidityDays: planDoc ? (planDoc.durationMonths * 30) : null,
       couponId: appliedCouponId,
+      couponCode: couponCode ? String(couponCode).trim().toUpperCase() : null,
       discountApplied: discountApplied > 0 ? parseFloat(discountApplied.toFixed(2)) : 0,
-      gstEnabled: tenantObj?.gstEnabled !== false,
+      gstEnabled: isGstActive,
       gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE'
     });
 
@@ -1222,6 +1228,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
     approvalMode, // 'FULL' | 'PRORATED' | 'DISCOUNT'
     customValidityDays,
     discountApplied,
+    couponCode,
     transactionRef,
     paymentDate,
     serviceStartDate
@@ -1232,53 +1239,119 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
     if (!payment) return res.status(404).json({ success: false, message: 'Payment record not found' });
     const tenantId = req.user!.tenantId!;
 
-    let effectiveAmount = Number(payment.amount || 0);
-    let effectiveValidityDays = Number(payment.planValidityDays || 30);
-    let effectiveDiscount = Number(payment.discountApplied || payment.discount || 0);
-    let effectiveRemarks = remarks || 'Verified by Compliance Staff';
-
     const plan: any = payment.planId ? await dynamicDb.Plan.findById(payment.planId).lean() : null;
     const defaultValidityDays = (plan?.durationMonths ? plan.durationMonths * 30 : 30);
-    const fullPlanPrice = Number(plan?.amount || plan?.price || payment.amount || 0);
+    const planBasePrice = Number(plan?.amount || plan?.price || payment.amount || 0);
 
+    const tenantDoc: any = await dynamicDb.Tenant.findById(tenantId).lean();
+    const tenantGstStr = (tenantDoc?.gst || tenantDoc?.gstNumber || tenantDoc?.gstin || '').trim();
+    const isTenantGst = tenantDoc?.gstEnabled !== false && tenantGstStr.length >= 15;
+    const resolvedGstEnabled = payment.gstEnabled !== undefined && payment.gstEnabled !== null
+      ? Boolean(payment.gstEnabled)
+      : (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') ? false : isTenantGst);
+    const resolvedGstCalculationType = payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE';
+    const isExcl = resolvedGstEnabled && resolvedGstCalculationType === 'EXCLUSIVE';
 
+    const fullPlanPriceWithGst = isExcl ? parseFloat((planBasePrice * 1.18).toFixed(2)) : planBasePrice;
+    const maxPermissibleAmount = Math.max(fullPlanPriceWithGst, Number(payment.amount || 0));
+
+    // Resolve coupon: if explicit couponCode passed in body:
+    // - Non-empty string: look up coupon and calculate discount on planBasePrice
+    // - Empty string or null: admin explicitly removed coupon -> clear coupon and discount
+    // - undefined: preserve existing payment coupon
+    let finalCouponId = payment.couponId || null;
+    let finalCouponCode = payment.couponCode || null;
+    let resolvedCouponDiscount = 0;
+
+    let activeCouponCode = '';
+    if (couponCode !== undefined && couponCode !== null) {
+      activeCouponCode = String(couponCode).trim().toUpperCase();
+    } else if (couponCode === undefined && payment.couponCode) {
+      activeCouponCode = String(payment.couponCode).trim().toUpperCase();
+    }
+
+    if (activeCouponCode) {
+      const foundCoupon: any = await dynamicDb.Coupon.findOne({
+        code: activeCouponCode,
+        tenantId,
+        status: 'ACTIVE'
+      }).lean();
+      if (foundCoupon) {
+        if (foundCoupon.minPurchaseValue && planBasePrice < Number(foundCoupon.minPurchaseValue)) {
+          finalCouponId = null;
+          finalCouponCode = null;
+          resolvedCouponDiscount = 0;
+        } else {
+          finalCouponId = foundCoupon._id || foundCoupon.id;
+          finalCouponCode = foundCoupon.code;
+          if (foundCoupon.discountType === 'PERCENTAGE') {
+            resolvedCouponDiscount = parseFloat(((planBasePrice * Number(foundCoupon.discountValue || 0)) / 100).toFixed(2));
+            if (foundCoupon.percentageType === 'CAPPED' && foundCoupon.maxDiscountValue && resolvedCouponDiscount > Number(foundCoupon.maxDiscountValue)) {
+              resolvedCouponDiscount = Number(foundCoupon.maxDiscountValue);
+            }
+          } else {
+            resolvedCouponDiscount = Number(foundCoupon.discountValue || 0);
+          }
+        }
+      } else {
+        // Fallback to existing payment discount if coupon code matches payment
+        finalCouponId = payment.couponId || null;
+        finalCouponCode = activeCouponCode;
+        resolvedCouponDiscount = Number(payment.discountApplied || payment.discount || 0);
+      }
+    } else {
+      // Explicitly removed or no coupon
+      finalCouponId = null;
+      finalCouponCode = null;
+      resolvedCouponDiscount = 0;
+    }
+
+    const discountedTaxableBase = Math.max(0, parseFloat((planBasePrice - resolvedCouponDiscount).toFixed(2)));
+    const calculatedGst = isExcl ? parseFloat((discountedTaxableBase * 0.18).toFixed(2)) : 0;
+    const expectedCalculatedTotal = parseFloat((discountedTaxableBase + calculatedGst).toFixed(2));
+
+    let effectiveAmount = Number(payment.amount || 0);
+    let effectiveValidityDays = Number(payment.planValidityDays || defaultValidityDays);
+    let effectiveDiscount = 0;
+    let effectiveRemarks = remarks || 'Verified by Compliance Staff';
 
     if (status === 'SUCCESS') {
-      if (receivedAmount !== undefined && fullPlanPrice > 0 && Number(receivedAmount) > fullPlanPrice) {
+      if (activeCouponCode && approvalMode === 'DISCOUNT') {
         return res.status(400).json({
           success: false,
-          message: `Received amount (₹${receivedAmount}) cannot be greater than the plan price of ₹${fullPlanPrice}.`
+          message: 'Both a coupon code and a balance waive-off discount cannot be applied at the same time. Please remove the coupon code or choose Prorated / Full approval.'
+        });
+      }
+
+      if (receivedAmount !== undefined && maxPermissibleAmount > 0 && Number(receivedAmount) > (maxPermissibleAmount + 2)) {
+        return res.status(400).json({
+          success: false,
+          message: `Received amount (₹${receivedAmount}) cannot be greater than the plan standard price of ₹${maxPermissibleAmount}.`
         });
       }
 
       if (approvalMode === 'PRORATED') {
-        effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPrice || Number(receivedAmount)) : effectiveAmount;
+        effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPriceWithGst || Number(receivedAmount)) : effectiveAmount;
         effectiveValidityDays = customValidityDays !== undefined && Number(customValidityDays) > 0
           ? Number(customValidityDays)
-          : Math.max(1, Math.round((effectiveAmount / (fullPlanPrice || effectiveAmount)) * defaultValidityDays));
+          : Math.max(1, Math.round((effectiveAmount / (fullPlanPriceWithGst || effectiveAmount)) * defaultValidityDays));
         effectiveDiscount = 0;
         effectiveRemarks = remarks || `Prorated service activated for ${effectiveValidityDays} days based on received amount ₹${effectiveAmount}.`;
       } else if (approvalMode === 'DISCOUNT') {
-        effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPrice || Number(receivedAmount)) : effectiveAmount;
+        effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPriceWithGst || Number(receivedAmount)) : effectiveAmount;
         effectiveValidityDays = defaultValidityDays;
         effectiveDiscount = discountApplied !== undefined
           ? Number(discountApplied)
-          : Math.max(0, fullPlanPrice - effectiveAmount);
+          : Math.max(0, parseFloat((fullPlanPriceWithGst - effectiveAmount).toFixed(2)));
         effectiveRemarks = remarks || `Special discount applied: ₹${effectiveDiscount}. Full ${defaultValidityDays} days service activated for ₹${effectiveAmount}.`;
       } else {
         // FULL match / standard approval
-        effectiveAmount = fullPlanPrice > 0 ? fullPlanPrice : (receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount);
+        effectiveAmount = receivedAmount !== undefined ? Number(receivedAmount) : expectedCalculatedTotal;
         effectiveValidityDays = defaultValidityDays;
-        effectiveDiscount = 0;
-        effectiveRemarks = remarks || 'Verified by Compliance Staff';
+        effectiveDiscount = resolvedCouponDiscount;
+        effectiveRemarks = remarks || (finalCouponCode ? `Verified with coupon ${finalCouponCode} applied.` : 'Verified by Compliance Staff');
       }
     }
-
-    const tenantDoc: any = await dynamicDb.Tenant.findById(tenantId).lean();
-    const isTenantGst = tenantDoc?.gstEnabled !== false && Boolean(tenantDoc?.gst && tenantDoc.gst.trim().length >= 15);
-    const resolvedGstEnabled = payment.gstEnabled !== undefined && payment.gstEnabled !== null
-      ? Boolean(payment.gstEnabled)
-      : (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') ? false : isTenantGst);
 
     const pDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
     const sDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : pDate);
@@ -1290,9 +1363,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
     }
 
-    const resolvedGstCalculationType = payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE';
     if (status === 'SUCCESS') {
-      const isExcl = resolvedGstCalculationType === 'EXCLUSIVE';
       const effectiveBase = isExcl ? (effectiveAmount / 1.18) : effectiveAmount;
       if (effectiveBase > 0) {
         const feeSummary = await getClientFyFeeSummary(payment.clientId, tenantId, dynamicDb);
@@ -1309,6 +1380,18 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
 
     const isL2Required = Boolean(tenantDoc?.l2ApprovalEnabled === true);
 
+    const isGstActive = resolvedGstEnabled;
+    const finalAmount = effectiveAmount;
+    let finalBaseAmount = finalAmount;
+    let finalGstAmount = 0;
+    let finalGstRate = 0;
+
+    if (isGstActive) {
+      finalGstRate = 18;
+      finalBaseAmount = parseFloat((finalAmount / 1.18).toFixed(2));
+      finalGstAmount = parseFloat((finalAmount - finalBaseAmount).toFixed(2));
+    }
+
     const paymentUpdatePayload: any = {
       status: isL2Required && status === 'SUCCESS' ? 'PENDING' : status,
       approvalStatus: isL2Required && status === 'SUCCESS' ? 'L2_PENDING' : (status === 'SUCCESS' ? 'DIRECT_APPROVED' : 'REJECTED'),
@@ -1316,12 +1399,17 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       serviceStartDate: sDate,
       remarks: effectiveRemarks,
       verifiedByStaffId: req.user!.id,
-      amount: effectiveAmount,
+      amount: finalAmount,
+      baseAmount: finalBaseAmount,
+      gstAmount: finalGstAmount,
+      gstRate: finalGstRate,
       planValidityDays: effectiveValidityDays,
+      couponId: finalCouponId,
+      couponCode: finalCouponCode,
       discountApplied: effectiveDiscount,
       discount: effectiveDiscount,
       gstEnabled: resolvedGstEnabled,
-      gstCalculationType: payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE'
+      gstCalculationType: resolvedGstCalculationType
     };
 
     const userDoc: any = await dynamicDb.User.findById(req.user!.id).lean();
@@ -1335,7 +1423,9 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
         planId: payment.planId,
         planName: plan?.name || 'Assigned Plan',
         categoryId: plan?.categoryId,
-        amount: effectiveAmount,
+        amount: finalAmount,
+        baseAmount: finalBaseAmount,
+        gstAmount: finalGstAmount,
         validityDays: effectiveValidityDays,
         discount: effectiveDiscount,
         paymentDate: pDate,
@@ -1916,8 +2006,11 @@ export const initiateRazorpayPayment = async (req: AuthenticatedRequest, res: Re
     let appliedCouponId = null;
 
     if (couponCode) {
-      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
+        if (coupon.minPurchaseValue && finalPrice < coupon.minPurchaseValue) {
+          return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required for coupon ${coupon.code}` });
+        }
         if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           finalPrice = Math.max(0, finalPrice - coupon.discountValue);
         } else if (coupon.discountType === 'PERCENTAGE') {
@@ -2010,17 +2103,21 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
     let appliedCouponId: any = null;
 
     if (couponCode) {
-      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
+        const rawPlanPrice = Number(plan.amount || plan.price || 0);
+        if (coupon.minPurchaseValue && rawPlanPrice < coupon.minPurchaseValue) {
+          return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required for coupon ${coupon.code}` });
+        }
         if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           discountAmount = coupon.discountValue;
         } else if (coupon.discountType === 'PERCENTAGE') {
-          discountAmount = ((plan.amount || plan.price) * coupon.discountValue) / 100;
+          discountAmount = (rawPlanPrice * coupon.discountValue) / 100;
           if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
             discountAmount = coupon.maxDiscountValue;
           }
         }
-        if (discountAmount > (plan.amount || plan.price)) discountAmount = (plan.amount || plan.price);
+        if (discountAmount > rawPlanPrice) discountAmount = rawPlanPrice;
         appliedCouponId = coupon._id || coupon.id;
 
         await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
@@ -2138,8 +2235,11 @@ export const initiateCCAvenuePayment = async (req: AuthenticatedRequest, res: Re
     let appliedCouponId: any = null;
 
     if (couponCode) {
-      const coupon: any = await dynamicDb.Coupon.findOne({ code: couponCode, tenantId }).lean();
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
       if (coupon && coupon.status === 'ACTIVE') {
+        if (coupon.minPurchaseValue && finalPrice < coupon.minPurchaseValue) {
+          return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required for coupon ${coupon.code}` });
+        }
         if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           finalPrice = Math.max(0, finalPrice - coupon.discountValue);
         } else if (coupon.discountType === 'PERCENTAGE') {

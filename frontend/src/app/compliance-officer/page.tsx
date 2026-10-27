@@ -1,4 +1,5 @@
 'use client';
+import { executeSmartDownload } from '@/utils/smartDownload';
 
 import AdminProfilePage from '../admin/profile/page';
 import StaffProfilePage from '../admin/staff-profile/page';
@@ -292,7 +293,7 @@ function getDisplayStatus(sub: any): string {
 }
 
 
-const downloadCSV = (data: any[], filename: string) => {
+const downloadCSV = async (data: any[], filename: string) => {
   if (!data || !data.length) {
     toast("No data available to export.");
     return;
@@ -310,14 +311,12 @@ const downloadCSV = (data: any[], filename: string) => {
     csvRows.push(values.join(','));
   }
   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.setAttribute('hidden', '');
-  a.setAttribute('href', url);
-  a.setAttribute('download', filename);
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const resolvedFileName = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+  await executeSmartDownload({
+    blob,
+    fileName: resolvedFileName,
+    documentType: `${filename.replace(/_/g, ' ')} Export`
+  });
 };
 
 import CouponsManager from '../../components/CouponsManager';
@@ -680,25 +679,74 @@ function AdminDashboardContent() {
   const [assignCouponCode, setAssignCouponCode] = useState('');
   const [coupons, setCoupons] = useState<any[]>([]);
 
+  // Helper to determine if a coupon is applicable for a specific plan and category
+  const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
+    if (!c || c.status !== 'ACTIVE') return false;
+
+    if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
+      if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
+    }
+
+    if (c.planId) {
+      let pIds: string[] = [];
+      if (Array.isArray(c.planId)) {
+        pIds = c.planId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.planId === 'string' && c.planId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.planId);
+          pIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.planId)];
+        } catch {
+          pIds = [String(c.planId)];
+        }
+      } else {
+        pIds = [String(c.planId?._id || c.planId?.id || c.planId)];
+      }
+      if (targetPlanId && pIds.length > 0 && !pIds.includes(String(targetPlanId))) return false;
+    }
+
+    if (c.categoryId) {
+      let catIds: string[] = [];
+      if (Array.isArray(c.categoryId)) {
+        catIds = c.categoryId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.categoryId === 'string' && c.categoryId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.categoryId);
+          catIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.categoryId)];
+        } catch {
+          catIds = [String(c.categoryId)];
+        }
+      } else {
+        catIds = [String(c.categoryId?._id || c.categoryId?.id || c.categoryId)];
+      }
+      if (targetCategoryId && catIds.length > 0 && !catIds.includes(String(targetCategoryId))) return false;
+    }
+
+    return true;
+  };
+
   const getPlanAmountWithCoupon = (basePrice: number, durationMonths: number, couponCode: string) => {
     let finalBase = basePrice;
     if (couponCode) {
-      const coupon = coupons.find((c: any) => c.code === couponCode && c.status === 'ACTIVE');
+      const cleanCode = couponCode.trim().toUpperCase();
+      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
       if (coupon) {
+        if (coupon.minPurchaseValue && basePrice < Number(coupon.minPurchaseValue)) {
+          return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+        }
         let disc = 0;
-        if (coupon.discountType === 'FLAT') {
-          disc = coupon.discountValue;
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          disc = Number(coupon.discountValue || 0);
         } else if (coupon.discountType === 'PERCENTAGE') {
-          disc = (basePrice * coupon.discountValue) / 100;
-          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > coupon.maxDiscountValue) {
-            disc = coupon.maxDiscountValue;
+          disc = (basePrice * Number(coupon.discountValue || 0)) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > Number(coupon.maxDiscountValue)) {
+            disc = Number(coupon.maxDiscountValue);
           }
         }
         if (disc > basePrice) disc = basePrice;
         finalBase = basePrice - disc;
       }
     }
-    return gstCalculationType === 'EXCLUSIVE' ? Math.round(finalBase * 1.18) : finalBase;
+    return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? finalBase : Math.round(finalBase * 1.18);
   };
 
   // Reusable confirmation state
@@ -803,7 +851,7 @@ function AdminDashboardContent() {
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
           if (assignCustomDays.trim()) payload.customDays = Number(assignCustomDays);
-          if (assignCouponCode.trim()) payload.couponCode = assignCouponCode;
+          if (assignCouponCode.trim()) payload.couponCode = assignCouponCode.trim().toUpperCase();
 
           const res = await api.assignPlanByAdmin(assignPlanClient.id, payload);
           if (res.success) {
@@ -878,6 +926,7 @@ function AdminDashboardContent() {
     downloadFilename?: string;
   } | null>(null);
   const [copiedVariable, setCopiedVariable] = useState<string | null>(null);
+  const [gstEnabled, setGstEnabled] = useState(true);
   const [gstCalculationType, setGstCalculationType] = useState('EXCLUSIVE');
   const [tenantState, setTenantState] = useState('');
   const [kycFirst, setKycFirst] = useState(true);
@@ -1230,6 +1279,8 @@ function AdminDashboardContent() {
               if (t.ccavenueWorkingKey) setCcavenueWorkingKey(t.ccavenueWorkingKey);
               if (t.stripePublishableKey) setStripePublishableKey(t.stripePublishableKey);
               if (t.stripeSecretKey) setStripeSecretKey(t.stripeSecretKey);
+              if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
+              if (t.gstEnabled !== undefined) setGstEnabled(t.gstEnabled);
 
               if (t.agreementContent) setAgreementContent(t.agreementContent);
               if (t.welcomeEmailText) setWelcomeEmailText(t.welcomeEmailText);
@@ -1393,14 +1444,78 @@ function AdminDashboardContent() {
   }, [checklistHistory, alerts, complaints, penalties]);
 
   const topLevelFilteredHistory = useMemo(() => {
+    const q = (historyFilterText || '').trim().toLowerCase();
     return checklistHistory.filter((h: any) => {
-      const matchesText = h.requirement?.requirement?.toLowerCase().includes(historyFilterText.toLowerCase());
+      const reqText = (h.requirement?.requirement || '').toLowerCase();
+      const remarksText = (h.officerRemarks || '').toLowerCase();
+      const updatedByText = (h.updatedByName || '').toLowerCase();
+      const periodText = (h.periodLabel || '').toLowerCase();
+      const matchesText = !q || reqText.includes(q) || remarksText.includes(q) || updatedByText.includes(q) || periodText.includes(q);
       const matchesFY = selectedFinancialYear === 'All' || getFinancialYear(h.createdAt) === selectedFinancialYear;
       return matchesText && matchesFY;
     });
   }, [checklistHistory, historyFilterText, selectedFinancialYear]);
 
   const historyPagination = usePagination(topLevelFilteredHistory, 10);
+
+  const handleExportChecklistHistory = async () => {
+    const recordsToExport = topLevelFilteredHistory && topLevelFilteredHistory.length > 0
+      ? topLevelFilteredHistory
+      : checklistHistory;
+
+    if (!recordsToExport || recordsToExport.length === 0) {
+      toast.error('No checklist audit history records available to export.');
+      return;
+    }
+
+    const exportData = recordsToExport.map((row: any, index: number) => {
+      const prevStatus = (row.previousStatus || 'PENDING').replace(/_/g, ' ');
+      const newStatus = (row.newStatus || '—').replace(/_/g, ' ');
+      return {
+        'Sr No': row.requirement?.serialNo || (index + 1),
+        'Requirement Description': row.requirement?.requirement || '—',
+        'Category / Frequency': row.requirement?.frequency || '—',
+        'Frequency Type': row.requirement?.frequencyType || '—',
+        'Severity Level': row.requirement?.severityLevel || '—',
+        'Penalty Amount': row.requirement?.penaltyAmount || '—',
+        'Period': row.periodLabel || '—',
+        'Financial Year': getFinancialYear(row.createdAt),
+        'Previous Status': prevStatus,
+        'Updated Status': newStatus,
+        'Officer Remarks': row.officerRemarks || '—',
+        'Proof Document URL': row.proofDocumentUrl || '—',
+        'Updated By': row.updatedByName || 'System',
+        'Audit Date & Time': row.createdAt ? new Date(row.createdAt).toLocaleString('en-IN') : '—'
+      };
+    });
+
+    const headers = Object.keys(exportData[0]);
+    const csvRows: string[] = [headers.join(',')];
+
+    for (const row of exportData) {
+      const values = headers.map(header => {
+        const val = (row as any)[header];
+        if (val === null || val === undefined) return '""';
+        const escaped = ('' + val).replace(/"/g, '""');
+        return `"${escaped}"`;
+      });
+      csvRows.push(values.join(','));
+    }
+
+    const csvString = '\uFEFF' + csvRows.join('\r\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const fySuffix = selectedFinancialYear !== 'All' ? `_${selectedFinancialYear.replace(/[\s-]+/g, '_')}` : '';
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `SEBI_Checklist_Audit_History${fySuffix}_${dateStr}.csv`;
+
+    await executeSmartDownload({
+      blob,
+      fileName: filename,
+      documentType: 'SEBI Checklist Audit History Export',
+      userRole: user?.role
+    });
+    toast.success(`Exported ${exportData.length} checklist history records successfully.`);
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -2074,14 +2189,11 @@ function AdminDashboardContent() {
     try {
       const response = await fetch(fileUrl);
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await executeSmartDownload({
+        blob,
+        fileName,
+        documentType: fileName
+      });
     } catch (error) {
       window.open(fileUrl, '_blank');
     }
@@ -2879,15 +2991,13 @@ function AdminDashboardContent() {
       }
 
       const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
       const dateStr = exportRange === 'date' ? `_${exportStartDate}_to_${exportEndDate}` : '';
-      link.setAttribute('download', `${type}${dateStr}.${isZip ? 'zip' : 'csv'}`);
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode?.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
+      const fullFileName = `${type}${dateStr}.${isZip ? 'zip' : 'csv'}`;
+      await executeSmartDownload({
+        blob,
+        fileName: fullFileName,
+        documentType: `Bulk ${type} Export`
+      });
     } catch (error: any) {
       toast.error(`Export failed: ${error.message}`);
     } finally {
@@ -4909,30 +5019,42 @@ function AdminDashboardContent() {
 
                             return (
                               <div className="space-y-4">
-                                {/* History Search/Filter Bar */}
-                                <div className="flex items-center space-x-3 w-full max-w-2xl">
-                                  <div className="flex flex-1 items-center bg-slate-100 dark:bg-slate-800/50 rounded-xl px-3 border border-slate-400 dark:border-white/10">
-                                    <input
-                                      type="text"
-                                      placeholder="Filter history by requirement description..."
-                                      value={historyFilterText}
-                                      onChange={(e) => setHistoryFilterText(e.target.value)}
-                                      className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
-                                    />
-                                    {historyFilterText && (
-                                      <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs">Clear</button>
-                                    )}
+                                {/* History Search/Filter Bar & Export */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+                                  <div className="flex items-center space-x-3 flex-1 min-w-[280px] max-w-2xl">
+                                    <div className="flex flex-1 items-center bg-slate-100 dark:bg-slate-800/50 rounded-xl px-3 border border-slate-400 dark:border-white/10">
+                                      <input
+                                        type="text"
+                                        placeholder="Filter history by requirement, remark, updated by, period..."
+                                        value={historyFilterText}
+                                        onChange={(e) => setHistoryFilterText(e.target.value)}
+                                        className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
+                                      />
+                                      {historyFilterText && (
+                                        <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs font-semibold">Clear</button>
+                                      )}
+                                    </div>
+                                    <select
+                                      value={selectedFinancialYear}
+                                      onChange={(e) => setSelectedFinancialYear(e.target.value)}
+                                      className="bg-slate-100 dark:bg-slate-800/50 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-2 px-3 rounded-xl focus:ring-0 focus:outline-none"
+                                    >
+                                      <option value="All">All Financial Years</option>
+                                      {availableFinancialYears.map(fy => (
+                                        <option key={fy as string} value={fy as string}>{fy as string}</option>
+                                      ))}
+                                    </select>
                                   </div>
-                                  <select
-                                    value={selectedFinancialYear}
-                                    onChange={(e) => setSelectedFinancialYear(e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-800/50 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-2 px-3 rounded-xl focus:ring-0 focus:outline-none"
+
+                                  <button
+                                    type="button"
+                                    onClick={handleExportChecklistHistory}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-sm hover:shadow transition cursor-pointer"
+                                    title="Export complete checklist audit history to Excel / CSV"
                                   >
-                                    <option value="All">All Financial Years</option>
-                                    {availableFinancialYears.map(fy => (
-                                      <option key={fy as string} value={fy as string}>{fy as string}</option>
-                                    ))}
-                                  </select>
+                                    <Download className="w-4 h-4" />
+                                    <span>Export History (Excel)</span>
+                                  </button>
                                 </div>
 
                                 <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
@@ -5776,7 +5898,7 @@ function AdminDashboardContent() {
                           </div>
 
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               try {
                                 let rawList = clientSubTab === 'deleted' ? deletedClients : clients.filter((cl: any) => !cl.user?.deletedAt);
 
@@ -5898,15 +6020,12 @@ function AdminDashboardContent() {
 
                                 const csvString = [headers.join(','), ...rows].join('\n');
                                 const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-                                const url = URL.createObjectURL(blob);
-                                const link = document.createElement('a');
-                                link.setAttribute('href', url);
-                                link.setAttribute('download', `${clientSubTab === 'deleted' ? 'Deleted_Clients_Report' : 'Complete_Clients_Report'}_${new Date().toISOString().split('T')[0]}.csv`);
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                URL.revokeObjectURL(url);
-                                import('react-hot-toast').then(m => m.default.success('Client CSV report downloaded successfully!'));
+                                const reportFileName = `${clientSubTab === 'deleted' ? 'Deleted_Clients_Report' : 'Complete_Clients_Report'}_${new Date().toISOString().split('T')[0]}.csv`;
+                                await executeSmartDownload({
+                                  blob,
+                                  fileName: reportFileName,
+                                  documentType: 'Client Report Export'
+                                });
                               } catch (err: any) {
                                 console.error('CSV Export Error:', err);
                                 import('react-hot-toast').then(m => m.default.error('Failed to export CSV: ' + err.message));
@@ -6035,13 +6154,12 @@ function AdminDashboardContent() {
                                 });
                                 if (!response.ok) throw new Error('Export failed');
                                 const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `deleted-clients-${new Date().toISOString().split('T')[0]}.csv`;
-                                document.body.appendChild(a);
-                                a.click();
-                                window.URL.revokeObjectURL(url);
+                                const deletedClientsFileName = `deleted-clients-${new Date().toISOString().split('T')[0]}.csv`;
+                                await executeSmartDownload({
+                                  blob,
+                                  fileName: deletedClientsFileName,
+                                  documentType: 'Deleted Clients Export'
+                                });
                               } catch (err) {
                                 console.error('Failed to download CSV:', err);
                                 toast.error('Failed to download deleted clients CSV.');
@@ -6271,6 +6389,10 @@ function AdminDashboardContent() {
                                                         setAssignPlanCategoryId('');
                                                         setAssignPlanId('');
                                                         setAssignPlanRemarks('');
+                                                        setAssignCouponCode('');
+                                                        setAssignCustomAmount('');
+                                                        setAssignCustomDays('');
+                                                        api.getCoupons().then(r => { if (r.success && Array.isArray(r.data)) setCoupons(r.data); }).catch(() => {});
                                                         setIsAssignPlanModalOpen(true);
                                                       }}
                                                       title="Assign Plan"
@@ -6362,7 +6484,10 @@ function AdminDashboardContent() {
                                   value={assignPlanCategoryId}
                                   onChange={e => {
                                     setAssignPlanCategoryId(e.target.value);
-                                    setAssignPlanId(''); // Reset plan selection
+                                    setAssignPlanId('');
+                                    setAssignCouponCode('');
+                                    setAssignCustomAmount('');
+                                    setAssignCustomDays('');
                                   }}
                                   required
                                   className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
@@ -6412,6 +6537,7 @@ function AdminDashboardContent() {
                                               key={p.id}
                                               onClick={() => {
                                                 setAssignPlanId(p.id);
+                                                setAssignCouponCode('');
                                                 setAssignCustomAmount('');
                                                 setAssignCustomDays('');
                                               }}
@@ -6453,22 +6579,46 @@ function AdminDashboardContent() {
                                 </div>
                               )}
 
-                              {/* Coupon Input with Datalist */}
+                              {/* Coupon Input with Dropdown & Badges */}
                               <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Apply Coupon (Optional)</label>
-                                <input
-                                  type="text"
-                                  list="active-coupons-list"
-                                  value={assignCouponCode}
-                                  placeholder="Type or select a coupon code"
-                                  onChange={e => {
-                                    const newCode = e.target.value;
-                                    setAssignCouponCode(newCode);
-                                    // Recalculate custom amount if custom days is present, or vice versa
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Apply Coupon (Optional)</label>
+                                  {assignCouponCode && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setAssignCouponCode('');
+                                        setAssignCustomAmount('');
+                                        setAssignCustomDays('');
+                                      }}
+                                      className="text-[10px] text-rose-500 hover:underline font-bold"
+                                    >
+                                      ✕ Remove Coupon
+                                    </button>
+                                  )}
+                                </div>
+
+                                {(() => {
+                                  const selPlanObj = adminPlans.find((x: any) => x.id === assignPlanId);
+                                  const effectivePlanBasePrice = assignCustomAmount ? Number(assignCustomAmount) : (selPlanObj ? (selPlanObj.price || selPlanObj.amount || 0) : null);
+                                  const applicableCouponsForAssign = coupons.filter((c: any) => isCouponApplicableToPlan(c, assignPlanId, assignPlanCategoryId, effectivePlanBasePrice));
+                                  const handleAssignCouponChange = (newCode: string) => {
+                                    const code = newCode.trim().toUpperCase();
+                                    if (code && assignPlanId) {
+                                      const p = adminPlans.find((x: any) => x.id === assignPlanId);
+                                      const cp = coupons.find((c: any) => String(c.code).trim().toUpperCase() === code && c.status === 'ACTIVE');
+                                      const curPlanPrice = assignCustomAmount ? Number(assignCustomAmount) : (p ? (p.price || p.amount || 0) : 0);
+                                      if (cp && cp.minPurchaseValue && curPlanPrice < Number(cp.minPurchaseValue)) {
+                                        toast.error(`Minimum purchase of ₹${Number(cp.minPurchaseValue).toLocaleString('en-IN')} required for coupon "${code}" (Plan amount: ₹${curPlanPrice.toLocaleString('en-IN')})`);
+                                        setAssignCouponCode('');
+                                        return;
+                                      }
+                                    }
+                                    setAssignCouponCode(code);
                                     if (assignPlanId) {
                                       const p = adminPlans.find((x: any) => x.id === assignPlanId);
                                       if (p) {
-                                        const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, newCode);
+                                        const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, code);
                                         const totalDays = p.durationMonths * 30;
                                         if (assignCustomAmount) {
                                           let val = Number(assignCustomAmount);
@@ -6487,14 +6637,66 @@ function AdminDashboardContent() {
                                         }
                                       }
                                     }
-                                  }}
-                                  className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase"
-                                />
-                                <datalist id="active-coupons-list">
-                                  {coupons.filter(c => c.status === 'ACTIVE').map(c => (
-                                    <option key={c.id} value={c.code}>{c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}%` : `₹${c.discountValue}`})</option>
-                                  ))}
-                                </datalist>
+                                  };
+
+                                  return (
+                                    <>
+                                      <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                          type="text"
+                                          autoComplete="off"
+                                          name="assign_plan_coupon_no_autofill"
+                                          value={assignCouponCode}
+                                          placeholder="Type coupon code (e.g. SUMMER50)"
+                                          onChange={e => handleAssignCouponChange(e.target.value)}
+                                          className="flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase"
+                                        />
+                                        <select
+                                          value={assignCouponCode.trim().toUpperCase()}
+                                          onChange={e => handleAssignCouponChange(e.target.value)}
+                                          className="bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500 max-w-full sm:max-w-[220px]"
+                                        >
+                                          <option value="">{applicableCouponsForAssign.length > 0 ? `-- Select Coupon (${applicableCouponsForAssign.length}) --` : '-- No Coupon --'}</option>
+                                          {applicableCouponsForAssign.map((c: any) => (
+                                            <option key={c.id || c._id || c.code} value={String(c.code).trim().toUpperCase()}>
+                                              {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Quick-Pick Clickable Badges for Plan/Category Coupons */}
+                                      {applicableCouponsForAssign.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicable Coupons:</span>
+                                          {applicableCouponsForAssign.map((c: any) => {
+                                            const isSelected = assignCouponCode.trim().toUpperCase() === String(c.code).trim().toUpperCase();
+                                            return (
+                                              <button
+                                                key={c.id || c._id || c.code}
+                                                type="button"
+                                                onClick={() => handleAssignCouponChange(isSelected ? '' : c.code)}
+                                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
+                                                  isSelected
+                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm ring-1 ring-violet-500'
+                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:border-violet-500 hover:text-violet-600'
+                                                }`}
+                                                title={isSelected ? 'Click to deselect' : `Click to apply ${c.code}`}
+                                              >
+                                                <Tag className="w-3 h-3 text-violet-500" />
+                                                <span>{c.code}</span>
+                                                <span className="text-[10px] opacity-80 font-normal">
+                                                  ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                                </span>
+                                                {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
 
                               {/* Payment Details */}

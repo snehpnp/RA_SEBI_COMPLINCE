@@ -78,7 +78,13 @@ export default function CouponsManager() {
         api.getAdminPlans(),
         api.getAdminCategories()
       ]);
-      if (resCoupons.success) setCoupons(resCoupons.data);
+      if (resCoupons.success && Array.isArray(resCoupons.data)) {
+        const mapped = resCoupons.data.map((c: any) => ({
+          ...c,
+          id: c.id || c._id
+        }));
+        setCoupons(mapped);
+      }
       if (resClients.success) setClients(resClients.data);
       if (resPlans.success) setPlans(resPlans.data);
       if (resCategories.success) setCategories(resCategories.data);
@@ -102,8 +108,8 @@ export default function CouponsManager() {
         expiryDate: coupon.expiryDate ? new Date(coupon.expiryDate).toISOString().split('T')[0] : '',
         usageLimit: coupon.usageLimit?.toString() || '',
         clientId: coupon.clientId || '',
-        planId: coupon.planId || '',
-        categoryId: coupon.categoryId || '',
+        planId: coupon.planId || '[]',
+        categoryId: coupon.categoryId || '[]',
         isPublic: !!coupon.isPublic
       });
     } else {
@@ -120,6 +126,16 @@ export default function CouponsManager() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const discVal = parseFloat(formData.discountValue);
+      if (isNaN(discVal) || discVal <= 0) {
+        toast.error('Please enter a valid discount value greater than 0');
+        return;
+      }
+      if (formData.discountType === 'PERCENTAGE' && discVal > 100) {
+        toast.error('Discount percentage cannot exceed 100%');
+        return;
+      }
+
       const payload = {
         code: formData.code,
         discountType: formData.discountType,
@@ -130,13 +146,18 @@ export default function CouponsManager() {
         expiryDate: formData.expiryDate || null,
         usageLimit: formData.clientId ? 1 : (formData.usageLimit ? parseInt(formData.usageLimit) : null),
         clientId: formData.clientId || null,
-        planId: formData.planId !== '[]' ? formData.planId : null,
-        categoryId: formData.categoryId !== '[]' ? formData.categoryId : null,
+        planId: (formData.planId && formData.planId !== '[]') ? formData.planId : null,
+        categoryId: (formData.categoryId && formData.categoryId !== '[]') ? formData.categoryId : null,
         isPublic: formData.isPublic
       };
 
       if (editingCoupon) {
-        await api.updateCoupon(editingCoupon.id, payload);
+        const couponId = editingCoupon.id || editingCoupon._id;
+        if (!couponId) {
+          toast.error('Invalid coupon ID');
+          return;
+        }
+        await api.updateCoupon(couponId, payload);
         toast.success('Coupon updated');
       } else {
         await api.createCoupon(payload);
@@ -151,7 +172,7 @@ export default function CouponsManager() {
 
   
   const handleToggleVisibility = (id: string) => {
-    const coupon = coupons.find(c => c.id === id);
+    const coupon = coupons.find(c => (c.id || c._id) === id);
     setConfirmDialog({
       isOpen: true,
       title: 'Change Visibility',
@@ -168,7 +189,7 @@ export default function CouponsManager() {
   };
   
   const handleToggleStatus = (id: string) => {
-    const coupon = coupons.find(c => c.id === id);
+    const coupon = coupons.find(c => (c.id || c._id) === id);
     setConfirmDialog({
       isOpen: true,
       title: 'Change Status',
@@ -220,7 +241,7 @@ export default function CouponsManager() {
               const displayStatus = isExpired ? 'EXPIRED' : c.status;
               
               return (
-              <tr key={c.id} className="hover:bg-slate-100 dark:hover:bg-slate-700/30 transition">
+              <tr key={c.id || c._id} className="hover:bg-slate-100 dark:hover:bg-slate-700/30 transition">
                 <td className="py-4 px-6 text-slate-900 dark:text-white font-medium">
                   <div className="flex items-center space-x-2">
                     <Tag className="h-4 w-4 text-indigo-400" />
@@ -234,10 +255,36 @@ export default function CouponsManager() {
                 </td>
                 <td className="py-4 px-6 text-slate-600 dark:text-slate-400 text-xs space-y-1">
                   {c.minPurchaseValue && <div>Min Buy: ₹{c.minPurchaseValue}</div>}
-                  {c.clientId && <div>Client Specific</div>}
-                  {c.planId && <div>Plan Specific</div>}
-                  {c.categoryId && <div>Category Specific</div>}
-                  {(!c.minPurchaseValue && !c.clientId && !c.planId && !c.categoryId) && <span className="text-slate-500 dark:text-slate-400">None</span>}
+                  {c.clientId && <div className="text-amber-500 dark:text-amber-400 font-medium">Client Specific</div>}
+                  {(() => {
+                    let pIds: string[] = [];
+                    try {
+                      if (Array.isArray(c.planId)) pIds = c.planId;
+                      else if (typeof c.planId === 'string' && c.planId.startsWith('[')) pIds = JSON.parse(c.planId);
+                      else if (c.planId) pIds = [c.planId];
+                    } catch { pIds = c.planId ? [c.planId] : []; }
+
+                    let catIds: string[] = [];
+                    try {
+                      if (Array.isArray(c.categoryId)) catIds = c.categoryId;
+                      else if (typeof c.categoryId === 'string' && c.categoryId.startsWith('[')) catIds = JSON.parse(c.categoryId);
+                      else if (c.categoryId) catIds = [c.categoryId];
+                    } catch { catIds = c.categoryId ? [c.categoryId] : []; }
+
+                    pIds = (pIds || []).filter(Boolean);
+                    catIds = (catIds || []).filter(Boolean);
+
+                    if (pIds.length > 0) {
+                      return <div className="text-purple-500 dark:text-purple-400 font-medium">Plan Specific ({pIds.length} Plan{pIds.length > 1 ? 's' : ''})</div>;
+                    }
+                    if (catIds.length > 0) {
+                      return <div className="text-indigo-500 dark:text-indigo-400 font-medium">All Plans in Segment ({catIds.length} Segment{catIds.length > 1 ? 's' : ''})</div>;
+                    }
+                    if (!c.minPurchaseValue && !c.clientId) {
+                      return <span className="text-slate-500 dark:text-slate-400">All Plans (Universal)</span>;
+                    }
+                    return null;
+                  })()}
                 </td>
                 <td className="py-4 px-6 text-slate-700 dark:text-slate-300">
                   {c.usedCount} {c.usageLimit ? `/ ${c.usageLimit}` : ' (Unlimited)'}
@@ -247,7 +294,7 @@ export default function CouponsManager() {
                 </td>
                 
                 <td className="py-4 px-6 text-slate-700 dark:text-slate-300">
-                  <button onClick={() => handleToggleVisibility(c.id)} className="flex items-center space-x-1 hover:text-indigo-400 transition" title="Toggle Client Visibility">
+                  <button onClick={() => handleToggleVisibility(c.id || c._id)} className="flex items-center space-x-1 hover:text-indigo-400 transition" title="Toggle Client Visibility">
                     {c.isPublic ? <Eye className="h-4 w-4 text-emerald-400" /> : <EyeOff className="h-4 w-4 text-slate-500 dark:text-slate-400" />}
                     <span className="text-xs">{c.isPublic ? 'Visible' : 'Hidden'}</span>
                   </button>
@@ -261,7 +308,7 @@ export default function CouponsManager() {
                 <td className="py-4 px-6 text-right space-x-2">
                   {!isExpired && (
                     <>
-                      <button onClick={() => handleToggleStatus(c.id)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white" title="Toggle Status">
+                      <button onClick={() => handleToggleStatus(c.id || c._id)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white" title="Toggle Status">
                         {c.status === 'ACTIVE' ? <XCircle className="h-5 w-5 text-amber-500" /> : <CheckCircle className="h-5 w-5 text-emerald-500" />}
                       </button>
                       <button onClick={() => handleOpenModal(c)} className="text-slate-600 dark:text-slate-400 hover:text-indigo-400">
@@ -308,23 +355,56 @@ export default function CouponsManager() {
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Discount Type</label>
                   <select
                     value={formData.discountType}
-                    onChange={e => setFormData({ ...formData, discountType: e.target.value })}
+                    onChange={e => {
+                      const newType = e.target.value;
+                      let newDiscount = formData.discountValue;
+                      if (newType === 'PERCENTAGE' && parseFloat(newDiscount) > 100) {
+                        newDiscount = '100';
+                      }
+                      setFormData({ ...formData, discountType: newType, discountValue: newDiscount });
+                    }}
                     className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
                   >
-                    <option value="PERCENTAGE">Percentage</option>
-                    <option value="FLAT">Flat Amount</option>
+                    <option value="PERCENTAGE">Percentage (%)</option>
+                    <option value="FLAT">Flat Amount (₹)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Discount Value {formData.discountType === 'PERCENTAGE' ? '(%)' : '(₹)'}</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Discount Value {formData.discountType === 'PERCENTAGE' ? '(%) [Max 100%]' : '(₹)'}
+                  </label>
                   <input
                     required
-                    type="number"
-                    min="1"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={formData.discountType === 'PERCENTAGE' ? 'e.g. 25.50' : 'e.g. 500.00'}
                     value={formData.discountValue}
-                    onChange={e => setFormData({ ...formData, discountValue: e.target.value })}
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setFormData(prev => ({ ...prev, discountValue: '' }));
+                        return;
+                      }
+                      // Allow only numbers with at most 2 decimal places (e.g. 25.50)
+                      if (!/^\d*\.?\d{0,2}$/.test(val)) {
+                        return;
+                      }
+                      // If user starts with '.', prefix with '0.'
+                      if (val === '.') {
+                        setFormData(prev => ({ ...prev, discountValue: '0.' }));
+                        return;
+                      }
+                      // If percentage, restrict to max 100
+                      if (formData.discountType === 'PERCENTAGE') {
+                        const num = parseFloat(val);
+                        if (!isNaN(num) && num > 100) {
+                          setFormData(prev => ({ ...prev, discountValue: '100' }));
+                          return;
+                        }
+                      }
+                      setFormData(prev => ({ ...prev, discountValue: val }));
+                    }}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white font-semibold"
                   />
                 </div>
               </div>
@@ -346,11 +426,16 @@ export default function CouponsManager() {
                     <div>
                       <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Max Discount Value (₹)</label>
                       <input
-                        type="number"
-                        min="1"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={formData.maxDiscountValue}
-                        onChange={e => setFormData({ ...formData, maxDiscountValue: e.target.value })}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+                            setFormData({ ...formData, maxDiscountValue: val });
+                          }
+                        }}
+                        placeholder="e.g. 500.00"
                         className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
                       />
                     </div>
@@ -362,11 +447,16 @@ export default function CouponsManager() {
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Min Purchase Value (₹) (Optional)</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={formData.minPurchaseValue}
-                    onChange={e => setFormData({ ...formData, minPurchaseValue: e.target.value })}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d{0,2}$/.test(val)) {
+                        setFormData({ ...formData, minPurchaseValue: val });
+                      }
+                    }}
+                    placeholder="e.g. 1000.00"
                     className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
                   />
                 </div>
@@ -423,21 +513,38 @@ export default function CouponsManager() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Restrict to Plan (Filtered by Segment)</label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">Restrict to Plan (Optional)</label>
+                      </div>
                       {(() => {
                         let selectedCats = [];
                         try { selectedCats = JSON.parse(formData.categoryId); if(!Array.isArray(selectedCats)) selectedCats = []; } catch(e) { selectedCats = []; }
                         
+                        let selectedPlans = [];
+                        try { selectedPlans = JSON.parse(formData.planId); if(!Array.isArray(selectedPlans)) selectedPlans = []; } catch(e) { selectedPlans = []; }
+
                         const filteredPlans = selectedCats.length > 0 
                           ? plans.filter(p => selectedCats.includes(p.categoryId))
                           : plans;
 
                         return (
-                          <MultiSelectPills
-                            options={filteredPlans.map(p => ({ value: p.id || p._id, label: p.name }))}
-                            selectedString={formData.planId}
-                            onChange={(val: string) => setFormData({ ...formData, planId: val })}
-                          />
+                          <div className="space-y-2">
+                            <MultiSelectPills
+                              options={filteredPlans.map(p => ({ value: p.id || p._id, label: p.name }))}
+                              selectedString={formData.planId}
+                              onChange={(val: string) => setFormData({ ...formData, planId: val })}
+                            />
+                            {selectedCats.length > 0 && selectedPlans.length === 0 && (
+                              <div className="text-[11px] text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 rounded-lg p-2.5 leading-relaxed">
+                                ℹ️ <strong>Segment-Level Coupon:</strong> Koi specific plan select nahi kiya gaya hai, isliye yeh coupon chune gaye Segment(s) ke <strong>SABHI Plans</strong> par valid hoga.
+                              </div>
+                            )}
+                            {selectedPlans.length > 0 && (
+                              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg p-2">
+                                ✓ Sirf select kiye gaye <strong>{selectedPlans.length} plan(s)</strong> par hi yeh coupon apply hoga.
+                              </div>
+                            )}
+                          </div>
                         );
                       })()}
                     </div>

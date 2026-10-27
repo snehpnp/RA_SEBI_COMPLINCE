@@ -97,6 +97,8 @@ async function seedInitial() {
         { code: 'ACCESS_VAULTS_FULL', name: 'Full Access Vaults (View & Download)' },
         { code: 'MASK_VAULT_DATA', name: 'Mask Sensitive Data in Vaults' },
         { code: 'VIEW_SENSITIVE_DATA', name: 'View Sensitive Client Details (Unmask)' },
+        { code: 'ACCESS_DELIVERY_REPORTS', name: 'Access Delivery Reports Desk' },
+        { code: 'VIEW_ALL_DELIVERIES', name: 'View Delivery Reports' },
         { code: 'EXPORT_DATA', name: 'Export Data to CSV' }
     ];
     const permMap = {};

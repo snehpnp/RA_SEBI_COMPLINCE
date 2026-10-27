@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { toast } from 'react-hot-toast';
+import { executeSmartDownload } from './smartDownload';
 
 export const generatePeriodicReport = async (data: any, periodName: string = 'Current', endDateStr?: string) => {
   try {
@@ -264,7 +265,11 @@ export const generatePeriodicReport = async (data: any, periodName: string = 'Cu
     // 8. Trigger download
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `SEBI_Periodic_Report_${periodName}.xlsx`);
+    await executeSmartDownload({
+      blob,
+      fileName: `SEBI_Periodic_Report_${periodName}.xlsx`,
+      documentType: 'SEBI Periodic Report'
+    });
 
   } catch (error) {
     console.error('Error generating report:', error);

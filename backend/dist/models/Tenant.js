@@ -133,6 +133,7 @@ exports.TenantSchema = new mongoose_1.Schema({
         default: 'I, {{clientName}}, confirm that I have voluntarily subscribed to the research services of {{companyName}}. I have reviewed and signed the SEBI Research Analyst Service Agreement and confirm that my PAN card is {{pan}}.'
     },
     lockedTradesPreviewCount: { type: Number, default: 5 },
+    showCategoryClientCountToResearcher: { type: Boolean, default: false },
     showOpenTradePotential: { type: Boolean, default: true },
     showLockedTradePotential: { type: Boolean, default: true },
     smsGatewayEnabled: { type: Boolean, default: false },

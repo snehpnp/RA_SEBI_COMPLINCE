@@ -1,5 +1,7 @@
 import { toast } from 'react-hot-toast';
-export function downloadCSV(data: any[], filename: string) {
+import { executeSmartDownload } from './smartDownload';
+
+export async function downloadCSV(data: any[], filename: string) {
   if (!data || !data.length) {
     toast('No data available to export.');
     return;
@@ -41,14 +43,10 @@ export function downloadCSV(data: any[], filename: string) {
   const csvString = csvRows.join('\n');
   const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
   
-  const link = document.createElement('a');
-  if (link.download !== undefined) {
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename + '.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
+  const resolvedFileName = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+  await executeSmartDownload({
+    blob,
+    fileName: resolvedFileName,
+    documentType: `${filename.replace(/_/g, ' ')} Export`
+  });
 }

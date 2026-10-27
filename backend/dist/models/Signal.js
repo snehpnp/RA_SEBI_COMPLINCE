@@ -39,7 +39,8 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.SignalSchema = new mongoose_1.Schema({
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', required: true },
     segment: { type: String, required: true },
-    planId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Plan', required: true },
+    categoryId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'PlanCategory', default: null },
+    planId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Plan', default: null },
     callType: { type: String, required: true },
     tradeDuration: { type: String, required: true },
     stockId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Stock', required: true },
@@ -78,6 +79,12 @@ exports.SignalSchema.virtual('tenant', {
 exports.SignalSchema.virtual('stock', {
     ref: 'Stock',
     localField: 'stockId',
+    foreignField: '_id',
+    justOne: true
+});
+exports.SignalSchema.virtual('category', {
+    ref: 'PlanCategory',
+    localField: 'categoryId',
     foreignField: '_id',
     justOne: true
 });

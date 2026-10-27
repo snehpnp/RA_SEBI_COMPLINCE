@@ -1,3 +1,4 @@
+import { executeSmartDownload } from '@/utils/smartDownload';
 import React, { useState, useEffect, useMemo } from 'react';
 import DataTable from 'react-data-table-component';
 
@@ -46,7 +47,7 @@ const tableCustomStyles = {
     },
   },
 };
-import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send, Users } from 'lucide-react';
+import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send, Users, MessageSquare } from 'lucide-react';
 import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
@@ -124,7 +125,7 @@ export default function SignalManagement({
     return allCategories.filter((c: any) => {
       const pCount = (c.plansBreakdown && c.plansBreakdown.length) || c.plansCount || 0;
       if (pCount > 0) return true;
-      return allPlans.some((p: any) => String(p.categoryId || p.category?._id || p.category?.id) === String(c.id || c._id));
+      return source.some((p: any) => String(p.categoryId || p.category?._id || p.category?.id) === String(c.id || c._id));
     });
   }, [categoriesList, adminPlans, localPlans]);
 
@@ -375,14 +376,12 @@ export default function SignalManagement({
       }
       // File exists — trigger download
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = reportUrl.split('/').pop() || 'report.pdf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      const resolvedFileName = reportUrl.split('/').pop() || 'report.pdf';
+      await executeSmartDownload({
+        blob,
+        fileName: resolvedFileName,
+        documentType: 'Signal Report'
+      });
     } catch (err: any) {
       toast.error('❌ Download failed: ' + (err.message || 'Network error'));
     }
@@ -804,6 +803,60 @@ export default function SignalManagement({
         cell: (row: any) => <span className="font-semibold text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.exitPrice ? `₹ ${row.exitPrice}` : 'N/A'}</span>
       });
     }
+
+    // Always show Status & Remark column
+    cols.push({
+      name: 'Status & Remark',
+      minWidth: '200px',
+      cell: (row: any) => {
+        const isClosed = row.status === 'CLOSED';
+        const hasCloseStatus = Boolean(row.closeStatus);
+        const statusText = row.closeStatus || (isClosed ? 'Closed' : 'Active');
+
+        let badgeStyle = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
+        if (row.closeStatus === 'Fully Closed') {
+          badgeStyle = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+        } else if (row.closeStatus === 'SL Hit' || row.closeStatus === 'Stoploss Triggered') {
+          badgeStyle = 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20';
+        } else if (row.closeStatus === 'Avoid Signal') {
+          badgeStyle = 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
+        } else if ((row.closeStatus || '').includes('Target') || row.closeStatus === 'Partially Closed') {
+          badgeStyle = 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20';
+        } else if (isClosed) {
+          badgeStyle = 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
+        }
+
+        return (
+          <div className="flex flex-col py-1.5 max-w-[210px]">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${badgeStyle}`}>
+                {statusText}
+              </span>
+              {row.closeTargets && (
+                <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded">
+                  {row.closeTargets}
+                </span>
+              )}
+            </div>
+            {row.closeRemark ? (
+              <button
+                type="button"
+                onClick={() => setAvoidRemarkModal(row.closeRemark)}
+                className="flex items-center gap-1 text-[11px] text-slate-700 dark:text-slate-300 mt-1 hover:text-amber-600 dark:hover:text-amber-400 text-left transition-colors group cursor-pointer"
+                title={`Remark: ${row.closeRemark}\n(Click to view full remark)`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="truncate max-w-[170px] font-medium">{row.closeRemark}</span>
+              </button>
+            ) : (
+              hasCloseStatus && (
+                <span className="text-[10px] text-slate-400 italic mt-0.5">No remark</span>
+              )
+            )}
+          </div>
+        );
+      }
+    });
 
     cols.push({
       name: 'Entry Date',
@@ -1706,18 +1759,29 @@ export default function SignalManagement({
           />
         )}
 
-        {/* AVOID REMARK MODAL */}
+        {/* TRADE UPDATE & CLOSE REMARK MODAL */}
         {avoidRemarkModal && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-slate-100 dark:bg-[#1A2235] border border-slate-400 dark:border-white/10 rounded-lg shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
-              <div className="flex justify-between items-center p-3 bg-[#4c1d95] border-b border-[#4c1d95]">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white px-2">Description</h3>
-                <button onClick={() => setAvoidRemarkModal(null)} className="text-slate-900 dark:text-white/80 hover:text-slate-900 dark:text-white transition">
+            <div className="bg-white dark:bg-[#151c2c] border border-slate-300 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+              <div className="flex justify-between items-center p-4 bg-slate-100 dark:bg-[#0B101E] border-b border-slate-200 dark:border-white/10">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-amber-500" />
+                  <span>Trade Update &amp; Close Remark</span>
+                </h3>
+                <button onClick={() => setAvoidRemarkModal(null)} className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-8 bg-white min-h-[150px]">
-                <p className="text-black text-sm font-semibold">{avoidRemarkModal}</p>
+              <div className="p-6 space-y-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-400 block tracking-wider">Researcher Note / Close Remark</span>
+                <p className="text-sm font-medium leading-relaxed bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-white/10 whitespace-pre-wrap select-all text-slate-800 dark:text-slate-200">
+                  {avoidRemarkModal}
+                </p>
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-[#0B101E] border-t border-slate-200 dark:border-white/10 flex justify-end">
+                <button onClick={() => setAvoidRemarkModal(null)} className="px-5 py-2 bg-[#d4f23b] text-black rounded-xl text-xs font-bold hover:bg-[#c3e031] transition">
+                  Close
+                </button>
               </div>
             </div>
           </div>
@@ -1769,21 +1833,23 @@ export default function SignalManagement({
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Target 3</p><p className="font-semibold text-green-600 dark:text-green-400">{viewSignalDetails.target3 ? `₹ ${viewSignalDetails.target3}` : 'N/A'}</p></div>
                 </div>
 
-                {viewSignalDetails.status === 'CLOSED' && (() => {
-                  const isSuccess = viewSignalDetails.closeStatus === 'Fully Closed' || viewSignalDetails.closeStatus === 'Partially Closed' || viewSignalDetails.closeStatus === 'Target Hit';
+                {(viewSignalDetails.status === 'CLOSED' || viewSignalDetails.closeStatus || viewSignalDetails.closeRemark) && (() => {
+                  const isSuccess = viewSignalDetails.closeStatus === 'Fully Closed' || viewSignalDetails.closeStatus === 'Partially Closed' || viewSignalDetails.closeStatus === 'Target Hit' || (viewSignalDetails.closeStatus || '').includes('Target');
                   const isNeutral = viewSignalDetails.closeStatus === 'Avoid Signal';
                   const bgClass = isSuccess ? 'bg-green-50 dark:bg-green-900/20 border-green-500/20' : (isNeutral ? 'bg-slate-50 dark:bg-slate-900/20 border-slate-500/20' : 'bg-red-50 dark:bg-red-900/20 border-red-500/20');
                   const textClass = isSuccess ? 'text-green-600 dark:text-green-400' : (isNeutral ? 'text-slate-600 dark:text-slate-400' : 'text-red-600 dark:text-red-400');
                   return (
                     <div className={`border-t border-slate-300 dark:border-white/5 pt-6 grid grid-cols-2 md:grid-cols-4 gap-6 p-4 rounded-xl border ${bgClass}`}>
-                      <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Close Status</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.closeStatus || 'N/A'}</p></div>
+                      <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Close Status</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.closeStatus || viewSignalDetails.status || 'N/A'}</p></div>
                       <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Exit Price</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.exitPrice ? `₹ ${viewSignalDetails.exitPrice}` : 'N/A'}</p></div>
                       <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Targets Hit</p><p className={`font-semibold ${textClass} break-all`}>{viewSignalDetails.closeTargets || 'None'}</p></div>
                       <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Exit Date</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.closedAt ? new Date(viewSignalDetails.closedAt).toLocaleString() : 'N/A'}</p></div>
                       {viewSignalDetails.closeRemark && (
-                        <div className="col-span-2 md:col-span-4 mt-2">
-                          <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Close Remark</p>
-                          <p className="text-sm text-slate-700 dark:text-gray-300">{viewSignalDetails.closeRemark}</p>
+                        <div className="col-span-2 md:col-span-4 mt-2 p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-white/10">
+                          <p className="text-xs uppercase font-extrabold text-amber-500 mb-1 flex items-center gap-1.5">
+                            <MessageSquare className="w-3.5 h-3.5" /> Close Remark / Trade Update Note
+                          </p>
+                          <p className="text-sm font-medium text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{viewSignalDetails.closeRemark}</p>
                         </div>
                       )}
                     </div>

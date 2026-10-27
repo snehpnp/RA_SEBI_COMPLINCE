@@ -65,13 +65,13 @@ export default function L1L2AuditModal({
   const clientName = payment.client?.name || payment.client?.user?.name || payment.clientName || 'Client';
   const clientEmail = payment.client?.user?.email || payment.client?.email || payment.clientEmail || 'N/A';
   const clientMobile = payment.client?.user?.mobile || payment.client?.mobile || 'N/A';
-  const clientPan = payment.client?.pan || 'N/A';
+  const clientPan = payment.client?.pan || payment.client?.user?.pan || payment.client?.profile?.panNumber || 'N/A';
 
   // L1 details with graceful fallback for legacy records
   const l1 = {
     submittedByName: (payment.l1Details?.submittedByName && !payment.l1Details.submittedByName.includes('@'))
       ? payment.l1Details.submittedByName
-      : (payment.assignedByAdminName || payment.assignedByStaffName || payment.l1Details?.submittedByName || 'Staff (Maker)'),
+      : (payment.assignedByStaffName || payment.assignedByAdminName || payment.verifiedByStaffName || payment.l1Details?.submittedByName || 'Alpha Admin'),
     submittedAt: formatDateTime(payment.l1Details?.submittedAt || payment.createdAt),
     planName: payment.l1Details?.planName || payment.plan?.name || payment.planName || 'Assigned Plan',
     amount: payment.l1Details?.amount ?? payment.amount,
@@ -80,14 +80,15 @@ export default function L1L2AuditModal({
     couponCode: payment.l1Details?.couponCode || payment.couponCode || '',
     paymentDate: formatComparableDate(payment.l1Details?.paymentDate || payment.paymentDate),
     serviceStartDate: formatComparableDate(payment.l1Details?.serviceStartDate || payment.serviceStartDate),
-    remarks: payment.l1Details?.remarks || payment.remarks || 'Verified by Compliance Staff'
+    remarks: payment.l1Details?.remarks || payment.remarks || 'Verified by Compliance Staff',
+    receiptUrl: payment.receiptUrl || payment.screenshotUrl || null
   };
 
   // L2 details with graceful fallback
   const l2 = {
     reviewedByName: (payment.l2Details?.reviewedByName && !payment.l2Details.reviewedByName.includes('@'))
       ? payment.l2Details.reviewedByName
-      : (payment.approvedByName || payment.l2Details?.reviewedByName || (payment.approvalStatus === 'APPROVED' ? 'Admin / Approver' : 'Pending Review')),
+      : (payment.approvedByName || payment.l2Details?.reviewedByName || (payment.approvalStatus === 'APPROVED' ? 'Admin / Approver' : (payment.approvalStatus === 'REJECTED' ? 'L2 Authority' : 'Pending Review'))),
     reviewedAt: formatDateTime(payment.l2Details?.reviewedAt || payment.updatedAt),
     action: payment.l2Details?.action || payment.approvalStatus || 'L2_PENDING',
     finalPlanName: payment.l2Details?.finalPlanName || payment.plan?.name || payment.planName || l1.planName,
@@ -97,7 +98,7 @@ export default function L1L2AuditModal({
     finalPaymentDate: formatComparableDate(payment.l2Details?.finalPaymentDate || payment.paymentDate || l1.paymentDate),
     finalServiceStartDate: formatComparableDate(payment.l2Details?.finalServiceStartDate || payment.serviceStartDate || l1.serviceStartDate),
     remarks: payment.l2Details?.remarks || payment.l2Remarks || payment.adminRemarks || (payment.approvalStatus === 'APPROVED' ? 'Approved by L2 Reviewer' : 'Awaiting clearance'),
-    rejectionReason: payment.l2Details?.rejectionReason || payment.rejectionReason || ''
+    rejectionReason: payment.l2Details?.rejectionReason || payment.rejectionReason || payment.l2Remarks || payment.adminRemarks || payment.remarks || 'Payment authorization was rejected by reviewer'
   };
 
   const isL2Pending = payment.approvalStatus === 'L2_PENDING';
@@ -144,10 +145,18 @@ export default function L1L2AuditModal({
               </div>
               <div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span>L1 vs L2 Approval &amp; Verification Audit</span>
+                  <span>
+                    {isL2Rejected
+                      ? 'L1 Submission vs L2 Rejection Audit'
+                      : isL2Approved
+                      ? 'L1 vs L2 Approval & Verification Audit'
+                      : 'L1 Submission Audit (Awaiting L2)'}
+                  </span>
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                  Side-by-side audit of Level 1 staff submission versus Level 2 approver modifications.
+                  {isL2Rejected
+                    ? 'Complete audit of initial Level 1 staff submission details and Level 2 rejection reasons.'
+                    : 'Side-by-side audit of Level 1 staff submission versus Level 2 approver modifications.'}
                 </p>
               </div>
             </div>
@@ -158,7 +167,7 @@ export default function L1L2AuditModal({
               isL2Approved
                 ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700'
                 : isL2Rejected
-                ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-700'
+                ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-700 font-black'
                 : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700'
             }`}>
               {isL2Approved ? '✓ L2 APPROVED' : isL2Rejected ? '✗ L2 REJECTED' : isDirectApproved ? '✓ DIRECT APPROVED' : '⏳ AWAITING L2'}
@@ -171,6 +180,32 @@ export default function L1L2AuditModal({
             </button>
           </div>
         </div>
+
+        {/* L2 Rejection Alert Banner */}
+        {isL2Rejected && (
+          <div className="p-4 my-3 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border-2 border-rose-300 dark:border-rose-800 flex items-start gap-3 shadow-sm">
+            <div className="p-2 rounded-xl bg-rose-200/80 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300 shrink-0 mt-0.5">
+              <XCircle className="w-5 h-5" />
+            </div>
+            <div className="space-y-1 flex-1">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="font-black text-sm text-rose-900 dark:text-rose-200 flex items-center gap-1.5">
+                  L2 Payment Rejection Clearance Record
+                </span>
+                <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-rose-200 dark:bg-rose-900 text-rose-900 dark:text-rose-200 font-bold border border-rose-300 dark:border-rose-700">
+                  Rejected At: {l2.reviewedAt}
+                </span>
+              </div>
+              <p className="text-xs text-rose-950 dark:text-rose-200 font-semibold bg-white/70 dark:bg-black/30 p-2.5 rounded-xl border border-rose-200 dark:border-rose-900/40 mt-1">
+                <strong className="text-rose-700 dark:text-rose-400">Rejection Reason:</strong> &quot;{l2.rejectionReason}&quot;
+              </p>
+              <div className="text-[11px] text-rose-800 dark:text-rose-300/90 flex items-center justify-between flex-wrap gap-2 pt-1 font-medium">
+                <span>Declined by Approver: <strong className="font-bold underline">{l2.reviewedByName}</strong></span>
+                <span>Initially Forwarded by L1 Maker: <strong className="font-bold underline">{l1.submittedByName}</strong></span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Client & Transaction Overview Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-4 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-white/5 text-xs">
@@ -289,6 +324,23 @@ export default function L1L2AuditModal({
                   "{l1.remarks || 'No remarks entered'}"
                 </div>
               </div>
+
+              {l1.receiptUrl && (
+                <div className="pt-1 flex items-center justify-between p-2.5 rounded-xl bg-blue-100/60 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40">
+                  <span className="text-[11px] font-bold text-blue-900 dark:text-blue-200">
+                    Payment Screenshot Proof:
+                  </span>
+                  <a
+                    href={l1.receiptUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shadow-sm transition"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>View Proof Image</span>
+                  </a>
+                </div>
+              )}
             </div>
           </div>
 

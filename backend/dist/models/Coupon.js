@@ -48,8 +48,8 @@ exports.CouponSchema = new mongoose_1.Schema({
     usageLimit: { type: Number, default: null },
     usedCount: { type: Number, default: 0 },
     clientId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Client', default: null },
-    planId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Plan', default: null },
-    categoryId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'PlanCategory', default: null },
+    planId: { type: mongoose_1.Schema.Types.Mixed, default: null },
+    categoryId: { type: mongoose_1.Schema.Types.Mixed, default: null },
     status: { type: String, default: 'ACTIVE' },
     isPublic: { type: Boolean, default: false }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Coupon' });

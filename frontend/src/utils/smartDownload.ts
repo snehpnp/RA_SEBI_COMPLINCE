@@ -24,10 +24,41 @@ export async function executeSmartDownload({
   onAdminFallbackPrompt,
   onStaffBlockedPrompt
 }: SmartDownloadOptions) {
-  const policy = tenantDetails?.fileDownloadPolicy || 'BOTH'; // 'SYSTEM' | 'EMAIL' | 'BOTH'
-  const maxEmailSizeMb = tenantDetails?.maxEmailFileSizeMb || 10;
+  let policy = tenantDetails?.fileDownloadPolicy;
+  let maxEmailSizeMb = tenantDetails?.maxEmailFileSizeMb;
+  let resolvedRole = userRole;
+
+  if (typeof window !== 'undefined') {
+    if (!policy) {
+      policy = (localStorage.getItem('fileDownloadPolicy') as any) || undefined;
+    }
+    if (!policy) {
+      try {
+        const storedTenant = JSON.parse(localStorage.getItem('tenantDetails') || '{}');
+        policy = storedTenant?.fileDownloadPolicy;
+        if (!maxEmailSizeMb) maxEmailSizeMb = storedTenant?.maxEmailFileSizeMb;
+      } catch {}
+    }
+    if (!policy) {
+      try {
+        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        policy = storedUser?.tenant?.fileDownloadPolicy;
+        if (!maxEmailSizeMb) maxEmailSizeMb = storedUser?.tenant?.maxEmailFileSizeMb;
+        if (!resolvedRole) resolvedRole = storedUser?.role;
+      } catch {}
+    }
+    if (!resolvedRole) {
+      try {
+        const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+        resolvedRole = storedUser?.role;
+      } catch {}
+    }
+  }
+
+  policy = policy || 'BOTH';
+  maxEmailSizeMb = Number(maxEmailSizeMb) || 10;
   const fileSizeMb = parseFloat((blob.size / (1024 * 1024)).toFixed(2));
-  const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+  const isAdmin = resolvedRole === 'ADMIN' || resolvedRole === 'SUPER_ADMIN';
 
   // Helper for direct browser download
   const downloadToBrowser = () => {
@@ -37,8 +68,12 @@ export async function executeSmartDownload({
     a.download = fileName;
     document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url);
+      if (a.parentNode) {
+        a.parentNode.removeChild(a);
+      }
+    }, 1000);
   };
 
   // CASE 1: System Download Only
@@ -66,8 +101,9 @@ export async function executeSmartDownload({
       if (onStaffBlockedPrompt) {
         onStaffBlockedPrompt(fileSizeMb);
       } else {
-        alert(
-          `Document file size (${fileSizeMb} MB) exceeds maximum email attachment limit. Direct system download is restricted for your role. Please contact Admin to receive this export.`
+        toast.error(
+          `Document file size (${fileSizeMb} MB) exceeds maximum email attachment limit. Direct system download is restricted for your role. Please contact Admin to receive this export.`,
+          { duration: 6000 }
         );
       }
     }
@@ -82,9 +118,7 @@ export async function executeSmartDownload({
     formData.append('fileName', fileName);
     formData.append('documentType', documentType);
 
-    const res = await api.post('/files/send-export-email', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    });
+    const res = await api.post('/files/send-export-email', formData);
 
     if (res.data?.success) {
       toast.success(

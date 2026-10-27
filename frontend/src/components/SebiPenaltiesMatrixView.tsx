@@ -1,3 +1,4 @@
+import { executeSmartDownload } from '@/utils/smartDownload';
 import React, { useState, useMemo } from 'react';
 import { 
   SEBI_PENALTIES_MASTER, 
@@ -399,7 +400,7 @@ export const SebiPenaltiesMatrixView: React.FC<Props> = ({
   }, [currentCalendarDate]);
 
   // Export to CSV with UTF-8 BOM (\uFEFF) for Microsoft Excel compatibility
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     let headers: string[] = [];
     let rows: (string | number)[][] = [];
     let fileName = '';
@@ -451,14 +452,11 @@ export const SebiPenaltiesMatrixView: React.FC<Props> = ({
     const csvString = [headers.join(','), ...rows.map(e => e.join(','))].join('\r\n');
     // Prepend UTF-8 BOM (\uFEFF) so Microsoft Excel / WPS detects UTF-8 and correctly renders ₹ (Rupee) and special symbols
     const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    await executeSmartDownload({
+      blob,
+      fileName,
+      documentType: 'SEBI Penalties Matrix'
+    });
   };
 
   const getSeverityBadge = (rule: SebiPenaltyRule) => {

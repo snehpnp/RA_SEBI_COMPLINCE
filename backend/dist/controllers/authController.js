@@ -48,8 +48,9 @@ const auditService_1 = require("../services/auditService");
 const activityService_1 = require("../services/activityService");
 const emailService_1 = require("../services/emailService");
 const smsService_1 = require("../services/smsService");
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
-const REFRESH_SECRET = process.env.REFRESH_SECRET || 'super-refresh-key-54321';
+const jwtSecret_1 = require("../config/jwtSecret");
+const JWT_SECRET = (0, jwtSecret_1.getJwtSecret)();
+const REFRESH_SECRET = (0, jwtSecret_1.getRefreshSecret)();
 const maskEmail = (email) => {
     if (!email)
         return '';

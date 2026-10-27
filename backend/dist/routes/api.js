@@ -491,9 +491,9 @@ router.patch('/signals/:id/close', auth_1.authenticateJWT, (0, auth_1.requirePer
 router.post('/signals/:id/report', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), signalController_1.uploadReport);
 router.post('/signals/:id/messages', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, signalController_1.addSignalMessage);
 // TRADE SIGNAL MULTI-CHANNEL DELIVERY REPORTS
-router.get('/signals/delivery-reports/master', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.getMasterDeliveryReport);
-router.get('/signals/delivery-reports/channel/:channel', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.getChannelDeliveryReport);
-router.post('/signals/delivery-reports/sync-dlr', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.syncSmsDeliveryReports);
+router.get('/signals/delivery-reports/master', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, (0, auth_1.requireAnyPermission)(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']), deliveryReportController_1.getMasterDeliveryReport);
+router.get('/signals/delivery-reports/channel/:channel', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, (0, auth_1.requireAnyPermission)(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']), deliveryReportController_1.getChannelDeliveryReport);
+router.post('/signals/delivery-reports/sync-dlr', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, (0, auth_1.requireAnyPermission)(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']), deliveryReportController_1.syncSmsDeliveryReports);
 router.post('/admin/telegram/test', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, deliveryReportController_1.testTelegramBotConnection);
 router.post('/admin/telegram/set-webhook', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.setTelegramWebhookEndpoint);
 router.get('/admin/telegram/webhook-info', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, telegramController_1.getTelegramWebhookStatus);

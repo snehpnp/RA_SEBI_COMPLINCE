@@ -49,7 +49,7 @@ export default function RichTextEditor({
       .then(([ckReact, ckClassic]) => {
         if (!isMounted) return;
         editorComponents.current = {
-          CKEditor: ckReact.CKEditor || ckReact.default?.CKEditor || ckReact.default,
+          CKEditor: ckReact.CKEditor || (ckReact as any).default?.CKEditor || (ckReact as any).default,
           ClassicEditor: ckClassic.default || ckClassic
         };
         setEditorReady(true);

@@ -2344,11 +2344,123 @@ const getAdminCategories = async (req, res) => {
         })
             .sort({ createdAt: -1 })
             .lean();
-        const formatted = rawCategories.map(c => ({
-            ...c,
-            id: String(c._id || c.id),
-            _id: c._id
-        }));
+        const isFullAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
+        let includeCounts = isFullAdmin;
+        if (!isFullAdmin) {
+            let tenantObj = null;
+            if (tenantId && mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                tenantObj = await db_1.default.Tenant.findById(tenantId).select('showCategoryClientCountToResearcher').lean();
+            }
+            if (!tenantObj && tenantId) {
+                tenantObj = await db_1.default.Tenant.findOne({
+                    $or: [{ id: tenantId }, { tenantId: tenantId }]
+                }).select('showCategoryClientCountToResearcher').lean();
+            }
+            includeCounts = tenantObj?.showCategoryClientCountToResearcher === true;
+        }
+        let plans = [];
+        let validSubs = [];
+        let allSubs = [];
+        if (includeCounts && rawCategories.length > 0) {
+            const categoryIds = rawCategories.map((c) => c._id);
+            plans = await db_1.default.Plan.find({
+                tenantId: { $in: relatedTenantIds },
+                categoryId: { $in: categoryIds },
+                deletedAt: null
+            }).select('_id name categoryId').lean();
+            if (plans.length > 0) {
+                const now = new Date();
+                allSubs = await db_1.default.Subscription.find({
+                    $or: [
+                        { tenantId: { $in: relatedTenantIds } },
+                        { tenantId: null },
+                        { tenantId: { $exists: false } }
+                    ],
+                    planId: { $in: plans.map((p) => p._id) }
+                }).select('_id clientId planId startDate endDate status').lean();
+                validSubs = allSubs.filter((sub) => {
+                    if (!['ACTIVE', 'active'].includes(sub.status))
+                        return false;
+                    if (!sub.endDate)
+                        return false;
+                    const end = new Date(sub.endDate);
+                    const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+                    const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+                    return Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime()) >= now.getTime();
+                });
+            }
+        }
+        const formatted = rawCategories.map(c => {
+            const catPlans = plans.filter((p) => String(p.categoryId) === String(c._id));
+            const plansCount = catPlans.length;
+            if (!includeCounts) {
+                return {
+                    ...c,
+                    id: String(c._id || c.id),
+                    _id: c._id,
+                    plansCount,
+                    activeClientCount: null,
+                    expiredClientCount: null,
+                    plansBreakdown: []
+                };
+            }
+            const catPlanIds = catPlans.map((p) => String(p._id));
+            const catActiveSubs = validSubs.filter((sub) => catPlanIds.includes(String(sub.planId)));
+            const distinctActiveClients = new Set(catActiveSubs.map((sub) => String(sub.clientId)));
+            // Expired clients for this category (Only for full admin)
+            let expiredCount = null;
+            if (isFullAdmin) {
+                const now = new Date();
+                const catAllSubs = allSubs.filter((sub) => catPlanIds.includes(String(sub.planId)));
+                const catExpiredSubs = catAllSubs.filter((sub) => {
+                    if (['EXPIRED', 'expired'].includes(sub.status))
+                        return true;
+                    if (!sub.endDate)
+                        return true;
+                    return new Date(sub.endDate).getTime() < now.getTime();
+                });
+                const distinctExpired = new Set(catExpiredSubs.map((sub) => String(sub.clientId)).filter(cid => !distinctActiveClients.has(cid)));
+                expiredCount = distinctExpired.size;
+            }
+            const plansBreakdown = catPlans.map((p) => {
+                const pSubs = catActiveSubs.filter((sub) => String(sub.planId) === String(p._id));
+                const pDistinctClients = new Set(pSubs.map((sub) => String(sub.clientId)));
+                let pExpiredCount = undefined;
+                if (isFullAdmin) {
+                    const now = new Date();
+                    const pAllSubs = allSubs.filter((sub) => String(sub.planId) === String(p._id));
+                    const pExpSubs = pAllSubs.filter((sub) => {
+                        if (['EXPIRED', 'expired'].includes(sub.status))
+                            return true;
+                        if (!sub.endDate)
+                            return true;
+                        return new Date(sub.endDate).getTime() < now.getTime();
+                    });
+                    const pDistinctExp = new Set(pExpSubs.map((sub) => String(sub.clientId)).filter(cid => !pDistinctClients.has(cid)));
+                    pExpiredCount = pDistinctExp.size;
+                }
+                return {
+                    planId: String(p._id),
+                    planName: p.name,
+                    activeClientCount: pDistinctClients.size,
+                    expiredClientCount: isFullAdmin ? pExpiredCount : undefined
+                };
+            });
+            const totalActivePlanSubscribers = plansBreakdown.reduce((sum, p) => sum + (p.activeClientCount || 0), 0);
+            const totalExpiredPlanSubscribers = isFullAdmin
+                ? plansBreakdown.reduce((sum, p) => sum + (p.expiredClientCount || 0), 0)
+                : null;
+            return {
+                ...c,
+                id: String(c._id || c.id),
+                _id: c._id,
+                plansCount,
+                activeClientCount: totalActivePlanSubscribers,
+                expiredClientCount: totalExpiredPlanSubscribers,
+                distinctActiveClientsCount: distinctActiveClients.size,
+                plansBreakdown
+            };
+        });
         return res.status(200).json({ success: true, data: formatted });
     }
     catch (error) {
@@ -2904,6 +3016,9 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.ccAgreementEnabled = ccAgreementEnabled === 'true' || ccAgreementEnabled === true;
         if (ccAgreementEmail !== undefined)
             dataToUpdate.ccAgreementEmail = ccAgreementEmail ? ccAgreementEmail.trim() : null;
+        if (req.body.showCategoryClientCountToResearcher !== undefined) {
+            dataToUpdate.showCategoryClientCountToResearcher = req.body.showCategoryClientCountToResearcher === 'true' || req.body.showCategoryClientCountToResearcher === true;
+        }
         // Strict SEBI compliance: Always keep kycFirst = true (KYC Before Payment)
         dataToUpdate.kycFirst = true;
         if (req.body.l2ApprovalEnabled !== undefined) {
@@ -3269,7 +3384,7 @@ const getAdminPayments = async (req, res) => {
                 ...p,
                 id: String(p._id || p.id),
                 coupon: couponObj || null,
-                couponCode: couponObj?.code || null,
+                couponCode: couponObj?.code || p.couponCode || null,
                 client: clientObj,
                 plan: p.planId ? planMap.get(String(p.planId)) : null
             };
@@ -3460,11 +3575,14 @@ const assignPlanByAdmin = async (req, res) => {
         const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
         const isAdmin = assigner?.roleId?.name === 'SUPER_ADMIN' || assigner?.roleId?.name === 'ADMIN';
         const assignerName = `${assigner?.firstName || ''} ${assigner?.lastName || ''}`.trim();
+        const effectiveBase = (customAmount !== undefined && customAmount !== null)
+            ? Number(customAmount)
+            : Number(plan.price);
         let discountAmount = 0;
         let appliedCouponId = null;
         if (couponCode) {
             const coupon = await db_1.default.Coupon.findOne({
-                code: couponCode,
+                code: String(couponCode).trim().toUpperCase(),
                 tenantId,
                 status: 'ACTIVE'
             }).lean();
@@ -3479,49 +3597,81 @@ const assignPlanByAdmin = async (req, res) => {
             if (coupon.clientId && String(coupon.clientId) !== String(actualClientId) && String(coupon.clientId) !== String(clientId)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable to this client.' });
             }
-            if (coupon.planId && String(coupon.planId) !== String(plan._id || plan.id)) {
-                return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
+            if (coupon.planId) {
+                let allowedPlans = [];
+                try {
+                    allowedPlans = JSON.parse(String(coupon.planId));
+                    if (!Array.isArray(allowedPlans))
+                        allowedPlans = [String(coupon.planId)];
+                }
+                catch {
+                    allowedPlans = [String(coupon.planId)];
+                }
+                if (allowedPlans.length > 0 && !allowedPlans.includes(String(plan._id || plan.id))) {
+                    return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
+                }
             }
-            if (coupon.categoryId && String(coupon.categoryId) !== String(plan.categoryId)) {
-                return res.status(400).json({ success: false, message: 'Coupon is not applicable to this category.' });
+            if (coupon.categoryId) {
+                let allowedCats = [];
+                try {
+                    allowedCats = JSON.parse(String(coupon.categoryId));
+                    if (!Array.isArray(allowedCats))
+                        allowedCats = [String(coupon.categoryId)];
+                }
+                catch {
+                    allowedCats = [String(coupon.categoryId)];
+                }
+                if (allowedCats.length > 0 && !allowedCats.includes(String(plan.categoryId))) {
+                    return res.status(400).json({ success: false, message: 'Coupon is not applicable to this category.' });
+                }
             }
-            if (coupon.minPurchaseValue && plan.price < coupon.minPurchaseValue) {
+            if (coupon.minPurchaseValue && effectiveBase < coupon.minPurchaseValue) {
                 return res.status(400).json({ success: false, message: `Minimum purchase of ₹${coupon.minPurchaseValue} required.` });
             }
             if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                 discountAmount = coupon.discountValue;
             }
             else if (coupon.discountType === 'PERCENTAGE') {
-                discountAmount = (plan.price * coupon.discountValue) / 100;
+                discountAmount = (effectiveBase * coupon.discountValue) / 100;
                 if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
                     discountAmount = coupon.maxDiscountValue;
                 }
             }
-            if (discountAmount > plan.price)
-                discountAmount = plan.price;
+            if (discountAmount > effectiveBase)
+                discountAmount = effectiveBase;
             appliedCouponId = coupon._id || coupon.id;
         }
         const isGstActive = tenantObj?.gstEnabled !== false;
         const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
-        const discountedBasePrice = plan.price - discountAmount;
-        let totalAmount = discountedBasePrice;
-        if (isExclusive) {
-            totalAmount = discountedBasePrice * 1.18;
-        }
-        let finalBasePrice = discountedBasePrice;
-        let finalGstAmount = isExclusive ? (totalAmount - discountedBasePrice) : 0;
-        let finalTotalAmount = totalAmount;
-        if (customAmount !== undefined && customAmount !== null) {
-            finalTotalAmount = customAmount;
-            if (isExclusive) {
-                finalBasePrice = finalTotalAmount / 1.18;
-                finalGstAmount = finalTotalAmount - finalBasePrice;
+        // GST Inclusive vs Exclusive discount handling
+        // When GST is inclusive, effectiveBase has 18% GST included, so pre-tax main value is effectiveBase / 1.18
+        const preTaxBase = (isGstActive && !isExclusive)
+            ? parseFloat((effectiveBase / 1.18).toFixed(2))
+            : effectiveBase;
+        // Recalculate discount strictly on pre-tax base value
+        if (couponCode && appliedCouponId) {
+            const coupon = await db_1.default.Coupon.findById(appliedCouponId).lean();
+            if (coupon) {
+                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+                    discountAmount = (isGstActive && !isExclusive)
+                        ? parseFloat((Number(coupon.discountValue || 0) / 1.18).toFixed(2))
+                        : Number(coupon.discountValue || 0);
+                }
+                else if (coupon.discountType === 'PERCENTAGE') {
+                    discountAmount = parseFloat(((preTaxBase * Number(coupon.discountValue || 0)) / 100).toFixed(2));
+                    if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > Number(coupon.maxDiscountValue)) {
+                        discountAmount = Number(coupon.maxDiscountValue);
+                    }
+                }
+                if (discountAmount > preTaxBase)
+                    discountAmount = preTaxBase;
             }
-            else {
-                finalBasePrice = finalTotalAmount;
-                finalGstAmount = 0;
-            }
         }
+        const taxableBase = Math.max(0, parseFloat((preTaxBase - discountAmount).toFixed(2)));
+        const gstAmt = isGstActive ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+        const finalTotalAmount = parseFloat((taxableBase + gstAmt).toFixed(2));
+        const finalBasePrice = taxableBase;
+        const finalGstAmount = gstAmt;
         const adminRemark = remarks?.trim()
             ? `Assigned by Admin - ${remarks.trim()}`
             : 'Assigned by Admin';
@@ -3548,10 +3698,16 @@ const assignPlanByAdmin = async (req, res) => {
                 });
             }
         }
-        // Check if there is an existing active subscription for the same plan (sequential queueing)
+        // Check if there is an existing active subscription for the same category or plan (sequential queueing)
+        let matchingPlanIds = [plan._id || plan.id];
+        if (plan.categoryId) {
+            const categoryPlans = await db_1.default.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+            if (categoryPlans.length > 0)
+                matchingPlanIds = categoryPlans.map((p) => p._id);
+        }
         const existingSub = await db_1.default.Subscription.findOne({
             $or: [{ clientId: actualClientId }, { clientId: client.userId }],
-            planId: plan._id || plan.id,
+            planId: { $in: matchingPlanIds },
             status: 'ACTIVE',
             endDate: { $gt: parsedPaymentDate }
         }).sort({ endDate: -1 }).lean();

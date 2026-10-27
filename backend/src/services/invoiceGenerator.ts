@@ -445,8 +445,9 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         isGstEnabled = tenant.gstEnabled !== false;
       }
 
+      const tenantGstVal = (tenant.gst || tenant.gstNumber || tenant.gstin || '').trim();
       // If tenant has no valid 15-char GSTIN, GST is disabled by default
-      if (!tenant.gst || tenant.gst.trim().length < 15) {
+      if (!tenantGstVal || tenantGstVal.length < 15) {
         isGstEnabled = false;
       }
 
@@ -482,17 +483,11 @@ export const generateInvoicePdf = async (paymentId: string): Promise<Buffer> => 
         taxableValue = totalAmount;
         totalGst = 0;
         grossBase = Number((totalAmount + baseDiscount).toFixed(2));
-      } else if (isGstInclusive) {
-        // INCLUSIVE: Total payable includes 18% GST
-        netInvoiceTotal = totalAmount;
-        taxableValue = Number((netInvoiceTotal / 1.18).toFixed(2));
-        totalGst = Number((netInvoiceTotal - taxableValue).toFixed(2));
-        grossBase = Number((taxableValue + baseDiscount).toFixed(2));
       } else {
-        // EXCLUSIVE: 18% GST on top
+        // GST ENABLED (Both Inclusive & Exclusive received amounts decompose accurately)
         netInvoiceTotal = totalAmount;
-        taxableValue = Number((netInvoiceTotal / 1.18).toFixed(2));
-        totalGst = Number((netInvoiceTotal - taxableValue).toFixed(2));
+        taxableValue = Number((payment.baseAmount || (netInvoiceTotal / 1.18)).toFixed(2));
+        totalGst = Number((payment.gstAmount || (netInvoiceTotal - taxableValue)).toFixed(2));
         grossBase = Number((taxableValue + baseDiscount).toFixed(2));
       }
 

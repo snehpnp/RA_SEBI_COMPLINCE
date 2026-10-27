@@ -15,8 +15,8 @@ export interface ICoupon extends Document {
   usageLimit?: number | null;
   usedCount: number;
   clientId?: Types.ObjectId | null;
-  planId?: Types.ObjectId | null;
-  categoryId?: Types.ObjectId | null;
+  planId?: any;
+  categoryId?: any;
   status: string; // ACTIVE, INACTIVE
   isPublic: boolean;
   createdAt: Date;
@@ -36,8 +36,8 @@ export const CouponSchema = new Schema<ICoupon>(
     usageLimit: { type: Number, default: null },
     usedCount: { type: Number, default: 0 },
     clientId: { type: Schema.Types.ObjectId, ref: 'Client', default: null },
-    planId: { type: Schema.Types.ObjectId, ref: 'Plan', default: null },
-    categoryId: { type: Schema.Types.ObjectId, ref: 'PlanCategory', default: null },
+    planId: { type: Schema.Types.Mixed, default: null },
+    categoryId: { type: Schema.Types.Mixed, default: null },
     status: { type: String, default: 'ACTIVE' },
     isPublic: { type: Boolean, default: false }
   },

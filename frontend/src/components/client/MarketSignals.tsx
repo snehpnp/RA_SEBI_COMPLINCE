@@ -420,6 +420,28 @@ export default function MarketSignals({ onUnlockTrade }: { onUnlockTrade?: (sign
                 </div>
               </div>
 
+              {/* Close / Update Info Card */}
+              {(selectedSignal.closeStatus || selectedSignal.closeRemark || selectedSignal.exitPrice) && (
+                <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs uppercase font-extrabold text-amber-500 tracking-wider">
+                      Trade Update Status: {selectedSignal.closeStatus?.replace(/_/g, ' ') || 'Closed'}
+                    </span>
+                    {selectedSignal.exitPrice && (
+                      <span className="text-xs font-bold text-premium-text">
+                        Exit Price: ₹{selectedSignal.exitPrice}
+                      </span>
+                    )}
+                  </div>
+                  {selectedSignal.closeRemark && (
+                    <div className="pt-2 border-t border-amber-500/15">
+                      <p className="text-[11px] text-premium-text/60 uppercase font-semibold">Analyst Note / Remark:</p>
+                      <p className="text-sm font-medium text-premium-text/90 mt-0.5 whitespace-pre-wrap">{selectedSignal.closeRemark}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Rationale */}
               <div>
                 <h4 className="text-sm font-bold uppercase tracking-wider text-premium-text/50 mb-3">Trade Rationale &amp; Analysis</h4>

@@ -2632,13 +2632,19 @@ export const getAdminCategories = async (req: AuthenticatedRequest, res: Respons
         };
       });
 
+      const totalActivePlanSubscribers = plansBreakdown.reduce((sum: number, p: any) => sum + (p.activeClientCount || 0), 0);
+      const totalExpiredPlanSubscribers = isFullAdmin
+        ? plansBreakdown.reduce((sum: number, p: any) => sum + (p.expiredClientCount || 0), 0)
+        : null;
+
       return {
         ...c,
         id: String(c._id || c.id),
         _id: c._id,
         plansCount,
-        activeClientCount: distinctActiveClients.size,
-        expiredClientCount: isFullAdmin ? expiredCount : null,
+        activeClientCount: totalActivePlanSubscribers,
+        expiredClientCount: totalExpiredPlanSubscribers,
+        distinctActiveClientsCount: distinctActiveClients.size,
         plansBreakdown
       };
     });
@@ -3135,11 +3141,17 @@ export const updateTenantSettings = async (req: AuthenticatedRequest, res: Respo
     if (companyName) dataToUpdate.companyName = companyName;
     if (companyEmail) dataToUpdate.email = companyEmail;
     if (gstCalculationType) dataToUpdate.gstCalculationType = gstCalculationType;
-    if (gst !== undefined) dataToUpdate.gst = gst ? gst.trim().toUpperCase() : null;
+    if (gst !== undefined && gst.trim() !== '') {
+      dataToUpdate.gst = gst.trim().toUpperCase();
+    } else if (gst !== undefined && (gstEnabled === 'false' || gstEnabled === false) && oldTenant?.gst) {
+      dataToUpdate.gst = oldTenant.gst;
+    } else if (gst !== undefined) {
+      dataToUpdate.gst = gst ? gst.trim().toUpperCase() : null;
+    }
     if (state !== undefined) dataToUpdate.state = state;
-    if (address !== undefined) dataToUpdate.address = address;
-    if (website !== undefined) dataToUpdate.website = website;
-    if (mobile !== undefined) dataToUpdate.mobile = mobile;
+    if (address !== undefined && typeof address === 'string' && address.trim() !== '') dataToUpdate.address = address.trim();
+    if (website !== undefined && typeof website === 'string' && website.trim() !== '') dataToUpdate.website = website.trim();
+    if (mobile !== undefined && typeof mobile === 'string' && mobile.trim() !== '') dataToUpdate.mobile = mobile.trim();
     if (smtpHost !== undefined) dataToUpdate.smtpHost = smtpHost ? smtpHost.trim() : null;
     if (bankAccountName !== undefined) dataToUpdate.bankAccountName = bankAccountName;
     if (bankAccountNo !== undefined) dataToUpdate.bankAccountNo = bankAccountNo;
@@ -3573,6 +3585,13 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
     ]));
     const planMap = new Map(plans.map((p: any) => [String(p._id || p.id), { ...p, id: String(p._id || p.id) }]));
 
+    const staffUserIds = [...new Set(payments.map((p: any) => p.verifiedByStaffId || p.l1Details?.submittedBy || p.l2Details?.reviewedBy).filter(Boolean))];
+    const staffUsers = staffUserIds.length > 0 ? await dynamicDb.User.find({ _id: { $in: staffUserIds } }).select('firstName lastName email name roleId').lean() : [];
+    const staffMap = new Map(staffUsers.map((u: any) => [
+      String(u._id || u.id),
+      `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || u.email
+    ]));
+
     const isFullAdmin = req.user!.role === 'SUPER_ADMIN' || req.user!.role === 'ADMIN';
     const hasViewSensitive = isFullAdmin;
 
@@ -3597,13 +3616,57 @@ export const getAdminPayments = async (req: AuthenticatedRequest, res: Response)
       const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
       const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
 
+      const resolvedStaffName = (p.verifiedByStaffId ? staffMap.get(String(p.verifiedByStaffId)) : null) || p.assignedByStaffName || p.assignedByAdminName || (p.l1Details?.submittedByName && !p.l1Details.submittedByName.includes('@') ? p.l1Details.submittedByName : null) || 'Alpha Admin';
+      const resolvedL2ReviewerName = (p.l2Details?.reviewedBy ? staffMap.get(String(p.l2Details.reviewedBy)) : null) || (p.l2Details?.reviewedByName && !p.l2Details.reviewedByName.includes('@') ? p.l2Details.reviewedByName : null) || 'L2 Authority';
+
+      let effectiveL1Details = p.l1Details;
+      if (!effectiveL1Details && (p.verifiedByStaffId || p.approvalStatus || p.remarks)) {
+        effectiveL1Details = {
+          submittedBy: p.verifiedByStaffId || null,
+          submittedByName: resolvedStaffName,
+          planId: p.planId,
+          planName: p.planId ? planMap.get(String(p.planId))?.name : 'Assigned Plan',
+          amount: p.amount,
+          validityDays: p.planValidityDays || 30,
+          discount: p.discountApplied || 0,
+          couponCode: p.couponCode || '',
+          paymentDate: p.paymentDate || p.createdAt,
+          serviceStartDate: p.serviceStartDate || p.paymentDate || p.createdAt,
+          remarks: p.remarks || 'Verified by Compliance Staff',
+          submittedAt: p.createdAt
+        };
+      } else if (effectiveL1Details && (!effectiveL1Details.submittedByName || effectiveL1Details.submittedByName.includes('@') || effectiveL1Details.submittedByName === 'Staff (Maker)')) {
+        effectiveL1Details = {
+          ...effectiveL1Details,
+          submittedByName: resolvedStaffName
+        };
+      }
+
+      let effectiveL2Details = p.l2Details;
+      if (!effectiveL2Details && p.approvalStatus === 'REJECTED') {
+        effectiveL2Details = {
+          action: 'REJECTED',
+          reviewedByName: resolvedL2ReviewerName,
+          rejectionReason: p.rejectionReason || p.l2Remarks || p.remarks || 'Declined by Approver at Level 2 clearance',
+          reviewedAt: p.updatedAt || p.paymentDate || p.createdAt
+        };
+      } else if (effectiveL2Details && (!effectiveL2Details.reviewedByName || effectiveL2Details.reviewedByName.includes('@'))) {
+        effectiveL2Details = {
+          ...effectiveL2Details,
+          reviewedByName: resolvedL2ReviewerName
+        };
+      }
+
       return {
         ...p,
         id: String(p._id || p.id),
         coupon: couponObj || null,
-        couponCode: couponObj?.code || null,
+        couponCode: couponObj?.code || p.couponCode || null,
         client: clientObj,
-        plan: p.planId ? planMap.get(String(p.planId)) : null
+        plan: p.planId ? planMap.get(String(p.planId)) : null,
+        assignedByStaffName: resolvedStaffName,
+        l1Details: effectiveL1Details,
+        l2Details: effectiveL2Details
       };
     });
 
@@ -3801,12 +3864,16 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const isAdmin = assigner?.roleId?.name === 'SUPER_ADMIN' || assigner?.roleId?.name === 'ADMIN';
     const assignerName = `${assigner?.firstName || ''} ${assigner?.lastName || ''}`.trim();
 
+    const effectiveBase = (customAmount !== undefined && customAmount !== null)
+      ? Number(customAmount)
+      : Number(plan.price);
+
     let discountAmount = 0;
     let appliedCouponId: any = null;
 
     if (couponCode) {
       const coupon: any = await dynamicDb.Coupon.findOne({
-        code: couponCode,
+        code: String(couponCode).trim().toUpperCase(),
         tenantId,
         status: 'ACTIVE'
       }).lean();
@@ -3825,55 +3892,81 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         return res.status(400).json({ success: false, message: 'Coupon is not applicable to this client.' });
       }
 
-      if (coupon.planId && String(coupon.planId) !== String(plan._id || plan.id)) {
-        return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
+      if (coupon.planId) {
+        let allowedPlans: string[] = [];
+        try {
+          allowedPlans = JSON.parse(String(coupon.planId));
+          if (!Array.isArray(allowedPlans)) allowedPlans = [String(coupon.planId)];
+        } catch {
+          allowedPlans = [String(coupon.planId)];
+        }
+        if (allowedPlans.length > 0 && !allowedPlans.includes(String(plan._id || plan.id))) {
+          return res.status(400).json({ success: false, message: 'Coupon is not applicable to this plan.' });
+        }
       }
 
-      if (coupon.categoryId && String(coupon.categoryId) !== String(plan.categoryId)) {
-        return res.status(400).json({ success: false, message: 'Coupon is not applicable to this category.' });
+      if (coupon.categoryId) {
+        let allowedCats: string[] = [];
+        try {
+          allowedCats = JSON.parse(String(coupon.categoryId));
+          if (!Array.isArray(allowedCats)) allowedCats = [String(coupon.categoryId)];
+        } catch {
+          allowedCats = [String(coupon.categoryId)];
+        }
+        if (allowedCats.length > 0 && !allowedCats.includes(String(plan.categoryId))) {
+          return res.status(400).json({ success: false, message: 'Coupon is not applicable to this category.' });
+        }
       }
 
-      if (coupon.minPurchaseValue && plan.price < coupon.minPurchaseValue) {
+      if (coupon.minPurchaseValue && effectiveBase < coupon.minPurchaseValue) {
         return res.status(400).json({ success: false, message: `Minimum purchase of ₹${coupon.minPurchaseValue} required.` });
       }
 
       if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
         discountAmount = coupon.discountValue;
       } else if (coupon.discountType === 'PERCENTAGE') {
-        discountAmount = (plan.price * coupon.discountValue) / 100;
+        discountAmount = (effectiveBase * coupon.discountValue) / 100;
         if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
           discountAmount = coupon.maxDiscountValue;
         }
       }
 
-      if (discountAmount > plan.price) discountAmount = plan.price;
+      if (discountAmount > effectiveBase) discountAmount = effectiveBase;
       appliedCouponId = coupon._id || coupon.id;
     }
 
     const isGstActive = tenantObj?.gstEnabled !== false;
     const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
 
-    const discountedBasePrice = plan.price - discountAmount;
-    let totalAmount = discountedBasePrice;
+    // GST Inclusive vs Exclusive discount handling
+    // When GST is inclusive, effectiveBase has 18% GST included, so pre-tax main value is effectiveBase / 1.18
+    const preTaxBase = (isGstActive && !isExclusive)
+      ? parseFloat((effectiveBase / 1.18).toFixed(2))
+      : effectiveBase;
 
-    if (isExclusive) {
-      totalAmount = discountedBasePrice * 1.18;
-    }
-
-    let finalBasePrice = discountedBasePrice;
-    let finalGstAmount = isExclusive ? (totalAmount - discountedBasePrice) : 0;
-    let finalTotalAmount = totalAmount;
-
-    if (customAmount !== undefined && customAmount !== null) {
-      finalTotalAmount = customAmount;
-      if (isExclusive) {
-        finalBasePrice = finalTotalAmount / 1.18;
-        finalGstAmount = finalTotalAmount - finalBasePrice;
-      } else {
-        finalBasePrice = finalTotalAmount;
-        finalGstAmount = 0;
+    // Recalculate discount strictly on pre-tax base value
+    if (couponCode && appliedCouponId) {
+      const coupon: any = await dynamicDb.Coupon.findById(appliedCouponId).lean();
+      if (coupon) {
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          discountAmount = (isGstActive && !isExclusive)
+            ? parseFloat((Number(coupon.discountValue || 0) / 1.18).toFixed(2))
+            : Number(coupon.discountValue || 0);
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          discountAmount = parseFloat(((preTaxBase * Number(coupon.discountValue || 0)) / 100).toFixed(2));
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > Number(coupon.maxDiscountValue)) {
+            discountAmount = Number(coupon.maxDiscountValue);
+          }
+        }
+        if (discountAmount > preTaxBase) discountAmount = preTaxBase;
       }
     }
+
+    const taxableBase = Math.max(0, parseFloat((preTaxBase - discountAmount).toFixed(2)));
+    const gstAmt = isGstActive ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+    const finalTotalAmount = parseFloat((taxableBase + gstAmt).toFixed(2));
+    const finalBasePrice = taxableBase;
+    const finalGstAmount = gstAmt;
 
     const adminRemark = remarks?.trim()
       ? `Assigned by Admin - ${remarks.trim()}`

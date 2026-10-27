@@ -11,7 +11,11 @@ const getCoupons = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
         const coupons = await db_1.default.Coupon.find({ tenantId }).lean();
-        return res.status(200).json({ success: true, data: coupons });
+        const mapped = (coupons || []).map((c) => ({
+            ...c,
+            id: String(c._id || c.id)
+        }));
+        return res.status(200).json({ success: true, data: mapped });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -23,10 +27,17 @@ const createCoupon = async (req, res) => {
     const { code, discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId, isPublic = false } = req.body;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant' });
+    const parsedDiscount = parseFloat(discountValue);
+    if (isNaN(parsedDiscount) || parsedDiscount <= 0) {
+        return res.status(400).json({ success: false, message: 'Discount value must be greater than 0' });
+    }
+    if (discountType === 'PERCENTAGE' && parsedDiscount > 100) {
+        return res.status(400).json({ success: false, message: 'Discount percentage cannot exceed 100%' });
+    }
     try {
         const coupon = await db_1.default.Coupon.create({
             tenantId,
-            code: code.toUpperCase(),
+            code: String(code).trim().toUpperCase(),
             discountType,
             discountValue: parseFloat(discountValue),
             percentageType: percentageType || null,
@@ -49,6 +60,16 @@ exports.createCoupon = createCoupon;
 const updateCoupon = async (req, res) => {
     const { id } = req.params;
     const { discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId } = req.body;
+    if (!id || id === 'undefined' || id === 'null') {
+        return res.status(400).json({ success: false, message: 'Invalid coupon ID' });
+    }
+    const parsedDiscount = parseFloat(discountValue);
+    if (isNaN(parsedDiscount) || parsedDiscount <= 0) {
+        return res.status(400).json({ success: false, message: 'Discount value must be greater than 0' });
+    }
+    if (discountType === 'PERCENTAGE' && parsedDiscount > 100) {
+        return res.status(400).json({ success: false, message: 'Discount percentage cannot exceed 100%' });
+    }
     try {
         const existing = await db_1.default.Coupon.findById(id);
         if (!existing)
@@ -79,6 +100,9 @@ const updateCoupon = async (req, res) => {
 exports.updateCoupon = updateCoupon;
 const toggleCouponVisibility = async (req, res) => {
     const { id } = req.params;
+    if (!id || id === 'undefined' || id === 'null') {
+        return res.status(400).json({ success: false, message: 'Invalid coupon ID' });
+    }
     try {
         const coupon = await db_1.default.Coupon.findById(id);
         if (!coupon)
@@ -93,6 +117,9 @@ const toggleCouponVisibility = async (req, res) => {
 exports.toggleCouponVisibility = toggleCouponVisibility;
 const toggleCouponStatus = async (req, res) => {
     const { id } = req.params;
+    if (!id || id === 'undefined' || id === 'null') {
+        return res.status(400).json({ success: false, message: 'Invalid coupon ID' });
+    }
     try {
         const existing = await db_1.default.Coupon.findById(id);
         if (!existing)
@@ -178,6 +205,7 @@ const applyCoupon = async (req, res) => {
             // Ensure discount doesn't exceed amount
             if (discountAmount > purchaseAmount)
                 discountAmount = purchaseAmount;
+            discountAmount = Math.round(discountAmount * 100) / 100;
             return res.status(200).json({ success: true, data: { ...coupon, calculatedDiscount: discountAmount } });
         }
         return res.status(200).json({ success: true, data: coupon });
@@ -188,7 +216,7 @@ const applyCoupon = async (req, res) => {
 };
 exports.applyCoupon = applyCoupon;
 const getClientCoupons = async (req, res) => {
-    const tenantId = req.headers['x-tenant-id'];
+    const tenantId = (req.user?.tenantId || req.headers['x-tenant-id']);
     const clientId = req.user?.id;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
@@ -203,7 +231,7 @@ const getClientCoupons = async (req, res) => {
             ]
         }).lean();
         // Optionally filter by clientId matching
-        const validCoupons = coupons.filter((c) => !c.clientId || c.clientId === clientId);
+        const validCoupons = coupons.filter((c) => !c.clientId || String(c.clientId) === String(clientId));
         return res.status(200).json({ success: true, data: validCoupons });
     }
     catch (error) {

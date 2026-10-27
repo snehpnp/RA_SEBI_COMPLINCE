@@ -4,6 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
+const jwtSecret_1 = require("./config/jwtSecret");
+// Synchronize global JWT and refresh secrets with secure machine-persistent secrets
+process.env.JWT_SECRET = (0, jwtSecret_1.getJwtSecret)();
+process.env.REFRESH_SECRET = (0, jwtSecret_1.getRefreshSecret)();
 process.on('uncaughtException', (err) => {
     console.error('UNCAUGHT EXCEPTION:', err);
 });

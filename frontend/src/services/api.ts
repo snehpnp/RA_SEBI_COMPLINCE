@@ -917,14 +917,12 @@ class ApiClient {
     }
 
     const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    a.remove();
+    const { executeSmartDownload } = await import('../utils/smartDownload');
+    await executeSmartDownload({
+      blob,
+      fileName: filename,
+      documentType: 'Invoice'
+    });
   }
 
   async updateClientProfile(data: any) {
@@ -1503,10 +1501,10 @@ class ApiClient {
     return this.request(`/admin/coupons/${id}/status`, { method: 'POST' });
   }
 
-  async applyCoupon(code: string) {
+  async applyCoupon(code: string, context?: { clientId?: string; planId?: string; categoryId?: string; amount?: number }) {
     return this.request('/client/coupons/apply', {
       method: 'POST',
-      body: JSON.stringify({ code })
+      body: JSON.stringify({ code: (code || '').trim().toUpperCase(), ...context })
     });
   }
 
@@ -1732,14 +1730,12 @@ class ApiClient {
     }
 
     const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
+    const { executeSmartDownload } = await import('../utils/smartDownload');
+    await executeSmartDownload({
+      blob,
+      fileName: filename,
+      documentType: 'Vault Document'
+    });
   }
 
   async downloadFileFromUrl(fileUrl?: string | null, fallbackFilename?: string) {
@@ -1784,16 +1780,12 @@ class ApiClient {
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-      }, 1000);
+      const { executeSmartDownload } = await import('../utils/smartDownload');
+      await executeSmartDownload({
+        blob,
+        fileName: filename,
+        documentType: filename
+      });
     } catch (err) {
       console.warn('Direct fetch download failed, attempting direct anchor download:', err);
       const fullUrl = fileUrl.startsWith('http')

@@ -109,7 +109,53 @@ function buildReportQuery(tenantId: any, query: any, defaultChannel?: string) {
  * Helper to enrich and format notification log records with full subscriber,
  * plan, and trade lifecycle details (Entry vs Exit, levels, profit/loss, sent message).
  */
-async function enrichDeliveryRecords(records: any[]) {
+
+const maskEmail = (email: string | null | undefined) => {
+  if (!email) return email;
+  const parts = email.split('@');
+  if (parts.length !== 2) return email;
+  const name = parts[0];
+  const maskedName = name.length > 2 ? name.substring(0, 2) + '*'.repeat(name.length - 2) : name + '*';
+  return `${maskedName}@${parts[1]}`;
+};
+
+const maskMobile = (mobile: string | null | undefined) => {
+  if (!mobile) return mobile;
+  const clean = String(mobile).trim();
+  const digits = clean.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    const last2 = digits.slice(-2);
+    const first2 = digits.slice(0, 2);
+    return `${first2}${'*'.repeat(digits.length - 4)}${last2}`;
+  }
+  return clean.length > 4 ? clean.substring(0, 2) + '*'.repeat(clean.length - 4) + clean.substring(clean.length - 2) : '**********';
+};
+
+const maskRecipient = (recipient: string | null | undefined) => {
+  if (!recipient) return recipient;
+  const r = String(recipient).trim();
+  if (r.includes('@')) return maskEmail(r);
+  if (/^\+?\d{10,14}$/.test(r)) return maskMobile(r);
+  return r;
+};
+
+async function checkHasViewSensitive(user: any): Promise<boolean> {
+  if (!user) return false;
+  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
+  if (Array.isArray(user.permissions) && user.permissions.includes('VIEW_SENSITIVE_DATA')) return true;
+  try {
+    const userRole = await dynamicDb.Role.findOne({ name: user.role }).lean();
+    if (!userRole) return false;
+    const perm = await dynamicDb.Permission.findOne({ code: 'VIEW_SENSITIVE_DATA' }).lean();
+    if (!perm) return false;
+    const rp = await dynamicDb.RolePermission.findOne({ roleId: userRole._id || userRole.id, permissionId: perm._id || perm.id }).lean();
+    return !!rp;
+  } catch {
+    return false;
+  }
+}
+
+async function enrichDeliveryRecords(records: any[], hasViewSensitive: boolean = true) {
   if (!records || records.length === 0) return [];
 
   const clientIdsToFind = new Set<string>();
@@ -211,7 +257,7 @@ async function enrichDeliveryRecords(records: any[]) {
       status: log.status,
       title: log.title,
       message: log.message,
-      recipient: log.recipient,
+      recipient: hasViewSensitive ? log.recipient : maskRecipient(log.recipient),
       stockSymbol: d.stockSymbol || d.symbol || matchedSignal?.symbol || 'N/A',
       segment: d.segment || matchedSignal?.segment || 'CASH',
       callType: d.callType || matchedSignal?.callType || 'BUY',
@@ -226,8 +272,8 @@ async function enrichDeliveryRecords(records: any[]) {
       closeStatus: d.closeStatus ?? matchedSignal?.closeStatus ?? (isExit ? 'CLOSED' : 'OPEN'),
       closeRemark: d.closeRemark ?? matchedSignal?.closeRemark ?? null,
       clientName,
-      clientEmail,
-      clientMobile,
+      clientEmail: hasViewSensitive ? clientEmail : maskEmail(clientEmail),
+      clientMobile: hasViewSensitive ? clientMobile : maskMobile(clientMobile),
       telegramChatId,
       planId: d.planId || matchedSignal?.planId || null,
       planName,
@@ -326,7 +372,8 @@ export const getMasterDeliveryReport = async (req: AuthenticatedRequest, res: Re
       }
     });
 
-    const enrichedData = await enrichDeliveryRecords(records);
+    const hasViewSensitive = await checkHasViewSensitive(req.user);
+    const enrichedData = await enrichDeliveryRecords(records, hasViewSensitive);
 
     return res.status(200).json({
       success: true,
@@ -368,7 +415,8 @@ export const getChannelDeliveryReport = async (req: AuthenticatedRequest, res: R
         .lean()
     ]);
 
-    const enrichedData = await enrichDeliveryRecords(records);
+    const hasViewSensitive = await checkHasViewSensitive(req.user);
+    const enrichedData = await enrichDeliveryRecords(records, hasViewSensitive);
 
     return res.status(200).json({
       success: true,

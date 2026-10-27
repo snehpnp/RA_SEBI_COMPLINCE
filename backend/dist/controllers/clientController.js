@@ -952,7 +952,7 @@ const handleRazorpayWebhook = async (req, res) => {
         let discountAmount = 0;
         let appliedCouponId = null;
         if (couponCode) {
-            const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
+            const coupon = await db_1.default.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
             const plan = await db_1.default.Plan.findById(planId).lean();
             if (coupon && plan && coupon.status === 'ACTIVE') {
                 if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
@@ -982,6 +982,7 @@ const handleRazorpayWebhook = async (req, res) => {
             planId,
             amount: parseFloat(amount) || 0,
             couponId: appliedCouponId,
+            couponCode: couponCode ? String(couponCode).trim().toUpperCase() : null,
             discountApplied: discountAmount || 0,
             paymentMode: paymentMode || 'ONLINE_RAZORPAY',
             transactionRef: transactionRef || 'TXN-' + Math.floor(100000 + Math.random() * 900000),
@@ -993,9 +994,15 @@ const handleRazorpayWebhook = async (req, res) => {
         if (payStatus === 'SUCCESS') {
             const plan = await db_1.default.Plan.findById(planId).lean();
             if (plan) {
+                let matchingPlanIds = [planId];
+                if (plan.categoryId) {
+                    const categoryPlans = await db_1.default.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+                    if (categoryPlans.length > 0)
+                        matchingPlanIds = categoryPlans.map((p) => p._id);
+                }
                 const existingSub = await db_1.default.Subscription.findOne({
                     clientId,
-                    planId,
+                    planId: { $in: matchingPlanIds },
                     status: 'ACTIVE',
                     endDate: { $gt: new Date() }
                 }).sort({ endDate: -1 }).lean();
@@ -1139,6 +1146,7 @@ const submitManualPayment = async (req, res) => {
             tenantState: tenantObj?.state || null,
             planValidityDays: planDoc ? (planDoc.durationMonths * 30) : null,
             couponId: appliedCouponId,
+            couponCode: couponCode ? String(couponCode).trim().toUpperCase() : null,
             discountApplied: discountApplied > 0 ? parseFloat(discountApplied.toFixed(2)) : 0,
             gstEnabled: tenantObj?.gstEnabled !== false,
             gstCalculationType: tenantObj?.gstCalculationType || 'EXCLUSIVE'
@@ -1156,55 +1164,107 @@ const submitManualPayment = async (req, res) => {
 exports.submitManualPayment = submitManualPayment;
 const verifyManualPayment = async (req, res) => {
     const { paymentId, status, remarks, receivedAmount, approvalMode, // 'FULL' | 'PRORATED' | 'DISCOUNT'
-    customValidityDays, discountApplied, transactionRef, paymentDate, serviceStartDate } = req.body;
+    customValidityDays, discountApplied, couponCode, transactionRef, paymentDate, serviceStartDate } = req.body;
     try {
         const payment = await db_1.default.Payment.findById(paymentId).lean();
         if (!payment)
             return res.status(404).json({ success: false, message: 'Payment record not found' });
         const tenantId = req.user.tenantId;
-        let effectiveAmount = Number(payment.amount || 0);
-        let effectiveValidityDays = Number(payment.planValidityDays || 30);
-        let effectiveDiscount = Number(payment.discountApplied || payment.discount || 0);
-        let effectiveRemarks = remarks || 'Verified by Compliance Staff';
         const plan = payment.planId ? await db_1.default.Plan.findById(payment.planId).lean() : null;
         const defaultValidityDays = (plan?.durationMonths ? plan.durationMonths * 30 : 30);
-        const fullPlanPrice = Number(plan?.amount || plan?.price || payment.amount || 0);
-        if (status === 'SUCCESS') {
-            if (receivedAmount !== undefined && fullPlanPrice > 0 && Number(receivedAmount) > fullPlanPrice) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Received amount (₹${receivedAmount}) cannot be greater than the plan price of ₹${fullPlanPrice}.`
-                });
-            }
-            if (approvalMode === 'PRORATED') {
-                effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPrice || Number(receivedAmount)) : effectiveAmount;
-                effectiveValidityDays = customValidityDays !== undefined && Number(customValidityDays) > 0
-                    ? Number(customValidityDays)
-                    : Math.max(1, Math.round((effectiveAmount / (fullPlanPrice || effectiveAmount)) * defaultValidityDays));
-                effectiveDiscount = 0;
-                effectiveRemarks = remarks || `Prorated service activated for ${effectiveValidityDays} days based on received amount ₹${effectiveAmount}.`;
-            }
-            else if (approvalMode === 'DISCOUNT') {
-                effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPrice || Number(receivedAmount)) : effectiveAmount;
-                effectiveValidityDays = defaultValidityDays;
-                effectiveDiscount = discountApplied !== undefined
-                    ? Number(discountApplied)
-                    : Math.max(0, fullPlanPrice - effectiveAmount);
-                effectiveRemarks = remarks || `Special discount applied: ₹${effectiveDiscount}. Full ${defaultValidityDays} days service activated for ₹${effectiveAmount}.`;
-            }
-            else {
-                // FULL match / standard approval
-                effectiveAmount = fullPlanPrice > 0 ? fullPlanPrice : (receivedAmount !== undefined ? Number(receivedAmount) : effectiveAmount);
-                effectiveValidityDays = defaultValidityDays;
-                effectiveDiscount = 0;
-                effectiveRemarks = remarks || 'Verified by Compliance Staff';
-            }
-        }
+        const planBasePrice = Number(plan?.amount || plan?.price || payment.amount || 0);
         const tenantDoc = await db_1.default.Tenant.findById(tenantId).lean();
         const isTenantGst = tenantDoc?.gstEnabled !== false && Boolean(tenantDoc?.gst && tenantDoc.gst.trim().length >= 15);
         const resolvedGstEnabled = payment.gstEnabled !== undefined && payment.gstEnabled !== null
             ? Boolean(payment.gstEnabled)
             : (String(payment.transactionRef || '').toLowerCase().includes('gst_disable') ? false : isTenantGst);
+        const resolvedGstCalculationType = payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE';
+        const isExcl = resolvedGstEnabled && resolvedGstCalculationType === 'EXCLUSIVE';
+        const fullPlanPriceWithGst = isExcl ? parseFloat((planBasePrice * 1.18).toFixed(2)) : planBasePrice;
+        // Resolve coupon: if explicit couponCode passed in body:
+        // - Non-empty string: look up coupon and calculate discount on planBasePrice
+        // - Empty string or null: admin explicitly removed coupon -> clear coupon and discount
+        // - undefined: preserve existing payment coupon
+        let finalCouponId = payment.couponId || null;
+        let finalCouponCode = payment.couponCode || null;
+        let resolvedCouponDiscount = 0;
+        let activeCouponCode = '';
+        if (couponCode !== undefined && couponCode !== null) {
+            activeCouponCode = String(couponCode).trim().toUpperCase();
+        }
+        else if (couponCode === undefined && payment.couponCode) {
+            activeCouponCode = String(payment.couponCode).trim().toUpperCase();
+        }
+        if (activeCouponCode) {
+            const foundCoupon = await db_1.default.Coupon.findOne({
+                code: activeCouponCode,
+                tenantId,
+                status: 'ACTIVE'
+            }).lean();
+            if (foundCoupon) {
+                finalCouponId = foundCoupon._id || foundCoupon.id;
+                finalCouponCode = foundCoupon.code;
+                if (foundCoupon.discountType === 'PERCENTAGE') {
+                    resolvedCouponDiscount = parseFloat(((planBasePrice * Number(foundCoupon.discountValue || 0)) / 100).toFixed(2));
+                    if (foundCoupon.percentageType === 'CAPPED' && foundCoupon.maxDiscountValue && resolvedCouponDiscount > Number(foundCoupon.maxDiscountValue)) {
+                        resolvedCouponDiscount = Number(foundCoupon.maxDiscountValue);
+                    }
+                }
+                else {
+                    resolvedCouponDiscount = Number(foundCoupon.discountValue || 0);
+                }
+            }
+            else {
+                // Fallback to existing payment discount if coupon code matches payment
+                finalCouponId = payment.couponId || null;
+                finalCouponCode = activeCouponCode;
+                resolvedCouponDiscount = Number(payment.discountApplied || payment.discount || 0);
+            }
+        }
+        else {
+            // Explicitly removed or no coupon
+            finalCouponId = null;
+            finalCouponCode = null;
+            resolvedCouponDiscount = 0;
+        }
+        const discountedTaxableBase = Math.max(0, parseFloat((planBasePrice - resolvedCouponDiscount).toFixed(2)));
+        const calculatedGst = isExcl ? parseFloat((discountedTaxableBase * 0.18).toFixed(2)) : 0;
+        const expectedCalculatedTotal = parseFloat((discountedTaxableBase + calculatedGst).toFixed(2));
+        let effectiveAmount = Number(payment.amount || 0);
+        let effectiveValidityDays = Number(payment.planValidityDays || defaultValidityDays);
+        let effectiveDiscount = 0;
+        let effectiveRemarks = remarks || 'Verified by Compliance Staff';
+        if (status === 'SUCCESS') {
+            if (receivedAmount !== undefined && fullPlanPriceWithGst > 0 && Number(receivedAmount) > (fullPlanPriceWithGst + 2)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Received amount (₹${receivedAmount}) cannot be greater than the plan standard price of ₹${fullPlanPriceWithGst}.`
+                });
+            }
+            if (approvalMode === 'PRORATED') {
+                effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPriceWithGst || Number(receivedAmount)) : effectiveAmount;
+                effectiveValidityDays = customValidityDays !== undefined && Number(customValidityDays) > 0
+                    ? Number(customValidityDays)
+                    : Math.max(1, Math.round((effectiveAmount / (fullPlanPriceWithGst || effectiveAmount)) * defaultValidityDays));
+                effectiveDiscount = 0;
+                effectiveRemarks = remarks || `Prorated service activated for ${effectiveValidityDays} days based on received amount ₹${effectiveAmount}.`;
+            }
+            else if (approvalMode === 'DISCOUNT') {
+                effectiveAmount = receivedAmount !== undefined ? Math.min(Number(receivedAmount), fullPlanPriceWithGst || Number(receivedAmount)) : effectiveAmount;
+                effectiveValidityDays = defaultValidityDays;
+                effectiveDiscount = discountApplied !== undefined
+                    ? Number(discountApplied)
+                    : Math.max(0, parseFloat((fullPlanPriceWithGst - effectiveAmount).toFixed(2)));
+                effectiveRemarks = remarks || `Special discount applied: ₹${effectiveDiscount}. Full ${defaultValidityDays} days service activated for ₹${effectiveAmount}.`;
+            }
+            else {
+                // FULL match / standard approval
+                effectiveAmount = receivedAmount !== undefined ? Number(receivedAmount) : expectedCalculatedTotal;
+                effectiveValidityDays = defaultValidityDays;
+                effectiveDiscount = resolvedCouponDiscount;
+                effectiveRemarks = remarks || (finalCouponCode ? `Verified with coupon ${finalCouponCode} applied.` : 'Verified by Compliance Staff');
+            }
+        }
         const pDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
         const sDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : pDate);
         // Validate: serviceStartDate >= paymentDate
@@ -1213,9 +1273,7 @@ const verifyManualPayment = async (req, res) => {
         if (status === 'SUCCESS' && sDateOnly < pDateOnly) {
             return res.status(400).json({ success: false, message: 'Validation Error: Service start date cannot be earlier than payment date.' });
         }
-        const resolvedGstCalculationType = payment.gstCalculationType || tenantDoc?.gstCalculationType || 'EXCLUSIVE';
         if (status === 'SUCCESS') {
-            const isExcl = resolvedGstCalculationType === 'EXCLUSIVE';
             const effectiveBase = isExcl ? (effectiveAmount / 1.18) : effectiveAmount;
             if (effectiveBase > 0) {
                 const feeSummary = await (0, feeCapHelper_1.getClientFyFeeSummary)(payment.clientId, tenantId, db_1.default);
@@ -1239,6 +1297,8 @@ const verifyManualPayment = async (req, res) => {
             verifiedByStaffId: req.user.id,
             amount: effectiveAmount,
             planValidityDays: effectiveValidityDays,
+            couponId: finalCouponId,
+            couponCode: finalCouponCode,
             discountApplied: effectiveDiscount,
             discount: effectiveDiscount,
             gstEnabled: resolvedGstEnabled,
@@ -1293,10 +1353,16 @@ const verifyManualPayment = async (req, res) => {
                         });
                     }
                 }
-                // Check if there is an existing active subscription for this client and plan (sequential queueing)
+                // Check if there is an existing active subscription for this client and category/plan (sequential queueing)
+                let matchingPlanIds = [plan._id || plan.id];
+                if (plan.categoryId) {
+                    const categoryPlans = await db_1.default.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+                    if (categoryPlans.length > 0)
+                        matchingPlanIds = categoryPlans.map((p) => p._id);
+                }
                 const existingSub = await db_1.default.Subscription.findOne({
                     clientId: payment.clientId,
-                    planId: plan._id || plan.id,
+                    planId: { $in: matchingPlanIds },
                     status: 'ACTIVE',
                     endDate: { $gt: new Date() }
                 }).sort({ endDate: -1 }).lean();
@@ -1804,7 +1870,7 @@ const initiateRazorpayPayment = async (req, res) => {
         let finalPrice = plan.amount || plan.price;
         let appliedCouponId = null;
         if (couponCode) {
-            const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
+            const coupon = await db_1.default.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
             if (coupon && coupon.status === 'ACTIVE') {
                 if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     finalPrice = Math.max(0, finalPrice - coupon.discountValue);
@@ -1887,7 +1953,7 @@ const verifyRazorpayPayment = async (req, res) => {
         let discountAmount = 0;
         let appliedCouponId = null;
         if (couponCode) {
-            const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
+            const coupon = await db_1.default.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
             if (coupon && coupon.status === 'ACTIVE') {
                 if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     discountAmount = coupon.discountValue;
@@ -1934,9 +2000,15 @@ const verifyRazorpayPayment = async (req, res) => {
             tenantState: tenantObj?.state || null,
             paymentDate: new Date()
         });
+        let matchingPlanIds = [plan._id || plan.id];
+        if (plan.categoryId) {
+            const categoryPlans = await db_1.default.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+            if (categoryPlans.length > 0)
+                matchingPlanIds = categoryPlans.map((p) => p._id);
+        }
         const existingSub = await db_1.default.Subscription.findOne({
             clientId: client._id || client.id,
-            planId: plan._id || plan.id,
+            planId: { $in: matchingPlanIds },
             status: 'ACTIVE',
             endDate: { $gt: new Date() }
         }).sort({ endDate: -1 }).lean();
@@ -2000,7 +2072,7 @@ const initiateCCAvenuePayment = async (req, res) => {
         let finalPrice = plan.amount || plan.price;
         let appliedCouponId = null;
         if (couponCode) {
-            const coupon = await db_1.default.Coupon.findOne({ code: couponCode, tenantId }).lean();
+            const coupon = await db_1.default.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
             if (coupon && coupon.status === 'ACTIVE') {
                 if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
                     finalPrice = Math.max(0, finalPrice - coupon.discountValue);

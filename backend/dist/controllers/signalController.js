@@ -42,7 +42,7 @@ const createSignal = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
         const userId = req.user.id;
-        const { segment, planIds, callType, tradeDuration, stockId, expiryDate, strikePrice, optionType, entryPrice, entryType, suggestedQuantity, target1, target2, target3, stoploss, description } = req.body;
+        const { segment, categoryIds, planCategoryIds, planIds, callType, tradeDuration, stockId, expiryDate, strikePrice, optionType, entryPrice, entryType, suggestedQuantity, target1, target2, target3, stoploss, description } = req.body;
         let reportUrl = null;
         if (req.file) {
             reportUrl = `/uploads/research/${req.file.filename}`;
@@ -60,22 +60,78 @@ const createSignal = async (req, res) => {
                 return res.status(403).json({ success: false, message: 'You do not have permission to create signals.' });
             }
         }
-        let parsedPlanIds = [];
+        let rawTargetIds = [];
+        const sourceParam = categoryIds || planCategoryIds || planIds;
         try {
-            parsedPlanIds = JSON.parse(planIds);
+            rawTargetIds = JSON.parse(sourceParam);
         }
         catch (e) {
-            if (typeof planIds === 'string')
-                parsedPlanIds = [planIds];
+            if (typeof sourceParam === 'string')
+                rawTargetIds = [sourceParam];
         }
-        if (!parsedPlanIds || parsedPlanIds.length === 0) {
-            return res.status(400).json({ success: false, message: 'Please select at least one plan.' });
+        if (!Array.isArray(rawTargetIds))
+            rawTargetIds = [rawTargetIds].filter(Boolean);
+        rawTargetIds = [...new Set(rawTargetIds.map((id) => (id ? (id._id?.toString() || id.id || id.toString()) : null)).filter(Boolean))];
+        if (!rawTargetIds || rawTargetIds.length === 0) {
+            return res.status(400).json({ success: false, message: 'Please select at least one plan category.' });
         }
+        // Match which IDs are categories vs plans
+        const validObjectIds = rawTargetIds.filter((id) => mongoose_1.default.Types.ObjectId.isValid(id)).map((id) => new mongoose_1.default.Types.ObjectId(id));
+        const matchedCategories = await db_1.default.PlanCategory.find({
+            $or: [
+                { _id: { $in: validObjectIds } },
+                { id: { $in: rawTargetIds } }
+            ]
+        }).lean();
+        const categoryMap = new Map();
+        matchedCategories.forEach((c) => {
+            categoryMap.set(c._id.toString(), c);
+            if (c.id)
+                categoryMap.set(c.id.toString(), c);
+        });
         const createdSignals = [];
-        for (const pId of parsedPlanIds) {
+        const allPlanIdsToNotify = [];
+        const allCategoryIdsToNotify = [];
+        for (const tId of rawTargetIds) {
+            let catId = null;
+            let pId = null;
+            if (categoryMap.has(tId)) {
+                const matchedCat = categoryMap.get(tId);
+                catId = matchedCat._id;
+                allCategoryIdsToNotify.push(catId.toString());
+                const plansUnderCategory = await db_1.default.Plan.find({
+                    $or: [
+                        { categoryId: catId },
+                        { categoryId: catId.toString() }
+                    ]
+                }).select('_id id').lean();
+                if (plansUnderCategory.length > 0) {
+                    pId = plansUnderCategory[0]._id;
+                    plansUnderCategory.forEach((p) => {
+                        allPlanIdsToNotify.push(p._id.toString());
+                        if (p.id)
+                            allPlanIdsToNotify.push(p.id.toString());
+                    });
+                }
+            }
+            else {
+                const planDoc = await db_1.default.Plan.findById(tId).lean() || await db_1.default.Plan.findOne({ id: tId }).lean();
+                if (planDoc) {
+                    pId = planDoc._id || planDoc.id;
+                    catId = planDoc.categoryId || null;
+                    allPlanIdsToNotify.push(pId.toString());
+                    if (catId)
+                        allCategoryIdsToNotify.push(catId.toString());
+                }
+                else {
+                    pId = tId;
+                    allPlanIdsToNotify.push(tId.toString());
+                }
+            }
             const newSignal = await db_1.default.Signal.create({
                 tenantId,
                 segment,
+                categoryId: catId,
                 planId: pId,
                 callType,
                 tradeDuration,
@@ -108,7 +164,8 @@ const createSignal = async (req, res) => {
             const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
             await (0, notificationService_1.broadcastSignalNotification)({
                 tenantId,
-                planIds: parsedPlanIds,
+                planIds: allPlanIdsToNotify.length > 0 ? allPlanIdsToNotify : rawTargetIds,
+                categoryIds: allCategoryIdsToNotify,
                 title: `🚀 New Trade Alert: ${stockSymbol} (${segment})`,
                 message: `New ${callType} recommendation for ${stockSymbol} at ₹${entryPrice}. Target: ${target1}${target2 ? `/${target2}` : ''}, SL: ₹${stoploss}. View: ${tradeDuration || 'INTRADAY'}.`,
                 type: 'signal',
@@ -225,10 +282,38 @@ const listSignals = async (req, res) => {
             const showLockedTradePotential = tenantDoc?.showLockedTradePotential !== false;
             let unlockedSignals = [];
             const subscribedPlanIds = allSubs.map((s) => s.planId.toString());
+            const validSubPlanObjectIds = subscribedPlanIds.filter((id) => mongoose_1.default.Types.ObjectId.isValid(id)).map((id) => new mongoose_1.default.Types.ObjectId(id));
+            const subscribedPlans = await db_1.default.Plan.find({
+                $or: [
+                    ...(validSubPlanObjectIds.length > 0 ? [{ _id: { $in: validSubPlanObjectIds } }] : []),
+                    { id: { $in: subscribedPlanIds } }
+                ]
+            }).select('categoryId').lean();
+            const planCategoryMap = new Map();
+            const subscribedCategoryIds = [];
+            subscribedPlans.forEach((p) => {
+                if (p.categoryId) {
+                    const cId = p.categoryId.toString();
+                    subscribedCategoryIds.push(cId);
+                    planCategoryMap.set(p._id.toString(), cId);
+                    if (p.id)
+                        planCategoryMap.set(p.id.toString(), cId);
+                }
+            });
+            const validSubCatObjectIds = subscribedCategoryIds.filter((id) => mongoose_1.default.Types.ObjectId.isValid(id)).map((id) => new mongoose_1.default.Types.ObjectId(id));
             if (allSubs.length > 0) {
                 const subConditions = allSubs.map((sub) => {
+                    const subPlanIdStr = sub.planId.toString();
+                    const subCatId = planCategoryMap.get(subPlanIdStr);
+                    const orConditions = [{ planId: sub.planId }];
+                    if (subCatId && mongoose_1.default.Types.ObjectId.isValid(subCatId)) {
+                        orConditions.push({ categoryId: new mongoose_1.default.Types.ObjectId(subCatId) });
+                    }
+                    else if (subCatId) {
+                        orConditions.push({ categoryId: subCatId });
+                    }
                     const conditions = {
-                        planId: sub.planId,
+                        $or: orConditions,
                         createdAt: { $gte: sub.startDate }
                     };
                     if (sub.endDate) {
@@ -254,8 +339,15 @@ const listSignals = async (req, res) => {
                     tenantId,
                     status: 'OPEN'
                 };
+                const excludeFilters = [];
                 if (subscribedPlanIds.length > 0) {
-                    lockedWhere.planId = { $nin: subscribedPlanIds };
+                    excludeFilters.push({ planId: { $nin: [...validSubPlanObjectIds, ...subscribedPlanIds] } });
+                }
+                if (subscribedCategoryIds.length > 0) {
+                    excludeFilters.push({ categoryId: { $nin: [...validSubCatObjectIds, ...subscribedCategoryIds] } });
+                }
+                if (excludeFilters.length > 0) {
+                    lockedWhere.$and = excludeFilters;
                 }
                 lockedSignals = await db_1.default.Signal.find(lockedWhere)
                     .sort({ createdAt: -1 })
@@ -332,7 +424,7 @@ const listSignals = async (req, res) => {
                     symbol: matchedStock?.symbol || s.symbol || '',
                     stockName: matchedStock?.name || s.stockName || '',
                     planId: pIdStr || (s.planId ? s.planId.toString() : ''),
-                    planName: (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
+                    planName: (s.categoryId && planMap.get(s.categoryId.toString())) || (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
                     createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
                     ...potential
                 };
@@ -358,7 +450,7 @@ const listSignals = async (req, res) => {
                     callType: s.callType || 'BUY',
                     tradeDuration: s.tradeDuration || 'INTRADAY',
                     planId: pIdStr || (s.planId ? s.planId.toString() : ''),
-                    planName: (pIdStr && planMap.get(pIdStr)) || 'Premium Service Plan',
+                    planName: (s.categoryId && planMap.get(s.categoryId.toString())) || (pIdStr && planMap.get(pIdStr)) || 'Premium Service Plan',
                     entryPrice: null,
                     target1: null,
                     target2: null,
@@ -406,8 +498,10 @@ const listSignals = async (req, res) => {
             .sort({ createdAt: -1 })
             .lean();
         const planIds = signals.map((s) => s.planId).filter(Boolean);
-        const plans = await db_1.default.Plan.find({ _id: { $in: planIds } }).lean();
-        const categories = await db_1.default.PlanCategory.find({ _id: { $in: planIds } }).lean();
+        const categoryIds = signals.map((s) => s.categoryId).filter(Boolean);
+        const allLookupIds = [...new Set([...planIds, ...categoryIds])];
+        const plans = await db_1.default.Plan.find({ _id: { $in: allLookupIds } }).lean();
+        const categories = await db_1.default.PlanCategory.find({ _id: { $in: allLookupIds } }).lean();
         const map = new Map();
         plans.forEach((p) => map.set(p._id.toString(), p.name));
         categories.forEach((c) => map.set(c._id.toString(), c.name));
@@ -447,7 +541,7 @@ const listSignals = async (req, res) => {
                 stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
                 symbol: matchedStock?.symbol || '',
                 stockName: matchedStock?.name || '',
-                planName: (pIdStr && map.get(pIdStr)) || pIdStr || '',
+                planName: (s.categoryId && map.get(s.categoryId.toString())) || (pIdStr && map.get(pIdStr)) || pIdStr || '',
                 createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
                 ...potential
             };

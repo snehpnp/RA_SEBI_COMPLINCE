@@ -38,6 +38,7 @@ import { PaginatedList } from '../../components/ui/PaginatedList';
 import DataTable from 'react-data-table-component';
 import dynamic from 'next/dynamic';
 import { generatePeriodicReport } from '@/utils/generatePeriodicReport';
+import { executeSmartDownload } from '@/utils/smartDownload';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, Cell, XAxis, YAxis, Tooltip } from 'recharts';
 import CouponsManager from '../../components/CouponsManager';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
@@ -129,7 +130,6 @@ const NAV_CONFIG: NavModule[] = [
       { code: 'CREATE_CLIENTS', label: 'Register Clients', desc: 'Allows registering/adding new clients in the portal' },
       { code: 'EDIT_CLIENTS', label: 'Edit Clients', desc: 'Allows modifying existing client profiles and records' },
       { code: 'DELETE_CLIENTS', label: 'Delete Clients', desc: 'Allows soft-deleting and deactivating client profiles' },
-      { code: 'VIEW_SENSITIVE_DATA', label: 'View Sensitive Data (Unmasked)', desc: 'Allows viewing original Email, Mobile, PAN, and Aadhaar without masking' },
       { code: 'EXPORT_DATA', label: 'Export Data (CSV/PDF)', desc: 'Allows exporting client details, staff directories, and compliance reports to CSV' },
     ],
   },
@@ -162,6 +162,14 @@ const NAV_CONFIG: NavModule[] = [
     ],
   },
   {
+    tab: 'coupons',
+    label: 'Coupons',
+    icon: 'Tag',
+    accessKey: 'ACCESS_PLANS',
+    moduleLabel: 'Coupons Management',
+    moduleDesc: 'Create and manage discount promo coupons for client subscriptions',
+  },
+  {
     tab: 'research',
     label: 'Signal Management',
     icon: 'TrendingUp',
@@ -178,7 +186,7 @@ const NAV_CONFIG: NavModule[] = [
     tab: 'delivery-reports',
     label: 'Delivery Reports',
     icon: 'Send',
-    accessKey: 'ACCESS_RESEARCH',
+    accessKey: 'ACCESS_DELIVERY_REPORTS',
     moduleLabel: 'Delivery Reports Desk',
     moduleDesc: 'Audit multi-channel delivery logs across Telegram, SMS, and Client Panel alerts',
     subPermissions: [
@@ -321,7 +329,7 @@ const NAV_CONFIG: NavModule[] = [
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video, Send, Smartphone, Monitor, ShieldAlert
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, FolderArchive, Folder, Video, Send, Smartphone, Monitor, ShieldAlert, Tag
 };
 
 // =============================================================================
@@ -456,7 +464,7 @@ function getDisplayStatus(sub: any): string {
 }
 
 
-const downloadCSV = (data: any[], filename: string) => {
+const downloadCSV = async (data: any[], filename: string) => {
   if (!data || !data.length) {
     toast("No data available to export.");
     return;
@@ -474,14 +482,12 @@ const downloadCSV = (data: any[], filename: string) => {
     csvRows.push(values.join(','));
   }
   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.setAttribute('hidden', '');
-  a.setAttribute('href', url);
-  a.setAttribute('download', filename);
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const resolvedFileName = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+  await executeSmartDownload({
+    blob,
+    fileName: resolvedFileName,
+    documentType: `${filename.replace(/_/g, ' ')} Export`
+  });
 };
 
 const tableCustomStyles = {
@@ -1083,22 +1089,26 @@ function AdminDashboardContent() {
   const getPlanAmountWithCoupon = (basePrice: number, durationMonths: number, couponCode: string) => {
     let finalBase = basePrice;
     if (couponCode) {
-      const coupon = coupons.find((c: any) => c.code === couponCode && c.status === 'ACTIVE');
+      const cleanCode = couponCode.trim().toUpperCase();
+      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
       if (coupon) {
+        if (coupon.minPurchaseValue && basePrice < Number(coupon.minPurchaseValue)) {
+          return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+        }
         let disc = 0;
-        if (coupon.discountType === 'FLAT') {
-          disc = coupon.discountValue;
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          disc = Number(coupon.discountValue || 0);
         } else if (coupon.discountType === 'PERCENTAGE') {
-          disc = (basePrice * coupon.discountValue) / 100;
-          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > coupon.maxDiscountValue) {
-            disc = coupon.maxDiscountValue;
+          disc = (basePrice * Number(coupon.discountValue || 0)) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > Number(coupon.maxDiscountValue)) {
+            disc = Number(coupon.maxDiscountValue);
           }
         }
         if (disc > basePrice) disc = basePrice;
         finalBase = basePrice - disc;
       }
     }
-    return gstCalculationType === 'EXCLUSIVE' ? Math.round(finalBase * 1.18) : finalBase;
+    return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? finalBase : Math.round(finalBase * 1.18);
   };
 
   // Reusable confirmation state
@@ -1149,19 +1159,34 @@ function AdminDashboardContent() {
     const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
     if (!selectedPlan) return;
 
-    let basePrice = selectedPlan.price;
-    let finalPrice = (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+    const enteredTotal = assignCustomAmount.trim() ? Number(assignCustomAmount) : selectedPlan.price;
+    const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+    const preTaxBase = (gstEnabled && !isExclusiveGst) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal;
 
-    if (assignCustomAmount.trim()) {
-      finalPrice = Number(assignCustomAmount);
-      if (gstEnabled && gstCalculationType === 'EXCLUSIVE') {
-        basePrice = Math.round(finalPrice / 1.18);
-      } else {
-        basePrice = finalPrice;
+    let discOnBase = 0;
+    if (assignCouponCode.trim()) {
+      const cleanCode = assignCouponCode.trim().toUpperCase();
+      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      if (matchedCoupon) {
+        if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+          discOnBase = (gstEnabled && !isExclusiveGst)
+            ? parseFloat((Number(matchedCoupon.discountValue || 0) / 1.18).toFixed(2))
+            : Number(matchedCoupon.discountValue || 0);
+        } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+          discOnBase = parseFloat(((preTaxBase * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+          if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && discOnBase > Number(matchedCoupon.maxDiscountValue)) {
+            discOnBase = Number(matchedCoupon.maxDiscountValue);
+          }
+        }
+        if (discOnBase > preTaxBase) discOnBase = preTaxBase;
       }
     }
 
-    const gstAmount = gstEnabled ? (finalPrice - basePrice) : 0;
+    const taxableBase = Math.max(0, parseFloat((preTaxBase - discOnBase).toFixed(2)));
+    const gstAmt = gstEnabled ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+    let finalPrice = parseFloat((taxableBase + gstAmt).toFixed(2));
+    let basePrice = taxableBase;
+    const gstAmount = gstAmt;
 
     const messageNode = (
       <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
@@ -1206,7 +1231,7 @@ function AdminDashboardContent() {
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
           if (assignCustomDays.trim()) payload.customDays = Number(assignCustomDays);
-          if (assignCouponCode.trim()) payload.couponCode = assignCouponCode;
+          if (assignCouponCode.trim()) payload.couponCode = assignCouponCode.trim().toUpperCase();
 
           const res = await api.assignPlanByAdmin(assignPlanClient.id, payload);
           if (res.success) {
@@ -1400,8 +1425,54 @@ function AdminDashboardContent() {
   const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications' | 'l2_pending'>('all');
   const [selectedScreenshotModal, setSelectedScreenshotModal] = useState<{ url: string; clientName: string; planName: string; utr: string; amount: number } | null>(null);
 
+  // Helper to determine if a coupon is applicable for a specific plan and category
+  const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
+    if (!c || c.status !== 'ACTIVE') return false;
+
+    if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
+      if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
+    }
+
+    if (c.planId) {
+      let pIds: string[] = [];
+      if (Array.isArray(c.planId)) {
+        pIds = c.planId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.planId === 'string' && c.planId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.planId);
+          pIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.planId)];
+        } catch {
+          pIds = [String(c.planId)];
+        }
+      } else {
+        pIds = [String(c.planId?._id || c.planId?.id || c.planId)];
+      }
+      if (targetPlanId && pIds.length > 0 && !pIds.includes(String(targetPlanId))) return false;
+    }
+
+    if (c.categoryId) {
+      let catIds: string[] = [];
+      if (Array.isArray(c.categoryId)) {
+        catIds = c.categoryId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.categoryId === 'string' && c.categoryId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.categoryId);
+          catIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.categoryId)];
+        } catch {
+          catIds = [String(c.categoryId)];
+        }
+      } else {
+        catIds = [String(c.categoryId?._id || c.categoryId?.id || c.categoryId)];
+      }
+      if (targetCategoryId && catIds.length > 0 && !catIds.includes(String(targetCategoryId))) return false;
+    }
+
+    return true;
+  };
+
   // Smart Verification Modal for QR / Manual Payments
   const [selectedVerifyPayment, setSelectedVerifyPayment] = useState<any | null>(null);
+  const [verifyCouponCode, setVerifyCouponCode] = useState<string>('');
   const [verifyReceivedAmount, setVerifyReceivedAmount] = useState<number>(0);
   const [verifyApprovalMode, setVerifyApprovalMode] = useState<'FULL' | 'PRORATED' | 'DISCOUNT'>('FULL');
   const [verifyCustomDays, setVerifyCustomDays] = useState<number>(30);
@@ -1806,6 +1877,10 @@ function AdminDashboardContent() {
               if (t.fileDownloadPolicy !== undefined) setFileDownloadPolicy(t.fileDownloadPolicy);
               if (t.fileDownloadNotificationEmail !== undefined) setFileDownloadNotificationEmail(t.fileDownloadNotificationEmail || '');
               if (t.maxEmailFileSizeMb !== undefined) setMaxEmailFileSizeMb(Number(t.maxEmailFileSizeMb) || 10);
+              if (typeof window !== 'undefined') {
+                if (t.fileDownloadPolicy !== undefined) localStorage.setItem('fileDownloadPolicy', t.fileDownloadPolicy);
+                localStorage.setItem('tenantDetails', JSON.stringify(t));
+              }
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
               if (t.smtpPort) setSmtpPort(t.smtpPort.toString());
@@ -1950,11 +2025,12 @@ function AdminDashboardContent() {
         fetchResearcherDscPermissions();
       }
 
-      if (tab === 'clients') {
+      if (tab === 'clients' || tab === 'coupons') {
         api.getAdminClients().then(res => { if (res.success) setClients(res.data); }).catch(() => { });
         api.getAdminDeletedClients().then(res => { if (res.success) setDeletedClients(res.data); }).catch(() => { });
         api.getAdminCategories().then(res => { if (res.success) setCategories(res.data); }).catch(() => { });
         api.getAdminPlans().then(res => { if (res.success) setAdminPlans(res.data); }).catch(() => { });
+        api.getCoupons().then(res => { if (res.success && Array.isArray(res.data)) setCoupons(res.data); }).catch(() => { });
       }
 
       if (tab === 'research') {
@@ -1978,6 +2054,7 @@ function AdminDashboardContent() {
 
       if (initStep || tab === 'payments' || tab === 'l2-approvals' || tab === 'dashboard') {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+        api.getCoupons().then(res => { if (res.success && Array.isArray(res.data)) setCoupons(res.data); }).catch(() => { });
       }
 
       if (initStep || tab === 'auditLogs' || tab === 'dashboard') {
@@ -2096,14 +2173,79 @@ function AdminDashboardContent() {
   }, [checklistHistory, alerts, complaints, penalties]);
 
   const topLevelFilteredHistory = useMemo(() => {
+    const q = (historyFilterText || '').trim().toLowerCase();
     return checklistHistory.filter((h: any) => {
-      const matchesText = h.requirement?.requirement?.toLowerCase().includes(historyFilterText.toLowerCase());
+      const reqText = (h.requirement?.requirement || '').toLowerCase();
+      const remarksText = (h.officerRemarks || '').toLowerCase();
+      const updatedByText = (h.updatedByName || '').toLowerCase();
+      const periodText = (h.periodLabel || '').toLowerCase();
+      const matchesText = !q || reqText.includes(q) || remarksText.includes(q) || updatedByText.includes(q) || periodText.includes(q);
       const matchesFY = selectedFinancialYear === 'All' || getFinancialYear(h.createdAt) === selectedFinancialYear;
       return matchesText && matchesFY;
     });
   }, [checklistHistory, historyFilterText, selectedFinancialYear]);
 
   const historyPagination = usePagination(topLevelFilteredHistory, 10);
+
+  const handleExportChecklistHistory = async () => {
+    const recordsToExport = topLevelFilteredHistory && topLevelFilteredHistory.length > 0
+      ? topLevelFilteredHistory
+      : checklistHistory;
+
+    if (!recordsToExport || recordsToExport.length === 0) {
+      toast.error('No checklist audit history records available to export.');
+      return;
+    }
+
+    const exportData = recordsToExport.map((row: any, index: number) => {
+      const prevStatus = (row.previousStatus || 'PENDING').replace(/_/g, ' ');
+      const newStatus = (row.newStatus || '—').replace(/_/g, ' ');
+      return {
+        'Sr No': row.requirement?.serialNo || (index + 1),
+        'Requirement Description': row.requirement?.requirement || '—',
+        'Category / Frequency': row.requirement?.frequency || '—',
+        'Frequency Type': row.requirement?.frequencyType || '—',
+        'Severity Level': row.requirement?.severityLevel || '—',
+        'Penalty Amount': row.requirement?.penaltyAmount || '—',
+        'Period': row.periodLabel || '—',
+        'Financial Year': getFinancialYear(row.createdAt),
+        'Previous Status': prevStatus,
+        'Updated Status': newStatus,
+        'Officer Remarks': row.officerRemarks || '—',
+        'Proof Document URL': row.proofDocumentUrl || '—',
+        'Updated By': row.updatedByName || 'System',
+        'Audit Date & Time': row.createdAt ? new Date(row.createdAt).toLocaleString('en-IN') : '—'
+      };
+    });
+
+    const headers = Object.keys(exportData[0]);
+    const csvRows: string[] = [headers.join(',')];
+
+    for (const row of exportData) {
+      const values = headers.map(header => {
+        const val = (row as any)[header];
+        if (val === null || val === undefined) return '""';
+        const escaped = ('' + val).replace(/"/g, '""');
+        return `"${escaped}"`;
+      });
+      csvRows.push(values.join(','));
+    }
+
+    const csvString = '\uFEFF' + csvRows.join('\r\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const fySuffix = selectedFinancialYear !== 'All' ? `_${selectedFinancialYear.replace(/[\s-]+/g, '_')}` : '';
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `SEBI_Checklist_Audit_History${fySuffix}_${dateStr}.csv`;
+
+    await executeSmartDownload({
+      blob,
+      fileName: filename,
+      documentType: 'SEBI Checklist Audit History Export',
+      tenantDetails,
+      userRole: user?.role
+    });
+    toast.success(`Exported ${exportData.length} checklist history records successfully.`);
+  };
 
   useEffect(() => {
     // Safety fallback so the dashboard never gets stuck on the loading spinner
@@ -2136,7 +2278,12 @@ function AdminDashboardContent() {
         if (res.success) {
           const syncedUser = res.data.user;
           const currentUserStr = localStorage.getItem('user');
-          const currentU = currentUserStr ? JSON.parse(currentUserStr) : null;
+          let currentU = null;
+          try {
+            currentU = currentUserStr ? JSON.parse(currentUserStr) : null;
+          } catch {
+            currentU = null;
+          }
           if (currentU?.isImpersonated) {
             syncedUser.isImpersonated = true;
           }
@@ -2164,7 +2311,13 @@ function AdminDashboardContent() {
               staff: 'ACCESS_STAFF',
               clients: 'ACCESS_CLIENTS',
               plans: 'ACCESS_PLANS',
+              coupons: 'ACCESS_PLANS',
               research: 'ACCESS_RESEARCH',
+              'delivery-reports': 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_all: 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_telegram: 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_sms: 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_inapp: 'ACCESS_DELIVERY_REPORTS',
               payments: 'ACCESS_PAYMENTS',
               compliance: 'ACCESS_COMPLIANCE',
               settings: 'ACCESS_SETTINGS',
@@ -2225,7 +2378,13 @@ function AdminDashboardContent() {
           staff: 'ACCESS_STAFF',
           clients: 'ACCESS_CLIENTS',
           plans: 'ACCESS_PLANS',
+          coupons: 'ACCESS_PLANS',
           research: 'ACCESS_RESEARCH',
+          'delivery-reports': 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_all: 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_telegram: 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_sms: 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_inapp: 'ACCESS_DELIVERY_REPORTS',
           payments: 'ACCESS_PAYMENTS',
           compliance: 'ACCESS_COMPLIANCE',
           settings: 'ACCESS_SETTINGS',
@@ -2559,6 +2718,10 @@ function AdminDashboardContent() {
             localStorage.setItem('user', JSON.stringify(updatedUser));
             return updatedUser;
           });
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('fileDownloadPolicy', fileDownloadPolicy);
+            localStorage.setItem('tenantDetails', JSON.stringify(data.data || { ...tenantDetails, fileDownloadPolicy }));
+          }
         }
         setLogoFile(null);
         if (refreshBranding) await refreshBranding();
@@ -2605,9 +2768,9 @@ function AdminDashboardContent() {
       formData.append('maxEmailFileSizeMb', String(maxEmailFileSizeMb));
       formData.append('gst', (orgGst || '').trim());
       formData.append('state', tenantState || '');
-      formData.append('address', orgAddress || '');
-      formData.append('mobile', orgMobile || '');
-      formData.append('website', orgWebsite || '');
+      if (orgAddress && orgAddress.trim()) formData.append('address', orgAddress.trim());
+      if (orgMobile && orgMobile.trim()) formData.append('mobile', orgMobile.trim());
+      if (orgWebsite && orgWebsite.trim()) formData.append('website', orgWebsite.trim());
       formData.append('kycFirst', String(kycFirst));
       formData.append('welcomeEmailText', welcomeEmailText || '');
       formData.append('reportDisclaimer', reportDisclaimer || '');
@@ -3121,14 +3284,13 @@ function AdminDashboardContent() {
     try {
       const response = await fetch(fileUrl);
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await executeSmartDownload({
+        blob,
+        fileName,
+        documentType: fileName,
+        tenantDetails,
+        userRole: user?.role
+      });
     } catch (error) {
       window.open(fileUrl, '_blank');
     }
@@ -3620,21 +3782,33 @@ function AdminDashboardContent() {
       return;
     }
 
-    const planAmount = Number(selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
-    if (planAmount > 0 && verifyReceivedAmount > planAmount) {
-      toast.error(`Received amount cannot exceed the plan standard price of ₹${planAmount.toLocaleString('en-IN')}.`);
+    const paymentPlanId = selectedVerifyPayment.planId ? String(typeof selectedVerifyPayment.planId === 'object' ? (selectedVerifyPayment.planId._id || selectedVerifyPayment.planId.id) : selectedVerifyPayment.planId) : null;
+    const resolvedPlan = selectedVerifyPayment.plan || (paymentPlanId ? plans.find((p: any) => String(p._id || p.id) === paymentPlanId) : null);
+    const basePlanPrice = Number(resolvedPlan?.price || resolvedPlan?.amount || selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
+    const isExcl = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+    const billedPaymentAmount = Number(selectedVerifyPayment.amount || 0);
+    const calculatedStandardPrice = !gstEnabled || !isExcl ? basePlanPrice : parseFloat((basePlanPrice * 1.18).toFixed(2));
+    const maxAllowedPrice = Math.max(calculatedStandardPrice, billedPaymentAmount);
+
+    if (maxAllowedPrice > 0 && verifyReceivedAmount > (maxAllowedPrice + 2)) {
+      toast.error(`Received amount cannot exceed the plan standard price of ₹${maxAllowedPrice.toLocaleString('en-IN')}.`);
       return;
     }
 
     setIsSubmittingVerify(true);
     try {
+      const cleanCoupon = verifyCouponCode.trim().toUpperCase();
+      const safeApprovalMode = cleanCoupon && verifyApprovalMode === 'DISCOUNT' ? 'FULL' : verifyApprovalMode;
+      const safeCustomDiscount = safeApprovalMode === 'DISCOUNT' ? Number(verifyCustomDiscount || 0) : 0;
+
       const payload: any = {
         paymentId: selectedVerifyPayment.id || selectedVerifyPayment._id,
         status: 'SUCCESS',
         receivedAmount: Number(verifyReceivedAmount),
-        approvalMode: verifyApprovalMode,
+        approvalMode: safeApprovalMode,
         customValidityDays: Number(verifyCustomDays),
-        discountApplied: verifyApprovalMode === 'DISCOUNT' ? Number(verifyCustomDiscount) : 0,
+        discountApplied: safeCustomDiscount,
+        couponCode: cleanCoupon || '',
         transactionRef: verifyUtr,
         remarks: verifyRemarks.trim() || undefined
       };
@@ -4115,15 +4289,15 @@ function AdminDashboardContent() {
       }
 
       const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
       const dateStr = exportRange === 'date' ? `_${exportStartDate}_to_${exportEndDate}` : '';
-      link.setAttribute('download', `${type}${dateStr}.${isZip ? 'zip' : 'csv'}`);
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode?.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
+      const fullFileName = `${type}${dateStr}.${isZip ? 'zip' : 'csv'}`;
+      await executeSmartDownload({
+        blob,
+        fileName: fullFileName,
+        documentType: `Bulk ${type} Export`,
+        tenantDetails,
+        userRole: user?.role
+      });
     } catch (error: any) {
       toast.error(`Export failed: ${error.message}`);
     } finally {
@@ -4470,16 +4644,29 @@ function AdminDashboardContent() {
                   </span>
                 </div>
               )}
-              {(row.l2Details || (row.l1Details && (row.approvalStatus === 'L2_PENDING' || row.approvalStatus === 'APPROVED' || row.approvalStatus === 'REJECTED'))) && (
+              {(row.approvalStatus === 'REJECTED' || row.l2Details || row.l1Details) && (
                 <div className="pt-0.5">
                   <button
                     type="button"
                     onClick={() => setSelectedL1L2Diff(row)}
-                    className="text-[10px] bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded font-bold transition inline-flex items-center gap-1 border border-amber-300 dark:border-amber-700/50 shadow-sm"
+                    className={`text-[10px] px-2 py-0.5 rounded font-bold transition inline-flex items-center gap-1 border shadow-sm ${
+                      row.approvalStatus === 'REJECTED'
+                        ? 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-800'
+                        : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700/50'
+                    }`}
                     title="View L1 Submission vs L2 Approval Details"
                   >
-                    <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                    <span>L1/L2 Audit</span>
+                    {row.approvalStatus === 'REJECTED' ? (
+                      <>
+                        <Eye className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                        <span>Rejection Details</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                        <span>L1/L2 Audit</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}
@@ -4707,15 +4894,13 @@ function AdminDashboardContent() {
         if (row.approvalStatus === 'L2_PENDING') {
           return (
             <div className="flex items-center gap-1.5 justify-end">
-              <button
-                type="button"
-                onClick={() => setSelectedL2Payment(row)}
-                className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition shadow-sm flex items-center gap-1"
-                title="Review and grant final L2 clearance"
+              <span
+                className="px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm"
+                title="QR/UTR verified by L1. Sent to L2 Approvals Queue for final clearance."
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>L2 Review</span>
-              </button>
+                <Clock className="w-3.5 h-3.5 text-amber-500" />
+                <span>L2 Pending</span>
+              </span>
               <button
                 type="button"
                 onClick={() => setSelectedL1L2Diff(row)}
@@ -4733,13 +4918,15 @@ function AdminDashboardContent() {
               <button
                 type="button"
                 onClick={() => {
+                  api.getCoupons().then(res => { if (res.success && Array.isArray(res.data)) setCoupons(res.data); }).catch(() => { });
                   const planAmount = Number(row.plan?.amount || row.plan?.price || row.amount || 0);
                   const planDays = (row.plan?.durationMonths ? row.plan.durationMonths * 30 : 30);
                   setSelectedVerifyPayment(row);
-                  setVerifyReceivedAmount(row.amount || planAmount);
+                  setVerifyCouponCode(row.couponCode || row.coupon?.code || '');
+                  setVerifyReceivedAmount(Number(row.amount || planAmount));
                   setVerifyApprovalMode('FULL');
-                  setVerifyCustomDays(planDays);
-                  setVerifyCustomDiscount(0);
+                  setVerifyCustomDays(row.planValidityDays || planDays);
+                  setVerifyCustomDiscount(Number(row.discountApplied || row.discount || 0));
                   setVerifyUtr(row.transactionRef || '');
                   setVerifyRemarks('');
                 }}
@@ -5497,7 +5684,7 @@ function AdminDashboardContent() {
                   </button>
                 )}
                 {(!isStaff || hasPermission('EDIT_CLIENTS')) && (
-                  <button onClick={() => { setAssignPlanClient(row); setAssignPlanCategoryId(''); setAssignPlanId(''); setAssignPlanRemarks(''); setIsAssignPlanModalOpen(true); }} title="Assign Plan" className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 inline-flex items-center gap-1">
+                  <button onClick={() => { setAssignPlanClient(row); setAssignPlanCategoryId(''); setAssignPlanId(''); setAssignPlanRemarks(''); setAssignCouponCode(''); setAssignCustomAmount(''); setAssignCustomDays(''); api.getCoupons().then(r => { if (r.success && Array.isArray(r.data)) setCoupons(r.data); }); setIsAssignPlanModalOpen(true); }} title="Assign Plan" className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide transition bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 inline-flex items-center gap-1">
                     <CreditCard className="h-3 w-3" />
                     <span>Assign</span>
                   </button>
@@ -6077,7 +6264,7 @@ function AdminDashboardContent() {
               {/* ====================================================
             PROFILE COMPLETENESS WIZARD (Only for ADMIN, if completeness < 80%)
            ==================================================== */}
-              {!isProfileComplete && !isCompletenessLoading && !tenantDetails?.address && !user?.tenant?.address && ['ADMIN', 'RESEARCHER'].includes(user.role) && !user?.isImpersonated && (
+              {!isProfileComplete && !isCompletenessLoading && !tenantIsLive && !tenantDetails?.address && !user?.tenant?.address && ['ADMIN', 'RESEARCHER'].includes(user.role) && !user?.isImpersonated && (
                 <div className="max-w-3xl mx-auto space-y-8 mt-6">
                   <div className="p-6 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 rounded-2xl text-xs space-y-2">
                     <h3 className="font-bold text-sm">Action Required: Profile Wizard Completeness is below 80%</h3>
@@ -6789,9 +6976,13 @@ function AdminDashboardContent() {
                             return (
                               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {categoriesWithPlans.map((cat: any) => {
-                                  const count = typeof cat.activeClientCount === 'number' ? cat.activeClientCount : 0;
-                                  const expiredCount = typeof cat.expiredClientCount === 'number' ? cat.expiredClientCount : 0;
                                   const plans = cat.plansBreakdown || [];
+                                  const count = plans.length > 0
+                                    ? plans.reduce((sum: number, p: any) => sum + (Number(p.activeClientCount) || 0), 0)
+                                    : (typeof cat.activeClientCount === 'number' ? cat.activeClientCount : 0);
+                                  const expiredCount = plans.length > 0
+                                    ? plans.reduce((sum: number, p: any) => sum + (Number(p.expiredClientCount) || 0), 0)
+                                    : (typeof cat.expiredClientCount === 'number' ? cat.expiredClientCount : 0);
                                   return (
                                     <div
                                       key={cat.id || cat._id}
@@ -8074,18 +8265,26 @@ function AdminDashboardContent() {
                                           <ShieldCheck className="w-4 h-4" />
                                           <span>Review (L2)</span>
                                         </button>
+                                      ) : row.approvalStatus === 'REJECTED' ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedL1L2Diff(row)}
+                                          className="px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold text-xs border border-rose-300 dark:border-rose-800 inline-flex items-center gap-1.5 transition shadow-sm"
+                                          title="View complete L1 submission and L2 rejection audit details"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                          <span>View Details</span>
+                                        </button>
                                       ) : (
                                         <>
-                                          {(row.l1Details || row.l2Details) && (
-                                            <button
-                                              onClick={() => setSelectedL1L2Diff(row)}
-                                              className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-white/10 inline-flex items-center gap-1 transition"
-                                              title="View L1 vs L2 details"
-                                            >
-                                              <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                                              <span>L1 vs L2</span>
-                                            </button>
-                                          )}
+                                          <button
+                                            onClick={() => setSelectedL1L2Diff(row)}
+                                            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-white/10 inline-flex items-center gap-1 transition"
+                                            title="View L1 vs L2 details"
+                                          >
+                                            <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                            <span>L1 vs L2</span>
+                                          </button>
                                           {(row.approvalStatus === 'APPROVED' || row.approvalStatus === 'DIRECT_APPROVED') && (
                                             <button
                                               onClick={() => {
@@ -8396,15 +8595,91 @@ function AdminDashboardContent() {
 
                         {/* Smart Payment Verification & Assignment Modal */}
                         {selectedVerifyPayment && (() => {
-                          const planAmount = Number(selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
-                          const planDays = (selectedVerifyPayment.plan?.durationMonths ? selectedVerifyPayment.plan.durationMonths * 30 : 30);
-                          const difference = Math.max(0, planAmount - verifyReceivedAmount);
-                          const isShortPayment = verifyReceivedAmount > 0 && verifyReceivedAmount < planAmount;
-                          const isFullMatch = verifyReceivedAmount === planAmount && planAmount > 0;
-                          const isOverAmount = verifyReceivedAmount > planAmount && planAmount > 0;
+                          const paymentPlanId = selectedVerifyPayment.planId ? String(typeof selectedVerifyPayment.planId === 'object' ? (selectedVerifyPayment.planId._id || selectedVerifyPayment.planId.id) : selectedVerifyPayment.planId) : null;
+                          const resolvedPlan = selectedVerifyPayment.plan || (paymentPlanId ? plans.find((p: any) => String(p._id || p.id) === paymentPlanId) : null);
+                          const paymentCategoryId = String(resolvedPlan?.categoryId || selectedVerifyPayment.plan?.categoryId || selectedVerifyPayment.categoryId || '');
+                          const standardBasePrice = Number(resolvedPlan?.price || resolvedPlan?.amount || selectedVerifyPayment.plan?.amount || selectedVerifyPayment.plan?.price || selectedVerifyPayment.amount || 0);
+                          const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                          const billedPaymentAmount = Number(selectedVerifyPayment.amount || 0);
+                          const calculatedTotalWithGst = !gstEnabled || !isExclusive ? standardBasePrice : parseFloat((standardBasePrice * 1.18).toFixed(2));
+                          const standardTotalWithGst = Math.max(calculatedTotalWithGst, billedPaymentAmount);
+                          const planDays = (resolvedPlan?.durationMonths || selectedVerifyPayment.plan?.durationMonths ? (resolvedPlan?.durationMonths || selectedVerifyPayment.plan.durationMonths) * 30 : 30);
+
+                          const cleanVerifyCoupon = verifyCouponCode.trim().toUpperCase();
+                          const matchedCoupon = cleanVerifyCoupon ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanVerifyCoupon && c.status === 'ACTIVE') : null;
+                          const applicableCoupons = coupons.filter((c: any) => isCouponApplicableToPlan(c, paymentPlanId, paymentCategoryId, standardBasePrice));
+
+                          let couponDiscountOnBase = 0;
+                          if (cleanVerifyCoupon) {
+                            if (matchedCoupon) {
+                              if (matchedCoupon.minPurchaseValue && standardBasePrice < Number(matchedCoupon.minPurchaseValue)) {
+                                couponDiscountOnBase = 0;
+                              } else if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+                                couponDiscountOnBase = Number(matchedCoupon.discountValue || 0);
+                              } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+                                couponDiscountOnBase = parseFloat(((standardBasePrice * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+                                if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && couponDiscountOnBase > Number(matchedCoupon.maxDiscountValue)) {
+                                  couponDiscountOnBase = Number(matchedCoupon.maxDiscountValue);
+                                }
+                              }
+                            } else if (selectedVerifyPayment.discountApplied > 0) {
+                              couponDiscountOnBase = Number(selectedVerifyPayment.discountApplied);
+                            }
+                          } else {
+                            couponDiscountOnBase = 0;
+                          }
+
+                          const discountedTaxableBase = Math.max(0, parseFloat((standardBasePrice - couponDiscountOnBase).toFixed(2)));
+                          const calculatedGst = isExclusive ? parseFloat((discountedTaxableBase * 0.18).toFixed(2)) : 0;
+                          const expectedCalculatedTotal = parseFloat((discountedTaxableBase + calculatedGst).toFixed(2));
+
+                          // Expected amount is either the exact billed amount on payment record, or the re-calculated total
+                          const planAmount = cleanVerifyCoupon && Math.abs(billedPaymentAmount - expectedCalculatedTotal) <= 2
+                            ? billedPaymentAmount
+                            : expectedCalculatedTotal;
+
+                          const difference = Math.max(0, parseFloat((planAmount - verifyReceivedAmount).toFixed(2)));
+                          const isShortPayment = verifyReceivedAmount > 0 && verifyReceivedAmount < (planAmount - 1);
+                          const isFullMatch = Math.abs(verifyReceivedAmount - planAmount) <= 1 && planAmount > 0;
+                          const isOverAmount = verifyReceivedAmount > (standardTotalWithGst + 1);
                           const clientName = selectedVerifyPayment.client?.name || selectedVerifyPayment.client?.user?.name || selectedVerifyPayment.clientName || 'Client';
-                          const planName = selectedVerifyPayment.plan?.name || selectedVerifyPayment.planName || 'Plan';
+                          const planName = resolvedPlan?.name || selectedVerifyPayment.plan?.name || selectedVerifyPayment.planName || 'Plan';
                           const proofUrl = selectedVerifyPayment.screenshotUrl || selectedVerifyPayment.receiptUrl;
+
+                          const applyVerificationCouponCode = (code: string) => {
+                            const clean = code.trim().toUpperCase();
+                            setVerifyCouponCode(clean);
+                            if (!clean) {
+                              setVerifyReceivedAmount(standardTotalWithGst);
+                              setVerifyCustomDiscount(0);
+                              setVerifyApprovalMode('FULL');
+                              setVerifyCustomDays(planDays);
+                              return;
+                            }
+                            // When coupon is applied, Case 3 (Waive balance) must be disabled. Reset to FULL if currently DISCOUNT
+                            if (verifyApprovalMode === 'DISCOUNT') {
+                              setVerifyApprovalMode('FULL');
+                            }
+                            const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clean && c.status === 'ACTIVE');
+                            let disc = 0;
+                            if (mCoupon) {
+                              if (mCoupon.discountType === 'FLAT' || mCoupon.discountType === 'FIXED') {
+                                disc = Number(mCoupon.discountValue || 0);
+                              } else if (mCoupon.discountType === 'PERCENTAGE') {
+                                disc = parseFloat(((standardBasePrice * Number(mCoupon.discountValue || 0)) / 100).toFixed(2));
+                                if (mCoupon.percentageType === 'CAPPED' && mCoupon.maxDiscountValue && disc > Number(mCoupon.maxDiscountValue)) {
+                                  disc = Number(mCoupon.maxDiscountValue);
+                                }
+                              }
+                            }
+                            const netTaxable = Math.max(0, parseFloat((standardBasePrice - disc).toFixed(2)));
+                            const netGst = isExclusive ? parseFloat((netTaxable * 0.18).toFixed(2)) : 0;
+                            const newExpected = parseFloat((netTaxable + netGst).toFixed(2));
+                            setVerifyReceivedAmount(newExpected);
+                            setVerifyCustomDiscount(0);
+                            setVerifyApprovalMode('FULL');
+                            setVerifyCustomDays(planDays);
+                          };
 
                           return (
                             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -8434,10 +8709,17 @@ function AdminDashboardContent() {
                                 <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-white/5 text-xs">
                                   <div>
                                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Plan Standard Price</span>
-                                    <span className="text-base font-extrabold text-slate-900 dark:text-white mt-0.5 block">
-                                      ₹{planAmount.toLocaleString('en-IN')}
-                                    </span>
-                                    <span className="text-[11px] text-slate-500">Duration: {planDays} Days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</span>
+                                    <div className="flex items-baseline gap-2 mt-0.5">
+                                      <span className="text-base font-extrabold text-slate-900 dark:text-white">
+                                        ₹{standardTotalWithGst.toLocaleString('en-IN')}
+                                      </span>
+                                      {cleanVerifyCoupon && couponDiscountOnBase > 0 && (
+                                        <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/40">
+                                          Payable: ₹{planAmount.toLocaleString('en-IN')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] text-slate-500 block mt-0.5">Duration: {planDays} Days ({resolvedPlan?.durationMonths || selectedVerifyPayment.plan?.durationMonths || 1} Month)</span>
                                   </div>
                                   <div>
                                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Payment Proof Screenshot</span>
@@ -8455,6 +8737,97 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
 
+                                {/* Applied Coupon Section (Editable by Admin) */}
+                                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-white/5 space-y-2">
+                                  <div className="flex justify-between items-center">
+                                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                                      <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                                      Coupon Code (Applied by Client / Admin):
+                                    </label>
+                                    {verifyCouponCode && (
+                                      <button
+                                        type="button"
+                                        onClick={() => applyVerificationCouponCode('')}
+                                        className="text-[10px] font-bold text-rose-500 hover:underline"
+                                      >
+                                        ✕ Remove Coupon
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <input
+                                      type="text"
+                                      autoComplete="off"
+                                      name="verify_coupon_code_input"
+                                      value={verifyCouponCode}
+                                      onChange={(e) => applyVerificationCouponCode(e.target.value)}
+                                      placeholder="Type coupon code (e.g. ASDF)"
+                                      className="flex-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-3 py-1.5 text-xs font-mono font-bold uppercase text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                    />
+                                    <select
+                                      value={cleanVerifyCoupon}
+                                      onChange={(e) => applyVerificationCouponCode(e.target.value)}
+                                      className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500 max-w-full sm:max-w-[220px]"
+                                    >
+                                      <option value="">{applicableCoupons.length > 0 ? `-- Select Coupon (${applicableCoupons.length}) --` : '-- No Coupon --'}</option>
+                                      {applicableCoupons.map((c: any) => (
+                                        <option key={c.id || c._id || c.code} value={String(c.code).trim().toUpperCase()}>
+                                          {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Quick-Pick Clickable Badges for Plan/Category Coupons */}
+                                  {applicableCoupons.length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicable Coupons:</span>
+                                      {applicableCoupons.map((c: any) => {
+                                        const isSelected = cleanVerifyCoupon === String(c.code).trim().toUpperCase();
+                                        return (
+                                          <button
+                                            key={c.id || c._id || c.code}
+                                            type="button"
+                                            onClick={() => applyVerificationCouponCode(isSelected ? '' : c.code)}
+                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
+                                              isSelected
+                                                ? 'bg-primary-600 text-white border-primary-600 shadow-sm ring-1 ring-primary-500'
+                                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:border-primary-500 hover:text-primary-600 hover:bg-primary-50/50'
+                                            }`}
+                                            title={isSelected ? 'Click to deselect' : `Click to apply ${c.code}`}
+                                          >
+                                            <Tag className="w-3 h-3 text-primary-500" />
+                                            <span>{c.code}</span>
+                                            <span className="text-[10px] opacity-80 font-normal">
+                                              ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                            </span>
+                                            {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {/* Coupon validation badge */}
+                                  {cleanVerifyCoupon && (
+                                    matchedCoupon ? (
+                                      <div className="flex items-center justify-between text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold pt-0.5">
+                                        <span className="flex items-center gap-1">
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                          Coupon "{matchedCoupon.code}" Valid ({matchedCoupon.discountType === 'PERCENTAGE' ? `${matchedCoupon.discountValue}% OFF` : `₹${matchedCoupon.discountValue} OFF`})
+                                        </span>
+                                        <span className="font-bold font-mono">Net Expected: ₹{planAmount.toLocaleString('en-IN')} (Base Discount: ₹{couponDiscountOnBase.toLocaleString('en-IN')})</span>
+                                      </div>
+                                    ) : (
+                                      <div className="text-[11px] text-amber-600 dark:text-amber-400 font-medium pt-0.5 flex items-center gap-1">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                                        <span>Coupon "{cleanVerifyCoupon}" not found in active coupons list.</span>
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+
                                 {/* Actual Received Amount & UTR Inputs */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div>
@@ -8463,14 +8836,14 @@ function AdminDashboardContent() {
                                         Actual Amount Received in Bank (₹) *
                                       </label>
                                       <span className="text-[10px] font-bold text-slate-400">
-                                        Max: ₹{planAmount.toLocaleString('en-IN')}
+                                        Expected: ₹{planAmount.toLocaleString('en-IN')} (Max: ₹{standardTotalWithGst.toLocaleString('en-IN')})
                                       </span>
                                     </div>
                                     <input
                                       type="number"
                                       step="any"
                                       min={0.01}
-                                      max={planAmount}
+                                      max={standardTotalWithGst}
                                       value={verifyReceivedAmount || ''}
                                       onChange={(e) => {
                                         const raw = e.target.value;
@@ -8480,8 +8853,8 @@ function AdminDashboardContent() {
                                         }
                                         let val = parseFloat(raw);
                                         if (isNaN(val)) val = 0;
-                                        if (planAmount > 0 && val > planAmount) {
-                                          val = planAmount;
+                                        if (standardTotalWithGst > 0 && val > standardTotalWithGst) {
+                                          val = standardTotalWithGst;
                                         }
                                         setVerifyReceivedAmount(val);
                                         const diff = Math.max(0, parseFloat((planAmount - val).toFixed(2)));
@@ -8503,12 +8876,43 @@ function AdminDashboardContent() {
                                           ? 'border-rose-500 focus:ring-rose-500 text-rose-600'
                                           : 'border-slate-300 dark:border-white/10 focus:ring-primary-500'
                                       }`}
-                                      placeholder={`Max: ₹${planAmount.toLocaleString('en-IN')}`}
+                                      placeholder={`Max: ₹${standardTotalWithGst.toLocaleString('en-IN')}`}
                                       required
                                     />
                                     <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                                      Maximum allowed: <strong>₹{planAmount.toLocaleString('en-IN')}</strong> (Plan Standard Price)
+                                      Expected: <strong>₹{planAmount.toLocaleString('en-IN')}</strong> | Plan Standard Price: <strong>₹{standardTotalWithGst.toLocaleString('en-IN')}</strong>
                                     </p>
+
+                                    {/* Live Tax Breakdown Box */}
+                                    <div className="mt-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-white/5 flex items-center justify-between text-xs">
+                                      {gstEnabled ? (
+                                        <>
+                                          <div className="flex flex-col">
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Taxable Base</span>
+                                            <span className="font-bold text-slate-800 dark:text-slate-200">
+                                              ₹{(verifyReceivedAmount > 0 ? parseFloat((verifyReceivedAmount / 1.18).toFixed(2)) : 0).toLocaleString('en-IN')}
+                                            </span>
+                                          </div>
+                                          <div className="flex flex-col">
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">GST (18%)</span>
+                                            <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                                              ₹{(verifyReceivedAmount > 0 ? parseFloat((verifyReceivedAmount - (verifyReceivedAmount / 1.18)).toFixed(2)) : 0).toLocaleString('en-IN')}
+                                            </span>
+                                          </div>
+                                          <div className="flex flex-col text-right">
+                                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">Total Billed</span>
+                                            <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
+                                              ₹{Number(verifyReceivedAmount || 0).toLocaleString('en-IN')}
+                                            </span>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <div className="w-full flex items-center justify-between">
+                                          <span className="text-[11px] text-slate-500 dark:text-slate-400">Tax Type: <strong>0% Non-GST (Bill of Supply)</strong></span>
+                                          <span className="font-bold text-slate-800 dark:text-slate-200">₹{Number(verifyReceivedAmount || 0).toLocaleString('en-IN')}</span>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
 
                                   <div>
@@ -8537,7 +8941,7 @@ function AdminDashboardContent() {
                                     <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-2.5 text-xs text-rose-700 dark:text-rose-300">
                                       <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
                                       <span>
-                                        <strong>Amount Exceeded:</strong> Received amount (₹{verifyReceivedAmount.toLocaleString('en-IN')}) cannot exceed the plan price of ₹{planAmount.toLocaleString('en-IN')}.
+                                        <strong>Amount Exceeded:</strong> Received amount (₹{verifyReceivedAmount.toLocaleString('en-IN')}) cannot exceed the plan price of ₹{standardTotalWithGst.toLocaleString('en-IN')}.
                                       </span>
                                     </div>
                                   )}
@@ -8628,60 +9032,87 @@ function AdminDashboardContent() {
                                       </div>
 
                                       {/* Case 3: Discount on Remaining Balance */}
-                                      <div
-                                        onClick={() => setVerifyApprovalMode('DISCOUNT')}
-                                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
-                                          verifyApprovalMode === 'DISCOUNT'
-                                            ? 'bg-purple-500/10 border-purple-500/40 ring-2 ring-purple-500/20'
-                                            : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5 hover:border-slate-300'
-                                        }`}
-                                      >
-                                        <div className="flex items-start gap-3">
-                                          <input
-                                            type="radio"
-                                            name="approvalMode"
-                                            checked={verifyApprovalMode === 'DISCOUNT'}
-                                            onChange={() => setVerifyApprovalMode('DISCOUNT')}
-                                            className="mt-0.5 text-purple-600 focus:ring-purple-500"
-                                          />
-                                          <div className="space-y-1.5 flex-1">
-                                            <div className="flex items-center justify-between">
-                                              <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                                Case 3: Waive Remaining Balance as Discount (Full Period)
-                                              </span>
-                                              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                                                Full {planDays} Days
-                                              </span>
-                                            </div>
-                                            <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                                              Full subscription access for <strong>{planDays} days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be granted. The invoice will reflect: Standard Price ₹{planAmount.toLocaleString('en-IN')} less Special Discount ₹{verifyCustomDiscount.toLocaleString('en-IN')} = Net Amount Paid ₹{verifyReceivedAmount.toLocaleString('en-IN')}.
-                                            </p>
+                                      {(() => {
+                                        const isCouponActive = Boolean(cleanVerifyCoupon);
+                                        return (
+                                          <div
+                                            onClick={() => {
+                                              if (!isCouponActive) {
+                                                setVerifyApprovalMode('DISCOUNT');
+                                              }
+                                            }}
+                                            className={`p-3.5 rounded-2xl border transition-all ${
+                                              isCouponActive
+                                                ? 'opacity-40 cursor-not-allowed bg-slate-100/60 dark:bg-slate-800/20 border-slate-200 dark:border-white/5 select-none'
+                                                : verifyApprovalMode === 'DISCOUNT'
+                                                ? 'bg-purple-500/10 border-purple-500/40 ring-2 ring-purple-500/20 cursor-pointer'
+                                                : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5 hover:border-slate-300 cursor-pointer'
+                                            }`}
+                                          >
+                                            <div className="flex items-start gap-3">
+                                              <input
+                                                type="radio"
+                                                name="approvalMode"
+                                                disabled={isCouponActive}
+                                                checked={verifyApprovalMode === 'DISCOUNT' && !isCouponActive}
+                                                onChange={() => {
+                                                  if (!isCouponActive) setVerifyApprovalMode('DISCOUNT');
+                                                }}
+                                                className="mt-0.5 text-purple-600 focus:ring-purple-500 disabled:opacity-40"
+                                              />
+                                              <div className="space-y-1.5 flex-1">
+                                                <div className="flex items-center justify-between">
+                                                  <span className={`text-xs font-bold ${isCouponActive ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-white'}`}>
+                                                    Case 3: Waive Remaining Balance as Discount (Full Period)
+                                                  </span>
+                                                  {isCouponActive ? (
+                                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                                      Disabled (Coupon Applied)
+                                                    </span>
+                                                  ) : (
+                                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                                                      Full {planDays} Days
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                                                  {isCouponActive ? (
+                                                    <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                                      ⚠️ Coupon &quot;{cleanVerifyCoupon}&quot; is active. Both coupon and balance waive-off discount cannot be given simultaneously. Remove coupon to enable Case 3.
+                                                    </span>
+                                                  ) : (
+                                                    <>
+                                                      Full subscription access for <strong>{planDays} days ({selectedVerifyPayment.plan?.durationMonths || 1} Month)</strong> will be granted. The invoice will reflect: Standard Price ₹{planAmount.toLocaleString('en-IN')} less Special Discount ₹{verifyCustomDiscount.toLocaleString('en-IN')} = Net Amount Paid ₹{verifyReceivedAmount.toLocaleString('en-IN')}.
+                                                    </>
+                                                  )}
+                                                </p>
 
-                                            {verifyApprovalMode === 'DISCOUNT' && (
-                                              <div className="pt-2 flex items-center gap-2">
-                                                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
-                                                  Discount Given (₹):
-                                                </label>
-                                                <input
-                                                  type="number"
-                                                  step="any"
-                                                  value={verifyCustomDiscount}
-                                                  disabled
-                                                  onChange={(e) => setVerifyCustomDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
-                                                  onClick={(e) => e.stopPropagation()}
-                                                  className="w-28 bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                                />
-                                                <span className="text-[10px] text-slate-400">(Remaining balance discount)</span>
+                                                {!isCouponActive && verifyApprovalMode === 'DISCOUNT' && (
+                                                  <div className="pt-2 flex items-center gap-2">
+                                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                                                      Discount Given (₹):
+                                                    </label>
+                                                    <input
+                                                      type="number"
+                                                      step="any"
+                                                      value={verifyCustomDiscount}
+                                                      disabled
+                                                      onChange={(e) => setVerifyCustomDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                                                      onClick={(e) => e.stopPropagation()}
+                                                      className="w-28 bg-white dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-1 px-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                    />
+                                                    <span className="text-[10px] text-slate-400">(Remaining balance discount)</span>
+                                                  </div>
+                                                )}
                                               </div>
-                                            )}
+                                            </div>
                                           </div>
-                                        </div>
-                                      </div>
+                                        );
+                                      })()}
                                     </div>
                                   )}
                                 </div>
 
-                                {/* Optional Internal Verification Remarks */}
                                 <div>
                                   <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
                                     Internal Verification Remarks (Optional)
@@ -8928,30 +9359,42 @@ function AdminDashboardContent() {
 
                             return (
                               <div className="space-y-4">
-                                {/* History Search/Filter Bar */}
-                                <div className="flex items-center space-x-3 w-full max-w-2xl">
-                                  <div className="flex flex-1 items-center bg-slate-100 dark:bg-slate-800/50 rounded-xl px-3 border border-slate-400 dark:border-white/10">
-                                    <input
-                                      type="text"
-                                      placeholder="Filter history by requirement description..."
-                                      value={historyFilterText}
-                                      onChange={(e) => setHistoryFilterText(e.target.value)}
-                                      className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
-                                    />
-                                    {historyFilterText && (
-                                      <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs">Clear</button>
-                                    )}
+                                {/* History Search/Filter Bar & Export */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+                                  <div className="flex items-center space-x-3 flex-1 min-w-[280px] max-w-2xl">
+                                    <div className="flex flex-1 items-center bg-slate-100 dark:bg-slate-800/50 rounded-xl px-3 border border-slate-400 dark:border-white/10">
+                                      <input
+                                        type="text"
+                                        placeholder="Filter history by requirement, remark, updated by, period..."
+                                        value={historyFilterText}
+                                        onChange={(e) => setHistoryFilterText(e.target.value)}
+                                        className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
+                                      />
+                                      {historyFilterText && (
+                                        <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs font-semibold">Clear</button>
+                                      )}
+                                    </div>
+                                    <select
+                                      value={selectedFinancialYear}
+                                      onChange={(e) => setSelectedFinancialYear(e.target.value)}
+                                      className="bg-slate-100 dark:bg-slate-800/50 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-2 px-3 rounded-xl focus:ring-0 focus:outline-none"
+                                    >
+                                      <option value="All">All Financial Years</option>
+                                      {availableFinancialYears.map(fy => (
+                                        <option key={fy as string} value={fy as string}>{fy as string}</option>
+                                      ))}
+                                    </select>
                                   </div>
-                                  <select
-                                    value={selectedFinancialYear}
-                                    onChange={(e) => setSelectedFinancialYear(e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-800/50 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-2 px-3 rounded-xl focus:ring-0 focus:outline-none"
+
+                                  <button
+                                    type="button"
+                                    onClick={handleExportChecklistHistory}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-sm hover:shadow transition cursor-pointer"
+                                    title="Export complete checklist audit history to Excel / CSV"
                                   >
-                                    <option value="All">All Financial Years</option>
-                                    {availableFinancialYears.map(fy => (
-                                      <option key={fy as string} value={fy as string}>{fy as string}</option>
-                                    ))}
-                                  </select>
+                                    <Download className="w-4 h-4" />
+                                    <span>Export History (Excel)</span>
+                                  </button>
                                 </div>
 
                                 <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
@@ -9714,7 +10157,7 @@ function AdminDashboardContent() {
                           </div>
 
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               try {
                                 let rawList = clientSubTab === 'deleted' ? deletedClients : clients.filter((cl: any) => !cl.user?.deletedAt);
 
@@ -9836,15 +10279,14 @@ function AdminDashboardContent() {
 
                                 const csvString = [headers.join(','), ...rows].join('\n');
                                 const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-                                const url = URL.createObjectURL(blob);
-                                const link = document.createElement('a');
-                                link.setAttribute('href', url);
-                                link.setAttribute('download', `${clientSubTab === 'deleted' ? 'Deleted_Clients_Report' : 'Complete_Clients_Report'}_${new Date().toISOString().split('T')[0]}.csv`);
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                URL.revokeObjectURL(url);
-                                import('react-hot-toast').then(m => m.default.success('Client CSV report downloaded successfully!'));
+                                const reportFileName = `${clientSubTab === 'deleted' ? 'Deleted_Clients_Report' : 'Complete_Clients_Report'}_${new Date().toISOString().split('T')[0]}.csv`;
+                                await executeSmartDownload({
+                                  blob,
+                                  fileName: reportFileName,
+                                  documentType: 'Client Report Export',
+                                  tenantDetails,
+                                  userRole: user?.role
+                                });
                               } catch (err: any) {
                                 console.error('CSV Export Error:', err);
                                 import('react-hot-toast').then(m => m.default.error('Failed to export CSV: ' + err.message));
@@ -9974,13 +10416,14 @@ function AdminDashboardContent() {
                                 });
                                 if (!response.ok) throw new Error('Export failed');
                                 const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `deleted-clients-${new Date().toISOString().split('T')[0]}.csv`;
-                                document.body.appendChild(a);
-                                a.click();
-                                window.URL.revokeObjectURL(url);
+                                const deletedClientsFileName = `deleted-clients-${new Date().toISOString().split('T')[0]}.csv`;
+                                await executeSmartDownload({
+                                  blob,
+                                  fileName: deletedClientsFileName,
+                                  documentType: 'Deleted Clients Export',
+                                  tenantDetails,
+                                  userRole: user?.role
+                                });
                               } catch (err) {
                                 console.error('Failed to download CSV:', err);
                                 toast.error('Failed to download deleted clients CSV.');
@@ -10183,7 +10626,10 @@ function AdminDashboardContent() {
                                   value={assignPlanCategoryId}
                                   onChange={e => {
                                     setAssignPlanCategoryId(e.target.value);
-                                    setAssignPlanId(''); // Reset plan selection
+                                    setAssignPlanId('');
+                                    setAssignCouponCode('');
+                                    setAssignCustomAmount('');
+                                    setAssignCustomDays('');
                                   }}
                                   required
                                   className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
@@ -10233,6 +10679,7 @@ function AdminDashboardContent() {
                                               key={p.id}
                                               onClick={() => {
                                                 setAssignPlanId(p.id);
+                                                setAssignCouponCode('');
                                                 setAssignCustomAmount('');
                                                 setAssignCustomDays('');
                                                 const clickedSub = assignPlanClient?.subscriptions?.find((s: any) => {
@@ -10290,20 +10737,44 @@ function AdminDashboardContent() {
 
                               {/* Coupon Input with Datalist */}
                               <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Apply Coupon (Optional)</label>
-                                <input
-                                  type="text"
-                                  list="active-coupons-list"
-                                  value={assignCouponCode}
-                                  placeholder="Type or select a coupon code"
-                                  onChange={e => {
-                                    const newCode = e.target.value;
-                                    setAssignCouponCode(newCode);
-                                    // Recalculate custom amount if custom days is present, or vice versa
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Apply Coupon (Optional)</label>
+                                  {assignCouponCode && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setAssignCouponCode('');
+                                        setAssignCustomAmount('');
+                                        setAssignCustomDays('');
+                                      }}
+                                      className="text-[10px] text-rose-500 hover:underline font-bold"
+                                    >
+                                      ✕ Remove Coupon
+                                    </button>
+                                  )}
+                                </div>
+
+                                {(() => {
+                                  const selPlanObj = adminPlans.find((x: any) => x.id === assignPlanId);
+                                  const effectivePlanBasePrice = assignCustomAmount ? Number(assignCustomAmount) : (selPlanObj ? (selPlanObj.price || selPlanObj.amount || 0) : null);
+                                  const applicableCouponsForAssign = coupons.filter((c: any) => isCouponApplicableToPlan(c, assignPlanId, assignPlanCategoryId, effectivePlanBasePrice));
+                                  const handleAssignCouponChange = (newCode: string) => {
+                                    const code = newCode.trim().toUpperCase();
+                                    if (code && assignPlanId) {
+                                      const p = adminPlans.find((x: any) => x.id === assignPlanId);
+                                      const cp = coupons.find((c: any) => String(c.code).trim().toUpperCase() === code && c.status === 'ACTIVE');
+                                      const curPlanPrice = assignCustomAmount ? Number(assignCustomAmount) : (p ? (p.price || p.amount || 0) : 0);
+                                      if (cp && cp.minPurchaseValue && curPlanPrice < Number(cp.minPurchaseValue)) {
+                                        toast.error(`Minimum purchase of ₹${Number(cp.minPurchaseValue).toLocaleString('en-IN')} required for coupon "${code}" (Plan amount: ₹${curPlanPrice.toLocaleString('en-IN')})`);
+                                        setAssignCouponCode('');
+                                        return;
+                                      }
+                                    }
+                                    setAssignCouponCode(code);
                                     if (assignPlanId) {
                                       const p = adminPlans.find((x: any) => x.id === assignPlanId);
                                       if (p) {
-                                        const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, newCode);
+                                        const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, code);
                                         const totalDays = p.durationMonths * 30;
                                         if (assignCustomAmount) {
                                           let val = Number(assignCustomAmount);
@@ -10322,14 +10793,145 @@ function AdminDashboardContent() {
                                         }
                                       }
                                     }
-                                  }}
-                                  className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase"
-                                />
-                                <datalist id="active-coupons-list">
-                                  {coupons.filter(c => c.status === 'ACTIVE').map(c => (
-                                    <option key={c.id} value={c.code}>{c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}%` : `₹${c.discountValue}`})</option>
-                                  ))}
-                                </datalist>
+                                  };
+
+                                  return (
+                                    <>
+                                      <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                          type="text"
+                                          autoComplete="off"
+                                          name="assign_plan_coupon_no_autofill"
+                                          value={assignCouponCode}
+                                          placeholder="Type coupon code (e.g. SUMMER50)"
+                                          onChange={e => handleAssignCouponChange(e.target.value)}
+                                          className="flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase"
+                                        />
+                                        <select
+                                          value={assignCouponCode.trim().toUpperCase()}
+                                          onChange={e => handleAssignCouponChange(e.target.value)}
+                                          className="bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500 max-w-full sm:max-w-[220px]"
+                                        >
+                                          <option value="">{applicableCouponsForAssign.length > 0 ? `-- Select Coupon (${applicableCouponsForAssign.length}) --` : '-- No Coupon --'}</option>
+                                          {applicableCouponsForAssign.map((c: any) => (
+                                            <option key={c.id || c._id || c.code} value={String(c.code).trim().toUpperCase()}>
+                                              {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Quick-Pick Clickable Badges for Plan/Category Coupons */}
+                                      {applicableCouponsForAssign.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicable Coupons:</span>
+                                          {applicableCouponsForAssign.map((c: any) => {
+                                            const isSelected = assignCouponCode.trim().toUpperCase() === String(c.code).trim().toUpperCase();
+                                            return (
+                                              <button
+                                                key={c.id || c._id || c.code}
+                                                type="button"
+                                                onClick={() => handleAssignCouponChange(isSelected ? '' : c.code)}
+                                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
+                                                  isSelected
+                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm ring-1 ring-violet-500'
+                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:border-violet-500 hover:text-violet-600'
+                                                }`}
+                                                title={isSelected ? 'Click to deselect' : `Click to apply ${c.code}`}
+                                              >
+                                                <Tag className="w-3 h-3 text-violet-500" />
+                                                <span>{c.code}</span>
+                                                <span className="text-[10px] opacity-80 font-normal">
+                                                  ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                                </span>
+                                                {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+
+                                {/* Coupon live status feedback */}
+                                {(() => {
+                                  const cleanCode = assignCouponCode.trim().toUpperCase();
+                                  if (!cleanCode) return null;
+                                  const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+                                  if (!coupon) {
+                                    return (
+                                      <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                        <span>Coupon "{cleanCode}" not found or inactive.</span>
+                                      </div>
+                                    );
+                                  }
+
+                                  let planAllowed = true;
+                                  if (coupon.planId && assignPlanId) {
+                                    try {
+                                      let arr = JSON.parse(String(coupon.planId));
+                                      if (!Array.isArray(arr)) arr = [String(coupon.planId)];
+                                      if (arr.length > 0 && !arr.includes(String(assignPlanId))) planAllowed = false;
+                                    } catch {
+                                      if (String(coupon.planId) !== String(assignPlanId)) planAllowed = false;
+                                    }
+                                  }
+                                  let catAllowed = true;
+                                  if (coupon.categoryId && assignPlanCategoryId) {
+                                    try {
+                                      let arr = JSON.parse(String(coupon.categoryId));
+                                      if (!Array.isArray(arr)) arr = [String(coupon.categoryId)];
+                                      if (arr.length > 0 && !arr.includes(String(assignPlanCategoryId))) catAllowed = false;
+                                    } catch {
+                                      if (String(coupon.categoryId) !== String(assignPlanCategoryId)) catAllowed = false;
+                                    }
+                                  }
+
+                                  if (!planAllowed || !catAllowed) {
+                                    return (
+                                      <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                        <span>Coupon "{coupon.code}" is restricted to specific plans/segments and cannot be used here.</span>
+                                      </div>
+                                    );
+                                  }
+
+                                  const selPlan = (adminPlans || []).find((p: any) => p.id === assignPlanId);
+                                  const effectiveBasePrice = assignCustomAmount ? Number(assignCustomAmount) : (selPlan ? selPlan.price : 0);
+                                  if (coupon.minPurchaseValue && effectiveBasePrice > 0 && effectiveBasePrice < Number(coupon.minPurchaseValue)) {
+                                    return (
+                                      <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                        <span>Minimum purchase of ₹{Number(coupon.minPurchaseValue).toLocaleString('en-IN')} required for "{coupon.code}" (Plan amount: ₹{effectiveBasePrice.toLocaleString('en-IN')}).</span>
+                                      </div>
+                                    );
+                                  }
+
+                                  let discText = coupon.discountType === 'PERCENTAGE' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} FLAT OFF`;
+                                  let saveAmount = 0;
+                                  if (effectiveBasePrice > 0) {
+                                    if (coupon.discountType === 'PERCENTAGE') {
+                                      saveAmount = Math.round((effectiveBasePrice * coupon.discountValue) / 100);
+                                      if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && saveAmount > coupon.maxDiscountValue) {
+                                        saveAmount = coupon.maxDiscountValue;
+                                      }
+                                    } else {
+                                      saveAmount = Math.min(effectiveBasePrice, coupon.discountValue);
+                                    }
+                                  }
+
+                                  return (
+                                    <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-600 dark:text-emerald-400 text-[11px] flex items-center justify-between font-semibold">
+                                      <span className="flex items-center gap-1.5">
+                                        <CheckCircle className="w-3.5 h-3.5 flex-shrink-0 text-emerald-500" />
+                                        Coupon "{coupon.code}" Applied: {discText}
+                                      </span>
+                                      {saveAmount > 0 && <span className="font-bold font-mono">Save ₹{saveAmount.toLocaleString('en-IN')}</span>}
+                                    </div>
+                                  );
+                                })()}
                               </div>
 
                               {/* Payment Details */}
@@ -10500,6 +11102,81 @@ function AdminDashboardContent() {
                                 />
                               </div>
 
+                              {/* Price Breakdown Card */}
+                              {(() => {
+                                const selPlan = (adminPlans || []).find((p: any) => p.id === assignPlanId);
+                                if (!selPlan) return null;
+                                const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                const hasCustom = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
+                                const enteredTotal = hasCustom ? Number(assignCustomAmount) : selPlan.price;
+
+                                // If GST is inclusive, enteredTotal includes 18% GST. Pre-tax base is enteredTotal / 1.18
+                                const preTaxBase = (gstEnabled && !isExclusive)
+                                  ? parseFloat((enteredTotal / 1.18).toFixed(2))
+                                  : enteredTotal;
+
+                                const cleanCode = assignCouponCode.trim().toUpperCase();
+                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE') : null;
+
+                                let discOnBase = 0;
+                                if (matchedCoupon) {
+                                  if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+                                    discOnBase = (gstEnabled && !isExclusive)
+                                      ? parseFloat((Number(matchedCoupon.discountValue || 0) / 1.18).toFixed(2))
+                                      : Number(matchedCoupon.discountValue || 0);
+                                  } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+                                    discOnBase = parseFloat(((preTaxBase * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+                                    if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && discOnBase > Number(matchedCoupon.maxDiscountValue)) {
+                                      discOnBase = Number(matchedCoupon.maxDiscountValue);
+                                    }
+                                  }
+                                  if (discOnBase > preTaxBase) discOnBase = preTaxBase;
+                                }
+
+                                const taxableBase = Math.max(0, parseFloat((preTaxBase - discOnBase).toFixed(2)));
+                                const gstAmt = gstEnabled ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+                                const finalPayable = parseFloat((taxableBase + gstAmt).toFixed(2));
+
+                                return (
+                                  <div className="bg-slate-100 dark:bg-slate-900/80 border border-slate-300 dark:border-white/10 rounded-xl p-3 space-y-1.5 text-xs font-mono">
+                                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                      <span>Pre-tax Base Value:</span>
+                                      <span className={discOnBase > 0 ? 'line-through text-slate-500' : 'text-slate-800 dark:text-slate-200'}>
+                                        ₹{preTaxBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                    {discOnBase > 0 && matchedCoupon && (
+                                      <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                                        <span className="flex items-center gap-1">
+                                          <Tag className="w-3.5 h-3.5" />
+                                          Coupon Discount on Base ({matchedCoupon.code} - {matchedCoupon.discountType === 'PERCENTAGE' ? `${matchedCoupon.discountValue}%` : `₹${matchedCoupon.discountValue}`}):
+                                        </span>
+                                        <span>-₹{discOnBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    )}
+                                    {gstEnabled && (
+                                      <>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-200 dark:border-white/5 pt-1">
+                                          <span>Taxable Value:</span>
+                                          <span>₹{taxableBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                          <span>GST (18%):</span>
+                                          <span>₹{gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div className="flex justify-between border-t border-slate-300 dark:border-white/10 pt-1.5 font-extrabold text-sm text-violet-600 dark:text-violet-400">
+                                      <span>Total Payable:</span>
+                                      <span>
+                                        ₹{finalPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {(!gstEnabled || !isExclusive) ? ' (GST Incl.)' : ' (+ 18% GST)'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
                               {/* Info note */}
                               <div className="flex items-start gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl text-[10px] text-amber-700 dark:text-amber-300">
                                 <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
@@ -10518,7 +11195,19 @@ function AdminDashboardContent() {
                                 {(() => {
                                   const selPlan = adminPlans.find(p => p.id === assignPlanId);
                                   const rawBase = selPlan ? getPlanAmountWithCoupon(selPlan.price, selPlan.durationMonths, assignCouponCode) : 0;
-                                  const finalBase = assignCustomAmount ? (gstEnabled && gstCalculationType === 'EXCLUSIVE' ? Number(assignCustomAmount) / 1.18 : Number(assignCustomAmount)) : rawBase;
+                                  const enteredVal = assignCustomAmount ? Number(assignCustomAmount) : (selPlan ? selPlan.price : 0);
+                                  const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                  const preTax = (gstEnabled && !isExclusiveGst) ? enteredVal / 1.18 : enteredVal;
+                                  let discVal = 0;
+                                  const cMatch = assignCouponCode.trim() ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === assignCouponCode.trim().toUpperCase() && c.status === 'ACTIVE') : null;
+                                  if (cMatch) {
+                                    if (cMatch.minPurchaseValue && preTax < Number(cMatch.minPurchaseValue)) {
+                                      discVal = 0;
+                                    } else {
+                                      discVal = cMatch.discountType === 'PERCENTAGE' ? (preTax * cMatch.discountValue) / 100 : cMatch.discountValue;
+                                    }
+                                  }
+                                  const finalBase = Math.max(0, preTax - discVal);
                                   const isFeeExceeded = assignPlanFeeSummary && finalBase > 0 && (
                                     assignPlanFeeSummary.isQuotaFull ||
                                     (assignPlanFeeSummary.totalBasePaid + finalBase > assignPlanFeeSummary.maxBaseFeeCap) ||
@@ -15461,6 +16150,64 @@ function AdminDashboardContent() {
                                     <option value="SMS_OTP">Mobile SMS OTP Verification</option>
                                     <option value="BOTH">Both (Email & SMS OTP)</option>
                                   </select>
+                                </div>
+
+                                {/* View Sensitive Data (Unmasked) Policy */}
+                                <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-800/60 pt-4">
+                                  <div className="pr-4">
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-semibold">View Sensitive Data (Unmasked)</p>
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                        (selectedRole.permissions && selectedRole.permissions.includes('VIEW_SENSITIVE_DATA')) || ['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name)
+                                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                          : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
+                                      }`}>
+                                        {(selectedRole.permissions && selectedRole.permissions.includes('VIEW_SENSITIVE_DATA')) || ['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name) ? 'Unmasked' : 'Masked (Protected)'}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-0.5">
+                                      When enabled, users with this role can view unmasked Mobile, Email, PAN, and Aadhaar across all tables (Delivery Reports, Clients, Payments, Vaults, etc.). When disabled, sensitive data will be securely masked.
+                                    </p>
+                                  </div>
+                                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                                    <input
+                                      type="checkbox"
+                                      className="sr-only peer"
+                                      checked={(selectedRole.permissions && selectedRole.permissions.includes('VIEW_SENSITIVE_DATA')) || ['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name)}
+                                      disabled={['SUPER_ADMIN', 'ADMIN'].includes(selectedRole.name)}
+                                      onChange={async (e) => {
+                                        const newValue = e.target.checked;
+                                        const currentPerms = selectedRole.permissions || [];
+                                        const updatedPerms = newValue
+                                          ? [...new Set([...currentPerms, 'VIEW_SENSITIVE_DATA'])]
+                                          : currentPerms.filter((p: string) => p !== 'VIEW_SENSITIVE_DATA');
+                                        
+                                        setSelectedRole({ ...selectedRole, permissions: updatedPerms });
+
+                                        try {
+                                          const res = await api.updateRolePermissions(selectedRole.id, updatedPerms);
+                                          if (res.success) {
+                                            toast.success(`Sensitive Data View set to ${newValue ? 'Unmasked (Original Details)' : 'Masked (Protected)'} for ${selectedRole.name}.`);
+                                            const rReq = await api.getRoles();
+                                            if (rReq.success) {
+                                              setRoles(rReq.data);
+                                              const updated = rReq.data.find((r: any) => r.id === selectedRole.id);
+                                              if (updated) setSelectedRole(updated);
+                                            }
+                                            if (user?.role === selectedRole.name) {
+                                              const updatedUser = { ...user, permissions: updatedPerms };
+                                              setUser(updatedUser);
+                                              localStorage.setItem('user', JSON.stringify(updatedUser));
+                                            }
+                                          }
+                                        } catch (err: any) {
+                                          toast.error(err.message || 'Failed to update sensitive data permission.');
+                                          setSelectedRole({ ...selectedRole, permissions: currentPerms });
+                                        }
+                                      }}
+                                    />
+                                    <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-500"></div>
+                                  </label>
                                 </div>
                               </div>
 

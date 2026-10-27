@@ -27,6 +27,8 @@ export default function SubscriptionCenter({
   const [availablePlans, setAvailablePlans] = useState<any[]>([]);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
   const [gstType, setGstType] = useState<string>('INCLUSIVE');
+  const [gstEnabled, setGstEnabled] = useState<boolean>(true);
+  const isExclusiveGst = gstEnabled && gstType === 'EXCLUSIVE';
 
   // Extract unique categories from available plans
   const categories = useMemo(() => {
@@ -135,14 +137,80 @@ export default function SubscriptionCenter({
     customMessage?: string;
   }>({});
 
-  const handleApplyCoupon = async () => {
-    if (!couponCode) return;
+  const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
+    if (!c || (c.status && c.status !== 'ACTIVE')) return false;
+
+    if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
+      if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
+    }
+
+    if (c.planId) {
+      let pIds: string[] = [];
+      if (Array.isArray(c.planId)) {
+        pIds = c.planId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.planId === 'string' && c.planId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.planId);
+          pIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.planId)];
+        } catch {
+          pIds = [String(c.planId)];
+        }
+      } else {
+        pIds = [String(c.planId?._id || c.planId?.id || c.planId)];
+      }
+      const cleanTargetPlan = targetPlanId ? String(targetPlanId).trim() : null;
+      if (cleanTargetPlan && pIds.length > 0 && !pIds.includes(cleanTargetPlan)) return false;
+    }
+
+    if (c.categoryId) {
+      let catIds: string[] = [];
+      if (Array.isArray(c.categoryId)) {
+        catIds = c.categoryId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.categoryId === 'string' && c.categoryId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.categoryId);
+          catIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.categoryId)];
+        } catch {
+          catIds = [String(c.categoryId)];
+        }
+      } else {
+        catIds = [String(c.categoryId?._id || c.categoryId?.id || c.categoryId)];
+      }
+      const cleanTargetCat = targetCategoryId ? String(targetCategoryId).trim() : null;
+      if (cleanTargetCat && catIds.length > 0 && !catIds.includes(cleanTargetCat)) return false;
+    }
+
+    return true;
+  };
+
+  const handleApplyCoupon = async (codeOverride?: string) => {
+    const code = (codeOverride || couponCode || '').trim().toUpperCase();
+    if (!code) return;
     setLoading(true);
     try {
-      const res = await api.applyCoupon(couponCode);
+      const planId = checkoutPlan?.id || checkoutPlan?._id;
+      const categoryId = checkoutPlan?.categoryId || checkoutPlan?.category?._id || checkoutPlan?.category?.id || checkoutPlan?.category;
+      const rawPrice = Number(checkoutPlan?.amount || checkoutPlan?.price || 0);
+      const matchedLocal = (availableCoupons || []).find((cp: any) => String(cp.code).trim().toUpperCase() === code);
+      if (matchedLocal && matchedLocal.minPurchaseValue && rawPrice > 0 && rawPrice < Number(matchedLocal.minPurchaseValue)) {
+        toast.error(`Minimum purchase of ₹${Number(matchedLocal.minPurchaseValue).toLocaleString('en-IN')} required for coupon "${code}" (Plan price: ₹${rawPrice.toLocaleString('en-IN')})`);
+        setAppliedCoupon(null);
+        setLoading(false);
+        return;
+      }
+
+      const res = await api.applyCoupon(code, {
+        planId: planId ? String(planId) : undefined,
+        categoryId: categoryId ? String(categoryId) : undefined,
+        amount: rawPrice || undefined
+      });
       if (res.success) {
         setAppliedCoupon(res.data);
-        toast('Coupon applied!');
+        setCouponCode(code);
+        toast.success(`Coupon ${code} applied successfully!`);
+      } else {
+        toast.error(res.message || 'Invalid coupon');
+        setAppliedCoupon(null);
       }
     } catch (err: any) {
       toast.error(err.message || 'Invalid coupon');
@@ -214,7 +282,7 @@ export default function SubscriptionCenter({
         if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
         else price = Math.max(0, price - appliedCoupon.discountValue);
       }
-      if (gstType === 'EXCLUSIVE') {
+      if (isExclusiveGst) {
         price = price * 1.18; // Add 18% GST
       }
       const formattedPrice = price.toFixed(2);
@@ -420,12 +488,14 @@ export default function SubscriptionCenter({
         if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
         else price = Math.max(0, price - appliedCoupon.discountValue);
       }
-      if (gstType === 'EXCLUSIVE') {
+      if (isExclusiveGst) {
         price = price * 1.18;
       }
       const formattedPrice = price.toFixed(2);
 
       const formData = new FormData();
+      formData.append('gstEnabled', String(gstEnabled));
+      formData.append('gstCalculationType', gstType);
       formData.append('planId', checkoutPlan.id || checkoutPlan._id);
       formData.append('amount', formattedPrice);
       formData.append('paymentMode', 'UPI_QR');
@@ -570,6 +640,7 @@ export default function SubscriptionCenter({
         if (plansRes.success) {
           setAvailablePlans(plansRes.data || []);
           setGstType(plansRes.gstCalculationType || 'INCLUSIVE');
+          setGstEnabled(plansRes.gstEnabled !== false);
         }
       } catch (err) {
         console.error('Failed to fetch subscriptions/plans', err);
@@ -648,7 +719,7 @@ export default function SubscriptionCenter({
                 let displayPrice = sub.amountPaid || sub.amountTotal;
                 if (!displayPrice) {
                   let p = sub.plan?.amount || sub.plan?.price || 0;
-                  if (gstType === 'EXCLUSIVE') p = p * 1.18;
+                  if (isExclusiveGst) p = p * 1.18;
                   displayPrice = p.toFixed(2);
                 }
 
@@ -1070,7 +1141,7 @@ export default function SubscriptionCenter({
                         / {plan.durationMonths || plan.duration || '1'} Month(s)
                       </span>
                     </div>
-                    <p className="text-[10px] text-premium-text/40 uppercase tracking-widest mb-6">18% GST ({gstType === 'EXCLUSIVE' ? 'Exclusive' : 'Inclusive'})</p>
+                    <p className="text-[10px] text-premium-text/40 uppercase tracking-widest mb-6">{gstEnabled ? (isExclusiveGst ? '+ 18% GST (Exclusive)' : '18% GST (Inclusive)') : '0% GST (Non-GST)'}</p>
 
                     {plan.description && (
                       <div className="mb-6 p-4 bg-premium-bg/50 border border-premium-border/50 rounded-2xl">
@@ -1118,6 +1189,7 @@ export default function SubscriptionCenter({
                             }
                             setCheckoutPlan(plan);
                             setAppliedCoupon(null);
+                            api.getClientCoupons().then(r => { if (r && r.success && Array.isArray(r.data)) setAvailableCoupons(r.data); }).catch(() => {});
                             setCouponCode('');
                             setCheckoutPaymentMethod(null);
                             setProofSuccess(false);
@@ -1236,7 +1308,7 @@ export default function SubscriptionCenter({
                                 if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
                                 else price = Math.max(0, price - appliedCoupon.discountValue);
                               }
-                              if (gstType === 'EXCLUSIVE') price = price * 1.18;
+                              if (isExclusiveGst) price = price * 1.18;
                               return price.toFixed(2);
                             })()}</span>
                           </div>
@@ -1402,28 +1474,61 @@ export default function SubscriptionCenter({
                     <div className="mb-6 flex gap-2">
                       <div className="flex gap-2 w-full">
                         <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} placeholder="Have a coupon?" className="flex-1 bg-premium-bg border border-premium-border rounded-xl px-4 py-2.5 text-sm uppercase" />
-                        <button onClick={handleApplyCoupon} disabled={loading || !couponCode} className="px-4 py-2.5 bg-premium-bg border border-premium-border hover:border-premium-primary rounded-xl text-sm font-bold transition-all">Apply</button>
+                        <button onClick={() => handleApplyCoupon()} disabled={loading || !couponCode} className="px-4 py-2.5 bg-premium-bg border border-premium-border hover:border-premium-primary rounded-xl text-sm font-bold transition-all">Apply</button>
                       </div>
                     </div>
 
                     {availableCoupons.length > 0 && !appliedCoupon && (
                       <div className="flex flex-wrap gap-2 mb-4 -mt-3">
                         {availableCoupons.filter(c => {
-                          if (c.planId && c.planId !== checkoutPlan.id && c.planId !== checkoutPlan._id) return false;
-                          if (c.categoryId && c.categoryId !== checkoutPlan.categoryId) return false;
-                          return true;
-                        }).map(c => (
-                          <button key={c.id} onClick={() => { setCouponCode(c.code); }} className="text-[10px] px-2 py-1 rounded-full bg-premium-primary/10 text-premium-primary border border-premium-primary/20 hover:bg-premium-primary/20 transition-all font-bold tracking-wider">
-                            USE {c.code}
-                          </button>
-                        ))}
+                          const planPrice = Number(checkoutPlan?.amount || checkoutPlan?.price || 0);
+                          return isCouponApplicableToPlan(
+                            c,
+                            checkoutPlan?.id || checkoutPlan?._id,
+                            checkoutPlan?.categoryId || checkoutPlan?.category?._id || checkoutPlan?.category?.id || checkoutPlan?.category,
+                            planPrice
+                          );
+                        }).map(c => {
+                          const discountLabel = c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`;
+                          return (
+                            <button
+                              key={c.id || c._id || c.code}
+                              type="button"
+                              onClick={() => {
+                                setCouponCode(c.code);
+                                handleApplyCoupon(c.code);
+                              }}
+                              className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 hover:border-emerald-400 transition-all font-semibold tracking-wider flex items-center gap-1.5 shadow-sm"
+                            >
+                              <span>USE <span className="font-bold">{c.code}</span></span>
+                              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1 py-0.5 rounded font-normal">({discountLabel})</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
 
                     {appliedCoupon && (
-                      <p className="text-emerald-500 text-sm mb-4">
-                        Coupon Applied: {appliedCoupon.discountType === 'PERCENTAGE' ? `${appliedCoupon.discountValue}% off` : `₹${appliedCoupon.discountValue} off`}
-                      </p>
+                      <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/25 px-3.5 py-2.5 rounded-xl text-emerald-400 text-sm mb-4">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                          <span className="font-bold">Coupon Applied: {appliedCoupon.code || couponCode}</span>
+                          <span className="text-xs text-emerald-300">
+                            ({appliedCoupon.discountType === 'PERCENTAGE' ? `${appliedCoupon.discountValue}% off` : `₹${appliedCoupon.discountValue} off`})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAppliedCoupon(null);
+                            setCouponCode('');
+                            toast('Coupon removed');
+                          }}
+                          className="text-xs text-rose-400 hover:text-rose-300 font-semibold px-2 py-1 rounded-lg hover:bg-rose-500/10 transition"
+                        >
+                          Remove
+                        </button>
+                      </div>
                     )}
 
                     <div className="bg-premium-bg border border-premium-border p-4 rounded-2xl mb-6">
@@ -1437,7 +1542,7 @@ export default function SubscriptionCenter({
                           <span>-{appliedCoupon.discountType === 'PERCENTAGE' ? `${appliedCoupon.discountValue}%` : `₹${appliedCoupon.discountValue}`}</span>
                         </div>
                       )}
-                      {gstType === 'EXCLUSIVE' && (
+                      {isExclusiveGst && (
                         <div className="flex justify-between items-center mb-2 text-sm text-premium-text/60">
                           <span>GST (18%)</span>
                           <span>₹{(() => {
@@ -1458,7 +1563,7 @@ export default function SubscriptionCenter({
                             if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
                             else price = Math.max(0, price - appliedCoupon.discountValue);
                           }
-                          if (gstType === 'EXCLUSIVE') {
+                          if (isExclusiveGst) {
                             price = price * 1.18;
                           }
                           return price.toFixed(2);
@@ -1561,7 +1666,7 @@ export default function SubscriptionCenter({
                                   if (appliedCoupon.discountType === 'PERCENTAGE') price = price - (price * (appliedCoupon.discountValue / 100));
                                   else price = Math.max(0, price - appliedCoupon.discountValue);
                                 }
-                                if (gstType === 'EXCLUSIVE') price = price * 1.18;
+                                if (isExclusiveGst) price = price * 1.18;
                                 const formattedPrice = price.toFixed(2);
 
                                 setContactAdminData({

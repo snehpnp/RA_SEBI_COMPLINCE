@@ -8,6 +8,9 @@ export interface IPayment extends Document {
   clientId: Types.ObjectId;
   planId?: Types.ObjectId | null;
   amount: number;
+  baseAmount?: number | null;
+  gstAmount?: number | null;
+  gstRate?: number | null;
   paymentMode: string;
   transactionRef: string;
   receiptUrl?: string | null;
@@ -71,6 +74,9 @@ export const PaymentSchema = new Schema<IPayment>(
     planId: { type: Schema.Types.ObjectId, ref: 'Plan', default: null },
     subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', default: null },
     amount: { type: Number, required: true },
+    baseAmount: { type: Number, default: null },
+    gstAmount: { type: Number, default: null },
+    gstRate: { type: Number, default: null },
     paymentMode: { type: String, required: true },
     transactionRef: { type: String, required: true, unique: true },
     receiptUrl: { type: String, default: null },

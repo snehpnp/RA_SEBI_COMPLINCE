@@ -1,3 +1,4 @@
+import { executeSmartDownload } from '@/utils/smartDownload';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Send,
@@ -49,6 +50,29 @@ const stripHtml = (html: string = '') => {
     .trim();
 };
 
+
+// Sensitive data masking helpers
+const maskEmail = (email: string | null | undefined) => {
+  if (!email) return email || '';
+  const parts = email.split('@');
+  if (parts.length !== 2) return email;
+  const name = parts[0];
+  const maskedName = name.length > 2 ? name.substring(0, 2) + '*'.repeat(name.length - 2) : name + '*';
+  return `${maskedName}@${parts[1]}`;
+};
+
+const maskMobile = (mobile: string | null | undefined) => {
+  if (!mobile) return mobile || '';
+  const clean = String(mobile).trim();
+  const digits = clean.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    const last2 = digits.slice(-2);
+    const first2 = digits.slice(0, 2);
+    return `${first2}${'*'.repeat(digits.length - 4)}${last2}`;
+  }
+  return clean.length > 4 ? clean.substring(0, 2) + '*'.repeat(clean.length - 4) + clean.substring(clean.length - 2) : '**********';
+};
+
 export default function TradeDeliveryReports({ onBackToSignals, initialChannel = 'ALL' }: TradeDeliveryReportsProps) {
   const activeChannel = initialChannel;
 
@@ -57,6 +81,31 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
   const [selectedClient, setSelectedClient] = useState<string>('ALL');
   const [clientsList, setClientsList] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [canViewSensitive, setCanViewSensitive] = useState<boolean>(true);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        const isFull = u.role === 'SUPER_ADMIN' || u.role === 'ADMIN';
+        const hasPerm = Array.isArray(u.permissions) && u.permissions.includes('VIEW_SENSITIVE_DATA');
+        setCanViewSensitive(isFull || hasPerm);
+      }
+    } catch {
+      setCanViewSensitive(true);
+    }
+  }, []);
+
+  const formatMobile = (m: string | null | undefined) => canViewSensitive ? (m || '') : maskMobile(m);
+  const formatEmail = (e: string | null | undefined) => canViewSensitive ? (e || '') : maskEmail(e);
+  const formatRecipient = (r: string | null | undefined) => {
+    if (!r) return '';
+    if (canViewSensitive) return r;
+    if (r.includes('@')) return maskEmail(r);
+    if (/^\+?\d{10,14}$/.test(r.trim())) return maskMobile(r);
+    return r;
+  };
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [page, setPage] = useState(1);
@@ -319,7 +368,7 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
   });
 
   // Export comprehensive reports to CSV with full trade lifecycle details
-  const handleExportCsv = () => {
+  const handleExportCsv = async () => {
     if (filteredReports.length === 0) {
       toast('No records available to export.');
       return;
@@ -374,8 +423,8 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
         `"${(r.closeRemark || '').replace(/"/g, '""')}"`,
         `"${(r.planName || '').replace(/"/g, '""')}"`,
         `"${(r.clientName || '').replace(/"/g, '""')}"`,
-        `"${r.clientMobile || ''}"`,
-        `"${r.clientEmail || ''}"`,
+        `"${formatMobile(r.clientMobile || '')}"`,
+        `"${formatEmail(r.clientEmail || '')}"`,
         `"${r.telegramChatId || ''}"`,
         `"${r.channel || ''}"`,
         `"${r.scheduleId || ''}"`,
@@ -390,16 +439,12 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
     // Add UTF-8 BOM so Excel opens with proper character rendering
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
     const clientSuffix = selectedClient !== 'ALL' ? `-client-${selectedClient.slice(-6)}` : '';
-    link.setAttribute('download', `${channelConfig.filePrefix}${clientSuffix}-${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    toast.success(`${channelConfig.title} downloaded successfully!`);
+    await executeSmartDownload({
+      blob,
+      fileName: `${channelConfig.filePrefix}${clientSuffix}-${new Date().toISOString().split('T')[0]}.csv`,
+      documentType: channelConfig.title
+    });
   };
 
   const copyMessageToClipboard = (text: string) => {
@@ -959,14 +1004,14 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                         {row.clientMobile ? (
                           <div className="text-[11px] font-mono font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1 mt-0.5">
                             <Phone className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                            <span>{row.clientMobile}</span>
+                            <span>{formatMobile(row.clientMobile)}</span>
                           </div>
                         ) : (
                           <div className="text-[10px] text-slate-400 italic">No mobile recorded</div>
                         )}
                         <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
                           <Mail className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span className="max-w-[180px] truncate">{row.clientEmail || row.recipient}</span>
+                          <span className="max-w-[180px] truncate">{formatEmail(row.clientEmail) || formatRecipient(row.recipient)}</span>
                         </div>
                       </td>
 
@@ -1001,7 +1046,7 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                               <Smartphone className="w-3 h-3" /> SMS Gateway
                             </span>
                             <span className="text-[9px] text-slate-500 font-mono">
-                              {row.clientMobile || row.recipient}
+                              {formatMobile(row.clientMobile) || formatRecipient(row.recipient)}
                             </span>
                             {row.scheduleId && (
                               <div className="flex items-center gap-1 mt-0.5">
@@ -1200,13 +1245,13 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                   <span className="text-[10px] text-slate-400 uppercase font-black">Mobile Number</span>
                   <p className="font-bold font-mono text-slate-900 dark:text-white flex items-center gap-1">
                     <Phone className="w-3 h-3 text-emerald-500" />
-                    {selectedRecord.clientMobile || 'N/A'}
+                    {formatMobile(selectedRecord.clientMobile) || 'N/A'}
                   </p>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-black">Email Address</span>
                   <p className="font-medium text-slate-700 dark:text-slate-300 truncate" title={selectedRecord.clientEmail}>
-                    {selectedRecord.clientEmail || selectedRecord.recipient}
+                    {formatEmail(selectedRecord.clientEmail) || formatRecipient(selectedRecord.recipient)}
                   </p>
                 </div>
                 <div>
@@ -1278,7 +1323,7 @@ export default function TradeDeliveryReports({ onBackToSignals, initialChannel =
                     <div>
                       <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-semibold">Recipient Mobile</span>
                       <p className="font-mono font-bold text-slate-900 dark:text-white mt-0.5">
-                        {selectedRecord.clientMobile || selectedRecord.recipient}
+                        {formatMobile(selectedRecord.clientMobile) || formatRecipient(selectedRecord.recipient)}
                       </p>
                     </div>
                   </div>

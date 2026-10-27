@@ -628,7 +628,7 @@ router.post(
 router.post(
   '/admin/digio/fetch-by-id',
   authenticateJWT,
-  requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
+  requireAnyPermission(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']),
   enforceTenantIsolation,
   fetchDigioRecord
 );
@@ -642,7 +642,7 @@ router.post(
 router.post(
   '/admin/cams-kra/fetch-pan',
   authenticateJWT,
-  requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
+  requireAnyPermission(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']),
   enforceTenantIsolation,
   fetchCamsRecord
 );
@@ -656,7 +656,7 @@ router.post(
 router.get(
   '/admin/cams-kra/pdf/:clientId',
   authenticateJWT,
-  requireAnyPermission(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']),
+  requireAnyPermission(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']),
   enforceTenantIsolation,
   getCamsKraPdf
 );
@@ -1678,18 +1678,21 @@ router.get(
   '/signals/delivery-reports/master',
   authenticateJWT,
   enforceTenantIsolation,
+  requireAnyPermission(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']),
   getMasterDeliveryReport
 );
 router.get(
   '/signals/delivery-reports/channel/:channel',
   authenticateJWT,
   enforceTenantIsolation,
+  requireAnyPermission(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']),
   getChannelDeliveryReport
 );
 router.post(
   '/signals/delivery-reports/sync-dlr',
   authenticateJWT,
   enforceTenantIsolation,
+  requireAnyPermission(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']),
   syncSmsDeliveryReports
 );
 router.post(

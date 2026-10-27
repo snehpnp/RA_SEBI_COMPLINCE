@@ -166,7 +166,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
     const botToken = tenantDoc?.telegramBotToken;
     const isTenantSmsEnabled = Boolean(tenantDoc?.smsGatewayEnabled && tenantDoc?.smsTradeEnabled !== false);
 
-    for (const sub of (eligibleSubs as any[])) {
+    const dispatchPromises = (eligibleSubs as any[]).map(async (sub) => {
       let client = (sub.clientId || sub.client) as any;
       // If population was incomplete, fetch client directly
       if (!client || typeof client !== 'object' || (!client.email && !client.userId)) {
@@ -175,7 +175,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
           client = await dynamicDb.Client.findById(rawClientId).populate('userId').lean();
         }
       }
-      if (!client) continue;
+      if (!client) return;
 
       let user = (client.userId || client.user) as any;
       if (user && typeof user !== 'object') {
@@ -190,7 +190,7 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
 
       // Avoid duplicate processing if client has multiple concurrent subscriptions
       const uniqueKey = clientEmail || recipientId || clientDbId;
-      if (!uniqueKey || notifiedRecipients.has(uniqueKey)) continue;
+      if (!uniqueKey || notifiedRecipients.has(uniqueKey)) return;
       notifiedRecipients.add(uniqueKey);
 
       const targetRecipient = clientEmail || recipientId || clientDbId;
@@ -593,7 +593,8 @@ export const broadcastSignalNotification = async (options: BroadcastNotification
           }
         });
       }
-    }
+    });
+    await Promise.allSettled(dispatchPromises);
 
     // 4. Log an ADMIN notification so admin header and dashboard see the activity
     const finalAdminTitle = adminTitle || title;

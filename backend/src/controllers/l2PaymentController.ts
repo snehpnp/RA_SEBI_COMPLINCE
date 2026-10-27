@@ -143,11 +143,11 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     // Calculate subscription end date
     const endDate = new Date(finalServiceStartDate.getTime() + finalValidityDays * 24 * 60 * 60 * 1000);
 
-    const isGstActive = tenantObj?.gstEnabled !== false;
-    const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
+    const tenantGstStr = (tenantObj?.gst || tenantObj?.gstNumber || tenantObj?.gstin || '').trim();
+    const isGstActive = tenantObj?.gstEnabled !== false && tenantGstStr.length >= 15;
     const amountTotal = finalAmount;
-    const amountBase = isExclusive ? (amountTotal / 1.18) : amountTotal;
-    const amountGst = amountTotal - amountBase;
+    const amountBase = isGstActive ? parseFloat((amountTotal / 1.18).toFixed(2)) : amountTotal;
+    const amountGst = isGstActive ? parseFloat((amountTotal - amountBase).toFixed(2)) : 0;
 
     // SEBI Annual Fee Cap Validation
     if (amountBase > 0) {
@@ -190,7 +190,12 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     payment.approvalStatus = 'APPROVED';
     payment.planId = planDoc ? (planDoc._id || planDoc.id) : selectedPlanId;
     if (paymentRefId || transactionRef) { payment.transactionRef = paymentRefId || transactionRef; }
-    payment.amount = finalAmount;
+    payment.amount = amountTotal;
+    payment.baseAmount = amountBase;
+    payment.gstAmount = amountGst;
+    payment.gstRate = isGstActive ? 18 : 0;
+    payment.gstEnabled = isGstActive;
+    payment.gstCalculationType = tenantObj?.gstCalculationType || 'EXCLUSIVE';
     payment.planValidityDays = finalValidityDays;
     payment.discountApplied = finalDiscount;
     payment.paymentDate = finalPaymentDate;
@@ -205,7 +210,9 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       action: 'APPROVED',
       finalPlanId: planDoc ? (planDoc._id || planDoc.id) : selectedPlanId,
       finalPlanName: planDoc?.name || payment.plan?.name || 'Approved Plan',
-      finalAmount,
+      finalAmount: amountTotal,
+      finalBaseAmount: amountBase,
+      finalGstAmount: amountGst,
       finalValidityDays,
       finalDiscount,
       finalPaymentDate,
