@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import mongoose from 'mongoose';
-import dynamicDb from '../config/db';
+import dynamicDb, { centralModels } from '../config/db';
 import { calculateNextDueDate, getCompliancePeriod } from '../utils/complianceDateHelper';
 import { AuthenticatedRequest } from '../middlewares/auth';
 import { logAudit } from '../services/auditService';
@@ -1146,7 +1146,7 @@ export const getAlerts = async (req: AuthenticatedRequest, res: Response) => {
 
 export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { remarks, actualDepositAmount } = req.body;
+  const { remarks, actualDepositAmount, newExpiryDate } = req.body;
   const proofUrl = req.file ? `/uploads/compliance/${req.file.filename}` : undefined;
   try {
     const alert = await dynamicDb.ComplianceAlert.findById(id).lean();
@@ -1195,6 +1195,58 @@ export const closeAlert = async (req: AuthenticatedRequest, res: Response) => {
       await dynamicDb.Tenant.findByIdAndUpdate(alert.tenantId, {
         $inc: { depositAmount: parseFloat(actualDepositAmount) }
       });
+    }
+
+    // Handle CERTIFICATE_EXPIRY alert resolution: extend SEBI certificate validity & record renewed document
+    if (alert.alertType === 'CERTIFICATE_EXPIRY' || newExpiryDate) {
+      if (newExpiryDate) {
+        const parsedExpiryDate = new Date(newExpiryDate);
+        if (!isNaN(parsedExpiryDate.getTime())) {
+          const tenant = await dynamicDb.Tenant.findById(alert.tenantId);
+          const centralCompany = await centralModels.AllCompany.findOne({ tenantId: alert.tenantId }).lean();
+          const originalCert = (tenant as any)?.onboardingCertificateUrl || (tenant as any)?.certificateUrl || (centralCompany as any)?.onboardingCertificateUrl || (centralCompany as any)?.certificateUrl;
+
+          const tenantUpdates: any = {
+            certificateValidity: parsedExpiryDate
+          };
+          if (originalCert && !(tenant as any)?.onboardingCertificateUrl) {
+            tenantUpdates.onboardingCertificateUrl = originalCert;
+          }
+          if (proofUrl) {
+            tenantUpdates.renewedCertificateUrl = proofUrl;
+            tenantUpdates.certificateUrl = proofUrl;
+          }
+
+          await dynamicDb.Tenant.findByIdAndUpdate(alert.tenantId, { $set: tenantUpdates });
+
+          const companyUpdates: any = {
+            certificateValidity: parsedExpiryDate
+          };
+          if (originalCert && !(centralCompany as any)?.onboardingCertificateUrl) {
+            companyUpdates.onboardingCertificateUrl = originalCert;
+          }
+          if (proofUrl) {
+            companyUpdates.renewedCertificateUrl = proofUrl;
+            companyUpdates.certificateUrl = proofUrl;
+          }
+          await centralModels.AllCompany.findOneAndUpdate({ tenantId: alert.tenantId }, { $set: companyUpdates }).catch(() => {});
+
+          if (proofUrl) {
+            await centralModels.TenantDocumentHistory.create({
+              tenantId: alert.tenantId,
+              docType: 'SEBI_CERTIFICATE_RENEWAL',
+              fileUrl: proofUrl,
+              fileName: req.file?.originalname || 'Renewed_SEBI_Certificate.pdf'
+            }).catch(() => {});
+          }
+
+          try {
+            await syncTenantToRemote(alert.tenantId.toString(), { reason: 'CERTIFICATE_RENEWAL' });
+          } catch (syncErr: any) {
+            console.warn('Sync dispatch warning on certificate renewal:', syncErr?.message || syncErr);
+          }
+        }
+      }
     }
     
     const updatedAlert = await dynamicDb.ComplianceAlert.findByIdAndUpdate(

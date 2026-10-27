@@ -749,6 +749,8 @@ function SuperAdminDashboardContent() {
         nismValidity: data.tenant?.nismValidity ? new Date(data.tenant.nismValidity).toISOString().split('T')[0] : '',
         depositAmount: data.tenant?.depositAmount !== undefined && data.tenant?.depositAmount !== null ? String(data.tenant.depositAmount) : '',
         certificateUrl: data.tenant?.certificateUrl || '',
+        onboardingCertificateUrl: data.tenant?.onboardingCertificateUrl || data.tenant?.certificateUrl || '',
+        renewedCertificateUrl: data.tenant?.renewedCertificateUrl || '',
         nismCertificateUrl: data.tenant?.nismCertificateUrl || '',
         address: data.tenant?.address || '',
         gst: data.tenant?.gst || '',
@@ -2181,12 +2183,52 @@ function SuperAdminDashboardContent() {
                     <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mb-4">Certificates</h3>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Certificate</label>
-                    {editData.certificateUrl && (
-                      <div className="mb-2">
-                        <a href={`${api.getBaseUrl()}${editData.certificateUrl}`} target="_blank" rel="noreferrer" className="text-primary-600 dark:text-primary-400 hover:underline text-xs">View Current SEBI Certificate</a>
-                      </div>
-                    )}
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">SEBI Certificate & Renewals</label>
+                    <div className="space-y-1.5 mb-2.5">
+                      {editData.onboardingCertificateUrl && (
+                        <div>
+                          <a
+                            href={`${api.getBaseUrl()}${editData.onboardingCertificateUrl}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-medium transition-colors border border-slate-200 dark:border-white/10"
+                          >
+                            <span>📜</span>
+                            <span className="font-semibold">Onboarding Certificate (Initial)</span>
+                            <span className="text-[10px] text-primary-500 underline ml-1">View</span>
+                          </a>
+                        </div>
+                      )}
+                      {editData.renewedCertificateUrl && (
+                        <div>
+                          <a
+                            href={`${api.getBaseUrl()}${editData.renewedCertificateUrl}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-medium transition-colors border border-emerald-500/20"
+                          >
+                            <span>🔄</span>
+                            <span className="font-semibold">Renewed Certificate (Latest Extended)</span>
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-300 underline ml-1">View</span>
+                          </a>
+                        </div>
+                      )}
+                      {!editData.onboardingCertificateUrl && !editData.renewedCertificateUrl && editData.certificateUrl && (
+                        <div>
+                          <a
+                            href={`${api.getBaseUrl()}${editData.certificateUrl}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 bg-primary-500/10 hover:bg-primary-500/20 text-primary-600 dark:text-primary-400 rounded-lg text-xs font-medium transition-colors border border-primary-500/20"
+                          >
+                            <span>📜</span>
+                            <span className="font-semibold">Current SEBI Certificate</span>
+                            <span className="text-[10px] text-primary-500 underline ml-1">View</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                    <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">Replace / Upload New Certificate (Optional)</label>
                     <input type="file" onChange={e => setEditSebiCertificate(e.target.files?.[0] || null)} className="w-full bg-slate-100 dark:bg-slate-950/50 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-sm text-slate-600 dark:text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400" accept=".pdf" />
                   </div>
                   <div>
@@ -2219,8 +2261,12 @@ function SuperAdminDashboardContent() {
                                 <TableCell className="text-center font-mono text-slate-500">{index + 1}</TableCell>
                                 <TableCell className="whitespace-nowrap">{new Date(doc.uploadedAt).toLocaleString()}</TableCell>
                                 <TableCell>
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${doc.docType === 'SEBI_CERTIFICATE' ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                    {doc.docType.replace('_', ' ')}
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    doc.docType === 'SEBI_CERTIFICATE_RENEWAL' ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30' :
+                                    doc.docType === 'SEBI_CERTIFICATE' ? 'bg-primary-500/20 text-primary-600 dark:text-primary-400' :
+                                    'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                                  }`}>
+                                    {doc.docType === 'SEBI_CERTIFICATE_RENEWAL' ? 'SEBI RENEWAL CERTIFICATE' : doc.docType.replace(/_/g, ' ')}
                                   </span>
                                 </TableCell>
                                 <TableCell className="truncate max-w-[150px]" title={doc.fileName}>{doc.fileName}</TableCell>

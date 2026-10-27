@@ -1696,6 +1696,7 @@ function AdminDashboardContent() {
   const [alertProof, setAlertProof] = useState<File | null>(null);
   const [depositTopup, setDepositTopup] = useState('50000');
   const [closeRemarks, setCloseRemarks] = useState('');
+  const [newCertificateExpiryDate, setNewCertificateExpiryDate] = useState('');
 
   const isNismDuplicate = staffNism.trim() !== '' && staff.some(st =>
     st.nismNumber &&
@@ -3710,6 +3711,9 @@ function AdminDashboardContent() {
         const formData = new FormData();
         formData.append('remarks', closeRemarks);
         formData.append('actualDepositAmount', depositTopup);
+        if (newCertificateExpiryDate) {
+          formData.append('newExpiryDate', newCertificateExpiryDate);
+        }
         if (alertProof) {
           formData.append('proof', alertProof);
         }
@@ -3721,6 +3725,7 @@ function AdminDashboardContent() {
             setClosingAlertId(null);
             setCloseRemarks('');
             setAlertProof(null);
+            setNewCertificateExpiryDate('');
             toast.success('Alert closed successfully.');
           }
         } catch (err: any) {
@@ -5205,6 +5210,7 @@ function AdminDashboardContent() {
                 setDepositTopup(row.alertType === 'DEPOSIT_LOW' ? '50000' : '');
                 setCloseRemarks('');
                 setAlertProof(null);
+                setNewCertificateExpiryDate('');
               }
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm ${resolveBtnColor}`}
@@ -9823,6 +9829,7 @@ function AdminDashboardContent() {
                                                       setDepositTopup(a.alertType === 'DEPOSIT_LOW' ? '50000' : '');
                                                       setCloseRemarks('');
                                                       setAlertProof(null);
+                                                      setNewCertificateExpiryDate('');
                                                     }
                                                   }}
                                                   className={`px-3 py-1.5 border rounded font-semibold transition ${resolveBtnColor}`}
@@ -17945,11 +17952,49 @@ function AdminDashboardContent() {
 
         {closingAlertId && (() => {
           const activeClosingAlert = alerts.find((a: any) => a.id === closingAlertId);
+          const isCertExpiry = activeClosingAlert?.alertType === 'CERTIFICATE_EXPIRY' || 
+            String(activeClosingAlert?.title || '').toUpperCase().includes('EXPIRY') || 
+            String(activeClosingAlert?.description || '').toUpperCase().includes('CERTIFICATE');
+
           return (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 space-y-4">
-                <h3 className="font-bold text-base text-slate-900 dark:text-white">Resolve Compliance Alert</h3>
+              <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    {isCertExpiry ? 'Extend SEBI Certificate Validity' : 'Resolve Compliance Alert'}
+                  </h3>
+                  <button type="button" onClick={() => { setClosingAlertId(null); setNewCertificateExpiryDate(''); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
+                </div>
+
+                {isCertExpiry && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs space-y-1">
+                    <div className="font-bold text-amber-600 dark:text-amber-400 flex items-center space-x-1.5">
+                      <span>📜</span>
+                      <span>SEBI Certificate Renewal & Validity Extension</span>
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
+                      Enter the new extended expiry date and upload the renewed SEBI certificate document. This will update the company record, keep the initial onboarding certificate safe, and resolve this expiry alert.
+                    </p>
+                  </div>
+                )}
+
                 <form onSubmit={handleCloseAlert} className="space-y-4">
+                  {isCertExpiry && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        New Extended Expiry Date <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={newCertificateExpiryDate}
+                        onChange={e => setNewCertificateExpiryDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-2 px-3 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-primary-500"
+                      />
+                    </div>
+                  )}
+
                   {activeClosingAlert?.alertType === 'DEPOSIT_LOW' && (
                     <div>
                       <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Add deposit Float (Rs.)</label>
@@ -17958,32 +18003,42 @@ function AdminDashboardContent() {
                   )}
 
                   <div>
-                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
-                      {activeClosingAlert?.alertType === 'DEPOSIT_LOW' ? 'Upload Payment Receipt (Optional)' : 'Upload Proof Document (Optional)'}
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      {isCertExpiry 
+                        ? 'Upload Renewed SEBI Certificate (PDF/Image) *' 
+                        : (activeClosingAlert?.alertType === 'DEPOSIT_LOW' ? 'Upload Payment Receipt (Optional)' : 'Upload Proof Document (Optional)')}
                     </label>
                     <input
                       type="file"
+                      required={isCertExpiry}
+                      accept={isCertExpiry ? '.pdf,.png,.jpg,.jpeg' : undefined}
                       onChange={e => setAlertProof(e.target.files ? e.target.files[0] : null)}
-                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/5 rounded-lg py-2 px-3 text-xs text-slate-700 dark:text-slate-300 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-slate-200 dark:bg-white/10 file:text-slate-900 dark:text-white hover:file:bg-slate-300 dark:bg-white/20"
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-2 px-3 text-xs text-slate-700 dark:text-slate-300 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-primary-500/10 file:text-primary-600 dark:text-primary-400 hover:file:bg-primary-500/20"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
-                      {activeClosingAlert?.alertType === 'DEPOSIT_LOW' ? 'Proof remarks / Date' : 'Resolution Remarks'}
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      {isCertExpiry 
+                        ? 'Renewal Remarks *' 
+                        : (activeClosingAlert?.alertType === 'DEPOSIT_LOW' ? 'Proof remarks / Date' : 'Resolution Remarks')}
                     </label>
                     <textarea
                       value={closeRemarks}
                       onChange={e => setCloseRemarks(e.target.value)}
                       required
                       rows={3}
-                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/5 rounded-lg py-2 px-3 text-xs"
-                      placeholder={activeClosingAlert?.alertType === 'DEPOSIT_LOW' ? 'Enter bank receipt reference details...' : 'Enter details about how this alert was resolved...'}
+                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-lg py-2 px-3 text-xs"
+                      placeholder={isCertExpiry 
+                        ? 'e.g. SEBI Certificate renewed with validity extended up to 2029.' 
+                        : (activeClosingAlert?.alertType === 'DEPOSIT_LOW' ? 'Enter bank receipt reference details...' : 'Enter details about how this alert was resolved...')}
                     />
                   </div>
                   <div className="flex space-x-3 pt-2 justify-end text-xs">
-                    <button type="button" onClick={() => setClosingAlertId(null)} className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5">Cancel</button>
-                    <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold">Submit & Close Alert</button>
+                    <button type="button" onClick={() => { setClosingAlertId(null); setNewCertificateExpiryDate(''); }} className="px-4 py-2 border border-slate-400 dark:border-white/10 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5">Cancel</button>
+                    <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold text-white shadow-lg shadow-emerald-600/20">
+                      {isCertExpiry ? 'Update Validity & Close Alert' : 'Submit & Close Alert'}
+                    </button>
                   </div>
                 </form>
               </div>
