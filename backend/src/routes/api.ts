@@ -24,7 +24,7 @@ import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCoupo
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
 import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord, fetchCamsRecord, getCamsKraPdf } from '../controllers/kycController';
-import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission, requireComplianceEnabled } from '../middlewares/auth';
+import { authenticateJWT, optionalAuthenticateJWT, requireRoles, requirePermission, requireAnyPermission, requireComplianceEnabled } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
 import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
