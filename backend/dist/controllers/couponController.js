@@ -59,7 +59,7 @@ const createCoupon = async (req, res) => {
 exports.createCoupon = createCoupon;
 const updateCoupon = async (req, res) => {
     const { id } = req.params;
-    const { discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId } = req.body;
+    const { discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId, isPublic } = req.body;
     if (!id || id === 'undefined' || id === 'null') {
         return res.status(400).json({ success: false, message: 'Invalid coupon ID' });
     }
@@ -77,20 +77,22 @@ const updateCoupon = async (req, res) => {
         if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
             return res.status(400).json({ success: false, message: 'Expired coupons cannot be edited' });
         }
-        const coupon = await db_1.default.Coupon.findByIdAndUpdate(id, {
-            $set: {
-                discountType,
-                discountValue: parseFloat(discountValue),
-                percentageType: percentageType || null,
-                minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
-                maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
-                expiryDate: expiryDate ? new Date(expiryDate) : null,
-                usageLimit: usageLimit ? parseInt(usageLimit) : null,
-                clientId: clientId || null,
-                planId: planId || null,
-                categoryId: categoryId || null,
-            }
-        }, { returnDocument: 'after', lean: true });
+        const updateFields = {
+            discountType,
+            discountValue: parseFloat(discountValue),
+            percentageType: percentageType || null,
+            minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
+            maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
+            expiryDate: expiryDate ? new Date(expiryDate) : null,
+            usageLimit: usageLimit ? parseInt(usageLimit) : null,
+            clientId: clientId || null,
+            planId: planId || null,
+            categoryId: categoryId || null,
+        };
+        if (isPublic !== undefined) {
+            updateFields.isPublic = !!isPublic;
+        }
+        const coupon = await db_1.default.Coupon.findByIdAndUpdate(id, { $set: updateFields }, { returnDocument: 'after', lean: true });
         return res.status(200).json({ success: true, data: coupon });
     }
     catch (error) {
@@ -136,14 +138,16 @@ const toggleCouponStatus = async (req, res) => {
 };
 exports.toggleCouponStatus = toggleCouponStatus;
 const applyCoupon = async (req, res) => {
-    const tenantId = req.user.tenantId;
+    const tenantId = (req.user?.tenantId || req.headers['x-tenant-id']);
     const { code, clientId, planId, categoryId, amount } = req.body;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant' });
+    if (!code)
+        return res.status(400).json({ success: false, message: 'Coupon code is required' });
     try {
         const coupon = await db_1.default.Coupon.findOne({
             tenantId,
-            code: code.toUpperCase(),
+            code: String(code).trim().toUpperCase(),
             status: 'ACTIVE'
         }).lean();
         if (!coupon)
@@ -154,43 +158,88 @@ const applyCoupon = async (req, res) => {
         if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
             return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
         }
-        if (coupon.clientId && clientId && coupon.clientId !== clientId) {
-            return res.status(400).json({ success: false, message: 'Coupon is not applicable for this client' });
+        if (coupon.clientId) {
+            const cClientId = String(coupon.clientId?._id || coupon.clientId?.id || coupon.clientId).trim();
+            const userAuthId = String(req.user?.id || '').trim();
+            let clientRecordId = '';
+            if (userAuthId) {
+                const clientDoc = await db_1.default.Client.findOne({
+                    $or: [{ userId: userAuthId }, { _id: userAuthId }]
+                }).select('_id userId').lean();
+                if (clientDoc) {
+                    clientRecordId = String(clientDoc._id || clientDoc.id || '').trim();
+                }
+            }
+            const passedClientId = clientId ? String(clientId).trim() : '';
+            const matches = ((userAuthId && cClientId === userAuthId) ||
+                (clientRecordId && cClientId === clientRecordId) ||
+                (passedClientId && cClientId === passedClientId));
+            if (!matches) {
+                return res.status(400).json({ success: false, message: 'Coupon is not applicable for this client' });
+            }
         }
         if (coupon.planId && planId) {
-            const planIdStr = coupon.planId.toString();
             let allowedPlans = [];
-            try {
-                allowedPlans = JSON.parse(planIdStr);
-                if (!Array.isArray(allowedPlans))
+            if (Array.isArray(coupon.planId)) {
+                allowedPlans = coupon.planId.map((p) => String(p?._id || p?.id || p).trim());
+            }
+            else {
+                const planIdStr = String(coupon.planId).trim();
+                if (planIdStr.startsWith('[')) {
+                    try {
+                        const parsed = JSON.parse(planIdStr);
+                        allowedPlans = Array.isArray(parsed) ? parsed.map((p) => String(p?._id || p?.id || p).trim()) : [planIdStr];
+                    }
+                    catch {
+                        allowedPlans = [planIdStr];
+                    }
+                }
+                else {
                     allowedPlans = [planIdStr];
+                }
             }
-            catch (e) {
-                allowedPlans = [planIdStr];
-            }
-            if (allowedPlans.length > 0 && !allowedPlans.includes(planId)) {
+            allowedPlans = allowedPlans.filter(Boolean);
+            const cleanPlanId = String(planId).trim();
+            if (allowedPlans.length > 0 && !allowedPlans.includes(cleanPlanId)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable for this plan' });
             }
         }
         if (coupon.categoryId && categoryId) {
-            const catIdStr = coupon.categoryId.toString();
             let allowedCats = [];
-            try {
-                allowedCats = JSON.parse(catIdStr);
-                if (!Array.isArray(allowedCats))
+            if (Array.isArray(coupon.categoryId)) {
+                allowedCats = coupon.categoryId.map((c) => String(c?._id || c?.id || c).trim());
+            }
+            else {
+                const catIdStr = String(coupon.categoryId).trim();
+                if (catIdStr.startsWith('[')) {
+                    try {
+                        const parsed = JSON.parse(catIdStr);
+                        allowedCats = Array.isArray(parsed) ? parsed.map((c) => String(c?._id || c?.id || c).trim()) : [catIdStr];
+                    }
+                    catch {
+                        allowedCats = [catIdStr];
+                    }
+                }
+                else {
                     allowedCats = [catIdStr];
+                }
             }
-            catch (e) {
-                allowedCats = [catIdStr];
-            }
-            if (allowedCats.length > 0 && !allowedCats.includes(categoryId)) {
+            allowedCats = allowedCats.filter(Boolean);
+            const cleanCatId = String(categoryId).trim();
+            if (allowedCats.length > 0 && !allowedCats.includes(cleanCatId)) {
                 return res.status(400).json({ success: false, message: 'Coupon is not applicable for this segment' });
             }
         }
-        if (amount) {
-            const purchaseAmount = parseFloat(amount);
+        let purchaseAmount = (amount !== undefined && amount !== null && amount !== '') ? parseFloat(amount) : null;
+        if (purchaseAmount === null && planId) {
+            const planDoc = await db_1.default.Plan.findById(planId).select('price amount').lean();
+            if (planDoc) {
+                purchaseAmount = parseFloat(planDoc.price || planDoc.amount || 0);
+            }
+        }
+        if (purchaseAmount !== null && !isNaN(purchaseAmount)) {
             if (coupon.minPurchaseValue && purchaseAmount < coupon.minPurchaseValue) {
-                return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required` });
+                return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required (Plan price: Rs. ${purchaseAmount})` });
             }
             let discountAmount = 0;
             if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
@@ -206,9 +255,9 @@ const applyCoupon = async (req, res) => {
             if (discountAmount > purchaseAmount)
                 discountAmount = purchaseAmount;
             discountAmount = Math.round(discountAmount * 100) / 100;
-            return res.status(200).json({ success: true, data: { ...coupon, calculatedDiscount: discountAmount } });
+            return res.status(200).json({ success: true, data: { ...coupon, id: String(coupon._id || coupon.id), calculatedDiscount: discountAmount } });
         }
-        return res.status(200).json({ success: true, data: coupon });
+        return res.status(200).json({ success: true, data: { ...coupon, id: String(coupon._id || coupon.id) } });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -217,10 +266,19 @@ const applyCoupon = async (req, res) => {
 exports.applyCoupon = applyCoupon;
 const getClientCoupons = async (req, res) => {
     const tenantId = (req.user?.tenantId || req.headers['x-tenant-id']);
-    const clientId = req.user?.id;
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
+        const userAuthId = String(req.user?.id || '');
+        let clientRecordId = '';
+        if (userAuthId) {
+            const clientDoc = await db_1.default.Client.findOne({
+                $or: [{ userId: userAuthId }, { _id: userAuthId }]
+            }).select('_id userId').lean();
+            if (clientDoc) {
+                clientRecordId = String(clientDoc._id || clientDoc.id || '');
+            }
+        }
         const coupons = await db_1.default.Coupon.find({
             tenantId,
             status: 'ACTIVE',
@@ -230,8 +288,17 @@ const getClientCoupons = async (req, res) => {
                 { expiryDate: { $gt: new Date() } }
             ]
         }).lean();
-        // Optionally filter by clientId matching
-        const validCoupons = coupons.filter((c) => !c.clientId || String(c.clientId) === String(clientId));
+        // Filter by clientId matching
+        const validCoupons = coupons.filter((c) => {
+            if (!c.clientId)
+                return true;
+            const cClientId = String(c.clientId?._id || c.clientId?.id || c.clientId).trim();
+            return (cClientId === userAuthId ||
+                (clientRecordId && cClientId === clientRecordId));
+        }).map((c) => ({
+            ...c,
+            id: String(c._id || c.id)
+        }));
         return res.status(200).json({ success: true, data: validCoupons });
     }
     catch (error) {

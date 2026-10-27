@@ -291,11 +291,11 @@ router.patch('/admin/sms-templates/:id/status', auth_1.authenticateJWT, (0, auth
 router.delete('/admin/sms-templates/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.deleteSmsTemplate);
 router.post('/admin/sms/test', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testSmsGateway);
 router.post('/admin/test-digio', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testDigioConfig);
-router.post('/admin/digio/fetch-by-id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchDigioRecord);
+router.post('/admin/digio/fetch-by-id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchDigioRecord);
 router.post('/admin/test-cams-kra', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, adminController_1.testCamsKraConfig);
-router.post('/admin/cams-kra/fetch-pan', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchCamsRecord);
+router.post('/admin/cams-kra/fetch-pan', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.fetchCamsRecord);
 router.post('/client/cams-kra/fetch-pan', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['CLIENT']), tenant_1.enforceTenantIsolation, kycController_1.fetchCamsRecord);
-router.get('/admin/cams-kra/pdf/:clientId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['MANAGE_CLIENTS', 'VIEW_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.getCamsKraPdf);
+router.get('/admin/cams-kra/pdf/:clientId', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, kycController_1.getCamsKraPdf);
 // ==========================================
 router.get('/admin/profile-completeness', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, adminController_1.getProfileCompleteness);
 // Active Client History endpoints

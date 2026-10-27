@@ -2913,16 +2913,23 @@ const updateTenantSettings = async (req, res) => {
             dataToUpdate.email = companyEmail;
         if (gstCalculationType)
             dataToUpdate.gstCalculationType = gstCalculationType;
-        if (gst !== undefined)
+        if (gst !== undefined && gst.trim() !== '') {
+            dataToUpdate.gst = gst.trim().toUpperCase();
+        }
+        else if (gst !== undefined && (gstEnabled === 'false' || gstEnabled === false) && oldTenant?.gst) {
+            dataToUpdate.gst = oldTenant.gst;
+        }
+        else if (gst !== undefined) {
             dataToUpdate.gst = gst ? gst.trim().toUpperCase() : null;
+        }
         if (state !== undefined)
             dataToUpdate.state = state;
-        if (address !== undefined)
-            dataToUpdate.address = address;
-        if (website !== undefined)
-            dataToUpdate.website = website;
-        if (mobile !== undefined)
-            dataToUpdate.mobile = mobile;
+        if (address !== undefined && typeof address === 'string' && address.trim() !== '')
+            dataToUpdate.address = address.trim();
+        if (website !== undefined && typeof website === 'string' && website.trim() !== '')
+            dataToUpdate.website = website.trim();
+        if (mobile !== undefined && typeof mobile === 'string' && mobile.trim() !== '')
+            dataToUpdate.mobile = mobile.trim();
         if (smtpHost !== undefined)
             dataToUpdate.smtpHost = smtpHost ? smtpHost.trim() : null;
         if (bankAccountName !== undefined)
@@ -3359,6 +3366,12 @@ const getAdminPayments = async (req, res) => {
             }
         ]));
         const planMap = new Map(plans.map((p) => [String(p._id || p.id), { ...p, id: String(p._id || p.id) }]));
+        const staffUserIds = [...new Set(payments.map((p) => p.verifiedByStaffId || p.l1Details?.submittedBy || p.l2Details?.reviewedBy).filter(Boolean))];
+        const staffUsers = staffUserIds.length > 0 ? await db_1.default.User.find({ _id: { $in: staffUserIds } }).select('firstName lastName email name roleId').lean() : [];
+        const staffMap = new Map(staffUsers.map((u) => [
+            String(u._id || u.id),
+            `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || u.email
+        ]));
         const isFullAdmin = req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN';
         const hasViewSensitive = isFullAdmin;
         const enrichedPayments = payments.map((p) => {
@@ -3380,13 +3393,56 @@ const getAdminPayments = async (req, res) => {
             }
             const cIdStr = p.couponId ? String(typeof p.couponId === 'object' ? (p.couponId._id || p.couponId.id) : p.couponId) : null;
             const couponObj = (p.couponId && typeof p.couponId === 'object' && p.couponId.code) ? p.couponId : (cIdStr ? couponMap.get(cIdStr) : null);
+            const resolvedStaffName = (p.verifiedByStaffId ? staffMap.get(String(p.verifiedByStaffId)) : null) || p.assignedByStaffName || p.assignedByAdminName || (p.l1Details?.submittedByName && !p.l1Details.submittedByName.includes('@') ? p.l1Details.submittedByName : null) || 'Alpha Admin';
+            const resolvedL2ReviewerName = (p.l2Details?.reviewedBy ? staffMap.get(String(p.l2Details.reviewedBy)) : null) || (p.l2Details?.reviewedByName && !p.l2Details.reviewedByName.includes('@') ? p.l2Details.reviewedByName : null) || 'L2 Authority';
+            let effectiveL1Details = p.l1Details;
+            if (!effectiveL1Details && (p.verifiedByStaffId || p.approvalStatus || p.remarks)) {
+                effectiveL1Details = {
+                    submittedBy: p.verifiedByStaffId || null,
+                    submittedByName: resolvedStaffName,
+                    planId: p.planId,
+                    planName: p.planId ? planMap.get(String(p.planId))?.name : 'Assigned Plan',
+                    amount: p.amount,
+                    validityDays: p.planValidityDays || 30,
+                    discount: p.discountApplied || 0,
+                    couponCode: p.couponCode || '',
+                    paymentDate: p.paymentDate || p.createdAt,
+                    serviceStartDate: p.serviceStartDate || p.paymentDate || p.createdAt,
+                    remarks: p.remarks || 'Verified by Compliance Staff',
+                    submittedAt: p.createdAt
+                };
+            }
+            else if (effectiveL1Details && (!effectiveL1Details.submittedByName || effectiveL1Details.submittedByName.includes('@') || effectiveL1Details.submittedByName === 'Staff (Maker)')) {
+                effectiveL1Details = {
+                    ...effectiveL1Details,
+                    submittedByName: resolvedStaffName
+                };
+            }
+            let effectiveL2Details = p.l2Details;
+            if (!effectiveL2Details && p.approvalStatus === 'REJECTED') {
+                effectiveL2Details = {
+                    action: 'REJECTED',
+                    reviewedByName: resolvedL2ReviewerName,
+                    rejectionReason: p.rejectionReason || p.l2Remarks || p.remarks || 'Declined by Approver at Level 2 clearance',
+                    reviewedAt: p.updatedAt || p.paymentDate || p.createdAt
+                };
+            }
+            else if (effectiveL2Details && (!effectiveL2Details.reviewedByName || effectiveL2Details.reviewedByName.includes('@'))) {
+                effectiveL2Details = {
+                    ...effectiveL2Details,
+                    reviewedByName: resolvedL2ReviewerName
+                };
+            }
             return {
                 ...p,
                 id: String(p._id || p.id),
                 coupon: couponObj || null,
                 couponCode: couponObj?.code || p.couponCode || null,
                 client: clientObj,
-                plan: p.planId ? planMap.get(String(p.planId)) : null
+                plan: p.planId ? planMap.get(String(p.planId)) : null,
+                assignedByStaffName: resolvedStaffName,
+                l1Details: effectiveL1Details,
+                l2Details: effectiveL2Details
             };
         });
         enrichedPayments.sort((a, b) => {

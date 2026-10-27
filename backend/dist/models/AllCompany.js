@@ -50,6 +50,8 @@ exports.AllCompanySchema = new mongoose_1.Schema({
     website: { type: String, default: null },
     ownerName: { type: String, default: 'Admin User' },
     certificateUrl: { type: String, default: null },
+    onboardingCertificateUrl: { type: String, default: null },
+    renewedCertificateUrl: { type: String, default: null },
     certificateValidity: { type: Date, default: null },
     nismCertificateUrl: { type: String, default: null },
     nismValidity: { type: Date, default: null },

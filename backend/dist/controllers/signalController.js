@@ -156,51 +156,55 @@ const createSignal = async (req, res) => {
                 id: newSignal._id.toString()
             });
         }
-        // Broadcast real-time alerts to all clients subscribed to these plans, and to Admin
-        try {
-            const stockDoc = await db_1.default.Stock.findById(stockId).lean();
-            const stockSymbol = stockDoc?.symbol || 'Trade Signal';
-            const user = req.user;
-            const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
-            await (0, notificationService_1.broadcastSignalNotification)({
-                tenantId,
-                planIds: allPlanIdsToNotify.length > 0 ? allPlanIdsToNotify : rawTargetIds,
-                categoryIds: allCategoryIdsToNotify,
-                title: `🚀 New Trade Alert: ${stockSymbol} (${segment})`,
-                message: `New ${callType} recommendation for ${stockSymbol} at ₹${entryPrice}. Target: ${target1}${target2 ? `/${target2}` : ''}, SL: ₹${stoploss}. View: ${tradeDuration || 'INTRADAY'}.`,
-                type: 'signal',
-                data: {
-                    signalId: createdSignals[0]?.id,
-                    stockSymbol,
-                    callType,
-                    entryPrice,
-                    target1,
-                    target2,
-                    target3,
-                    stoploss,
-                    segment,
-                    expiryDate: expiryDate || null,
-                    strikePrice: strikePrice || null,
-                    optionType: optionType || null,
-                    tradeDuration,
-                    action: 'NEW_TRADE',
-                    smsOrderedVariables: req.body.smsOrderedVariables ? ((() => {
-                        try {
-                            return typeof req.body.smsOrderedVariables === 'string' ? JSON.parse(req.body.smsOrderedVariables) : req.body.smsOrderedVariables;
-                        }
-                        catch (e) {
-                            return undefined;
-                        }
-                    })()) : undefined
-                },
-                adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
-                adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`
-            });
-        }
-        catch (notifErr) {
-            console.warn('[Notification] Failed to broadcast new signal notification:', notifErr);
-        }
-        return res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
+        // Return immediate response so researcher modal closes in milliseconds without waiting for external SMS/Telegram network latency
+        res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
+        // Broadcast real-time alerts asynchronously in the background
+        setImmediate(async () => {
+            try {
+                const stockDoc = await db_1.default.Stock.findById(stockId).lean();
+                const stockSymbol = stockDoc?.symbol || 'Trade Signal';
+                const user = req.user;
+                const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+                await (0, notificationService_1.broadcastSignalNotification)({
+                    tenantId,
+                    planIds: allPlanIdsToNotify.length > 0 ? allPlanIdsToNotify : rawTargetIds,
+                    categoryIds: allCategoryIdsToNotify,
+                    title: `🚀 New Trade Alert: ${stockSymbol} (${segment})`,
+                    message: `New ${callType} recommendation for ${stockSymbol} at ₹${entryPrice}. Target: ${target1}${target2 ? `/${target2}` : ''}, SL: ₹${stoploss}. View: ${tradeDuration || 'INTRADAY'}.`,
+                    type: 'signal',
+                    data: {
+                        signalId: createdSignals[0]?.id,
+                        stockSymbol,
+                        callType,
+                        entryPrice,
+                        target1,
+                        target2,
+                        target3,
+                        stoploss,
+                        segment,
+                        expiryDate: expiryDate || null,
+                        strikePrice: strikePrice || null,
+                        optionType: optionType || null,
+                        tradeDuration,
+                        action: 'NEW_TRADE',
+                        smsOrderedVariables: req.body.smsOrderedVariables ? ((() => {
+                            try {
+                                return typeof req.body.smsOrderedVariables === 'string' ? JSON.parse(req.body.smsOrderedVariables) : req.body.smsOrderedVariables;
+                            }
+                            catch (e) {
+                                return undefined;
+                            }
+                        })()) : undefined
+                    },
+                    adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
+                    adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`
+                });
+            }
+            catch (notifErr) {
+                console.warn('[Notification] Failed to broadcast new signal notification in background:', notifErr);
+            }
+        });
+        return;
     }
     catch (err) {
         return res.status(500).json({ success: false, message: err.message });
@@ -633,40 +637,48 @@ const closeSignal = async (req, res) => {
                 notifTitle = `⚠️ Trade Avoided: ${stockSymbol}`;
                 notifMessage = `Recommendation to avoid ${stockSymbol}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
             }
-            await (0, notificationService_1.broadcastSignalNotification)({
-                tenantId,
-                planIds: planIdsToNotify,
-                title: notifTitle,
-                message: notifMessage,
-                type: 'update',
-                data: {
-                    signalId: id,
-                    stockSymbol,
-                    segment: signal.segment,
-                    callType: signal.callType,
-                    entryPrice: signal.entryPrice,
-                    entryType: signal.entryType,
-                    target1: signal.target1,
-                    target2: signal.target2,
-                    target3: signal.target3,
-                    targetLabel,
-                    specificTargetPrice,
-                    closedTargetVal: specificTargetPrice ? String(specificTargetPrice) : '',
-                    stoploss: signal.stoploss,
-                    tradeDuration: signal.tradeDuration,
-                    closeStatus,
-                    exitPrice,
-                    closeRemark,
-                    closeTargets,
-                    isFinalClose,
-                    action: 'TRADE_UPDATE'
-                },
-                adminTitle: `🎯 Trade Status Updated: ${stockSymbol}`,
-                adminMessage: `${researcherName} updated trade ${stockSymbol} to status: ${closeStatus}.${closeRemark ? ` (${closeRemark})` : ''}`
+            // Fire-and-forget in background
+            setImmediate(async () => {
+                try {
+                    await (0, notificationService_1.broadcastSignalNotification)({
+                        tenantId,
+                        planIds: planIdsToNotify,
+                        title: notifTitle,
+                        message: notifMessage,
+                        type: 'update',
+                        data: {
+                            signalId: id,
+                            stockSymbol,
+                            segment: signal.segment,
+                            callType: signal.callType,
+                            entryPrice: signal.entryPrice,
+                            entryType: signal.entryType,
+                            target1: signal.target1,
+                            target2: signal.target2,
+                            target3: signal.target3,
+                            targetLabel,
+                            specificTargetPrice,
+                            closedTargetVal: specificTargetPrice ? String(specificTargetPrice) : '',
+                            stoploss: signal.stoploss,
+                            tradeDuration: signal.tradeDuration,
+                            closeStatus,
+                            exitPrice,
+                            closeRemark,
+                            closeTargets,
+                            isFinalClose,
+                            action: 'TRADE_UPDATE'
+                        },
+                        adminTitle: `🎯 Trade Status Updated: ${stockSymbol}`,
+                        adminMessage: `${researcherName} updated trade ${stockSymbol} to status: ${closeStatus}.${closeRemark ? ` (${closeRemark})` : ''}`
+                    });
+                }
+                catch (notifErr) {
+                    console.warn('[Notification] Failed to broadcast closeSignal notification in background:', notifErr);
+                }
             });
         }
         catch (notifErr) {
-            console.warn('[Notification] Failed to broadcast closeSignal notification:', notifErr);
+            console.warn('[Notification] Failed to setup closeSignal notification:', notifErr);
         }
         return res.json({
             success: true,

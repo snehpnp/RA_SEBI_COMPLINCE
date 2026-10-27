@@ -1,11 +1,44 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPeriodicReportMeta = exports.getPeriodicReportData = exports.getComplianceDashboardMetrics = exports.resolvePenalty = exports.getPenalties = exports.getChecklistHistory = exports.updateAuditStatus = exports.getChecklist = exports.closeAlert = exports.getAlerts = exports.runComplianceCheck = exports.checkComplianceForTenant = exports.isClientKycComplete = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = __importStar(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const auditService_1 = require("../services/auditService");
 const activityService_1 = require("../services/activityService");
@@ -1042,7 +1075,7 @@ const getAlerts = async (req, res) => {
 exports.getAlerts = getAlerts;
 const closeAlert = async (req, res) => {
     const { id } = req.params;
-    const { remarks, actualDepositAmount } = req.body;
+    const { remarks, actualDepositAmount, newExpiryDate } = req.body;
     const proofUrl = req.file ? `/uploads/compliance/${req.file.filename}` : undefined;
     try {
         const alert = await db_1.default.ComplianceAlert.findById(id).lean();
@@ -1093,6 +1126,53 @@ const closeAlert = async (req, res) => {
             await db_1.default.Tenant.findByIdAndUpdate(alert.tenantId, {
                 $inc: { depositAmount: parseFloat(actualDepositAmount) }
             });
+        }
+        // Handle CERTIFICATE_EXPIRY alert resolution: extend SEBI certificate validity & record renewed document
+        if (alert.alertType === 'CERTIFICATE_EXPIRY' || newExpiryDate) {
+            if (newExpiryDate) {
+                const parsedExpiryDate = new Date(newExpiryDate);
+                if (!isNaN(parsedExpiryDate.getTime())) {
+                    const tenant = await db_1.default.Tenant.findById(alert.tenantId);
+                    const centralCompany = await db_1.centralModels.AllCompany.findOne({ tenantId: alert.tenantId }).lean();
+                    const originalCert = tenant?.onboardingCertificateUrl || tenant?.certificateUrl || centralCompany?.onboardingCertificateUrl || centralCompany?.certificateUrl;
+                    const tenantUpdates = {
+                        certificateValidity: parsedExpiryDate
+                    };
+                    if (originalCert && !tenant?.onboardingCertificateUrl) {
+                        tenantUpdates.onboardingCertificateUrl = originalCert;
+                    }
+                    if (proofUrl) {
+                        tenantUpdates.renewedCertificateUrl = proofUrl;
+                        tenantUpdates.certificateUrl = proofUrl;
+                    }
+                    await db_1.default.Tenant.findByIdAndUpdate(alert.tenantId, { $set: tenantUpdates });
+                    const companyUpdates = {
+                        certificateValidity: parsedExpiryDate
+                    };
+                    if (originalCert && !centralCompany?.onboardingCertificateUrl) {
+                        companyUpdates.onboardingCertificateUrl = originalCert;
+                    }
+                    if (proofUrl) {
+                        companyUpdates.renewedCertificateUrl = proofUrl;
+                        companyUpdates.certificateUrl = proofUrl;
+                    }
+                    await db_1.centralModels.AllCompany.findOneAndUpdate({ tenantId: alert.tenantId }, { $set: companyUpdates }).catch(() => { });
+                    if (proofUrl) {
+                        await db_1.centralModels.TenantDocumentHistory.create({
+                            tenantId: alert.tenantId,
+                            docType: 'SEBI_CERTIFICATE_RENEWAL',
+                            fileUrl: proofUrl,
+                            fileName: req.file?.originalname || 'Renewed_SEBI_Certificate.pdf'
+                        }).catch(() => { });
+                    }
+                    try {
+                        await (0, tenantSyncDispatcher_1.syncTenantToRemote)(alert.tenantId.toString(), { reason: 'CERTIFICATE_RENEWAL' });
+                    }
+                    catch (syncErr) {
+                        console.warn('Sync dispatch warning on certificate renewal:', syncErr?.message || syncErr);
+                    }
+                }
+            }
         }
         const updatedAlert = await db_1.default.ComplianceAlert.findByIdAndUpdate(id, {
             $set: {
