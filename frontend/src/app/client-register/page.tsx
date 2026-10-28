@@ -43,7 +43,7 @@ export default function ClientRegister() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push('/client-login');
+        router.push('/login');
       }, 2000);
 
     } catch (err: any) {
@@ -126,7 +126,7 @@ export default function ClientRegister() {
         
         <div className="mt-8 text-center text-sm text-premium-text/60">
           Already have an account?{' '}
-          <Link href="/client-login" className="text-premium-primary hover:text-premium-primary/80 font-medium transition-colors">
+          <Link href="/login" className="text-premium-primary hover:text-premium-primary/80 font-medium transition-colors">
             Sign In
           </Link>
         </div>

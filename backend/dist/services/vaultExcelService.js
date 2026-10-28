@@ -90,7 +90,7 @@ const generateMultiTabClientExcel = async (data) => {
         const matchingPay = (data.payments || []).find((p) => String(p.planId) === String(s.planId || s.plan?._id));
         const purchaseTime = s.createdAt || matchingPay?.createdAt || s.startDate;
         return {
-            planName: s.plan?.name || 'Advisory Plan',
+            planName: s.plan?.name || 'Service Plan',
             segment: s.plan?.researchSegments || s.segment || 'N/A',
             purchaseTimestamp: purchaseTime ? new Date(purchaseTime).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata' }) : 'N/A',
             startDate: s.startDate ? new Date(s.startDate).toISOString().split('T')[0] : '',

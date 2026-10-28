@@ -1,59 +1,153 @@
+import { dispatchExportFileEmail } from '../controllers/filePolicyController';
+import { handleL2PaymentAction } from '../controllers/l2PaymentController';
+import { requestVaultOtp, verifyVaultOtp, requireVaultToken, getVaultPenalties, togglePenaltyMask } from '../controllers/secretVaultController';
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp } from '../controllers/authController';
-import { createTenant, getTenants, toggleTenantStatus, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory } from '../controllers/superAdminController';
+import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp, verify2FALogin, resend2FAOtp, getSecurityPolicy, requestLoginOtp, loginWithOtp } from '../controllers/authController';
+import { createTenant, getTenants, toggleTenantStatus, toggleTenantCompliance, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
+import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, testSmtp, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip } from '../controllers/adminController';
-import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse } from '../controllers/clientController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, exportGstReadySheetCSV, getClientFeeSummaryEndpoint, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
+import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing, getClientFeeSummaryForSelf } from '../controllers/clientController';
+import { handleTelegramWebhook, setTelegramWebhookEndpoint, getTelegramWebhookStatus } from '../controllers/telegramController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
 import { createTicket, listTickets, getTicket, replyTicket, listAdminTickets, getAdminTicket, replyAdminTicket, closeAdminTicket } from '../controllers/ticketController';
-import { getSubscriptions, getPaymentHistory, updateProfile, getNotifications } from '../controllers/clientPortalController';
+import { getSubscriptions, getPaymentHistory, updateProfile, getNotifications, markNotificationsAsRead } from '../controllers/clientPortalController';
 import { getStocks, createSignal, listSignals, closeSignal, uploadReport, addSignalMessage } from '../controllers/signalController';
-import { getComplaints, createComplaint, resolveComplaint } from '../controllers/complaintController';
+import { getComplaints, createComplaint, resolveComplaint, deleteComplaint } from '../controllers/complaintController';
 import { getRoles, createRole, updateRolePermissions, updateRole, deleteRole } from '../controllers/roleController';
 import { getActiveClientSummary, getActiveClientsByDate, getActiveClientsByMonthExport } from '../controllers/activeClientController';
 import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCouponVisibility, applyCoupon, getClientCoupons } from '../controllers/couponController';
 import { uploadResource, deleteResource, getResources } from '../controllers/resourceController';
 import { getStates } from '../controllers/locationController';
-import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus } from '../controllers/kycController';
-import { authenticateJWT, requireRoles, requirePermission, requireAnyPermission } from '../middlewares/auth';
+import { initiateKyc, initiateAgreementEsign, updateKycAgreementStatus, fetchDigioRecord, fetchCamsRecord, getCamsKraPdf } from '../controllers/kycController';
+import { authenticateJWT, optionalAuthenticateJWT, requireRoles, requirePermission, requireAnyPermission, requireComplianceEnabled } from '../middlewares/auth';
 import { enforceTenantIsolation } from '../middlewares/tenant';
-import { getMarketOverview } from '../controllers/marketController';
+import { getMarketOverview, getNewsFeed } from '../controllers/marketController';
 import { getActivePages, getPageBySlug, getAdminPages, savePage, deletePage, getComplaintReport, saveComplaintReport, getComplaintReportHistory } from '../controllers/pageController';
 import { getSuperAdminProfile, updateSuperAdminProfile, getAdminProfile, updateAdminProfile, getStaffProfile, updateStaffProfile } from '../controllers/profileController';
 import { getGlobalBranding, updateGlobalBranding, testSmtpConnection } from '../controllers/systemSettingController';
+import { getTenantPermissions, updateTenantPermissions } from '../controllers/permissionController';
+import { bootstrapTenant, syncTenantUpdate, syncTenantStatus, syncTenantDelete, getTenantSyncConfig } from '../controllers/tenantSyncController';
+import { generateAgreementPdf } from '../services/pdfService';
+import { generateInvoicePdf } from '../services/invoiceGenerator';
+import {
+  getPublicOccupations,
+  getAdminOccupations,
+  createOccupation,
+  updateOccupation,
+  toggleOccupationStatus,
+  deleteOccupation
+} from '../controllers/occupationController';
+import { getClientTimeline } from '../controllers/clientTimelineController';
+import {
+  listClientVaults,
+  getClientVaultDetails,
+  uploadCallRecording,
+  deleteCallRecording,
+  exportClientVaultZip,
+  exportSingleFolder,
+  downloadSingleInvoice,
+  downloadAgreementPdf,
+  downloadSingleResearchReport
+} from '../controllers/clientVaultController';
+import {
+  getPublicFaqs,
+  getAdminFaqs,
+  createFaq,
+  updateFaq,
+  deleteFaq
+} from '../controllers/faqController';
+import {
+  getSignatureSettings,
+  updateSignatureSettings,
+  uploadResearcherSignature,
+  initiateReportAadhaarEsign,
+  completeReportAadhaarEsign,
+  useDailyAadhaarSign,
+  saveDscSignedReport,
+  verifyDscToken,
+  dscBridgePing,
+  dscBridgeTokenStatus,
+  dscBridgeSignPdf
+} from '../controllers/researcherSignatureController';
+import {
+  createVideoKycSession,
+  startEarlySession,
+  getSessionDetails,
+  verifyVideoKycOtp,
+  resendVideoKycOtp,
+  listVideoKycSessions,
+  uploadRecording,
+  reviewSession,
+  getVideoKycSettings,
+  updateVideoKycSettings
+} from '../controllers/videoKycController';
+import {
+  getMasterDeliveryReport,
+  getChannelDeliveryReport,
+  testTelegramBotConnection,
+  syncSmsDeliveryReports
+} from '../controllers/deliveryReportController';
 
 const router = Router();
 
-// Create uploads subdirectories if they don't exist
-const uploadRoot = path.join(__dirname, '../../../uploads');
-const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources'];
+// Robust Upload Root Helper
+const getUploadRoot = () => {
+  const candidates = [
+    path.resolve(process.cwd(), '../uploads'),
+    path.resolve(process.cwd(), 'uploads'),
+    path.resolve(__dirname, '../../uploads'),
+    path.resolve(__dirname, '../../../uploads'),
+    'A:/RA_SEBI_COMPLINCE/uploads',
+    'A:/RA_SEBI_COMPLINCE/backend/uploads'
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  const defaultDir = path.resolve(process.cwd(), 'uploads');
+  if (!fs.existsSync(defaultDir)) {
+    try { fs.mkdirSync(defaultDir, { recursive: true }); } catch {}
+  }
+  return defaultDir;
+};
+
+const uploadRoot = getUploadRoot();
+const folders = ['policies', 'agreements', 'kyc', 'payments', 'compliance', 'staff', 'branding', 'tickets', 'research', 'resources', 'recordings', 'video-kyc'];
 folders.forEach(f => {
   const dir = path.join(uploadRoot, f);
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   }
 });
 
 // Configure Multer Storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    let dest = path.join(uploadRoot, 'policies');
-    if (req.path.includes('manual')) dest = path.join(uploadRoot, 'payments');
-    if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist')) dest = path.join(uploadRoot, 'compliance');
-    if (req.path.includes('kyc')) dest = path.join(uploadRoot, 'kyc');
-    if (req.path.includes('staff')) dest = path.join(uploadRoot, 'staff');
-    if (req.path.includes('settings') || req.path.includes('signature')) dest = path.join(uploadRoot, 'branding');
-    if (req.path.includes('ticket') || req.path.includes('reply')) dest = path.join(uploadRoot, 'tickets');
-    if (req.path.includes('signals') || req.path.includes('research')) dest = path.join(uploadRoot, 'research');
-    if (req.path.includes('resources')) dest = path.join(uploadRoot, 'resources');
+    const root = getUploadRoot();
+    let folder = 'policies';
+    if (req.path.includes('video-kyc') || req.path.includes('video_kyc')) folder = 'video-kyc';
+    else if (req.path.includes('manual')) folder = 'payments';
+    else if (req.path.includes('recording') || req.path.includes('audio') || req.path.includes('vault')) folder = 'recordings';
+    else if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist')) folder = 'compliance';
+    else if (req.path.includes('kyc')) folder = 'kyc';
+    else if (req.path.includes('staff')) folder = 'staff';
+    else if (req.path.includes('settings') || req.path.includes('signature')) folder = 'branding';
+    else if (req.path.includes('ticket') || req.path.includes('reply')) folder = 'tickets';
+    else if (req.path.includes('signals') || req.path.includes('research')) folder = 'research';
+    else if (req.path.includes('resources')) folder = 'resources';
+
+    const dest = path.join(root, folder);
+    if (!fs.existsSync(dest)) {
+      try { fs.mkdirSync(dest, { recursive: true }); } catch {}
+    }
     cb(null, dest);
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}_${file.originalname}`);
+    cb(null, `${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
   }
 });
 
@@ -64,28 +158,39 @@ const fileFilter = (req: any, file: any, cb: any) => {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'text/csv'
+    'text/csv',
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/x-m4a', 'audio/m4a', 'audio/ogg', 'audio/webm', 'audio/aac',
+    'video/webm', 'video/mp4', 'video/ogg', 'video/x-matroska'
   ];
   const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv'];
-  
+  const allowedExts = ['.pdf', '.png', '.jpg', '.jpeg', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.mp3', '.wav', '.m4a', '.ogg', '.webm', '.aac', '.mp4'];
+
   if (allowedTypes.includes(file.mimetype) || allowedExts.includes(ext)) {
     cb(null, true);
   } else {
-    cb(new Error('Only PDF, Word, Excel, and Image files are allowed!'), false);
+    cb(new Error('Only PDF, Word, Excel, Image, Video, and Audio recording files are allowed!'), false);
   }
 };
 
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 20 * 1024 * 1024 } // Max 20MB
+  limits: {
+    fileSize: 100 * 1024 * 1024, // Max 100MB for video/audio recordings
+    fieldSize: 50 * 1024 * 1024,  // Max 50MB for base64 snapshots & form fields (prevents 'Field value too long')
+    fields: 100
+  }
 });
 
 // ----------------------------------------------------
 // AUTHENTICATION
 // ----------------------------------------------------
 router.post('/auth/login', login);
+router.post('/auth/request-login-otp', requestLoginOtp);
+router.post('/auth/login-with-otp', loginWithOtp);
+router.post('/auth/verify-2fa', verify2FALogin);
+router.post('/auth/resend-2fa', resend2FAOtp);
+router.get('/auth/security-policy', getSecurityPolicy);
 router.post('/auth/refresh', refreshToken);
 router.post('/auth/forgot-password', forgotPassword);
 router.post('/auth/reset-password', resetPassword);
@@ -96,6 +201,8 @@ router.post('/auth/logout', authenticateJWT, logout);
 router.get('/public/tenants', getPublicTenants);
 router.post('/public/request-otp', requestOtp);
 router.post('/public/verify-otp', verifyOtp);
+router.post('/public/telegram/webhook/:tokenOrTenant?', handleTelegramWebhook);
+router.post('/public/telegram/webhook', handleTelegramWebhook);
 // ----------------------------------------------------
 // PROFILE
 // ----------------------------------------------------
@@ -138,11 +245,18 @@ router.get(
   requireRoles(['SUPER_ADMIN']),
   getTenants
 );
+
 router.post(
   '/super-admin/tenants/:id/status',
   authenticateJWT,
   requireRoles(['SUPER_ADMIN']),
   toggleTenantStatus
+);
+router.post(
+  '/super-admin/tenants/:id/compliance-toggle',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  toggleTenantCompliance
 );
 router.delete(
   '/super-admin/tenants/:id',
@@ -190,6 +304,100 @@ router.put(
   ]),
   updateTenantDetails
 );
+router.post(
+  '/super-admin/tenants/:id/provision-db',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  provisionTenantDb
+);
+router.post(
+  '/super-admin/tenants/:id/sync-api',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncTenantApi
+);
+router.post(
+  '/super-admin/test-mongo-connection',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  testMongoConnection
+);
+router.post(
+  '/super-admin/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/tenants/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/verify-domain',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  verifyDomainUrl
+);
+// Universal Remote Instance Webhook Sync Endpoints
+router.post('/sync/bootstrap', bootstrapTenant);
+router.post('/sync/tenant', bootstrapTenant);
+router.post('/sync/update', syncTenantUpdate);
+router.post('/sync/status', syncTenantStatus);
+router.post('/sync/delete', syncTenantDelete);
+router.get('/sync/config', getTenantSyncConfig);
+router.get('/tenant/sync-config', getTenantSyncConfig);
+
+router.get(
+  '/super-admin/tenants/:id/clients',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyClients
+);
+router.get(
+  '/super-admin/tenants/:id/staff',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyStaff
+);
+router.get(
+  '/super-admin/tenants/:id/compliance',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyCompliance
+);
+router.post(
+  '/super-admin/tenants/:id/compliance/sweep',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  runCompanyComplianceSweep
+);
+router.use('/third-party-api', thirdPartyRoutes);
+router.get(
+  '/super-admin/tenants/:tenantId/permissions',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getTenantPermissions
+);
+router.put(
+  '/super-admin/tenants/:tenantId/permissions',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  updateTenantPermissions
+);
+router.post(
+  '/super-admin/tenants/sync-all',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  syncAllTenantsApi
+);
+router.post(
+  '/super-admin/verify-domain',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  verifyDomainUrl
+);
 router.put(
   '/super-admin/password',
   authenticateJWT,
@@ -220,11 +428,31 @@ router.get(
   requireRoles(['SUPER_ADMIN']),
   getGlobalTelemetry
 );
+router.get(
+  '/super-admin/dashboard',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getGlobalTelemetry
+);
+router.get(
+  '/super-admin/dashboard-stats',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getGlobalTelemetry
+);
+router.get(
+  '/super-admin/companies/:id/panel-stats',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN']),
+  getCompanyPanelStats
+);
 
 // ----------------------------------------------------
 // SYSTEM SETTINGS (GLOBAL BRANDING)
 // ----------------------------------------------------
 router.get('/system-settings/branding', getGlobalBranding);
+router.get('/system-settings/preview-pdf/:type', previewPolicyPdf);
+router.get('/admin/preview-pdf/:type', previewPolicyPdf);
 
 router.put(
   '/system-settings/branding',
@@ -251,28 +479,33 @@ router.put(
   authenticateJWT,
   requirePermission('ACCESS_SETTINGS'),
   upload.fields([
-    { name: 'logo', maxCount: 1 }, 
+    { name: 'logo', maxCount: 1 },
     { name: 'favicon', maxCount: 1 },
     { name: 'termsPdf', maxCount: 1 },
     { name: 'privacyPdf', maxCount: 1 },
     { name: 'coSignature', maxCount: 1 },
-    { name: 'internalPolicyPdf', maxCount: 1 }
+    { name: 'internalPolicyPdf', maxCount: 1 },
+    { name: 'upiQrImage', maxCount: 1 }
   ]),
   updateTenantSettings
 );
 router.get('/admin/email-templates', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), getEmailTemplates);
 router.put('/admin/email-templates/:type', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), updateEmailTemplate);
+router.post('/admin/email-templates/:type/reset', authenticateJWT, requireRoles(['ADMIN', 'PRINCIPAL_OFFICER']), resetEmailTemplate);
 router.post('/admin/test-smtp', authenticateJWT, requireRoles(['ADMIN']), testSmtp);
 router.post('/admin/test-smtp-connection', authenticateJWT, requireRoles(['ADMIN']), testSmtpConnection);
+router.post('/admin/verify-payment-gateway', authenticateJWT, requireRoles(['ADMIN', 'SUPER_ADMIN', 'COMPLIANCE_OFFICER', 'RESEARCHER']), verifyPaymentGateway);
+router.post('/admin/tenant/go-live', authenticateJWT, requireRoles(['ADMIN', 'SUPER_ADMIN']), goLiveTenant);
 
 // Bulk Exports
-router.get('/admin/exports/invoices', authenticateJWT, requirePermission('EXPORT_DATA'), exportInvoicesZip);
-router.get('/admin/exports/agreements', authenticateJWT, requirePermission('EXPORT_DATA'), exportAgreementsZip);
-router.get('/admin/exports/kra', authenticateJWT, requirePermission('EXPORT_DATA'), exportKRAZip);
-router.get('/admin/exports/clients', authenticateJWT, requirePermission('EXPORT_DATA'), exportClientsCSV);
-router.get('/admin/exports/deleted-clients', authenticateJWT, requirePermission('EXPORT_DATA'), exportDeletedClientsCSV);
-router.get('/admin/exports/payments', authenticateJWT, requirePermission('EXPORT_DATA'), exportPaymentsCSV);
-router.get('/admin/exports/research-reports', authenticateJWT, requirePermission('EXPORT_DATA'), exportResearchReportsZip);
+router.get('/admin/exports/invoices', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportInvoicesZip);
+router.get('/admin/exports/agreements', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportAgreementsZip);
+router.get('/admin/exports/kra', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportKRAZip);
+router.get('/admin/exports/clients', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportClientsCSV);
+router.get('/admin/exports/deleted-clients', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportDeletedClientsCSV);
+router.get('/admin/exports/payments', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportPaymentsCSV);
+router.get('/admin/exports/gst-sheet', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA', 'ACCESS_PAYMENTS']), exportGstReadySheetCSV);
+router.get('/admin/exports/research-reports', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportResearchReportsZip);
 
 // Custom Pages (Admin & Read-only for Staff/CO/PO)
 router.get('/admin/pages', authenticateJWT, getAdminPages);
@@ -288,6 +521,146 @@ router.get('/pages/:slug', getPageBySlug);
 router.get('/complaint-report', getComplaintReport);
 router.get('/complaint-report/history', getComplaintReportHistory);
 
+// Public Occupations Route (for Registration / Signup dropdowns)
+router.get('/occupations', getPublicOccupations);
+
+// Admin Occupations Management Routes
+router.get(
+  '/admin/occupations',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  getAdminOccupations
+);
+router.post(
+  '/admin/occupations',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  createOccupation
+);
+router.put(
+  '/admin/occupations/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  updateOccupation
+);
+router.post(
+  '/admin/occupations/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleOccupationStatus
+);
+router.patch(
+  '/admin/occupations/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleOccupationStatus
+);
+router.delete(
+  '/admin/occupations/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  deleteOccupation
+);
+
+// Admin SMS Templates & Gateway Routes
+router.get(
+  '/admin/sms-templates',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_RESEARCH', 'ADD_RESEARCH', 'OWN_RESEARCH', 'ACCESS_SIGNALS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  getSmsTemplates
+);
+router.post(
+  '/admin/sms-templates',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  createSmsTemplate
+);
+router.put(
+  '/admin/sms-templates/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  updateSmsTemplate
+);
+router.post(
+  '/admin/sms-templates/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleSmsTemplateStatus
+);
+router.patch(
+  '/admin/sms-templates/:id/status',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  toggleSmsTemplateStatus
+);
+router.delete(
+  '/admin/sms-templates/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  deleteSmsTemplate
+);
+router.post(
+  '/admin/sms/test',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  testSmsGateway
+);
+router.post(
+  '/admin/test-digio',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  testDigioConfig
+);
+router.post(
+  '/admin/digio/fetch-by-id',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  fetchDigioRecord
+);
+router.post(
+  '/admin/test-cams-kra',
+  authenticateJWT,
+  requirePermission('ACCESS_SETTINGS'),
+  enforceTenantIsolation,
+  testCamsKraConfig
+);
+router.post(
+  '/admin/cams-kra/fetch-pan',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  fetchCamsRecord
+);
+router.post(
+  '/client/cams-kra/fetch-pan',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  enforceTenantIsolation,
+  fetchCamsRecord
+);
+router.get(
+  '/admin/cams-kra/pdf/:clientId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'VIEW_ALL_CLIENTS', 'VIEW_OWN_CLIENTS', 'EDIT_CLIENTS', 'CREATE_CLIENTS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  getCamsKraPdf
+);
+
 // ==========================================
 router.get(
   '/admin/profile-completeness',
@@ -301,7 +674,7 @@ router.get(
 router.get(
   '/admin/active-clients/summary',
   authenticateJWT,
-  requirePermission('ACCESS_DASHBOARD'),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']),
   enforceTenantIsolation,
   getActiveClientSummary
 );
@@ -309,7 +682,7 @@ router.get(
 router.get(
   '/admin/active-clients/month-export',
   authenticateJWT,
-  requirePermission('ACCESS_DASHBOARD'),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']),
   enforceTenantIsolation,
   getActiveClientsByMonthExport
 );
@@ -354,6 +727,21 @@ router.get(
 );
 
 router.get(
+  '/admin/notifications',
+  authenticateJWT,
+  requireRoles(['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER']),
+  enforceTenantIsolation,
+  getAdminNotifications
+);
+router.put(
+  '/admin/notifications/read',
+  authenticateJWT,
+  requireRoles(['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER']),
+  enforceTenantIsolation,
+  markAdminNotificationsAsRead
+);
+
+router.get(
   '/admin/staff',
   authenticateJWT,
   requireAnyPermission(['ACCESS_STAFF', 'ACCESS_COMPLIANCE']),
@@ -383,11 +771,46 @@ router.delete(
   deleteStaff
 );
 router.post(
+  '/admin/staff/:id/delete',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  deleteStaff
+);
+router.post(
   '/admin/staff/:id/restore',
   authenticateJWT,
   requirePermission('ACCESS_STAFF'),
   enforceTenantIsolation,
   restoreStaff
+);
+router.get(
+  '/admin/staff/:id/password',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  getStaffPassword
+);
+router.post(
+  '/admin/staff/:id/resend-password',
+  authenticateJWT,
+  requirePermission('ACCESS_STAFF'),
+  enforceTenantIsolation,
+  resendStaffCredentials
+);
+router.get(
+  '/admin/researcher-dsc-permissions',
+  authenticateJWT,
+  requireAnyPermission(['MANAGE_STAFF_DSC', 'ACCESS_STAFF']),
+  enforceTenantIsolation,
+  getResearcherDscPermissions
+);
+router.put(
+  '/admin/researcher-dsc-permissions/:id',
+  authenticateJWT,
+  requireAnyPermission(['MANAGE_STAFF_DSC', 'ACCESS_STAFF']),
+  enforceTenantIsolation,
+  updateResearcherDscPermission
 );
 router.post(
   '/admin/parse-nism-certificate',
@@ -404,6 +827,23 @@ router.get(
   requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getAdminClients
+);
+// Admin / Client KYC Reset API - Strictly authenticated
+router.post(
+  '/admin/clients/reset-kyc',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN', 'ADMIN']),
+  enforceTenantIsolation,
+  resetClientKyc
+);
+
+// Permanent Delete User/Client API - Strictly authenticated (Super Admin & Admin only)
+router.post(
+  '/admin/clients/permanent-delete',
+  authenticateJWT,
+  requireRoles(['SUPER_ADMIN', 'ADMIN']),
+  enforceTenantIsolation,
+  permanentDeleteClient
 );
 router.get(
   '/admin/clients/deleted',
@@ -436,21 +876,28 @@ router.put(
 router.put(
   '/admin/clients/:id',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('EDIT_CLIENTS'),
   enforceTenantIsolation,
   updateClient
 );
 router.delete(
   '/admin/clients/:id',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('DELETE_CLIENTS'),
+  enforceTenantIsolation,
+  deleteClient
+);
+router.post(
+  '/admin/clients/:id/delete',
+  authenticateJWT,
+  requirePermission('DELETE_CLIENTS'),
   enforceTenantIsolation,
   deleteClient
 );
 router.post(
   '/admin/clients/:id/restore',
   authenticateJWT,
-  requirePermission('ACCESS_CLIENTS'),
+  requirePermission('DELETE_CLIENTS'),
   enforceTenantIsolation,
   restoreClient
 );
@@ -461,12 +908,130 @@ router.post(
   enforceTenantIsolation,
   assignPlanByAdmin
 );
+router.get(
+  '/admin/clients/:id/fee-summary',
+  authenticateJWT,
+  requirePermission('ACCESS_CLIENTS'),
+  enforceTenantIsolation,
+  getClientFeeSummaryEndpoint
+);
+router.get(
+  '/admin/clients/:clientId/timeline',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']),
+  enforceTenantIsolation,
+  getClientTimeline
+);
+
+// Admin Client Digital Vaults & File Explorer (Role-Permission controlled)
+router.get(
+  '/admin/vaults',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  listClientVaults
+);
+router.get(
+  '/admin/vaults/:clientId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_VIEW', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  getClientVaultDetails
+);
+router.post(
+  '/admin/vaults/:clientId/recordings',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  upload.single('file'),
+  uploadCallRecording
+);
+router.delete(
+  '/admin/vaults/:clientId/recordings/:recordingId',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  deleteCallRecording
+);
+router.get(
+  '/admin/vaults/:clientId/export-zip',
+  authenticateJWT,
+  requirePermission('ACCESS_VAULTS_FULL'),
+  enforceTenantIsolation,
+  exportClientVaultZip
+);
+router.get(
+  '/admin/vaults/:clientId/export-folder/:folderKey',
+  authenticateJWT,
+  requirePermission('ACCESS_VAULTS_FULL'),
+  enforceTenantIsolation,
+  exportSingleFolder
+);
+router.get(
+  '/admin/vaults/:clientId/invoice/:paymentId',
+  authenticateJWT,
+  requirePermission('ACCESS_VAULTS_FULL'),
+  enforceTenantIsolation,
+  downloadSingleInvoice
+);
+router.get(
+  '/admin/vaults/:clientId/agreement',
+  authenticateJWT,
+  requirePermission('ACCESS_VAULTS_FULL'),
+  enforceTenantIsolation,
+  downloadAgreementPdf
+);
+router.get(
+  '/admin/vaults/:clientId/research-report/:reportId',
+  authenticateJWT,
+  requirePermission('ACCESS_VAULTS_FULL'),
+  enforceTenantIsolation,
+  downloadSingleResearchReport
+);
+
+// ============================================================================
+// Frequently Asked Questions (FAQ) - Client & Admin Endpoints
+// ============================================================================
+router.get(
+  '/faqs',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getPublicFaqs
+);
+router.get(
+  '/admin/faqs',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  getAdminFaqs
+);
+router.post(
+  '/admin/faqs',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  createFaq
+);
+router.put(
+  '/admin/faqs/:id',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  updateFaq
+);
+router.delete(
+  '/admin/faqs/:id',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_TICKETS', 'ACCESS_SETTINGS']),
+  enforceTenantIsolation,
+  deleteFaq
+);
 
 // Admin Category Management
 router.get(
   '/admin/categories',
   authenticateJWT,
-  requirePermission('ACCESS_PLANS'),
+  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getAdminCategories
 );
@@ -496,7 +1061,7 @@ router.post(
 router.get(
   '/admin/plans',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH']),
+  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getAdminPlans
 );
@@ -516,6 +1081,13 @@ router.put(
 );
 router.delete(
   '/admin/plans/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_PLANS'),
+  enforceTenantIsolation,
+  deletePlan
+);
+router.post(
+  '/admin/plans/:id/delete',
   authenticateJWT,
   requirePermission('ACCESS_PLANS'),
   enforceTenantIsolation,
@@ -572,7 +1144,7 @@ router.delete(
 router.get(
   '/admin/coupons',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getCoupons
 );
@@ -627,6 +1199,19 @@ router.put(
   requireRoles(['CLIENT']),
   updateClientProfile
 );
+router.put(
+  '/client/telegram',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  updateClientTelegramPreferences
+);
+router.post(
+  '/client/telegram/test-ping',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  testClientTelegramPing
+);
+
 router.delete(
   '/client/account',
   authenticateJWT,
@@ -646,6 +1231,34 @@ router.post(
   authenticateJWT,
   requireRoles(['CLIENT']),
   initiateDigioKyc
+);
+
+router.post(
+  '/client/kyc/initiate',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  initiateKyc
+);
+
+router.post(
+  '/client/agreement/initiate',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  initiateAgreementEsign
+);
+
+router.post(
+  '/client/kyc/status',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  updateKycAgreementStatus
+);
+
+router.post(
+  '/client/kyc-agreement/status',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  updateKycAgreementStatus
 );
 
 router.post(
@@ -677,22 +1290,35 @@ router.post(
   '/client/payments/manual',
   authenticateJWT,
   requireRoles(['CLIENT']),
-  upload.single('receipt'),
+  upload.fields([{ name: 'receipt', maxCount: 1 }, { name: 'screenshot', maxCount: 1 }]),
   submitManualPayment
+);
+router.get(
+  '/client/fee-summary',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  getClientFeeSummaryForSelf
 );
 router.post(
   '/admin/payments/verify',
   authenticateJWT,
-  requirePermission('ACCESS_PAYMENTS'),
+  requireAnyPermission(['ACCESS_PAYMENT_QR_VERIFICATION', 'ACCESS_PAYMENTS']),
   enforceTenantIsolation,
   verifyManualPayment
 );
 router.get(
   '/admin/payments',
   authenticateJWT,
-  requirePermission('ACCESS_PAYMENTS'),
+  requireAnyPermission(['ACCESS_PAYMENTS', 'APPROVE_L2_PAYMENTS', 'ACCESS_L2_VERIFICATION']),
   enforceTenantIsolation,
   getAdminPayments
+);
+router.post(
+  '/admin/payments/:id/send-email',
+  authenticateJWT,
+  requirePermission('ACCESS_PAYMENTS'),
+  enforceTenantIsolation,
+  sendPaymentInvoiceEmail
 );
 
 router.post(
@@ -713,6 +1339,15 @@ router.get(
 // PAYMENTS WEBHOOK (RAZORPAY SIMULATOR)
 // ----------------------------------------------------
 router.post('/webhook/razorpay', handleRazorpayWebhook);
+
+// ----------------------------------------------------
+// PAYMENT GATEWAY STATUS CHECK
+// ----------------------------------------------------
+router.get(
+  '/payment/gateway-status',
+  authenticateJWT,
+  getPaymentGatewayStatus
+);
 
 // ----------------------------------------------------
 // RAZORPAY REAL PAYMENT INTEGRATION
@@ -768,20 +1403,27 @@ router.post(
 router.get(
   '/research/list',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']),
+  (req: any, res: any, next: any) => {
+    if (req.user?.role === 'CLIENT') return next();
+    return requireAnyPermission(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD'])(req, res, next);
+  },
   enforceTenantIsolation,
   listResearch
 );
 router.get(
   '/research/:id/detail',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD']),
+  (req: any, res: any, next: any) => {
+    if (req.user?.role === 'CLIENT') return next();
+    return requireAnyPermission(['ACCESS_RESEARCH', 'ACCESS_COMPLIANCE', 'ACCESS_DASHBOARD'])(req, res, next);
+  },
   enforceTenantIsolation,
   viewResearchDetail
 );
 
 // ----------------------------------------------------
 // COMPLIANCE & DEPOSIT ENGINE
+router.use('/compliance', requireComplianceEnabled);
 // ----------------------------------------------------
 router.post(
   '/compliance/check',
@@ -828,21 +1470,21 @@ router.post(
 router.get(
   '/compliance/checklist',
   authenticateJWT,
-  requirePermission('ACCESS_COMPLIANCE'),
+  requireAnyPermission(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getChecklist
 );
 router.get(
   '/compliance/checklist/history',
   authenticateJWT,
-  requirePermission('ACCESS_COMPLIANCE'),
+  requireAnyPermission(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   getChecklistHistory
 );
 router.post(
   '/compliance/checklist/:requirementId',
   authenticateJWT,
-  requirePermission('ACCESS_COMPLIANCE'),
+  requireAnyPermission(['ACCESS_CHECKLIST', 'ACCESS_COMPLIANCE']),
   enforceTenantIsolation,
   upload.single('proofDocumentUrl'),
   updateAuditStatus
@@ -873,6 +1515,12 @@ router.get(
 );
 
 router.get(
+  '/client/news-feed',
+  authenticateJWT,
+  getNewsFeed
+);
+
+router.get(
   '/client/subscriptions',
   authenticateJWT,
   requireRoles(['CLIENT']),
@@ -899,6 +1547,13 @@ router.get(
   requireRoles(['CLIENT']),
   enforceTenantIsolation,
   getNotifications
+);
+router.put(
+  '/client/notifications/read',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  enforceTenantIsolation,
+  markNotificationsAsRead
 );
 
 // TICKETS
@@ -1018,6 +1673,125 @@ router.post(
   addSignalMessage
 );
 
+// TRADE SIGNAL MULTI-CHANNEL DELIVERY REPORTS
+router.get(
+  '/signals/delivery-reports/master',
+  authenticateJWT,
+  enforceTenantIsolation,
+  requireAnyPermission(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']),
+  getMasterDeliveryReport
+);
+router.get(
+  '/signals/delivery-reports/channel/:channel',
+  authenticateJWT,
+  enforceTenantIsolation,
+  requireAnyPermission(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']),
+  getChannelDeliveryReport
+);
+router.post(
+  '/signals/delivery-reports/sync-dlr',
+  authenticateJWT,
+  enforceTenantIsolation,
+  requireAnyPermission(['ACCESS_DELIVERY_REPORTS', 'VIEW_ALL_DELIVERIES']),
+  syncSmsDeliveryReports
+);
+router.post(
+  '/admin/telegram/test',
+  authenticateJWT,
+  enforceTenantIsolation,
+  testTelegramBotConnection
+);
+router.post(
+  '/admin/telegram/set-webhook',
+  authenticateJWT,
+  enforceTenantIsolation,
+  setTelegramWebhookEndpoint
+);
+router.get(
+  '/admin/telegram/webhook-info',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getTelegramWebhookStatus
+);
+
+
+// ----------------------------------------------------
+// RESEARCHER SIGNATURE, AADHAAR ESIGN & DSC ROUTES
+// ----------------------------------------------------
+router.get(
+  '/researcher/signature-settings',
+  authenticateJWT,
+  enforceTenantIsolation,
+  getSignatureSettings
+);
+
+router.put(
+  '/researcher/signature-settings',
+  authenticateJWT,
+  enforceTenantIsolation,
+  updateSignatureSettings
+);
+
+router.post(
+  '/researcher/signature/upload',
+  authenticateJWT,
+  enforceTenantIsolation,
+  upload.single('signature'),
+  uploadResearcherSignature
+);
+
+router.post(
+  '/researcher/esign/initiate',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  upload.single('report'),
+  initiateReportAadhaarEsign
+);
+
+router.post(
+  '/researcher/esign/complete',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  completeReportAadhaarEsign
+);
+
+router.post(
+  '/researcher/esign/use-daily-stamp',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  upload.single('report'),
+  useDailyAadhaarSign
+);
+
+router.post(
+  '/researcher/dsc/save-signed-report',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  upload.single('report'),
+  saveDscSignedReport
+);
+
+router.post(
+  '/researcher/dsc/verify-token',
+  authenticateJWT,
+  requirePermission('ACCESS_RESEARCH'),
+  enforceTenantIsolation,
+  verifyDscToken
+);
+
+// Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
+router.get('/dsc-bridge/ping', dscBridgePing);
+router.get('/dsc-bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
+router.post('/dsc-bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
+
+router.get('/researcher/dsc/bridge/ping', dscBridgePing);
+router.get('/researcher/dsc/bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
+router.post('/researcher/dsc/bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
+
 // ----------------------------------------------------
 // COMPLAINTS & GRIEVANCES
 // ----------------------------------------------------
@@ -1057,6 +1831,13 @@ router.put(
   upload.single('proof'),
   resolveComplaint
 );
+router.delete(
+  '/compliance/complaints/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_COMPLIANCE'),
+  enforceTenantIsolation,
+  deleteComplaint
+);
 
 // ----------------------------------------------------
 // RESOURCES MANAGEMENT
@@ -1079,7 +1860,6 @@ router.delete(
 router.get(
   '/resources',
   authenticateJWT,
-  requireRoles(['SUPER_ADMIN', 'ADMIN', 'COMPLIANCE_OFFICER', 'PRINCIPAL_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'SALES', 'MARKETING']),
   getResources
 );
 
@@ -1092,32 +1872,225 @@ router.get(
 );
 
 // ----------------------------------------------------
+// VIDEO KYC & IPV (V-CIP) ENDPOINTS
+// ----------------------------------------------------
+router.post('/video-kyc/create-session', authenticateJWT, createVideoKycSession);
+router.post('/video-kyc/start-early/:sessionId', authenticateJWT, startEarlySession);
+router.get('/video-kyc/sessions', authenticateJWT, listVideoKycSessions);
+router.get('/video-kyc/session/:sessionId', getSessionDetails); // Accessible by session participants
+router.post('/video-kyc/verify-otp', verifyVideoKycOtp); // 4-digit OTP verification for client
+router.post('/video-kyc/resend-otp', resendVideoKycOtp); // Resend fresh OTP to client registered email
+router.post(
+  '/video-kyc/upload/:sessionId',
+  (req, res, next) => {
+    upload.single('recording')(req, res, (err: any) => {
+      if (err) {
+        console.error('❌ [VIDEO-KYC MULTER ERROR]:', err);
+        return res.status(400).json({
+          success: false,
+          message: err?.message || 'File upload error during Video KYC upload.'
+        });
+      }
+      next();
+    });
+  },
+  uploadRecording
+);
+router.post('/video-kyc/review/:sessionId', authenticateJWT, reviewSession);
+router.get('/video-kyc/settings', authenticateJWT, getVideoKycSettings);
+router.put('/video-kyc/settings', authenticateJWT, updateVideoKycSettings);
+
+// ----------------------------------------------------
 // GENERIC DOWNLOAD (Bypasses Nginx Static Block)
 // ----------------------------------------------------
-router.get('/download', (req, res) => {
+router.get('/download', async (req, res) => {
   try {
-    const fileUrl = req.query.path as string;
-    if (!fileUrl || !fileUrl.startsWith('/uploads/')) {
+    let fileUrl = req.query.path as string;
+    if (!fileUrl) {
       return res.status(400).json({ success: false, message: 'Invalid file path' });
     }
-    
+
+    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+      try {
+        fileUrl = new URL(fileUrl).pathname;
+      } catch {}
+    }
+
+    try {
+      fileUrl = decodeURIComponent(fileUrl);
+    } catch {}
+
     // Prevent directory traversal
     const normalizedUrl = path.normalize(fileUrl).replace(/^(\.\.[\/\\])+/, '');
-    
-    // Strip the leading slash or /uploads/ so path.join doesn't treat it as absolute
-    // Using the pre-computed uploadRoot from the top of the file
     const relativePath = normalizedUrl.replace(/^[\/\\]?uploads[\/\\]/, '');
-    const uploadRoot = path.join(__dirname, '../../../uploads'); // re-declaring in scope just in case
-    const filePath = path.join(uploadRoot, relativePath);
-    
-    if (fs.existsSync(filePath)) {
-      res.download(filePath);
+    const fileName = path.basename(normalizedUrl);
+
+    const roots = [
+      getUploadRoot(),
+      path.resolve(process.cwd(), '../uploads'),
+      path.resolve(process.cwd(), 'uploads'),
+      path.resolve(__dirname, '../../uploads'),
+      path.resolve(__dirname, '../../../uploads'),
+      'A:/RA_SEBI_COMPLINCE/uploads',
+      'A:/RA_SEBI_COMPLINCE/backend/uploads'
+    ];
+
+    const subfolders = ['research', 'resources', 'policies', 'branding', 'agreements', 'payments', 'compliance', 'kyc', 'staff', 'tickets'];
+
+    let foundPath: string | null = null;
+
+    // 1. Check relative path directly
+    for (const root of roots) {
+      const p = path.resolve(root, relativePath);
+      if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+        foundPath = p;
+        break;
+      }
+    }
+
+    // 2. Check direct fileName at root
+    if (!foundPath) {
+      for (const root of roots) {
+        const p = path.resolve(root, fileName);
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+          foundPath = p;
+          break;
+        }
+      }
+    }
+
+    // 3. Search across all known subfolders
+    if (!foundPath) {
+      for (const root of roots) {
+        for (const sub of subfolders) {
+          const p = path.resolve(root, sub, fileName);
+          if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+            foundPath = p;
+            break;
+          }
+        }
+        if (foundPath) break;
+      }
+    }
+
+    // 4. Stem/Fuzzy matching if exact timestamped filename was rotated/modified or uploaded with a different prefix
+    if (!foundPath) {
+      const stems = new Set<string>();
+      let tempName = fileName;
+      while (/^\d+_(.+)$/.test(tempName)) {
+        tempName = tempName.replace(/^\d+_/, '');
+        if (tempName) stems.add(tempName);
+      }
+      const cleanBase = fileName.replace(/^(\d+_)+/, '');
+      if (cleanBase) stems.add(cleanBase);
+
+      const candidateMatches: { filePath: string; mtime: number; score: number }[] = [];
+
+      for (const root of roots) {
+        if (!fs.existsSync(root)) continue;
+        const foldersToScan = ['', ...subfolders];
+        for (const sub of foldersToScan) {
+          const dir = sub ? path.resolve(root, sub) : root;
+          if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
+          try {
+            const files = fs.readdirSync(dir);
+            for (const f of files) {
+              const fullFPath = path.resolve(dir, f);
+              if (!fs.statSync(fullFPath).isFile()) continue;
+
+              for (const stem of stems) {
+                if (f === stem) {
+                  candidateMatches.push({ filePath: fullFPath, mtime: fs.statSync(fullFPath).mtimeMs, score: 100 });
+                } else if (f.endsWith(stem)) {
+                  candidateMatches.push({ filePath: fullFPath, mtime: fs.statSync(fullFPath).mtimeMs, score: 80 });
+                } else if (cleanBase.length > 4 && f.toLowerCase().includes(cleanBase.toLowerCase())) {
+                  candidateMatches.push({ filePath: fullFPath, mtime: fs.statSync(fullFPath).mtimeMs, score: 50 });
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
+      if (candidateMatches.length > 0) {
+        candidateMatches.sort((a, b) => b.score - a.score || b.mtime - a.mtime);
+        foundPath = candidateMatches[0].filePath;
+      }
+    }
+
+    // 5. On-Demand Dynamic Agreement PDF Generation
+    if (!foundPath && (fileName.includes('_signed_agreement') || fileUrl.includes('agreement'))) {
+      try {
+        const clientMatch = fileName.match(/^([a-f0-9]{24})_signed_agreement/i) || fileUrl.match(/([a-f0-9]{24})/i);
+        if (clientMatch && clientMatch[1]) {
+          const clientId = clientMatch[1];
+          const pdfBuffer = await generateAgreementPdf(clientId, { isSigned: true });
+          if (pdfBuffer && pdfBuffer.length > 0) {
+            const saveDir = path.resolve(getUploadRoot(), 'agreements');
+            if (!fs.existsSync(saveDir)) {
+              try { fs.mkdirSync(saveDir, { recursive: true }); } catch {}
+            }
+            const savePath = path.resolve(saveDir, fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`);
+            try { fs.writeFileSync(savePath, pdfBuffer); } catch {}
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+            return res.send(pdfBuffer);
+          }
+        }
+      } catch (genErr) {
+        console.warn('[DOWNLOAD] Agreement PDF dynamic generation failed:', genErr);
+      }
+    }
+
+    // 6. On-Demand Dynamic Invoice PDF Generation
+    if (!foundPath && (fileName.toLowerCase().includes('invoice') || fileUrl.toLowerCase().includes('invoice'))) {
+      try {
+        const invMatch = fileName.match(/^Invoice_([a-zA-Z0-9_-]+)\.pdf/i) || fileUrl.match(/Invoice_([a-zA-Z0-9_-]+)/i) || fileName.match(/^([a-f0-9]{24})/i);
+        if (invMatch && invMatch[1]) {
+          const identifier = invMatch[1];
+          const pdfBuffer = await generateInvoicePdf(identifier);
+          if (pdfBuffer && pdfBuffer.length > 0) {
+            const saveDir = path.resolve(getUploadRoot(), 'payments');
+            if (!fs.existsSync(saveDir)) {
+              try { fs.mkdirSync(saveDir, { recursive: true }); } catch {}
+            }
+            const savePath = path.resolve(saveDir, fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`);
+            try { fs.writeFileSync(savePath, pdfBuffer); } catch {}
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+            return res.send(pdfBuffer);
+          }
+        }
+      } catch (invErr) {
+        console.warn('[DOWNLOAD] Invoice PDF dynamic generation failed:', invErr);
+      }
+    }
+
+    if (foundPath) {
+      const ext = path.extname(foundPath).toLowerCase();
+      if (ext === '.pdf') {
+        res.setHeader('Content-Type', 'application/pdf');
+      }
+      return res.download(foundPath, fileName);
     } else {
-      res.status(404).json({ success: false, message: 'File not found on server' });
+      return res.status(404).json({ success: false, message: 'File not found on server' });
     }
   } catch (err: any) {
-    res.status(500).json({ success: false, message: 'Internal server error during download' });
+    console.error('[DOWNLOAD ERROR]:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error during download' });
   }
 });
 
+
+// ----------------------------------------------------
+// SECRET COMPLIANCE VAULT (LIVE CYCLE OVERRIDE)
+// ----------------------------------------------------
+router.post('/files/send-export-email', authenticateJWT, upload.single('file'), dispatchExportFileEmail);
+router.post('/admin/payments/:id/l2-action', authenticateJWT, requireAnyPermission(['ACCESS_PAYMENTS', 'APPROVE_L2_PAYMENTS', 'ACCESS_L2_VERIFICATION']), handleL2PaymentAction);
+router.post('/admin/secret-vault/send-otp', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), requestVaultOtp);
+router.post('/admin/secret-vault/verify-otp', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), verifyVaultOtp);
+router.get('/admin/secret-vault/penalties', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), requireVaultToken, getVaultPenalties);
+router.post('/admin/secret-vault/toggle-mask', authenticateJWT, requireRoles(['SUPER_ADMIN', 'ADMIN']), requireVaultToken, togglePenaltyMask);
+
 export default router;
+

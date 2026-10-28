@@ -1,76 +1,345 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendComplaintNotificationEmail = exports.sendAccountDeactivatedEmail = exports.sendAccountActivatedEmail = void 0;
+exports.resolveSmtpCredentials = resolveSmtpCredentials;
+exports.resolveTenantDoc = resolveTenantDoc;
 exports.sendEmail = sendEmail;
+exports.resolveEmailTemplate = resolveEmailTemplate;
+exports.wrapInBrandedHtmlEmail = wrapInBrandedHtmlEmail;
+exports.sendOtpEmail = sendOtpEmail;
+exports.sendTwoFactorLoginOtpEmail = sendTwoFactorLoginOtpEmail;
 exports.sendWelcomeEmail = sendWelcomeEmail;
 exports.sendForgotPasswordEmail = sendForgotPasswordEmail;
 exports.sendTestEmail = sendTestEmail;
+exports.sendSignedAgreementEmail = sendSignedAgreementEmail;
+exports.sendTaxInvoiceEmail = sendTaxInvoiceEmail;
+exports.sendVideoKycInviteEmail = sendVideoKycInviteEmail;
+const mongoose_1 = __importDefault(require("mongoose"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
-const db_1 = __importDefault(require("../config/db"));
+const db_1 = __importStar(require("../config/db"));
+const pdfService_1 = require("./pdfService");
+const defaultEmailTemplates_1 = require("../utils/defaultEmailTemplates");
 /**
- * Generic email sender using tenant's configured SMTP settings.
- * If SMTP is not configured, logs a warning and skips silently.
+ * Resolves SMTP credentials from the Database (Tenant, AllCompany, SystemSetting)
+ * before falling back to .env.
  */
-async function sendEmail(tenantId, to, subject, html, attachments) {
-    try {
-        if (!tenantId) {
-            console.warn('[EMAIL] No tenantId provided. Skipping email to:', to);
-            return false;
+async function resolveSmtpCredentials(tenantId) {
+    let tenantDoc = null;
+    let source = '';
+    const isValidCred = (doc) => {
+        return Boolean(doc &&
+            typeof doc.smtpHost === 'string' && doc.smtpHost.trim() !== '' &&
+            typeof doc.smtpUser === 'string' && doc.smtpUser.trim() !== '' &&
+            typeof doc.smtpPassword === 'string' && doc.smtpPassword.trim() !== '');
+    };
+    // 1. If tenantId is provided, query dynamicDb and centralModels Tenant / AllCompany
+    if (tenantId) {
+        try {
+            const doc = await db_1.default.Tenant.findById(tenantId).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'dynamicDb.Tenant(findById)';
+            }
         }
-        const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
-        if (!tenant || !tenant.smtpHost || !tenant.smtpUser || !tenant.smtpPassword) {
-            console.warn('[EMAIL] SMTP not configured for tenant:', tenantId, '. Skipping email to:', to);
+        catch { }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.centralModels.Tenant.findById(tenantId).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'centralModels.Tenant(findById)';
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.default.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'dynamicDb.Tenant(findOne)';
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.centralModels.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'centralModels.Tenant(findOne)';
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                const doc = await db_1.centralModels.AllCompany.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+                if (isValidCred(doc)) {
+                    tenantDoc = doc;
+                    source = 'centralModels.AllCompany(findOne)';
+                }
+            }
+            catch { }
+        }
+    }
+    // 2. Query any active Tenant in dynamicDb or centralModels that has SMTP credentials
+    if (!tenantDoc) {
+        try {
+            const doc = await db_1.default.Tenant.findOne({
+                smtpHost: { $nin: [null, ''] },
+                smtpUser: { $nin: [null, ''] },
+                smtpPassword: { $nin: [null, ''] }
+            }).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'dynamicDb.Tenant(anyActive)';
+            }
+        }
+        catch { }
+    }
+    if (!tenantDoc) {
+        try {
+            const doc = await db_1.centralModels.Tenant.findOne({
+                smtpHost: { $nin: [null, ''] },
+                smtpUser: { $nin: [null, ''] },
+                smtpPassword: { $nin: [null, ''] }
+            }).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'centralModels.Tenant(anyActive)';
+            }
+        }
+        catch { }
+    }
+    // 3. Query AllCompany in centralModels
+    if (!tenantDoc) {
+        try {
+            const doc = await db_1.centralModels.AllCompany.findOne({
+                smtpHost: { $nin: [null, ''] },
+                smtpUser: { $nin: [null, ''] },
+                smtpPassword: { $nin: [null, ''] }
+            }).lean();
+            if (isValidCred(doc)) {
+                tenantDoc = doc;
+                source = 'centralModels.AllCompany(anyActive)';
+            }
+        }
+        catch { }
+    }
+    // 4. Query SystemSetting (keys: GLOBAL_SMTP, SMTP_CONFIG, SMTP_SETTINGS, SMTP) in dynamicDb and centralModels
+    const smtpSettingKeys = ['GLOBAL_SMTP', 'SMTP_CONFIG', 'SMTP_SETTINGS', 'SMTP', 'EMAIL_CONFIG'];
+    if (!tenantDoc) {
+        for (const key of smtpSettingKeys) {
+            try {
+                const setting = await db_1.default.SystemSetting.findOne({ key }).lean();
+                if (setting?.value) {
+                    const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+                    if (isValidCred(parsed)) {
+                        tenantDoc = parsed;
+                        source = `dynamicDb.SystemSetting(${key})`;
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+    if (!tenantDoc) {
+        for (const key of smtpSettingKeys) {
+            try {
+                const setting = await db_1.centralModels.SystemSetting.findOne({ key }).lean();
+                if (setting?.value) {
+                    const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+                    if (isValidCred(parsed)) {
+                        tenantDoc = parsed;
+                        source = `centralModels.SystemSetting(${key})`;
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+    }
+    // 5. If credentials found in DB, return them
+    if (tenantDoc && tenantDoc.smtpHost && tenantDoc.smtpUser && tenantDoc.smtpPassword) {
+        const port = parseInt(tenantDoc.smtpPort || '587');
+        console.log(`[SMTP-RESOLVER] ✅ Using Database SMTP Credentials (${source}): Host=${tenantDoc.smtpHost}, Port=${port}, User=${tenantDoc.smtpUser}`);
+        return {
+            host: tenantDoc.smtpHost.trim(),
+            port,
+            secure: port === 465,
+            user: tenantDoc.smtpUser.trim(),
+            pass: tenantDoc.smtpPassword.trim(),
+            fromName: tenantDoc.smtpFrom || tenantDoc.companyName || 'RAGCP Platform',
+            fromEmail: tenantDoc.smtpUser.trim()
+        };
+    }
+    console.warn('[SMTP-RESOLVER] ⚠️ No SMTP credentials configured in Database. Please configure Email & SMTP in Admin Settings.');
+    return null;
+}
+/**
+ * Helper to fetch tenant document from DB or central models
+ */
+async function resolveTenantDoc(tenantId) {
+    let tenantDoc = null;
+    if (tenantId) {
+        try {
+            if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                tenantDoc = await db_1.default.Tenant.findById(tenantId).lean();
+            }
+        }
+        catch { }
+        if (!tenantDoc) {
+            try {
+                tenantDoc = await db_1.default.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                if (mongoose_1.default.Types.ObjectId.isValid(tenantId)) {
+                    tenantDoc = await db_1.centralModels.Tenant.findById(tenantId).lean();
+                }
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                tenantDoc = await db_1.centralModels.Tenant.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            catch { }
+        }
+        if (!tenantDoc) {
+            try {
+                tenantDoc = await db_1.centralModels.AllCompany.findOne({
+                    $or: [{ _id: tenantId }, { id: tenantId }, { tenantId: tenantId }]
+                }).lean();
+            }
+            catch { }
+        }
+    }
+    if (!tenantDoc) {
+        try {
+            tenantDoc = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        }
+        catch { }
+    }
+    if (!tenantDoc) {
+        try {
+            const setting = await db_1.default.SystemSetting.findOne({ key: 'GLOBAL_SMTP' }).lean();
+            if (setting?.value) {
+                tenantDoc = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value;
+            }
+        }
+        catch { }
+    }
+    return tenantDoc;
+}
+/**
+ * Generic email sender using resolved SMTP settings from Database.
+ */
+async function sendEmail(tenantId, to, subject, html, attachments, cc) {
+    try {
+        const smtp = await resolveSmtpCredentials(tenantId);
+        if (!smtp) {
+            console.warn('[EMAIL] No SMTP credentials found in Database or Environment. Skipping email to:', to);
             return false;
         }
         const transporter = nodemailer_1.default.createTransport({
-            host: tenant.smtpHost,
-            port: tenant.smtpPort || 587,
-            secure: (tenant.smtpPort || 587) === 465,
+            host: smtp.host,
+            port: smtp.port,
+            secure: smtp.secure,
             auth: {
-                user: tenant.smtpUser,
-                pass: tenant.smtpPassword,
+                user: smtp.user,
+                pass: smtp.pass
             },
-            tls: { rejectUnauthorized: false },
+            tls: { rejectUnauthorized: false }
         });
-        const fromName = tenant.smtpFrom || tenant.companyName || 'RAGCP Platform';
-        const fromEmail = tenant.smtpUser;
-        await transporter.sendMail({
-            from: `"${fromName}" <${fromEmail}>`,
+        const mailOptions = {
+            from: `"${smtp.fromName}" <${smtp.fromEmail}>`,
             to,
             subject,
             html,
-            attachments,
-        });
+            attachments
+        };
+        if (cc && (typeof cc === 'string' ? cc.trim() : (Array.isArray(cc) && cc.length > 0))) {
+            mailOptions.cc = cc;
+            console.log(`[EMAIL] 📋 CC attached: ${Array.isArray(cc) ? cc.join(', ') : cc}`);
+        }
+        await transporter.sendMail(mailOptions);
+        console.log(`[EMAIL] Email sent to ${to}${mailOptions.cc ? ` (CC: ${mailOptions.cc})` : ''} using DB SMTP (${smtp.user} @ ${smtp.host}:${smtp.port})`);
         // Log to NotificationLog
-        await db_1.default.notificationLog.create({
-            data: {
-                tenantId,
-                recipient: to,
+        try {
+            await db_1.NotificationLog.create({
+                tenantId: tenantId || null,
+                recipient: mailOptions.cc ? `${to}, CC: ${mailOptions.cc}` : to,
                 channel: 'EMAIL',
                 title: subject,
                 message: html.replace(/<[^>]*>/g, '').slice(0, 500),
-                status: 'SENT',
-            },
-        });
+                status: 'SENT'
+            });
+        }
+        catch { }
         return true;
     }
     catch (err) {
         console.error('[EMAIL] Failed to send email to:', to, '| Error:', err.message);
-        // Log failure
         if (tenantId) {
             try {
-                await db_1.default.notificationLog.create({
-                    data: {
-                        tenantId,
-                        recipient: to,
-                        channel: 'EMAIL',
-                        title: subject,
-                        message: `Failed: ${err.message}`,
-                        status: 'FAILED',
-                    },
+                await db_1.NotificationLog.create({
+                    tenantId,
+                    recipient: cc ? `${to}, CC: ${cc}` : to,
+                    channel: 'EMAIL',
+                    title: subject,
+                    message: `Failed: ${err.message}`,
+                    status: 'FAILED'
                 });
             }
             catch { }
@@ -79,70 +348,218 @@ async function sendEmail(tenantId, to, subject, html, attachments) {
     }
 }
 /**
+ * Resolves Email Template (Subject & Body) from the Database for a specific tenant and type,
+ * falling back to DEFAULT_EMAIL_TEMPLATES.
+ */
+async function resolveEmailTemplate(tenantId, type) {
+    const def = defaultEmailTemplates_1.DEFAULT_EMAIL_TEMPLATES.find(d => d.type === type) || {
+        subject: '',
+        body: ''
+    };
+    if (!tenantId) {
+        return { subject: def.subject, body: def.body };
+    }
+    try {
+        let tpl = await db_1.default.EmailTemplate.findOne({ tenantId, type }).lean();
+        if (!tpl && type === 'WELCOME_CLIENT') {
+            tpl = await db_1.default.EmailTemplate.findOne({ tenantId, type: 'WELCOME' }).lean();
+        }
+        if (!tpl && type === 'WELCOME') {
+            tpl = await db_1.default.EmailTemplate.findOne({ tenantId, type: 'WELCOME_CLIENT' }).lean();
+        }
+        if (tpl && tpl.subject && tpl.body) {
+            return { subject: tpl.subject, body: tpl.body };
+        }
+    }
+    catch (err) {
+        console.warn(`[EMAIL] Could not fetch template ${type} for tenant ${tenantId}:`, err?.message);
+    }
+    return { subject: def.subject, body: def.body };
+}
+/**
+ * Wraps email body content into a responsive, SEBI-compliant HTML container.
+ */
+function wrapInBrandedHtmlEmail(opts) {
+    const { title, companyName, content, headerGradient = 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #3b82f6 100%)', headerIcon = '✉️' } = opts;
+    // If content already contains complete HTML document, return as is
+    if (content.trim().toLowerCase().startsWith('<!doctype') || content.trim().toLowerCase().startsWith('<html')) {
+        return content;
+    }
+    let formattedContent = content;
+    // If plain text with no HTML block tags, format paragraphs and linebreaks
+    if (!/<(p|div|table|h1|h2|h3|h4|ul|ol)[^>]*>/i.test(content)) {
+        formattedContent = content
+            .split(/\n\n+/)
+            .map(paragraph => `<p style="margin: 0 0 14px; font-size: 14.5px; line-height: 1.65; color: #334155;">${paragraph.replace(/\n/g, '<br/>')}</p>`)
+            .join('');
+    }
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${title}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1e293b;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; padding: 32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 20px rgba(0,0,0,0.06);">
+          <tr>
+            <td style="background: ${headerGradient}; padding: 32px 24px; text-align: center;">
+              ${headerIcon ? `<div style="font-size: 28px; margin-bottom: 6px;">${headerIcon}</div>` : ''}
+              <h1 style="color: #ffffff !important; margin: 0 0 6px; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">
+                ${title}
+              </h1>
+              <p style="color: #dbeafe !important; margin: 0; font-size: 13.5px; font-weight: 500;">
+                ${companyName} • SEBI Research Analyst
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px; background-color: #ffffff;">
+              ${formattedContent}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 22px; text-align: center; background-color: #f8fafc; border-top: 1px solid #e2e8f0;">
+              <p style="color: #64748b !important; font-size: 12px; line-height: 1.5; margin: 0 0 4px;">
+                This regulatory communication was issued by <strong style="color: #334155 !important;">${companyName}</strong> in compliance with SEBI (Research Analysts) Regulations, 2014.
+              </p>
+              <p style="color: #94a3b8 !important; font-size: 11px; margin: 0;">
+                Please do not reply directly to this automated email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+/**
+ * Send OTP Verification Email
+ */
+async function sendOtpEmail(opts) {
+    const { tenantId, toEmail, otp, companyName } = opts;
+    const brand = companyName || 'RAGCP Platform';
+    const tpl = await resolveEmailTemplate(tenantId, 'REGISTRATION_OTP');
+    const vars = {
+        otp,
+        expiryMinutes: '10',
+        companyName: brand
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Verify Your Email Address - ${brand}: ${otp}`, vars);
+    const rawBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const html = wrapInBrandedHtmlEmail({
+        title: 'Verify Your Email Address',
+        companyName: brand,
+        content: rawBody,
+        headerIcon: '✉️'
+    });
+    return sendEmail(tenantId, toEmail, subject, html);
+}
+/**
+ * Send Two-Factor Login Verification OTP Email
+ */
+async function sendTwoFactorLoginOtpEmail(opts) {
+    const { tenantId, toEmail, otp, companyName } = opts;
+    const brand = companyName || 'RAGCP Platform';
+    const tpl = await resolveEmailTemplate(tenantId, 'LOGIN_2FA');
+    const clientName = toEmail.split('@')[0];
+    const vars = {
+        clientName,
+        otp,
+        expiryMinutes: '10',
+        companyName: brand
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Your Login Verification Code for ${brand}: ${otp}`, vars);
+    const rawBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const html = wrapInBrandedHtmlEmail({
+        title: 'Two-Step Login Verification',
+        companyName: brand,
+        content: rawBody,
+        headerIcon: '🔐'
+    });
+    return sendEmail(tenantId, toEmail, subject, html);
+}
+/**
  * Welcome email sent to newly onboarded Staff or Client.
  */
 async function sendWelcomeEmail(opts) {
-    const { tenantId, toEmail, name, password, role, loginUrl, companyName, customText, attachments } = opts;
-    const subject = `Welcome to ${companyName || 'RAGCP'} — Your Account is Ready`;
-    const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8"/>
-  <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; margin: 0; padding: 0; }
-    .container { max-width: 560px; margin: 40px auto; background: #1e293b; border-radius: 16px; overflow: hidden; border: 1px solid #334155; }
-    .header { background: linear-gradient(135deg, #6366f1, #8b5cf6); padding: 32px; text-align: center; }
-    .header h1 { color: #fff; margin: 0; font-size: 24px; font-weight: 700; }
-    .header p { color: rgba(255,255,255,0.8); margin: 8px 0 0; font-size: 13px; }
-    .body { padding: 32px; }
-    .body p { color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
-    .credentials { background: #0f172a; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #334155; }
-    .cred-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #1e293b; }
-    .cred-row:last-child { border-bottom: none; }
-    .cred-label { color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-    .cred-value { color: #e2e8f0; font-size: 13px; font-family: monospace; font-weight: 600; }
-    .btn { display: block; width: fit-content; margin: 24px auto 0; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff !important; text-decoration: none; padding: 12px 32px; border-radius: 8px; font-weight: 600; font-size: 14px; }
-    .footer { text-align: center; padding: 20px 32px; color: #475569; font-size: 11px; border-top: 1px solid #334155; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🎉 Welcome, ${name}!</h1>
-      <p>Your account has been created on ${companyName || 'RAGCP Platform'}</p>
+    const { tenantId, toEmail, name, username, password, role, loginUrl, companyName, customText } = opts;
+    let attachments = opts.attachments || [];
+    if ((!attachments || attachments.length === 0) && role === 'CLIENT' && tenantId) {
+        try {
+            attachments = await (0, pdfService_1.getTenantComplianceAttachments)(tenantId);
+        }
+        catch (attErr) {
+            console.error('[EMAIL] Error loading default compliance attachments:', attErr);
+        }
+    }
+    const cleanRole = role.replace(/_/g, ' ');
+    const displayCompany = companyName || 'Research Analyst Services';
+    const tpl = await resolveEmailTemplate(tenantId, 'WELCOME_CLIENT');
+    const vars = {
+        clientName: name,
+        name,
+        username: username || toEmail,
+        email: toEmail,
+        temporaryPassword: password,
+        password,
+        role: cleanRole,
+        loginUrl,
+        companyName: displayCompany,
+        supportEmail: `support@${toEmail.split('@')[1] || 'domain.com'}`
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Welcome to ${displayCompany} — Your Account is Ready`, vars);
+    const renderedCustomBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    // Dynamic body formatted into branded template
+    const dynamicBodyWithCredentials = `
+    ${renderedCustomBody ? `<div style="margin-bottom: 20px;">${renderedCustomBody.replace(/\n/g, '<br/>')}</div>` : ''}
+    ${customText ? `
+      <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 14px 18px; margin: 16px 0 20px; border-radius: 0 10px 10px 0; color: #334155; font-size: 14px; line-height: 1.6;">
+        ${customText}
+      </div>` : ''}
+
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin: 20px 0;">
+      <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; width: 38%;">Account Role</td>
+          <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right; border-bottom: 1px solid #e2e8f0;">${cleanRole}</td>
+        </tr>
+        ${username ? `
+        <tr>
+          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Assigned Username</td>
+          <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; font-family: monospace; color: #0284c7; text-align: right; border-bottom: 1px solid #e2e8f0;">${username}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Email Address</td>
+          <td style="padding: 9px 0; font-size: 13.5px; font-weight: 700; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${toEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding: 9px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Temporary Password</td>
+          <td style="padding: 9px 0; font-size: 14px; font-family: monospace; font-weight: 700; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">
+            <span style="background-color: #e2e8f0; padding: 4px 10px; border-radius: 6px;">${password}</span>
+          </td>
+        </tr>
+      </table>
     </div>
-    <div class="body">
-      <p>Hi ${name},</p>
-      ${customText ? `<p>${customText}</p>` : ''}
-      <p>Your account has been successfully created. Below are your login credentials:</p>
-      <div class="credentials">
-        <div class="cred-row">
-          <span class="cred-label">Role</span>
-          <span class="cred-value">${role.replace(/_/g, ' ')}</span>
-        </div>
-        <div class="cred-row">
-          <span class="cred-label">Email (Username)</span>
-          <span class="cred-value">${toEmail}</span>
-        </div>
-        <div class="cred-row">
-          <span class="cred-label">Password</span>
-          <span class="cred-value">${password}</span>
-        </div>
-        <div class="cred-row">
-          <span class="cred-label">Login URL</span>
-          <span class="cred-value">${loginUrl}</span>
-        </div>
-      </div>
-      <p style="color:#94a3b8; font-size:12px;">⚠️ Please change your password after first login for security.</p>
-      <a href="${loginUrl}" class="btn">Login to Your Account →</a>
+
+    <div style="text-align: center; margin: 28px 0 10px;">
+      <a href="${loginUrl}" style="display: inline-block; background-color: #2563eb; color: #ffffff !important; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 36px; border-radius: 10px;">
+        Login to Your Account →
+      </a>
     </div>
-    <div class="footer">
-      This email was sent by ${companyName || 'RAGCP Platform'}. Please do not reply to this email.
-    </div>
-  </div>
-</body>
-</html>`;
+  `;
+    const html = wrapInBrandedHtmlEmail({
+        title: `🎉 Welcome, ${name}!`,
+        companyName: displayCompany,
+        content: dynamicBodyWithCredentials,
+        headerGradient: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 60%, #3b82f6 100%)',
+        headerIcon: '🎉'
+    });
     return sendEmail(tenantId, toEmail, subject, html, attachments);
 }
 /**
@@ -150,115 +567,364 @@ async function sendWelcomeEmail(opts) {
  */
 async function sendForgotPasswordEmail(opts) {
     const { tenantId, toEmail, name, newPassword, loginUrl, companyName } = opts;
-    const subject = `Password Reset — ${companyName || 'RAGCP Platform'}`;
-    const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8"/>
-  <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; margin: 0; padding: 0; }
-    .container { max-width: 560px; margin: 40px auto; background: #1e293b; border-radius: 16px; overflow: hidden; border: 1px solid #334155; }
-    .header { background: linear-gradient(135deg, #f59e0b, #ef4444); padding: 32px; text-align: center; }
-    .header h1 { color: #fff; margin: 0; font-size: 22px; font-weight: 700; }
-    .body { padding: 32px; }
-    .body p { color: #cbd5e1; font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
-    .credentials { background: #0f172a; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #334155; }
-    .cred-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #1e293b; }
-    .cred-row:last-child { border-bottom: none; }
-    .cred-label { color: #64748b; font-size: 12px; font-weight: 600; text-transform: uppercase; }
-    .cred-value { color: #fbbf24; font-size: 14px; font-family: monospace; font-weight: 700; letter-spacing: 1px; }
-    .btn { display: block; width: fit-content; margin: 24px auto 0; background: linear-gradient(135deg, #f59e0b, #ef4444); color: #fff !important; text-decoration: none; padding: 12px 32px; border-radius: 8px; font-weight: 600; font-size: 14px; }
-    .footer { text-align: center; padding: 20px 32px; color: #475569; font-size: 11px; border-top: 1px solid #334155; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>🔐 Password Reset</h1>
+    const displayCompany = companyName || 'Research Analyst Services';
+    const tpl = await resolveEmailTemplate(tenantId, 'CHANGE_PASSWORD');
+    const vars = {
+        userName: name,
+        clientName: name,
+        temporaryPassword: newPassword,
+        loginUrl,
+        companyName: displayCompany
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Password Reset Request — ${displayCompany}`, vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const customContent = `
+    ${renderedBody ? `<div style="margin-bottom: 18px;">${renderedBody.replace(/\n/g, '<br/>')}</div>` : ''}
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px 20px; margin: 18px 0;">
+      <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+          <td style="padding: 8px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Email Account</td>
+          <td style="padding: 8px 0; font-size: 13.5px; font-weight: 700; color: #0284c7; text-align: right;">${toEmail}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">New Temporary Password</td>
+          <td style="padding: 8px 0; font-size: 14px; font-family: monospace; font-weight: 700; color: #d97706; text-align: right;">
+            <span style="background-color: #fef3c7; padding: 4px 10px; border-radius: 6px; color: #b45309;">${newPassword}</span>
+          </td>
+        </tr>
+      </table>
     </div>
-    <div class="body">
-      <p>Hi ${name},</p>
-      <p>We received a password reset request for your account. Your new temporary password is:</p>
-      <div class="credentials">
-        <div class="cred-row">
-          <span class="cred-label">Email</span>
-          <span class="cred-value" style="color:#e2e8f0">${toEmail}</span>
-        </div>
-        <div class="cred-row">
-          <span class="cred-label">New Password</span>
-          <span class="cred-value">${newPassword}</span>
-        </div>
-      </div>
-      <p style="color:#94a3b8; font-size:12px;">⚠️ Please login and change this password immediately.</p>
-      <p style="color:#94a3b8; font-size:12px;">If you did not request this, please contact your administrator immediately.</p>
-      <a href="${loginUrl}" class="btn">Login Now →</a>
+    <div style="text-align: center; margin: 24px 0 10px;">
+      <a href="${loginUrl}" style="display: inline-block; background-color: #ea580c; color: #ffffff !important; font-size: 14px; font-weight: 700; text-decoration: none; padding: 12px 32px; border-radius: 8px;">
+        Login to Portal →
+      </a>
     </div>
-    <div class="footer">
-      This email was sent by ${companyName || 'RAGCP Platform'}. Please do not reply to this email.
-    </div>
-  </div>
-</body>
-</html>`;
+  `;
+    const html = wrapInBrandedHtmlEmail({
+        title: '🔐 Password Reset Request',
+        companyName: displayCompany,
+        content: customContent,
+        headerGradient: 'linear-gradient(135deg, #d97706 0%, #ea580c 100%)',
+        headerIcon: '🔐'
+    });
     return sendEmail(tenantId, toEmail, subject, html);
 }
 /**
  * Send a test email to verify SMTP configuration.
  */
 async function sendTestEmail(tenantId, toEmail) {
-    const tenant = await db_1.default.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenant?.smtpHost || !tenant?.smtpUser || !tenant?.smtpPassword) {
-        return { success: false, message: 'SMTP is not fully configured. Please fill in all SMTP fields first.' };
+    const smtp = await resolveSmtpCredentials(tenantId);
+    if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+        return { success: false, message: 'SMTP is not fully configured. Please enter Host, Port, User, and Password first.' };
     }
     const html = `
-    <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#1e293b;padding:32px;border-radius:12px;border:1px solid #334155">
-      <h2 style="color:#6366f1;margin:0 0 16px">✅ SMTP Test Successful!</h2>
-      <p style="color:#cbd5e1">Your SMTP configuration is working correctly.</p>
-      <p style="color:#64748b;font-size:12px;margin:16px 0 0">Server: ${tenant.smtpHost}:${tenant.smtpPort || 587}</p>
+    <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; padding: 32px; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
+      <h2 style="color: #2563eb; margin: 0 0 16px;">✅ SMTP Test Successful!</h2>
+      <p style="color: #334155; font-size: 14px; line-height: 1.6;">Your SMTP email configuration is working correctly and ready to send compliance emails.</p>
+      <div style="background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 12.5px; color: #475569; margin-top: 16px;">
+        <strong>Server:</strong> ${smtp.host}:${smtp.port} &nbsp;|&nbsp; <strong>Sender:</strong> ${smtp.user}
+      </div>
     </div>`;
     const sent = await sendEmail(tenantId, toEmail, '✅ SMTP Test — RAGCP Platform', html);
     return sent
         ? { success: true, message: 'Test email sent successfully! Please check your inbox.' }
         : { success: false, message: 'Failed to send test email. Please check your SMTP credentials.' };
 }
-const sendAccountActivatedEmail = async ({ toEmail, name, companyName }) => {
-    const html = `
-    <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#1e293b;padding:32px;border-radius:12px;border:1px solid #334155;color:#e2e8f0;">
-      <h2 style="color:#10b981;margin:0 0 16px">Account Activated</h2>
-      <p>Your account on ${companyName || 'RAGCP Platform'} is now active.</p>
-      <p>Hi ${name},</p>
-      <p>Your account has been successfully approved and activated. You can now log in and access your portal.</p>
-    </div>
-  `;
-    return await sendEmail(null, toEmail, `Account Activated - ${companyName || 'RAGCP Platform'}`, html);
+const sendAccountActivatedEmail = async ({ toEmail, name, companyName, tenantId }) => {
+    const displayCompany = companyName || 'Research Analyst Services';
+    const tpl = await resolveEmailTemplate(tenantId, 'ACCOUNT_ACTIVATED');
+    const vars = {
+        clientName: name,
+        name,
+        companyName: displayCompany
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Account Activated — ${displayCompany}`, vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const html = wrapInBrandedHtmlEmail({
+        title: '✅ Account Activated',
+        companyName: displayCompany,
+        content: renderedBody,
+        headerGradient: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+        headerIcon: '✅'
+    });
+    return await sendEmail(tenantId, toEmail, subject, html);
 };
 exports.sendAccountActivatedEmail = sendAccountActivatedEmail;
-const sendAccountDeactivatedEmail = async ({ toEmail, name, companyName }) => {
-    const html = `
-    <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#1e293b;padding:32px;border-radius:12px;border:1px solid #334155;color:#e2e8f0;">
-      <h2 style="color:#f43f5e;margin:0 0 16px">Account Deactivated</h2>
-      <p>Your account on ${companyName || 'RAGCP Platform'} has been deactivated.</p>
-      <p>Hi ${name},</p>
-      <p>Your account has been deactivated by the administrator. If you believe this was a mistake, please contact support.</p>
-    </div>
-  `;
-    return await sendEmail(null, toEmail, `Account Deactivated - ${companyName || 'RAGCP Platform'}`, html);
+const sendAccountDeactivatedEmail = async ({ toEmail, name, companyName, tenantId }) => {
+    const displayCompany = companyName || 'Research Analyst Services';
+    const tpl = await resolveEmailTemplate(tenantId, 'ACCOUNT_DEACTIVATED');
+    const vars = {
+        clientName: name,
+        name,
+        companyName: displayCompany
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Account Deactivated — ${displayCompany}`, vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const html = wrapInBrandedHtmlEmail({
+        title: '⚠️ Account Deactivated',
+        companyName: displayCompany,
+        content: renderedBody,
+        headerGradient: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
+        headerIcon: '⚠️'
+    });
+    return await sendEmail(tenantId, toEmail, subject, html);
 };
 exports.sendAccountDeactivatedEmail = sendAccountDeactivatedEmail;
 const sendComplaintNotificationEmail = async ({ tenantId, adminEmail, clientName, clientPan, subject, description }) => {
-    const html = `
-    <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#1e293b;padding:32px;border-radius:12px;border:1px solid #334155;color:#e2e8f0;">
-      <h2 style="color:#f59e0b;margin:0 0 16px">New Client Complaint Raised</h2>
-      <p>A new grievance/complaint has been raised by a client.</p>
-      <div style="background:#0f172a; border-radius:12px; padding:20px; margin:20px 0; border:1px solid #334155;">
-        <p style="margin: 0 0 10px;"><strong>Client Name:</strong> ${clientName}</p>
-        <p style="margin: 0 0 10px;"><strong>Client PAN:</strong> ${clientPan || 'N/A'}</p>
-        <p style="margin: 0 0 10px;"><strong>Subject:</strong> ${subject}</p>
-        <p style="margin: 0;"><strong>Description:</strong> ${description}</p>
-      </div>
-      <p>Please log in to the Compliance Desk to review and resolve this complaint.</p>
-    </div>
-  `;
-    return await sendEmail(tenantId, adminEmail, `Action Required: New Complaint from ${clientName}`, html);
+    const tpl = await resolveEmailTemplate(tenantId, 'COMPLAINT_NOTIFICATION');
+    const vars = {
+        clientName,
+        clientPan: clientPan || 'N/A',
+        complaintSubject: subject,
+        description,
+        companyName: 'Compliance Desk'
+    };
+    const emailSubject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Action Required: New Complaint from ${clientName}`, vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const html = wrapInBrandedHtmlEmail({
+        title: '⚠️ Client Grievance Registered',
+        companyName: 'SEBI Compliance Grievance Desk',
+        content: renderedBody,
+        headerGradient: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+        headerIcon: '⚖️'
+    });
+    return await sendEmail(tenantId, adminEmail, emailSubject, html);
 };
 exports.sendComplaintNotificationEmail = sendComplaintNotificationEmail;
+/**
+ * Send Signed Service Agreement PDF copy to Client upon eSign completion
+ */
+async function sendSignedAgreementEmail(opts) {
+    const { tenantId, toEmail, clientName, companyName, agreementUrl, pdfBuffer, maskedAadhaar, signedAt } = opts;
+    let cc = opts.ccEmail;
+    if (!cc) {
+        try {
+            const doc = await resolveTenantDoc(tenantId);
+            if (doc && (doc.ccAgreementEnabled === true || doc.ccAgreementEnabled === 'true') && doc.ccAgreementEmail && doc.ccAgreementEmail.trim()) {
+                cc = doc.ccAgreementEmail.trim();
+                console.log(`[EMAIL] 📄 Auto-resolved CC Agreement email: ${cc}`);
+            }
+        }
+        catch (e) {
+            console.warn('[EMAIL] Failed to resolve CC for signed agreement:', e?.message);
+        }
+    }
+    const displayCompany = companyName || 'Research Analyst Services';
+    const formattedDate = (signedAt || new Date()).toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    const tpl = await resolveEmailTemplate(tenantId, 'KYC_AGREEMENT');
+    const vars = {
+        clientName,
+        companyName: displayCompany,
+        agreementDate: formattedDate,
+        maskedAadhaar: maskedAadhaar || 'N/A'
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Your Signed Service Agreement — ${displayCompany}`, vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const attachments = [];
+    if (pdfBuffer && Buffer.isBuffer(pdfBuffer)) {
+        attachments.push({
+            filename: `Service_Agreement_${clientName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+        });
+    }
+    const customContent = `
+    ${renderedBody ? `<div style="margin-bottom: 20px;">${renderedBody.replace(/\n/g, '<br/>')}</div>` : ''}
+
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px 20px; margin: 0 0 22px;">
+      <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+          <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; width: 40%;">Signer Name</td>
+          <td style="padding: 8px 0; font-size: 13px; font-weight: 700; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${clientName}</td>
+        </tr>
+        ${maskedAadhaar ? `
+        <tr>
+          <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Aadhaar (Verified)</td>
+          <td style="padding: 8px 0; font-size: 13px; font-weight: 600; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0; font-family: monospace;">${maskedAadhaar}</td>
+        </tr>` : ''}
+        <tr>
+          <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0;">Signed Timestamp</td>
+          <td style="padding: 8px 0; font-size: 12.5px; font-weight: 600; color: #0f172a; text-align: right; border-bottom: 1px solid #e2e8f0;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; font-size: 11.5px; font-weight: 700; color: #64748b; text-transform: uppercase;">Legal Status</td>
+          <td style="padding: 8px 0; font-size: 12.5px; font-weight: 700; color: #16a34a; text-align: right;">✅ Legally Binding & Executed</td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 16px 18px; margin: 0 0 24px;">
+      <div style="font-weight: 800; color: #15803d; font-size: 13.5px; margin-bottom: 4px;">
+        📎 Signed Agreement Copy Attached (PDF)
+      </div>
+      <div style="color: #166534; font-size: 12.5px; line-height: 1.5;">
+        A full copy of your signed agreement has been attached to this email as a PDF. Please download and retain it for your legal and regulatory records.
+      </div>
+    </div>
+  `;
+    const html = wrapInBrandedHtmlEmail({
+        title: 'Service Agreement Signed',
+        companyName: displayCompany,
+        content: customContent,
+        headerGradient: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
+        headerIcon: '✍️'
+    });
+    return sendEmail(tenantId, toEmail, subject, html, attachments, cc);
+}
+/**
+ * Send Official Tax Invoice PDF to Client
+ */
+async function sendTaxInvoiceEmail(opts) {
+    const { tenantId, toEmail, clientName, companyName, planName, invoiceNumber, amount, pdfBuffer } = opts;
+    let cc = opts.ccEmail;
+    if (!cc) {
+        try {
+            const doc = await resolveTenantDoc(tenantId);
+            if (doc && (doc.ccInvoiceEnabled === true || doc.ccInvoiceEnabled === 'true') && doc.ccInvoiceEmail && doc.ccInvoiceEmail.trim()) {
+                cc = doc.ccInvoiceEmail.trim();
+                console.log(`[EMAIL] 🧾 Auto-resolved CC Invoice email: ${cc}`);
+            }
+        }
+        catch (e) {
+            console.warn('[EMAIL] Failed to resolve CC for tax invoice:', e?.message);
+        }
+    }
+    const displayCompany = companyName || 'Research Analyst Services';
+    const displayPlan = planName || 'Research Service Plan';
+    const displayInv = invoiceNumber || `INV-${Date.now()}`;
+    const displayAmt = amount !== undefined ? `₹${Number(amount).toLocaleString('en-IN')}` : '';
+    const tpl = await resolveEmailTemplate(tenantId, 'INVOICE');
+    const vars = {
+        clientName,
+        companyName: displayCompany,
+        planName: displayPlan,
+        invoiceNumber: displayInv,
+        amount: displayAmt,
+        invoiceDate: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || `Tax Invoice ${displayInv} for ${displayPlan} — ${displayCompany}`, vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const attachments = [];
+    if (pdfBuffer && Buffer.isBuffer(pdfBuffer)) {
+        attachments.push({
+            filename: `Tax_Invoice_${displayInv.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+        });
+    }
+    const customContent = `
+    ${renderedBody ? `<div style="margin-bottom: 20px;">${renderedBody.replace(/\n/g, '<br/>')}</div>` : ''}
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 0 0 24px; padding: 16px 20px;">
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Invoice Number:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right; font-family: monospace;">${displayInv}</td>
+      </tr>
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Subscribed Plan:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">${displayPlan}</td>
+      </tr>
+      ${displayAmt ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Total Amount:</td>
+        <td style="padding: 6px 0; font-size: 15px; font-weight: 800; color: #059669; text-align: right;">${displayAmt}</td>
+      </tr>` : ''}
+    </table>
+
+    <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 16px 18px; margin: 0 0 24px;">
+      <div style="font-weight: 800; color: #1d4ed8; font-size: 13.5px; margin-bottom: 4px;">
+        📎 Tax Invoice Attached (PDF)
+      </div>
+      <div style="color: #1e40af; font-size: 12.5px; line-height: 1.5;">
+        A detailed copy of your GST/Tax invoice is attached as a PDF. Please retain this for your financial records and tax filing.
+      </div>
+    </div>
+  `;
+    const html = wrapInBrandedHtmlEmail({
+        title: 'Official Tax Invoice',
+        companyName: displayCompany,
+        content: customContent,
+        headerGradient: 'linear-gradient(135deg, #0f172a 0%, #1e3a8a 100%)',
+        headerIcon: '🧾'
+    });
+    return sendEmail(tenantId, toEmail, subject, html, attachments, cc);
+}
+/**
+ * Sends Video KYC / IPV Invitation Email to client with direct join link & dynamic OTP.
+ */
+async function sendVideoKycInviteEmail(tenantId, toEmail, clientName, companyName, videoKycUrl, otpCode, pan, scheduleInfo) {
+    const displayCompany = companyName || 'Research Analyst Services';
+    const isScheduled = scheduleInfo?.scheduleType === 'SCHEDULED' && scheduleInfo?.scheduledAt;
+    const formattedScheduledTime = isScheduled
+        ? new Date(scheduleInfo.scheduledAt).toLocaleString('en-IN', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            timeZone: 'Asia/Kolkata'
+        })
+        : null;
+    const tpl = await resolveEmailTemplate(tenantId, 'VIDEO_KYC_INVITE');
+    const vars = {
+        clientName,
+        companyName: displayCompany,
+        videoKycUrl,
+        otpCode,
+        pan: pan || 'N/A'
+    };
+    const subject = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.subject || (isScheduled
+        ? `Scheduled Video KYC Verification for ${formattedScheduledTime} — ${displayCompany}`
+        : `Complete Your SEBI Video KYC Verification — ${displayCompany}`), vars);
+    const renderedBody = (0, defaultEmailTemplates_1.renderEmailTemplateString)(tpl.body, vars);
+    const customContent = `
+    ${renderedBody ? `<div style="margin-bottom: 22px;">${renderedBody.replace(/\n/g, '<br/>')}</div>` : ''}
+
+    ${isScheduled ? `
+    <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 18px 20px; margin: 0 0 20px; text-align: center;">
+      <div style="font-size: 12px; color: #1e40af; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+        📅 Scheduled Video KYC Appointment
+      </div>
+      <div style="font-size: 20px; font-weight: 800; color: #1d4ed8;">
+        ${formattedScheduledTime}
+      </div>
+      <div style="font-size: 12px; color: #3b82f6; margin-top: 6px;">
+        Please join the video room at your scheduled appointment time.
+      </div>
+    </div>
+    ` : ''}
+
+    <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px 20px; margin: 0 0 24px; text-align: center;">
+      <div style="font-size: 13px; color: #166534; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">
+        Your Video KYC One-Time Code
+      </div>
+      <div style="font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #15803d; font-family: monospace;">
+        ${otpCode}
+      </div>
+      <div style="font-size: 12px; color: #15803d; margin-top: 6px;">
+        Keep this code ready to confirm when prompted during the video call.
+      </div>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0 20px;">
+      <a href="${videoKycUrl}" style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 15px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);">
+        📹 ${isScheduled ? 'Open Scheduled Video KYC Room' : 'Start Video KYC Session Now'}
+      </a>
+    </div>
+
+    <div style="background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 10px; padding: 14px 16px; margin: 20px 0 0; font-size: 12px; color: #92400e; line-height: 1.5;">
+      ⚠️ <strong>SEBI Compliance Requirement:</strong> Please ensure your camera and microphone are connected and allowed in browser permissions. Your session will be recorded and geotagged.
+    </div>
+  `;
+    const html = wrapInBrandedHtmlEmail({
+        title: 'Live Video KYC & IPV Verification',
+        companyName: displayCompany,
+        content: customContent,
+        headerGradient: 'linear-gradient(135deg, #1e3a8a 0%, #059669 100%)',
+        headerIcon: '📹'
+    });
+    return sendEmail(tenantId, toEmail, subject, html);
+}

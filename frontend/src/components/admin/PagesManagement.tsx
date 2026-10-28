@@ -5,11 +5,7 @@ import api from '../../services/api';
 import { useGlobalConfirm } from '../GlobalConfirmProvider';
 import dynamic from 'next/dynamic';
 import { toast } from 'react-hot-toast';
-const CKEditor = dynamic(() => import('@ckeditor/ckeditor5-react').then(mod => mod.CKEditor), { ssr: false });
-let ClassicEditor: any;
-if (typeof window !== 'undefined') {
-  ClassicEditor = require('@ckeditor/ckeditor5-build-classic');
-}
+import RichTextEditor from '../common/RichTextEditor';
 
 interface CustomPage {
   id: string;
@@ -331,13 +327,9 @@ export default function PagesManagement({ pageSlug, onPagesUpdate, readOnly = fa
                 }
               `}</style>
               <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden [&_.ck-editor\_\_editable]:min-h-[300px]">
-                <CKEditor
-                  editor={ClassicEditor as any}
+                <RichTextEditor
                   data={formData.content || ''}
-                  onChange={(event, editor) => {
-                    const data = editor.getData();
-                    setFormData({ ...formData, content: data });
-                  }}
+                  onChange={(val: string) => setFormData({ ...formData, content: val })}
                   config={{
                     toolbar: [
                       'heading', '|',

@@ -4,10 +4,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteResource = exports.getResources = exports.uploadResource = void 0;
-const client_1 = require("@prisma/client");
+const db_1 = __importDefault(require("../config/db"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const prisma = new client_1.PrismaClient();
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const uploadResource = async (req, res) => {
     try {
         const { title, category } = req.body;
@@ -16,13 +16,15 @@ const uploadResource = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing required fields: title, category, or file' });
         }
         const fileUrl = `/uploads/resources/${file.filename}`;
-        const resource = await prisma.resource.create({
-            data: {
-                title,
-                category,
-                fileUrl,
-                fileName: file.originalname,
-            },
+        const resource = await db_1.default.Resource.create({
+            title,
+            category,
+            fileUrl,
+            fileName: file.originalname,
+        });
+        // Auto-sync new resource across all company databases in background
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'RESOURCE_UPLOAD' }).catch((syncErr) => {
+            console.warn('[SYNC] Resource upload sync note:', syncErr.message);
         });
         res.status(201).json({ success: true, data: resource });
     }
@@ -33,9 +35,7 @@ const uploadResource = async (req, res) => {
 exports.uploadResource = uploadResource;
 const getResources = async (req, res) => {
     try {
-        const resources = await prisma.resource.findMany({
-            orderBy: { uploadedAt: 'desc' },
-        });
+        const resources = await db_1.default.Resource.find({}).sort({ uploadedAt: -1 }).lean();
         res.status(200).json({ success: true, data: resources });
     }
     catch (err) {
@@ -46,9 +46,7 @@ exports.getResources = getResources;
 const deleteResource = async (req, res) => {
     try {
         const { id } = req.params;
-        const resource = await prisma.resource.findUnique({
-            where: { id },
-        });
+        const resource = await db_1.default.Resource.findById(id);
         if (!resource) {
             return res.status(404).json({ success: false, message: 'Resource not found' });
         }
@@ -62,8 +60,10 @@ const deleteResource = async (req, res) => {
                 console.error('Failed to delete resource file:', fileErr);
             }
         }
-        await prisma.resource.delete({
-            where: { id },
+        await db_1.default.Resource.findByIdAndDelete(id);
+        // Auto-sync resource deletion across all company databases in background
+        (0, tenantSyncDispatcher_1.syncAllTenantsToRemote)({ reason: 'RESOURCE_DELETE' }).catch((syncErr) => {
+            console.warn('[SYNC] Resource delete sync note:', syncErr.message);
         });
         res.status(200).json({ success: true, message: 'Resource deleted successfully' });
     }

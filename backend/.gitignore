@@ -21,3 +21,12 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+.env
+/.env
+
+dist
+./dist
+/dist
+.jwt_secret
+.refresh_secret

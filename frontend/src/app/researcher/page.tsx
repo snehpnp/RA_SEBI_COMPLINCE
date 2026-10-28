@@ -1,16 +1,21 @@
 'use client';
+import { executeSmartDownload } from '@/utils/smartDownload';
+
+import L2PaymentReviewModal from '@/components/admin/L2PaymentReviewModal';
 
 import AdminProfilePage from '../admin/profile/page';
 import StaffProfilePage from '../admin/staff-profile/page';
 import PAProfilePage from '../admin/pa-profile/page';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import AdminResourcesTab from '@/components/AdminResourcesTab';
+import { useBranding } from '@/contexts/BrandingContext';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
-import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, ShieldAlert, CheckSquare, Layers, Loader2, ArrowRight, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, EyeOff, LayoutGrid, Table as TableIcon, Copy, Send, Monitor } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from '../admin/ActiveClientSummary';
 import PagesManagement from '../../components/admin/PagesManagement';
@@ -19,6 +24,8 @@ import ComplaintReportAdmin from '../../components/admin/ComplaintReportAdmin';
 import { formatPan, formatAadhaar } from '../../utils/formatters';
 import SignalManagement from '../../components/SignalManagement';
 import AdminResearchReports from '../../components/admin/AdminResearchReports';
+import TradeDeliveryReports from '../../components/admin/TradeDeliveryReports';
+import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import CustomPageView from '../../components/client/CustomPageView';
 import Legal from '../../components/client/Legal';
 import MobilePreview from '../../components/MobilePreview';
@@ -109,20 +116,36 @@ const NAV_CONFIG: NavModule[] = [
     moduleLabel: 'Research Reports',
     moduleDesc: 'Manage and upload PDF research reports',
   },
+  {
+    tab: 'l2-approvals',
+    label: 'L2 Verification',
+    icon: 'ShieldCheck',
+    accessKey: 'ACCESS_L2_VERIFICATION',
+    moduleLabel: 'L2 Payment Verification',
+    moduleDesc: 'Review, modify, and give final L2 multi-level approval for client plan payments',
+  },
+  {
+    tab: 'delivery-reports',
+    label: 'Delivery Reports',
+    icon: 'Send',
+    accessKey: 'ACCESS_DELIVERY_REPORTS',
+    moduleLabel: 'Delivery Reports',
+    moduleDesc: 'Audit multi-channel delivery logs across Telegram, SMS, and Panel alerts',
+  },
 
   {
-    tab: 'settings',
-    label: 'Personal Setting',
+    tab: 'signature_settings',
+    label: 'Personal Settings',
     icon: 'Settings',
-    accessKey: 'ACCESS_SETTINGS',
-    moduleLabel: 'Personal Setting',
-    moduleDesc: 'Manage personal settings',
+    accessKey: 'ACCESS_DASHBOARD',
+    moduleLabel: 'Personal Settings',
+    moduleDesc: 'Configure your signature and UI preferences',
   },
 ];
 
 // Map icon string -> Lucide component (keeps NAV_CONFIG serialisable)
 const ICON_MAP: Record<string, React.ElementType> = {
-  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare
+  Layers, Users, ClipboardList, TrendingUp, AlertTriangle, FileText, Settings, ShieldCheck, Activity, LifeBuoy, CheckSquare, Send, Smartphone, Monitor
 };
 
 // =============================================================================
@@ -186,7 +209,7 @@ function getDisplayStatus(sub: any): string {
 }
 
 
-const downloadCSV = (data: any[], filename: string) => {
+const downloadCSV = async (data: any[], filename: string) => {
   if (!data || !data.length) {
     toast("No data available to export.");
     return;
@@ -204,14 +227,12 @@ const downloadCSV = (data: any[], filename: string) => {
     csvRows.push(values.join(','));
   }
   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.setAttribute('hidden', '');
-  a.setAttribute('href', url);
-  a.setAttribute('download', filename);
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const resolvedFileName = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+  await executeSmartDownload({
+    blob,
+    fileName: resolvedFileName,
+    documentType: `${filename.replace(/_/g, ' ')} Export`
+  });
 };
 
 import CouponsManager from '../../components/CouponsManager';
@@ -221,6 +242,7 @@ function AdminDashboardContent() {
   const [showPassword, setShowPassword] = useState(false);
 
   const router = useRouter();
+  const { appName, logoUrl: appLogo } = useBranding();
 
   // Dashboard & Auth states
   const [user, setUser] = useState<any>({ firstName: '', email: '', role: '' });
@@ -248,7 +270,7 @@ function AdminDashboardContent() {
     return 'dashboard';
   });
   const activeTabRef = useRef<string>(activeTab);
-  useEffect(() => { 
+  useEffect(() => {
     activeTabRef.current = activeTab;
     if (typeof window !== 'undefined') {
       localStorage.setItem('researcherActiveTab', activeTab);
@@ -261,6 +283,7 @@ function AdminDashboardContent() {
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [adminPagesList, setAdminPagesList] = useState<any[]>([]);
   const [isPagesExpanded, setIsPagesExpanded] = useState(false);
+  const [isDeliveryReportsExpanded, setIsDeliveryReportsExpanded] = useState(false);
   const [roles, setRoles] = useState<any[]>([]);
   const [selectedRole, setSelectedRole] = useState<any | null>(null);
   const [savingPermissions, setSavingPermissions] = useState(false);
@@ -276,6 +299,11 @@ function AdminDashboardContent() {
 
   const hasPermission = (permCode: string) => {
     if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') return true;
+    if (permCode === 'ACCESS_L2_VERIFICATION') {
+      return user?.permissions?.includes('ACCESS_L2_VERIFICATION') ||
+             user?.permissions?.includes('APPROVE_L2_PAYMENTS') ||
+             false;
+    }
     return user?.permissions?.includes(permCode) || false;
   };
 
@@ -482,7 +510,10 @@ function AdminDashboardContent() {
   const [complaintAtrProof, setComplaintAtrProof] = useState<File | null>(null);
   const [complaintAtrRemarks, setComplaintAtrRemarks] = useState('');
   const [complaintResolveLoading, setComplaintResolveLoading] = useState(false);
+  const [viewingComplaint, setViewingComplaint] = useState<any | null>(null);
+  const [viewingAuditDetail, setViewingAuditDetail] = useState<any | null>(null);
   const [allPayments, setAllPayments] = useState<any[]>([]);
+  const [selectedL2Payment, setSelectedL2Payment] = useState<any | null>(null);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [dashboardMetric, setDashboardMetric] = useState<'sales' | 'clients'>('sales');
   const [dashboardTimeframe, setDashboardTimeframe] = useState<'monthly' | 'yearly'>('monthly');
@@ -547,25 +578,74 @@ function AdminDashboardContent() {
   const [assignCouponCode, setAssignCouponCode] = useState('');
   const [coupons, setCoupons] = useState<any[]>([]);
 
+  // Helper to determine if a coupon is applicable for a specific plan and category
+  const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
+    if (!c || c.status !== 'ACTIVE') return false;
+
+    if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
+      if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
+    }
+
+    if (c.planId) {
+      let pIds: string[] = [];
+      if (Array.isArray(c.planId)) {
+        pIds = c.planId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.planId === 'string' && c.planId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.planId);
+          pIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.planId)];
+        } catch {
+          pIds = [String(c.planId)];
+        }
+      } else {
+        pIds = [String(c.planId?._id || c.planId?.id || c.planId)];
+      }
+      if (targetPlanId && pIds.length > 0 && !pIds.includes(String(targetPlanId))) return false;
+    }
+
+    if (c.categoryId) {
+      let catIds: string[] = [];
+      if (Array.isArray(c.categoryId)) {
+        catIds = c.categoryId.map((id: any) => String(id?._id || id?.id || id));
+      } else if (typeof c.categoryId === 'string' && c.categoryId.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(c.categoryId);
+          catIds = Array.isArray(parsed) ? parsed.map((id: any) => String(id?._id || id?.id || id)) : [String(c.categoryId)];
+        } catch {
+          catIds = [String(c.categoryId)];
+        }
+      } else {
+        catIds = [String(c.categoryId?._id || c.categoryId?.id || c.categoryId)];
+      }
+      if (targetCategoryId && catIds.length > 0 && !catIds.includes(String(targetCategoryId))) return false;
+    }
+
+    return true;
+  };
+
   const getPlanAmountWithCoupon = (basePrice: number, durationMonths: number, couponCode: string) => {
     let finalBase = basePrice;
     if (couponCode) {
-      const coupon = coupons.find((c: any) => c.code === couponCode && c.status === 'ACTIVE');
+      const cleanCode = couponCode.trim().toUpperCase();
+      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
       if (coupon) {
+        if (coupon.minPurchaseValue && basePrice < Number(coupon.minPurchaseValue)) {
+          return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+        }
         let disc = 0;
-        if (coupon.discountType === 'FLAT') {
-          disc = coupon.discountValue;
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          disc = Number(coupon.discountValue || 0);
         } else if (coupon.discountType === 'PERCENTAGE') {
-          disc = (basePrice * coupon.discountValue) / 100;
-          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > coupon.maxDiscountValue) {
-            disc = coupon.maxDiscountValue;
+          disc = (basePrice * Number(coupon.discountValue || 0)) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > Number(coupon.maxDiscountValue)) {
+            disc = Number(coupon.maxDiscountValue);
           }
         }
         if (disc > basePrice) disc = basePrice;
         finalBase = basePrice - disc;
       }
     }
-    return gstCalculationType === 'EXCLUSIVE' ? Math.round(finalBase * 1.18) : finalBase;
+    return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? finalBase : Math.round(finalBase * 1.18);
   };
 
   // Reusable confirmation state
@@ -616,19 +696,44 @@ function AdminDashboardContent() {
     const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
     if (!selectedPlan) return;
 
-    let basePrice = selectedPlan.price;
-    let finalPrice = gstCalculationType === 'EXCLUSIVE' ? Math.round(basePrice * 1.18) : basePrice;
+    const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+    const isCustomActive = Boolean((assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount))) || (assignCustomDays && assignCustomDays.trim() && !isNaN(Number(assignCustomDays))));
+    const hasCustomAmount = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
+    
+    let defaultTotal = selectedPlan.price;
+    if (!hasCustomAmount && isExclusiveGst) {
+      defaultTotal = parseFloat((selectedPlan.price * 1.18).toFixed(2));
+    }
+    const enteredTotal = hasCustomAmount ? Number(assignCustomAmount) : defaultTotal;
 
-    if (assignCustomAmount.trim()) {
-      finalPrice = Number(assignCustomAmount);
-      if (gstCalculationType === 'EXCLUSIVE') {
-        basePrice = Math.round(finalPrice / 1.18);
-      } else {
-        basePrice = finalPrice;
+    const preTaxBase = hasCustomAmount
+      ? (gstEnabled ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal)
+      : ((gstEnabled && !isExclusiveGst) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal);
+
+    let discOnBase = 0;
+    if (!isCustomActive && assignCouponCode.trim()) {
+      const cleanCode = assignCouponCode.trim().toUpperCase();
+      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      if (matchedCoupon) {
+        if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+          discOnBase = (gstEnabled && !isExclusiveGst)
+            ? parseFloat((Number(matchedCoupon.discountValue || 0) / 1.18).toFixed(2))
+            : Number(matchedCoupon.discountValue || 0);
+        } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+          discOnBase = parseFloat(((preTaxBase * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+          if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && discOnBase > Number(matchedCoupon.maxDiscountValue)) {
+            discOnBase = Number(matchedCoupon.maxDiscountValue);
+          }
+        }
+        if (discOnBase > preTaxBase) discOnBase = preTaxBase;
       }
     }
 
-    const gstAmount = finalPrice - basePrice;
+    const taxableBase = Math.max(0, parseFloat((preTaxBase - discOnBase).toFixed(2)));
+    const gstAmt = gstEnabled ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+    let finalPrice = parseFloat((taxableBase + gstAmt).toFixed(2));
+    let basePrice = taxableBase;
+    const gstAmount = gstAmt;
 
     const messageNode = (
       <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
@@ -636,19 +741,19 @@ function AdminDashboardContent() {
           Are you sure you want to assign the plan <strong>"{selectedPlan.name}"</strong> to client <strong>"{assignPlanClient?.name || ''}"</strong>?
         </p>
         <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-1.5 font-mono text-[11px]">
-          <div className="flex justify-between"><span>Base Amount:</span> <span className="text-slate-800 dark:text-slate-200">₹{basePrice.toLocaleString()}</span></div>
-          {gstCalculationType === 'EXCLUSIVE' ? (
+          <div className="flex justify-between"><span>Base Amount:</span> <span className="text-slate-800 dark:text-slate-200">₹{basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+          {gstEnabled ? (
             <>
-              <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>GST (18%):</span> <span className="text-slate-700 dark:text-slate-300">₹{gstAmount.toLocaleString()}</span></div>
-              <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString()}</span></div>
+              <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>GST (18%):</span> <span className="text-slate-700 dark:text-slate-300">₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (GST Incl.)</span></div>
             </>
           ) : (
-            <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total (GST Incl.):</span> <span>₹{finalPrice.toLocaleString()}</span></div>
+            <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
           )}
           <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentRefId}</span></div>
           <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentDate}</span></div>
           {assignCustomDays.trim() && (
-            <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Service Validity:</span> <span className="text-emerald-600 dark:text-emerald-400 font-bold">{assignCustomDays} Days</span></div>
+            <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Service Validity:</span> <span className="text-emerald-600 dark:text-emerald-400 font-bold">{Math.round(Number(assignCustomDays))} Days</span></div>
           )}
         </div>
         <p className="text-slate-500 dark:text-slate-500 text-[10px]">This will immediately activate the plan. Any existing active subscription will be cancelled.</p>
@@ -669,8 +774,8 @@ function AdminDashboardContent() {
             paymentDate: assignPaymentDate
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
-          if (assignCustomDays.trim()) payload.customDays = Number(assignCustomDays);
-          if (assignCouponCode.trim()) payload.couponCode = assignCouponCode;
+          if (assignCustomDays.trim()) payload.customDays = Math.round(Number(assignCustomDays));
+          if (!isCustomActive && assignCouponCode.trim()) payload.couponCode = assignCouponCode.trim().toUpperCase();
 
           const res = await api.assignPlanByAdmin(assignPlanClient.id, payload);
           if (res.success) {
@@ -735,6 +840,17 @@ function AdminDashboardContent() {
   const [coNism, setCoNism] = useState('');
 
   const [policyUrl, setPolicyUrl] = useState('');
+  const [termsPdfUrl, setTermsPdfUrl] = useState('');
+  const [privacyPdfUrl, setPrivacyPdfUrl] = useState('');
+  const [pdfPreviewModal, setPdfPreviewModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    url: string;
+    badgeText: string;
+    downloadFilename?: string;
+  } | null>(null);
+  const [copiedVariable, setCopiedVariable] = useState<string | null>(null);
+  const [gstEnabled, setGstEnabled] = useState(true);
   const [gstCalculationType, setGstCalculationType] = useState('EXCLUSIVE');
   const [tenantState, setTenantState] = useState('');
   const [kycFirst, setKycFirst] = useState(true);
@@ -750,6 +866,11 @@ function AdminDashboardContent() {
   const [smtpPort, setSmtpPort] = useState('');
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFrom, setSmtpFrom] = useState('');
+  const [ccInvoiceEnabled, setCcInvoiceEnabled] = useState(false);
+  const [ccInvoiceEmail, setCcInvoiceEmail] = useState('');
+  const [ccAgreementEnabled, setCcAgreementEnabled] = useState(false);
+  const [ccAgreementEmail, setCcAgreementEmail] = useState('');
 
 
   // Periodic Report Settings
@@ -765,6 +886,7 @@ function AdminDashboardContent() {
   const [digioClientId, setDigioClientId] = useState('');
   const [digioClientSecret, setDigioClientSecret] = useState('');
   const [digioKycTemplateName, setDigioKycTemplateName] = useState('');
+  const [digioEnvironment, setDigioEnvironment] = useState('SANDBOX');
   // Payment Gateway states
   const [activePaymentGateway, setActivePaymentGateway] = useState('RAZORPAY');
   const [razorpayKeyId, setRazorpayKeyId] = useState('');
@@ -776,13 +898,15 @@ function AdminDashboardContent() {
   const [ccavenueWorkingKey, setCcavenueWorkingKey] = useState('');
   const [stripePublishableKey, setStripePublishableKey] = useState('');
   const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [verifyingGateway, setVerifyingGateway] = useState(false);
+  const [gatewayVerifyResult, setGatewayVerifyResult] = useState<{ success: boolean; message: string; mode?: string } | null>(null);
 
   const [agreementContent, setAgreementContent] = useState('');
-  const [smtpFrom, setSmtpFrom] = useState('');
 
   // Staff creation form state
   const [isSubmittingStaff, setIsSubmittingStaff] = useState(false);
   const [staffName, setStaffName] = useState('');
+  const [staffUsername, setStaffUsername] = useState('');
   const [staffEmail, setStaffEmail] = useState('');
   const [staffMobile, setStaffMobile] = useState('');
   const [staffRole, setStaffRole] = useState('RESEARCHER');
@@ -891,6 +1015,77 @@ function AdminDashboardContent() {
     return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
   };
 
+  const AGREEMENT_VARIABLES = [
+    { key: '{{CLIENT_NAME}}', label: 'Client Full Name' },
+    { key: '{{CLIENT_EMAIL}}', label: 'Client Email' },
+    { key: '{{CLIENT_MOBILE}}', label: 'Mobile Number' },
+    { key: '{{PAN_NUMBER}}', label: 'PAN Number' },
+    { key: '{{AADHAAR_NUMBER}}', label: 'Aadhaar Number' },
+    { key: '{{CLIENT_ADDRESS}}', label: 'Client Address' },
+    { key: '{{COMPANY_NAME}}', label: 'Company Name' },
+    { key: '{{COMPANY_ADDRESS}}', label: 'Company Address' },
+    { key: '{{SEBI_REGISTRATION}}', label: 'SEBI Reg. No.' },
+    { key: '{{DATE}}', label: 'Agreement Date' },
+  ];
+
+  const handleCopyVariable = (variableKey: string, variableLabel?: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(variableKey);
+      setCopiedVariable(variableKey);
+      toast.success(`Copied ${variableKey} (${variableLabel || 'variable'}) to clipboard!`);
+      setTimeout(() => setCopiedVariable(null), 2000);
+    }
+  };
+
+  const openPdfPreview = (
+    docType: 'terms' | 'privacy' | 'internal',
+    title: string,
+    fileObj: any,
+    savedUrl: string
+  ) => {
+    let previewUrl = '';
+    let badge = 'Default SEBI Template';
+    let defaultFilename = `${docType}_document.pdf`;
+
+    if (fileObj) {
+      previewUrl = URL.createObjectURL(fileObj);
+      badge = 'New File (Ready to save)';
+      defaultFilename = fileObj.name || `${docType}.pdf`;
+    } else if (savedUrl) {
+      previewUrl = getFullUrl(savedUrl);
+      badge = 'Custom Uploaded Document';
+      defaultFilename = savedUrl.split('/').pop() || `${docType}.pdf`;
+    } else {
+      const typeParam = docType === 'terms' ? 'terms' : docType === 'privacy' ? 'privacy' : 'internal-policy';
+      previewUrl = `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}/api/v1/system-settings/preview-pdf/${typeParam}`;
+      badge = 'Default SEBI Template';
+      defaultFilename = `SEBI_${docType}_Policy.pdf`;
+    }
+
+    setPdfPreviewModal({
+      isOpen: true,
+      title,
+      url: previewUrl,
+      badgeText: badge,
+      downloadFilename: defaultFilename
+    });
+  };
+
+  const getPdfDirectUrl = (
+    docType: 'terms' | 'privacy' | 'internal',
+    fileObj: any,
+    savedUrl: string
+  ) => {
+    if (fileObj) {
+      return URL.createObjectURL(fileObj);
+    }
+    if (savedUrl) {
+      return getFullUrl(savedUrl);
+    }
+    const typeParam = docType === 'terms' ? 'terms' : docType === 'privacy' ? 'privacy' : 'internal-policy';
+    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}/api/v1/system-settings/preview-pdf/${typeParam}`;
+  };
+
   const handleDownloadCSV = (type: string) => {
     let dataToExport: any[] = [];
     let filename = `${type}.csv`;
@@ -972,13 +1167,20 @@ function AdminDashboardContent() {
               if (t.mobile) setOrgMobile(t.mobile);
               if (t.gst) setOrgGst(t.gst);
               if (t.internalPolicyUrl) setPolicyUrl(t.internalPolicyUrl);
+              if (t.termsPdfUrl) setTermsPdfUrl(t.termsPdfUrl);
+              if (t.privacyPdfUrl) setPrivacyPdfUrl(t.privacyPdfUrl);
               if (t.gstCalculationType) setGstCalculationType(t.gstCalculationType);
+              if (t.gstEnabled !== undefined) setGstEnabled(t.gstEnabled);
               if (t.state) setTenantState(t.state);
               if (t.smtpHost) setSmtpHost(t.smtpHost);
               if (t.smtpPort) setSmtpPort(t.smtpPort.toString());
               if (t.smtpUser) setSmtpUser(t.smtpUser);
               if (t.smtpPassword) setSmtpPassword(t.smtpPassword);
               if (t.smtpFrom) setSmtpFrom(t.smtpFrom);
+              if (t.ccInvoiceEnabled !== undefined) setCcInvoiceEnabled(Boolean(t.ccInvoiceEnabled));
+              if (t.ccInvoiceEmail !== undefined) setCcInvoiceEmail(t.ccInvoiceEmail || '');
+              if (t.ccAgreementEnabled !== undefined) setCcAgreementEnabled(Boolean(t.ccAgreementEnabled));
+              if (t.ccAgreementEmail !== undefined) setCcAgreementEmail(t.ccAgreementEmail || '');
               if (t.bankAccountName) setBankAccountName(t.bankAccountName);
               if (t.bankAccountNo) setBankAccountNo(t.bankAccountNo);
               if (t.bankAccountType) setBankAccountType(t.bankAccountType);
@@ -991,6 +1193,7 @@ function AdminDashboardContent() {
               if (t.digioClientId) setDigioClientId(t.digioClientId);
               if (t.digioClientSecret) setDigioClientSecret(t.digioClientSecret);
               if (t.digioKycTemplateName) setDigioKycTemplateName(t.digioKycTemplateName);
+              if (t.digioEnvironment) setDigioEnvironment(t.digioEnvironment);
               if (t.activePaymentGateway) setActivePaymentGateway(t.activePaymentGateway);
               if (t.razorpayKeyId) setRazorpayKeyId(t.razorpayKeyId);
               if (t.razorpayKeySecret) setRazorpayKeySecret(t.razorpayKeySecret);
@@ -1078,14 +1281,16 @@ function AdminDashboardContent() {
 
       if (tab === 'compliance' || tab === 'checklist') {
         api.request('/compliance/complaints').then(res => { if (Array.isArray(res)) setComplaints(res); }).catch(() => { });
-        api.getComplianceAlerts().then(res => { if (res.success && res.data.length > 0) setAlerts(res.data); }).catch(() => { });
+        api.getComplianceAlerts().then(res => { if (res.success && Array.isArray(res.data)) setAlerts(res.data); }).catch(() => { });
         api.getComplianceChecklist().then(res => { if (res.success) setChecklist(res.data); }).catch(() => { });
         api.getPenalties().then(res => { if (res.success) setPenalties(res.data); }).catch(() => { });
         api.getComplianceChecklistHistory().then(res => { if (res.success) setChecklistHistory(res.data); }).catch(() => { });
       }
 
-      if (tab === 'payments') {
+      if (tab === 'payments' || tab === 'l2-approvals') {
         api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+        api.getAdminPlans().then(res => { if (res.success) setAdminPlans(res.data); }).catch(() => { });
+        api.getAdminCategories().then(res => { if (res.success) setCategories(res.data); }).catch(() => { });
       }
 
     } catch (err: any) {
@@ -1164,8 +1369,13 @@ function AdminDashboardContent() {
   }, [checklistHistory, alerts, complaints, penalties]);
 
   const topLevelFilteredHistory = useMemo(() => {
+    const q = (historyFilterText || '').trim().toLowerCase();
     return checklistHistory.filter((h: any) => {
-      const matchesText = h.requirement?.requirement?.toLowerCase().includes(historyFilterText.toLowerCase());
+      const reqText = (h.requirement?.requirement || '').toLowerCase();
+      const remarksText = (h.officerRemarks || '').toLowerCase();
+      const updatedByText = (h.updatedByName || '').toLowerCase();
+      const periodText = (h.periodLabel || '').toLowerCase();
+      const matchesText = !q || reqText.includes(q) || remarksText.includes(q) || updatedByText.includes(q) || periodText.includes(q);
       const matchesFY = selectedFinancialYear === 'All' || getFinancialYear(h.createdAt) === selectedFinancialYear;
       return matchesText && matchesFY;
     });
@@ -1173,11 +1383,70 @@ function AdminDashboardContent() {
 
   const historyPagination = usePagination(topLevelFilteredHistory, 10);
 
+  const handleExportChecklistHistory = async () => {
+    const recordsToExport = topLevelFilteredHistory && topLevelFilteredHistory.length > 0
+      ? topLevelFilteredHistory
+      : checklistHistory;
+
+    if (!recordsToExport || recordsToExport.length === 0) {
+      toast.error('No checklist audit history records available to export.');
+      return;
+    }
+
+    const exportData = recordsToExport.map((row: any, index: number) => {
+      const prevStatus = (row.previousStatus || 'PENDING').replace(/_/g, ' ');
+      const newStatus = (row.newStatus || '—').replace(/_/g, ' ');
+      return {
+        'Sr No': row.requirement?.serialNo || (index + 1),
+        'Requirement Description': row.requirement?.requirement || '—',
+        'Category / Frequency': row.requirement?.frequency || '—',
+        'Frequency Type': row.requirement?.frequencyType || '—',
+        'Severity Level': row.requirement?.severityLevel || '—',
+        'Penalty Amount': row.requirement?.penaltyAmount || '—',
+        'Period': row.periodLabel || '—',
+        'Financial Year': getFinancialYear(row.createdAt),
+        'Previous Status': prevStatus,
+        'Updated Status': newStatus,
+        'Officer Remarks': row.officerRemarks || '—',
+        'Proof Document URL': row.proofDocumentUrl || '—',
+        'Updated By': row.updatedByName || 'System',
+        'Audit Date & Time': row.createdAt ? new Date(row.createdAt).toLocaleString('en-IN') : '—'
+      };
+    });
+
+    const headers = Object.keys(exportData[0]);
+    const csvRows: string[] = [headers.join(',')];
+
+    for (const row of exportData) {
+      const values = headers.map(header => {
+        const val = (row as any)[header];
+        if (val === null || val === undefined) return '""';
+        const escaped = ('' + val).replace(/"/g, '""');
+        return `"${escaped}"`;
+      });
+      csvRows.push(values.join(','));
+    }
+
+    const csvString = '\uFEFF' + csvRows.join('\r\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const fySuffix = selectedFinancialYear !== 'All' ? `_${selectedFinancialYear.replace(/[\s-]+/g, '_')}` : '';
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `SEBI_Checklist_Audit_History${fySuffix}_${dateStr}.csv`;
+
+    await executeSmartDownload({
+      blob,
+      fileName: filename,
+      documentType: 'SEBI Checklist Audit History Export',
+      userRole: user?.role
+    });
+    toast.success(`Exported ${exportData.length} checklist history records successfully.`);
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const userStr = localStorage.getItem('user');
       if (!userStr) {
-        router.push('/admin/login?error=expired');
+        router.push('/login?error=expired');
         return;
       }
       const u = JSON.parse(userStr);
@@ -1191,6 +1460,12 @@ function AdminDashboardContent() {
           if (u?.isImpersonated) {
             syncedUser.isImpersonated = true;
           }
+          if (!syncedUser.tenantLogo && syncedUser.tenant?.logoUrl) {
+            syncedUser.tenantLogo = syncedUser.tenant.logoUrl;
+          }
+          if (!syncedUser.tenantName && syncedUser.tenant?.companyName) {
+            syncedUser.tenantName = syncedUser.tenant.companyName;
+          }
           setUser(syncedUser);
           localStorage.setItem('user', JSON.stringify(syncedUser));
 
@@ -1202,6 +1477,11 @@ function AdminDashboardContent() {
               clients: 'ACCESS_CLIENTS',
               plans: 'ACCESS_PLANS',
               research: 'ACCESS_RESEARCH',
+              'delivery-reports': 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_all: 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_telegram: 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_sms: 'ACCESS_DELIVERY_REPORTS',
+              deliveryReports_inapp: 'ACCESS_DELIVERY_REPORTS',
               payments: 'ACCESS_PAYMENTS',
               compliance: 'ACCESS_COMPLIANCE',
               settings: 'ACCESS_SETTINGS',
@@ -1210,7 +1490,7 @@ function AdminDashboardContent() {
             };
             const perm = permMap[tab];
             if (!perm) return true;
-            console.log("syncedUser.permissions", syncedUser.permissions)
+           
             return syncedUser.permissions?.includes(perm) || false;
           };
 
@@ -1255,6 +1535,11 @@ function AdminDashboardContent() {
           clients: 'ACCESS_CLIENTS',
           plans: 'ACCESS_PLANS',
           research: 'ACCESS_RESEARCH',
+          'delivery-reports': 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_all: 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_telegram: 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_sms: 'ACCESS_DELIVERY_REPORTS',
+          deliveryReports_inapp: 'ACCESS_DELIVERY_REPORTS',
           payments: 'ACCESS_PAYMENTS',
           compliance: 'ACCESS_COMPLIANCE',
           settings: 'ACCESS_SETTINGS',
@@ -1482,6 +1767,10 @@ function AdminDashboardContent() {
       if (smtpUser) formData.append('smtpUser', smtpUser);
       if (smtpPassword) formData.append('smtpPassword', smtpPassword);
       if (smtpFrom) formData.append('smtpFrom', smtpFrom);
+      formData.append('ccInvoiceEnabled', String(ccInvoiceEnabled));
+      formData.append('ccInvoiceEmail', (ccInvoiceEmail || '').trim());
+      formData.append('ccAgreementEnabled', String(ccAgreementEnabled));
+      formData.append('ccAgreementEmail', (ccAgreementEmail || '').trim());
       if (bankAccountName) formData.append('bankAccountName', bankAccountName);
       if (bankAccountNo) formData.append('bankAccountNo', bankAccountNo);
       if (bankAccountType) formData.append('bankAccountType', bankAccountType);
@@ -1492,6 +1781,7 @@ function AdminDashboardContent() {
       if (digioClientId) formData.append('digioClientId', digioClientId);
       if (digioClientSecret) formData.append('digioClientSecret', digioClientSecret);
       if (digioKycTemplateName) formData.append('digioKycTemplateName', digioKycTemplateName);
+      if (digioEnvironment) formData.append('digioEnvironment', digioEnvironment);
       if (activePaymentGateway) formData.append('activePaymentGateway', activePaymentGateway);
       if (razorpayKeyId) formData.append('razorpayKeyId', razorpayKeyId);
       if (razorpayKeySecret) formData.append('razorpayKeySecret', razorpayKeySecret);
@@ -1521,6 +1811,49 @@ function AdminDashboardContent() {
     } catch (err: any) { toast(err.message); }
   };
 
+  const handleVerifyPaymentGateway = async () => {
+    setVerifyingGateway(true);
+    setGatewayVerifyResult(null);
+    try {
+      const res: any = await api.verifyPaymentGateway({
+        gateway: activePaymentGateway,
+        razorpayKeyId,
+        razorpayKeySecret,
+        cashfreeAppId,
+        cashfreeSecretKey,
+        ccavenueMerchantId,
+        ccavenueAccessCode,
+        ccavenueWorkingKey,
+        stripePublishableKey,
+        stripeSecretKey
+      });
+
+      if (res.success) {
+        setGatewayVerifyResult({
+          success: true,
+          message: res.message || 'Payment Gateway Verified Successfully!',
+          mode: res.mode
+        });
+        toast.success(res.message || 'Payment Gateway connection verified!');
+      } else {
+        setGatewayVerifyResult({
+          success: false,
+          message: res.message || 'Payment Gateway Verification Failed.'
+        });
+        toast.error(res.message || 'Verification failed');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to verify payment gateway connection.';
+      setGatewayVerifyResult({
+        success: false,
+        message: errMsg
+      });
+      toast.error(errMsg);
+    } finally {
+      setVerifyingGateway(false);
+    }
+  };
+
   const handleTestSmtp = async () => {
     try {
       const email = prompt('Enter email address to send test email to:');
@@ -1544,6 +1877,10 @@ function AdminDashboardContent() {
     e.preventDefault();
     if (profileNewPassword !== profileConfirmPassword) {
       toast('New passwords do not match!');
+      return;
+    }
+    if (!profileNewPassword || profileNewPassword.length < 8 || profileNewPassword.length > 15) {
+      toast('Password must be between 8 and 15 characters.');
       return;
     }
     setIsChangingPassword(true);
@@ -1680,6 +2017,7 @@ function AdminDashboardContent() {
 
   const resetStaffForm = () => {
     setStaffName('');
+    setStaffUsername('');
     setStaffEmail('');
     setStaffMobile('');
     setStaffRole('RESEARCHER');
@@ -1746,6 +2084,7 @@ function AdminDashboardContent() {
   const startEditStaff = (st: any) => {
     setEditingStaff(st);
     setStaffName(st.name || '');
+    setStaffUsername(st.username || st.user?.username || '');
     setStaffEmail(st.email || '');
     setStaffMobile(st.mobile || '');
     const rName = st.user?.role?.name;
@@ -1768,14 +2107,11 @@ function AdminDashboardContent() {
     try {
       const response = await fetch(fileUrl);
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await executeSmartDownload({
+        blob,
+        fileName,
+        documentType: fileName
+      });
     } catch (error) {
       window.open(fileUrl, '_blank');
     }
@@ -1790,6 +2126,15 @@ function AdminDashboardContent() {
       // Frontend Validations
       if (!staffName || staffName.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(staffName)) {
         toast('Staff name must contain only letters and spaces (min 2 chars).');
+        return;
+      }
+      const cleanUsername = (staffUsername || '').trim().toLowerCase();
+      if (!cleanUsername || cleanUsername.length < 3) {
+        toast('Staff username is required and must be at least 3 characters.');
+        return;
+      }
+      if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUsername)) {
+        toast('Username can only contain letters, numbers, underscores, dots, and hyphens.');
         return;
       }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1832,6 +2177,7 @@ function AdminDashboardContent() {
 
       const formData = new FormData();
       formData.append('name', staffName);
+      formData.append('username', cleanUsername);
       formData.append('email', staffEmail);
       formData.append('mobile', staffMobile);
       formData.append('roleName', staffRole);
@@ -1985,7 +2331,10 @@ function AdminDashboardContent() {
           const res = await api.runComplianceCheck();
           if (res.success) {
             loadData();
-            toast(`Sweep done. ${res.alertsGenerated} alert(s) generated.`);
+            const msg = (res.alertsGenerated && res.alertsGenerated > 0)
+              ? `Sweep done. ${res.alertsGenerated} new alert(s) generated (${res.totalActiveAlerts || res.alertsGenerated} active).`
+              : `Sweep done. ${res.totalActiveAlerts || 0} active compliance alert(s) found.`;
+            toast(msg);
           }
         } catch (err: any) {
           toast.error(err.message || 'Sweep failed.');
@@ -2015,7 +2364,7 @@ function AdminDashboardContent() {
       }
 
       const res = await api.getPeriodicReportData(startDateStr, endDateStr);
-      console.log("RECEIVED REPORT DATA:", res.data);
+   
       if (res.success) {
         generatePeriodicReport(res.data, periodName, endDateStr);
         setShowReportModal(false);
@@ -2128,6 +2477,35 @@ function AdminDashboardContent() {
       }
     } catch (err: any) { toast.error(err.message || 'Failed to resolve complaint.'); }
     finally { setComplaintResolveLoading(false); }
+  };
+
+  const handleDeleteComplaint = (complaint: any) => {
+    if (!complaint) return;
+    const isClientSubmitted = complaint.source === 'CLIENT_PORTAL' || complaint.createdByType === 'CLIENT';
+    if (isClientSubmitted) {
+      toast.error('Client-submitted complaints cannot be deleted to comply with SEBI regulatory grievance norms.');
+      return;
+    }
+
+    triggerConfirm({
+      title: 'Delete Complaint',
+      message: `Are you sure you want to delete the complaint "${complaint.subject || complaint.id}"? All associated penalties, compliance audit records, and overdue alerts linked specifically to this complaint will also be permanently deleted.`,
+      variant: 'danger',
+      confirmLabel: 'Yes, Delete',
+      onConfirm: async () => {
+        try {
+          const res = await api.deleteComplaint(complaint.id || complaint._id);
+          if (res.success) {
+            toast.success(res.message || 'Complaint and all associated records deleted successfully.');
+            loadData();
+          } else {
+            toast.error(res.message || res.error || 'Failed to delete complaint.');
+          }
+        } catch (err: any) {
+          toast.error(err.message || 'Failed to delete complaint.');
+        }
+      }
+    });
   };
 
   // Resolve Alert Close
@@ -2307,6 +2685,10 @@ function AdminDashboardContent() {
   };
 
   const startEditClient = (cl: any) => {
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     setEditingClient(cl);
     setEditClientName(cl.name || '');
     setEditClientEmail(cl.email || '');
@@ -2411,6 +2793,10 @@ function AdminDashboardContent() {
 
   const handleUpdateClientSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStaff && !hasPermission('EDIT_CLIENTS')) {
+      toast.error('You do not have permission to edit clients.');
+      return;
+    }
     if (!editClientName.trim() || editClientName.trim().length < 2) {
       toast('Full name must be at least 2 characters.'); return;
     }
@@ -2552,15 +2938,13 @@ function AdminDashboardContent() {
       }
 
       const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
       const dateStr = exportRange === 'date' ? `_${exportStartDate}_to_${exportEndDate}` : '';
-      link.setAttribute('download', `${type}${dateStr}.${isZip ? 'zip' : 'csv'}`);
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode?.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
+      const fullFileName = `${type}${dateStr}.${isZip ? 'zip' : 'csv'}`;
+      await executeSmartDownload({
+        blob,
+        fileName: fullFileName,
+        documentType: `Bulk ${type} Export`
+      });
     } catch (error: any) {
       toast.error(`Export failed: ${error.message}`);
     } finally {
@@ -2586,11 +2970,24 @@ function AdminDashboardContent() {
           {/* Brand */}
           <div className={`h-24 flex items-center border-b border-blue-800 dark:border-premium-border ${isSidebarCollapsed ? 'justify-center flex-col px-2 py-2 gap-2' : 'px-6 justify-between'}`}>
             <div className={`flex items-center gap-3 overflow-hidden ${isSidebarCollapsed ? 'justify-center' : ''}`}>
-              {user?.tenantLogo ? (
-                <img src={user.tenantLogo.startsWith('http') ? user.tenantLogo : `${api.getBaseUrl()}${user.tenantLogo}`} alt={user?.tenantName || 'Logo'} className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`} />
-              ) : (
-                <img src="/logo-dark.png" alt="RAGCP Logo" className={`object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
-              )}
+              {(() => {
+                const rawLogo = user?.tenantLogo || user?.tenant?.logoUrl || appLogo;
+                const logoSrc = rawLogo ? (rawLogo.startsWith('http') ? rawLogo : `${api.getBaseUrl()}${rawLogo}`) : null;
+                const displayName = user?.tenantName || user?.tenant?.companyName || appName || 'Logo';
+
+                if (logoSrc) {
+                  return (
+                    <img
+                      src={logoSrc}
+                      alt={displayName}
+                      className={`max-h-10 object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-w-[40px]' : 'max-w-[150px]'}`}
+                    />
+                  );
+                }
+                return (
+                  <img src="/logo-dark.png" alt="RAGCP Logo" className={`object-contain transition-all duration-300 ${isSidebarCollapsed ? 'max-h-8' : 'max-h-12'}`} />
+                );
+              })()}
             </div>
             {!isSidebarCollapsed && (
               <button
@@ -2616,6 +3013,75 @@ function AdminDashboardContent() {
               if (!hasPermission(mod.accessKey)) return null;
               if (mod.tab === 'signature_settings' && (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN')) return null;
               const Icon = ICON_MAP[mod.icon] || Layers;
+              const isL2PendingMod = mod.tab === 'l2-approvals';
+              const l2CountForBadge = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING').length;
+
+              if (mod.tab === 'delivery-reports') {
+                const isDeliveryActive = activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_');
+                return (
+                  <div key={mod.tab} className="pt-1">
+                    <button
+                      onClick={() => {
+                        if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                        setIsDeliveryReportsExpanded(!isDeliveryReportsExpanded);
+                        if (!isDeliveryActive) {
+                          setActiveTab('deliveryReports_all');
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all duration-200 group ${
+                        isDeliveryActive
+                          ? 'bg-white/20 text-white font-semibold shadow-inner'
+                          : 'text-blue-100 dark:text-white/70 hover:bg-white/10 hover:text-white'
+                      } ${isSidebarCollapsed ? 'justify-center px-2' : ''}`}
+                      title={isSidebarCollapsed ? mod.label : undefined}
+                    >
+                      <div className="flex items-center gap-4 min-w-0">
+                        <Icon className={`w-5 h-5 transition-colors ${isDeliveryActive ? 'text-white' : 'text-blue-200 dark:text-white/50 group-hover:text-white'} shrink-0`} />
+                        {!isSidebarCollapsed && <span className="truncate whitespace-nowrap">{mod.label}</span>}
+                      </div>
+                      {!isSidebarCollapsed && (
+                        <div className={`transition-transform duration-200 ${isDeliveryReportsExpanded ? 'rotate-90' : ''}`}>
+                          <ChevronRight className="w-4 h-4" />
+                        </div>
+                      )}
+                    </button>
+
+                    {!isSidebarCollapsed && isDeliveryReportsExpanded && (
+                      <div className="pl-12 pr-4 space-y-1 mt-1">
+                        {[
+                          { id: 'deliveryReports_all', label: 'Delivery Report (All Type)', icon: Layers },
+                          { id: 'deliveryReports_telegram', label: 'Telegram Delivery Report', icon: Send },
+                          { id: 'deliveryReports_sms', label: 'Text Msg (SMS)', icon: Smartphone },
+                          { id: 'deliveryReports_inapp', label: 'Panel Notifications', icon: Monitor }
+                        ].map(subItem => {
+                          const SubIcon = subItem.icon;
+                          const isSubActive = activeTab === subItem.id || (activeTab === 'delivery-reports' && subItem.id === 'deliveryReports_all');
+                          return (
+                            <button
+                              key={subItem.id}
+                              onClick={() => {
+                                setActiveTab(subItem.id);
+                                setIsMobileMenuOpen(false);
+                              }}
+                              className={`w-full text-left py-2 px-3 rounded-lg text-xs transition-colors flex items-center justify-between gap-2 ${
+                                isSubActive
+                                  ? 'bg-[#d4f23b] text-black font-extrabold shadow-sm'
+                                  : 'text-blue-100 dark:text-white/70 hover:text-white hover:bg-white/10'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">{subItem.label}</span>
+                              </div>
+                              {isSubActive && <span className="w-1.5 h-1.5 rounded-full bg-black shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
 
               if (mod.tab === 'customPages') {
                 return (
@@ -2649,8 +3115,8 @@ function AdminDashboardContent() {
                               setIsMobileMenuOpen(false);
                             }}
                             className={`w-full text-left py-2 px-3 rounded-lg text-sm transition-colors ${activeTab === `customPages_${page.slug}`
-                                ? 'bg-white/20 text-white font-medium'
-                                : 'text-blue-200 hover:text-white hover:bg-white/10'
+                              ? 'bg-white/20 text-white font-medium'
+                              : 'text-blue-200 hover:text-white hover:bg-white/10'
                               }`}
                           >
                             {page.title}
@@ -2710,60 +3176,69 @@ function AdminDashboardContent() {
               </button>
             )}
           </div>
-
-          {/* User Footer */}
-          <div className={`p-4 border-t border-blue-800 dark:border-premium-border relative overflow-hidden flex flex-col ${isSidebarCollapsed ? 'px-2' : ''}`}>
-            <div className="absolute inset-0 bg-gradient-to-t from-white/5 to-transparent pointer-events-none" />
-            <div
-              onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-              className={`bg-white/10 backdrop-blur-md rounded-2xl flex items-center gap-3 border border-white/10 hover:border-white/30 transition-all duration-300 group relative overflow-hidden cursor-pointer ${isSidebarCollapsed ? 'p-2 justify-center flex-col' : 'p-4'}`}>
-              <div className="absolute top-0 left-[-100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[-20deg] group-hover:animate-[shimmer_1.5s_infinite]" />
-
-              <div className="relative shrink-0">
-                <div className="absolute inset-0 rounded-full border-2 border-white/30 animate-ping opacity-75" />
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(99,102,241,0.6)] relative z-10">
-                  {user?.firstName ? user.firstName.trim().charAt(0).toUpperCase() : 'A'}
-                </div>
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-400 border-2 border-blue-900 rounded-full z-20" />
-              </div>
-
-              {!isSidebarCollapsed && (
-                <div className="flex-1 min-w-0 relative z-10">
-                  <p className="font-bold text-sm truncate text-white">{user?.firstName || 'Staff'}</p>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <ShieldCheck className="w-3 h-3 text-blue-300" />
-                    <p className="text-[10px] font-bold tracking-wider uppercase text-blue-200">
-                      {user?.role || 'RESEARCHER'}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {!isSidebarCollapsed && (
-                <div className="relative z-10 shrink-0 mr-1"><ThemeToggle /></div>
-              )}
-            </div>
-            <div className={`flex-1 mt-4 border-t border-white/10 ${isSidebarCollapsed ? 'p-2' : 'pt-4'}`}>
-              <button onClick={() => setIsLogoutModalOpen(true)} className={`w-full flex items-center hover:bg-rose-500/20 rounded-xl text-blue-100 dark:text-white/60 hover:text-rose-400 transition-all group ${isSidebarCollapsed ? 'justify-center p-3' : 'justify-between p-3'}`} title={isSidebarCollapsed ? "Sign Out" : undefined}>
-                {!isSidebarCollapsed && <span className="font-semibold text-sm">Sign Out</span>}
-                <LogOut className={`w-4 h-4 transition-transform ${!isSidebarCollapsed ? 'group-hover:translate-x-1' : ''}`} />
-              </button>
-            </div>
-          </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 h-dvh flex flex-col overflow-hidden w-full bg-slate-50 dark:bg-slate-950">
-          {user?.isImpersonated && (
-            <button
-              onClick={handleRevertImpersonate}
-              className="fixed top-4 right-16 z-50 px-3 py-1.5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600 transition flex items-center space-x-1.5 font-semibold shadow-lg"
-              title="Back to Super Admin"
-            >
-              <LogOut className="h-3.5 w-3.5 rotate-180" />
-              <span className="hidden sm:inline">Back to Super Admin</span>
-            </button>
-          )}
+          {/* Top Header Bar with Theme, User & Logout */}
+          <header className="h-20 border-b border-slate-200 dark:border-white/10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 md:px-8 flex items-center justify-between shrink-0 z-30 transition-colors">
+            <div className="flex items-center gap-3">
+              {/* Mobile menu toggle */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors"
+                title="Open Navigation"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+              <div>
+                <h1 className="text-base md:text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                  {(() => {
+                    if (!activeTab) return 'Researcher Portal';
+                    if (activeTab === 'deliveryReports_all' || activeTab === 'delivery-reports') return 'Multi-Channel Delivery Reports';
+                    if (activeTab === 'deliveryReports_telegram') return 'Telegram Delivery Reports';
+                    if (activeTab === 'deliveryReports_sms') return 'Text Message (SMS) Delivery Reports';
+                    if (activeTab === 'deliveryReports_inapp') return 'Panel Notification Delivery Reports';
+                    return activeTab.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                  })()}
+                </h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
+                  {user?.tenant?.companyName ? `${user.tenant.companyName} Research Workspace` : 'Research Analyst Portal'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 md:gap-4">
+              {user?.isImpersonated && (
+                <button
+                  onClick={handleRevertImpersonate}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 font-bold text-xs shadow-md shadow-indigo-600/20"
+                  title="Back to Super Admin"
+                >
+                  <LogOut className="h-3.5 w-3.5 rotate-180" />
+                  <span className="hidden sm:inline">Back to Super Admin</span>
+                </button>
+              )}
+
+              {/* Theme Toggle */}
+              <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                <ThemeToggle />
+              </div>
+
+              {/* Profile Dropdown with Username & Logout */}
+              <UserProfileDropdown
+                user={{
+                  name: user?.firstName || 'Researcher',
+                  firstName: user?.firstName,
+                  email: user?.email,
+                  role: user?.role || 'RESEARCHER'
+                }}
+                badgeColor="indigo"
+                onProfileClick={() => setActiveTab('profile')}
+                onLogoutClick={() => setIsLogoutModalOpen(true)}
+              />
+            </div>
+          </header>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar relative">
             <div className="p-4 md:p-8 max-w-7xl mx-auto w-full h-full">
@@ -2933,66 +3408,7 @@ function AdminDashboardContent() {
            ==================================================== */}
               {(isProfileComplete || user.role !== 'ADMIN' || user?.isImpersonated) && (
                 <div className="space-y-8">
-                  {/* UNIFIED PAGE HEADER — shown on all tabs */}
-                  {(() => {
-                    // Tabs that have their own header / don't need one
-                    const tabsWithOwnHeader = ['research', 'dashboard'];
-                    if (tabsWithOwnHeader.includes(activeTab)) return null;
-
-                    // Build label + description for every possible tab
-                    const tabMeta: Record<string, { title: string; desc: string }> = {
-                      'research-reports': { title: 'Research Reports', desc: 'Manage and upload PDF research reports for clients' },
-                      clients: { title: 'Client Management', desc: 'View, add, and manage client profiles and subscriptions' },
-                      settings: { title: 'Settings', desc: 'Configure organization, integrations, billing and security settings' },
-                      profile: { title: 'My Profile', desc: 'View and update your personal profile and password' },
-                      legalView: { title: 'Legal & Disclosures', desc: 'View legal pages and regulatory disclosures' },
-                      compliance: { title: 'Compliance Center', desc: 'Track compliance checklists, alerts and penalties' },
-                      plans: { title: 'Plan Management', desc: 'Manage subscription categories and plans' },
-                      checklist: { title: 'Compliance Checklist', desc: 'Track and complete regulatory compliance tasks' },
-                      activeClientSummary: { title: 'Active Client Summary', desc: 'View active client subscription metrics' },
-                      complaintDataView: { title: 'Complaints', desc: 'Review and manage client complaints' },
-                      signature_settings: { title: 'Signature Settings', desc: 'Manage your research analyst co-signature' },
-                    };
-
-                    // Determine title/desc
-                    let title = '';
-                    let desc = '';
-
-                    if (activeTab.startsWith('customPages_')) {
-                      const slug = activeTab.replace('customPages_', '');
-                      const page = adminPagesList?.find((p: any) => p.slug === slug);
-                      title = page?.title || 'Custom Page';
-                      desc = 'Custom content page';
-                    } else {
-                      const meta = tabMeta[activeTab];
-                      if (meta) {
-                        title = meta.title;
-                        desc = meta.desc;
-                      } else {
-                        // fallback to NAV_CONFIG
-                        const navItem = NAV_CONFIG.find(n => n.tab === activeTab);
-                        title = navItem?.label || activeTab;
-                        desc = navItem?.moduleDesc || '';
-                      }
-                    }
-
-                    if (!title) return null;
-
-                    return (
-                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-300 dark:border-white/10 pb-5 mb-6">
-                        <div>
-                          <h2 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                            {title}
-                          </h2>
-                          {desc && (
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                              {desc}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {/* TABS CONTENT */}
 
 
 
@@ -3261,7 +3677,7 @@ function AdminDashboardContent() {
                               <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-2 border-b border-slate-300 dark:border-white/5">
                                 <div>
                                   <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">Sales & Client Growth</h3>
-                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track advisory revenue and user onboarding progress</p>
+                                  <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Track research service revenue and user onboarding progress</p>
                                 </div>
 
                                 {/* Controls */}
@@ -3314,7 +3730,7 @@ function AdminDashboardContent() {
                                       stroke="#64748b"
                                       fontSize={10}
                                       tickLine={false}
-                                      tickFormatter={(v) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
+                                      tickFormatter={(v: any) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
                                     />
                                     <Tooltip
                                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px' }}
@@ -3552,6 +3968,9 @@ function AdminDashboardContent() {
                                             </span>
                                           )}
                                         </span>
+                                        {(st.username || st.user?.username) && (
+                                          <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-bold block">@{st.username || st.user?.username}</span>
+                                        )}
                                         <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.email}</span>
                                         <span className="text-[10px] text-slate-500 dark:text-slate-500 block">{st.mobile}</span>
                                       </td>
@@ -3667,7 +4086,7 @@ function AdminDashboardContent() {
                             <form onSubmit={handleCreateOrUpdateStaff} className="space-y-4 pt-2">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Full Name</label>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Full Name *</label>
                                   <input
                                     type="text"
                                     required
@@ -3679,7 +4098,21 @@ function AdminDashboardContent() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Email Address</label>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">
+                                    Username (Unique Login ID) *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    required
+                                    value={staffUsername}
+                                    onChange={e => setStaffUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                                    className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs font-mono"
+                                    placeholder="amit_sharma"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Email Address *</label>
                                   <input
                                     type="email"
                                     required
@@ -3692,7 +4125,7 @@ function AdminDashboardContent() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Mobile Number</label>
+                                  <label className="block text-xs text-slate-600 dark:text-slate-400 mb-1">Mobile Number *</label>
                                   <input
                                     type="text"
                                     required
@@ -3902,9 +4335,22 @@ function AdminDashboardContent() {
                             {/* Credentials */}
                             <div className="space-y-3">
                               <div className="bg-slate-100 dark:bg-slate-950/80 border border-slate-400 dark:border-white/10 rounded-xl p-4 space-y-1">
-                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500 uppercase tracking-wider block">Login ID (Email)</span>
+                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500 uppercase tracking-wider block">Login ID (Username)</span>
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-mono text-sm text-emerald-700 dark:text-emerald-300 font-bold break-all">{createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}</span>
+                                  <span className="font-mono text-sm text-emerald-700 dark:text-emerald-300 font-bold break-all">
+                                    {createdStaffCreds?.username || createdStaffCreds?.staff?.username || createdStaffCreds?.user?.username || createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}
+                                  </span>
+                                  <button
+                                    onClick={() => navigator.clipboard.writeText(createdStaffCreds?.username || createdStaffCreds?.staff?.username || createdStaffCreds?.user?.username || createdStaffCreds?.staff?.email || createdStaffCreds?.email || '')}
+                                    className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
+                                  >Copy</button>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-100 dark:bg-slate-950/80 border border-slate-400 dark:border-white/10 rounded-xl p-4 space-y-1">
+                                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500 uppercase tracking-wider block">Registered Email</span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-xs text-slate-700 dark:text-slate-300 font-bold break-all">{createdStaffCreds?.staff?.email || createdStaffCreds?.email || '—'}</span>
                                   <button
                                     onClick={() => navigator.clipboard.writeText(createdStaffCreds?.staff?.email || createdStaffCreds?.email || '')}
                                     className="shrink-0 text-[10px] px-2 py-1 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition font-semibold"
@@ -3962,6 +4408,11 @@ function AdminDashboardContent() {
                                 <div className="flex justify-between border-b border-slate-300 dark:border-white/5 pb-2">
                                   <span className="text-slate-600 dark:text-slate-400">Full Name</span>
                                   <span className="font-bold text-slate-900 dark:text-white">{selectedStaff.name}</span>
+                                </div>
+
+                                <div className="flex justify-between border-b border-slate-300 dark:border-white/5 pb-2">
+                                  <span className="text-slate-600 dark:text-slate-400">Username (Login ID)</span>
+                                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400">@{selectedStaff.username || selectedStaff.user?.username || '—'}</span>
                                 </div>
 
                                 <div className="flex justify-between border-b border-slate-300 dark:border-white/5 pb-2">
@@ -4140,6 +4591,142 @@ function AdminDashboardContent() {
                       )}
                     </div>
                   )}
+
+                  {/* L2 VERIFICATION DESK FOR RESEARCHER */}
+                  {activeTab === 'l2-approvals' && (() => {
+                    const l2PendingPayments = allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING');
+                    const l2ApprovedPayments = allPayments.filter((p: any) => p.approvalStatus === 'APPROVED' || p.approvalStatus === 'DIRECT_APPROVED');
+                    const l2RejectedPayments = allPayments.filter((p: any) => p.approvalStatus === 'REJECTED');
+
+                    return (
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-300 dark:border-white/10 pb-4">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-2xl border border-amber-500/20">
+                              <ShieldCheck className="w-7 h-7" />
+                            </div>
+                            <div>
+                              <h2 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+                                <span>L2 Payment Verification</span>
+                                <span className="text-[11px] px-3 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-500/30 uppercase tracking-wider font-mono font-bold">
+                                  Approver Desk
+                                </span>
+                              </h2>
+                              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                                Review, modify plan parameters, service start date, and grant final L2 authorization before invoice dispatch.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+                              api.getAdminPlans().then(res => { if (res.success) setAdminPlans(res.data); }).catch(() => { });
+                            }}
+                            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>Refresh Queue</span>
+                          </button>
+                        </div>
+
+                        {/* Summary Metrics */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-300 dark:border-amber-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-300">Awaiting L2 Approval</span>
+                              <span className="p-2 rounded-xl bg-amber-200/80 dark:bg-amber-500/20 text-amber-900 dark:text-amber-300"><Clock className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-amber-950 dark:text-white mt-2 font-mono">{l2PendingPayments.length}</div>
+                            <p className="text-xs font-bold text-amber-800 dark:text-amber-300/90 mt-1">Pending Second-Level Clearance</p>
+                          </div>
+                          <div className="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-emerald-900 dark:text-emerald-300">L2 Approved / Active</span>
+                              <span className="p-2 rounded-xl bg-emerald-200/80 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"><CheckCircle2 className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-emerald-950 dark:text-white mt-2 font-mono">{l2ApprovedPayments.length}</div>
+                            <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300/90 mt-1">Authorized &amp; Dispatched</p>
+                          </div>
+                          <div className="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border-2 border-rose-300 dark:border-rose-500/30 shadow-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black uppercase tracking-wider text-rose-900 dark:text-rose-300">L2 Rejected</span>
+                              <span className="p-2 rounded-xl bg-rose-200/80 dark:bg-rose-500/20 text-rose-900 dark:text-rose-300"><X className="w-4 h-4" /></span>
+                            </div>
+                            <div className="text-3xl font-black text-rose-950 dark:text-white mt-2 font-mono">{l2RejectedPayments.length}</div>
+                            <p className="text-xs font-bold text-rose-800 dark:text-rose-300/90 mt-1">Declined by Approver</p>
+                          </div>
+                        </div>
+
+                        {/* Payments Table */}
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-white/10 overflow-hidden shadow-sm">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm whitespace-nowrap">
+                              <thead>
+                                <tr className="bg-slate-100 dark:bg-slate-800/90 border-b border-slate-300 dark:border-white/10 text-xs uppercase tracking-wider text-slate-800 dark:text-slate-200 font-black">
+                                  <th className="py-4 px-6">Payment Date</th>
+                                  <th className="py-4 px-6">Service Start Date</th>
+                                  <th className="py-4 px-6">Client Details</th>
+                                  <th className="py-4 px-6">Plan</th>
+                                  <th className="py-4 px-6">Amount</th>
+                                  <th className="py-4 px-6">Mode</th>
+                                  <th className="py-4 px-6 text-right">L2 Action</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200 dark:divide-white/5 font-medium">
+                                {l2PendingPayments.length === 0 ? (
+                                  <tr>
+                                    <td colSpan={9} className="p-12 text-center text-slate-500 dark:text-slate-400 font-medium">
+                                      No pending L2 approval requests. Queue is fully cleared.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  l2PendingPayments.map((p: any) => (
+                                    <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-white/5 transition">
+                                      <td className="py-4 px-6 font-mono text-xs text-slate-900 dark:text-slate-100 font-bold">
+                                        {p.paymentDate ? new Date(p.paymentDate).toLocaleDateString() : new Date(p.createdAt).toLocaleDateString()}
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <span className="inline-block px-2.5 py-1 rounded-md bg-blue-100 text-blue-900 border border-blue-300 dark:bg-blue-900/40 dark:text-blue-200 dark:border-blue-700 font-mono font-bold text-xs">
+                                          {p.serviceStartDate ? new Date(p.serviceStartDate).toLocaleDateString() : 'Matches Payment Date'}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <div className="font-bold text-slate-900 dark:text-white text-sm">{p.client?.name || 'Unknown Client'}</div>
+                                        {p.client?.email && <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">{p.client.email}</div>}
+                                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">{p.client?.user?.mobile || p.client?.mobile || 'N/A'}</div>
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <span className="inline-block px-2.5 py-1 rounded-md bg-indigo-100 text-indigo-900 border border-indigo-300 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700 font-bold text-xs font-mono">
+                                          {p.plan?.name || 'Custom Plan'}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-6 font-black font-mono text-base text-emerald-700 dark:text-emerald-400">
+                                        ₹{Number(p.amount || 0).toLocaleString('en-IN')}
+                                      </td>
+                                      <td className="py-4 px-6">
+                                        <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded border border-slate-300 dark:border-white/10 inline-block">
+                                          {p.paymentMode || 'MANUAL_UPI'}
+                                        </span>
+                                      </td>
+                                      <td className="py-4 px-6 text-right">
+                                        <button
+                                          onClick={() => setSelectedL2Payment(p)}
+                                          className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs shadow-md shadow-amber-600/30 inline-flex items-center gap-1.5 transition-all transform hover:scale-105"
+                                        >
+                                          <ShieldCheck className="w-4 h-4" />
+                                          <span>Review (L2)</span>
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* PAYMENTS TAB (RESTORED) */}
                   {activeTab === 'payments' && (
@@ -4474,30 +5061,42 @@ function AdminDashboardContent() {
 
                             return (
                               <div className="space-y-4">
-                                {/* History Search/Filter Bar */}
-                                <div className="flex items-center space-x-3 w-full max-w-2xl">
-                                  <div className="flex flex-1 items-center bg-slate-100 dark:bg-slate-800/50 rounded-xl px-3 border border-slate-400 dark:border-white/10">
-                                    <input
-                                      type="text"
-                                      placeholder="Filter history by requirement description..."
-                                      value={historyFilterText}
-                                      onChange={(e) => setHistoryFilterText(e.target.value)}
-                                      className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
-                                    />
-                                    {historyFilterText && (
-                                      <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs">Clear</button>
-                                    )}
+                                {/* History Search/Filter Bar & Export */}
+                                <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+                                  <div className="flex items-center space-x-3 flex-1 min-w-[280px] max-w-2xl">
+                                    <div className="flex flex-1 items-center bg-slate-100 dark:bg-slate-800/50 rounded-xl px-3 border border-slate-400 dark:border-white/10">
+                                      <input
+                                        type="text"
+                                        placeholder="Filter history by requirement, remark, updated by, period..."
+                                        value={historyFilterText}
+                                        onChange={(e) => setHistoryFilterText(e.target.value)}
+                                        className="bg-transparent border-0 text-slate-900 dark:text-white text-xs py-2 w-full focus:ring-0 focus:outline-none"
+                                      />
+                                      {historyFilterText && (
+                                        <button onClick={() => setHistoryFilterText('')} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white text-xs font-semibold">Clear</button>
+                                      )}
+                                    </div>
+                                    <select
+                                      value={selectedFinancialYear}
+                                      onChange={(e) => setSelectedFinancialYear(e.target.value)}
+                                      className="bg-slate-100 dark:bg-slate-800/50 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-2 px-3 rounded-xl focus:ring-0 focus:outline-none"
+                                    >
+                                      <option value="All">All Financial Years</option>
+                                      {availableFinancialYears.map(fy => (
+                                        <option key={fy as string} value={fy as string}>{fy as string}</option>
+                                      ))}
+                                    </select>
                                   </div>
-                                  <select
-                                    value={selectedFinancialYear}
-                                    onChange={(e) => setSelectedFinancialYear(e.target.value)}
-                                    className="bg-slate-100 dark:bg-slate-800/50 border border-slate-400 dark:border-white/10 text-slate-900 dark:text-white text-xs py-2 px-3 rounded-xl focus:ring-0 focus:outline-none"
+
+                                  <button
+                                    type="button"
+                                    onClick={handleExportChecklistHistory}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-sm hover:shadow transition cursor-pointer"
+                                    title="Export complete checklist audit history to Excel / CSV"
                                   >
-                                    <option value="All">All Financial Years</option>
-                                    {availableFinancialYears.map(fy => (
-                                      <option key={fy as string} value={fy as string}>{fy as string}</option>
-                                    ))}
-                                  </select>
+                                    <Download className="w-4 h-4" />
+                                    <span>Export History (Excel)</span>
+                                  </button>
                                 </div>
 
                                 <div className="glassmorphism rounded-2xl border border-slate-400 dark:border-white/10 overflow-x-auto w-full">
@@ -4758,7 +5357,7 @@ function AdminDashboardContent() {
                                         </div>
                                         <div className="text-right">
                                           <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                            {isBreached ? 'SLA BREACHED' : `${daysLeft} days left`}
+                                            {isBreached ? `${Math.abs(daysLeft)} days overdue` : daysLeft === 0 ? 'Due Today' : `${daysLeft} days left`}
                                           </span>
                                         </div>
                                       </div>
@@ -5079,7 +5678,7 @@ function AdminDashboardContent() {
                                 {(pageData) => (
                                   <table className="w-full text-left">
                                     <thead className="bg-slate-100 dark:bg-white/5 text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400 border-b border-slate-400 dark:border-white/10">
-                                      <tr><th className="px-6 py-4">Client</th><th className="px-6 py-4">Source</th><th className="px-6 py-4">Subject</th><th className="px-6 py-4">Received</th><th className="px-6 py-4">Deadline</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Action</th></tr>
+                                      <tr><th className="px-6 py-4">Client</th><th className="px-6 py-4">Source</th><th className="px-6 py-4">Subject</th><th className="px-6 py-4">Received</th><th className="px-6 py-4">Deadline</th><th className="px-6 py-4">Resolved Date</th><th className="px-6 py-4">Resolution SLA</th><th className="px-6 py-4">Status</th><th className="px-6 py-4">Action</th></tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-300 dark:divide-white/5 text-sm">
                                       {pageData.length === 0 ? (
@@ -5094,33 +5693,64 @@ function AdminDashboardContent() {
                                             <td className="px-6 py-4 font-medium">{c.clientName}</td>
                                             <td className="px-6 py-4">{c.source} {c.scoresRefId && <span className="block text-xs text-slate-600 dark:text-slate-400">{c.scoresRefId}</span>}</td>
                                             <td className="px-6 py-4">{c.subject}</td>
-                                            <td className="px-6 py-4">{new Date(c.receivedAt).toLocaleDateString()}</td>
+                                            <td className="px-6 py-4">{c.receivedAt ? new Date(c.receivedAt).toLocaleDateString() : '-'}</td>
+                                            <td className="px-6 py-4">{c.deadlineAt ? new Date(c.deadlineAt).toLocaleDateString() : '-'}</td>
+                                            <td className="px-6 py-4 font-medium">{(c.status === 'CLOSED' || c.status === 'RESOLVED') && (c.resolvedAt || c.updatedAt) ? new Date(c.resolvedAt || c.updatedAt).toLocaleDateString() : '-'}</td>
                                             <td className="px-6 py-4">
-                                              {c.status === 'CLOSED' ? '-' : (
-                                                <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-bold ${isBreached ? 'bg-red-500/20 text-red-600 dark:text-red-400' : isWarning ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'}`}>
-                                                  {daysLeft} days left
-                                                </span>
-                                              )}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              <span className={`px-2 py-1 rounded-md text-xs font-bold ${c.status === 'CLOSED' ? 'bg-slate-500/20 text-slate-600 dark:text-slate-400' : 'bg-primary-500/20 text-primary-600 dark:text-primary-400'}`}>{c.status}</span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                              {c.status !== 'CLOSED' ? (
-                                                <button
-                                                  onClick={() => {
-                                                    setComplaintResolveId(c.id);
-                                                    setComplaintAtrProof(null);
-                                                    setComplaintAtrRemarks('');
-                                                  }}
-                                                  className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
-                                                >Resolve</button>
+                                              {(c.status === 'CLOSED' || c.status === 'RESOLVED') ? (
+                                                (() => {
+                                                  const resDate = c.resolvedAt || c.updatedAt;
+                                                  if (!resDate || !c.deadlineAt) return <span className="text-slate-400 font-mono text-xs">-</span>;
+                                                  const diff = Math.ceil((new Date(resDate).getTime() - new Date(c.deadlineAt).getTime()) / (1000 * 3600 * 24));
+                                                  if (diff <= 0) {
+                                                    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 whitespace-nowrap"><CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> Resolved Timely</span>;
+                                                  } else {
+                                                    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 whitespace-nowrap"><AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" /> {diff} {diff === 1 ? 'day' : 'days'} Overdue</span>;
+                                                  }
+                                                })()
                                               ) : (
-                                                c.atrProofUrl && (
-                                                  <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
-                                                )
+                                                (() => {
+                                                  const daysLeft = c.deadlineAt ? Math.ceil((new Date(c.deadlineAt).getTime() - Date.now()) / (1000 * 3600 * 24)) : 0;
+                                                  if (daysLeft < 0) {
+                                                    return <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 whitespace-nowrap animate-pulse"><AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" /> {Math.abs(daysLeft)} days Overdue</span>;
+                                                  } else if (daysLeft === 0) {
+                                                    return <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 whitespace-nowrap">Due Today</span>;
+                                                  } else {
+                                                    return <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${daysLeft <= 5 ? 'bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/30' : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'}`}>{daysLeft} days left</span>;
+                                                  }
+                                                })()
                                               )}
                                             </td>
+                                            <td className="px-6 py-4">
+                                              <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${(c.status === 'CLOSED' || c.status === 'RESOLVED') ? (((c.resolvedAt || c.updatedAt) && c.deadlineAt && new Date(c.resolvedAt || c.updatedAt).getTime() > new Date(c.deadlineAt).getTime()) ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20') : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20'}`}>{c.status}</span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                               <div className="flex items-center gap-2">
+                                                 {c.status !== 'CLOSED' ? (
+                                                   <button
+                                                     onClick={() => {
+                                                       setComplaintResolveId(c.id);
+                                                       setComplaintAtrProof(null);
+                                                       setComplaintAtrRemarks('');
+                                                     }}
+                                                     className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
+                                                   >Resolve</button>
+                                                 ) : (
+                                                   c.atrProofUrl && (
+                                                     <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
+                                                   )
+                                                 )}
+                                                 {c.source !== 'CLIENT_PORTAL' && c.createdByType !== 'CLIENT' && (
+                                                   <button
+                                                     onClick={() => handleDeleteComplaint(c)}
+                                                     className="p-1 text-rose-500 hover:text-rose-700 dark:hover:text-rose-400 hover:bg-rose-500/10 rounded transition ml-auto"
+                                                     title="Delete Complaint & Cascading Records"
+                                                   >
+                                                     <Trash2 className="h-3.5 w-3.5" />
+                                                   </button>
+                                                 )}
+                                               </div>
+                                             </td>
                                           </tr>
                                         );
                                       })}
@@ -5305,7 +5935,7 @@ function AdminDashboardContent() {
                           </div>
 
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               try {
                                 let rawList = clientSubTab === 'deleted' ? deletedClients : clients.filter((cl: any) => !cl.user?.deletedAt);
 
@@ -5427,15 +6057,12 @@ function AdminDashboardContent() {
 
                                 const csvString = [headers.join(','), ...rows].join('\n');
                                 const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-                                const url = URL.createObjectURL(blob);
-                                const link = document.createElement('a');
-                                link.setAttribute('href', url);
-                                link.setAttribute('download', `${clientSubTab === 'deleted' ? 'Deleted_Clients_Report' : 'Complete_Clients_Report'}_${new Date().toISOString().split('T')[0]}.csv`);
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                                URL.revokeObjectURL(url);
-                                import('react-hot-toast').then(m => m.default.success('Client CSV report downloaded successfully!'));
+                                const reportFileName = `${clientSubTab === 'deleted' ? 'Deleted_Clients_Report' : 'Complete_Clients_Report'}_${new Date().toISOString().split('T')[0]}.csv`;
+                                await executeSmartDownload({
+                                  blob,
+                                  fileName: reportFileName,
+                                  documentType: 'Client Report Export'
+                                });
                               } catch (err: any) {
                                 console.error('CSV Export Error:', err);
                                 import('react-hot-toast').then(m => m.default.error('Failed to export CSV: ' + err.message));
@@ -5564,13 +6191,12 @@ function AdminDashboardContent() {
                                 });
                                 if (!response.ok) throw new Error('Export failed');
                                 const blob = await response.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `deleted-clients-${new Date().toISOString().split('T')[0]}.csv`;
-                                document.body.appendChild(a);
-                                a.click();
-                                window.URL.revokeObjectURL(url);
+                                const deletedClientsFileName = `deleted-clients-${new Date().toISOString().split('T')[0]}.csv`;
+                                await executeSmartDownload({
+                                  blob,
+                                  fileName: deletedClientsFileName,
+                                  documentType: 'Deleted Clients Export'
+                                });
                               } catch (err) {
                                 console.error('Failed to download CSV:', err);
                                 toast.error('Failed to download deleted clients CSV.');
@@ -5733,19 +6359,11 @@ function AdminDashboardContent() {
                                             <td className="py-4 px-5">
                                               <div className="flex flex-col gap-1.5 items-start">
                                                 {/* KRA Status Badge */}
-                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                                  : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                                    : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
+                                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${(cl.kraVerified && (cl.camsKraData || cl.kraStatus))
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                                  : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
                                                   }`}>
-                                                  KRA: {
-                                                    cl.complianceAlerts?.some((a: any) => a.alertType === 'KYC_FAILED')
-                                                      ? 'FAILED'
-                                                      : (cl.status && cl.status !== 'PENDING_ONBOARDING' && cl.status !== 'KYC_PENDING' && cl.status !== 'KYC_FAILED')
-                                                        ? 'VERIFIED'
-                                                        : 'PENDING'
-                                                  }
+                                                  KRA: {(cl.kraVerified && (cl.camsKraData || cl.kraStatus)) ? 'VERIFIED' : 'PENDING'}
                                                 </span>
                                                 {/* eSign Status Badge */}
                                                 <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border ${cl.agreements?.some((a: any) => a.status === 'SIGNED' || a.status === 'ACTIVE')
@@ -5813,6 +6431,10 @@ function AdminDashboardContent() {
                                                         setAssignPlanCategoryId('');
                                                         setAssignPlanId('');
                                                         setAssignPlanRemarks('');
+                                                        setAssignCouponCode('');
+                                                        setAssignCustomAmount('');
+                                                        setAssignCustomDays('');
+                                                        api.getCoupons().then(r => { if (r.success && Array.isArray(r.data)) setCoupons(r.data); }).catch(() => {});
                                                         setIsAssignPlanModalOpen(true);
                                                       }}
                                                       title="Assign Plan"
@@ -5904,7 +6526,10 @@ function AdminDashboardContent() {
                                   value={assignPlanCategoryId}
                                   onChange={e => {
                                     setAssignPlanCategoryId(e.target.value);
-                                    setAssignPlanId(''); // Reset plan selection
+                                    setAssignPlanId('');
+                                    setAssignCouponCode('');
+                                    setAssignCustomAmount('');
+                                    setAssignCustomDays('');
                                   }}
                                   required
                                   className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
@@ -5924,101 +6549,230 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                                     Select Active Plan <span className="text-rose-600 dark:text-rose-400">*</span>
                                   </label>
-                                  {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).length === 0 ? (
-                                    <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
-                                      No active plans found in this category.
-                                    </div>
-                                  ) : (
-                                    <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
-                                      {adminPlans.filter((p) => p.categoryId === assignPlanCategoryId && p.status === 'ACTIVE' && !p.deletedAt).map((p) => {
-                                        const isSelected = assignPlanId === p.id;
-                                        return (
-                                          <div
-                                            key={p.id}
-                                            onClick={() => {
-                                              setAssignPlanId(p.id);
-                                              setAssignCustomAmount('');
-                                              setAssignCustomDays('');
-                                            }}
-                                            className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
-                                          >
-                                            <div className="flex justify-between items-start">
-                                              <div>
-                                                <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
-                                                <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                  {(() => {
+                                    const selectedCat = categories.find((c: any) => String(c.id || c._id) === String(assignPlanCategoryId) || String(c.name).toUpperCase() === String(assignPlanCategoryId).toUpperCase());
+                                    const selectedCatName = (selectedCat?.name || '').toUpperCase();
+                                    const filteredPlans = adminPlans.filter((p: any) => {
+                                      const pCatId = typeof p.categoryId === 'object' && p.categoryId ? String(p.categoryId._id || p.categoryId.id) : String(p.categoryId || '');
+                                      const pCatObjId = p.category ? (typeof p.category === 'object' ? String(p.category.id || p.category._id) : String(p.category)) : '';
+                                      const pCatName = (p.category?.name || (typeof p.categoryId === 'object' ? p.categoryId.name : '') || '').toUpperCase();
+                                      
+                                      const matchesCategory = 
+                                        pCatId === String(assignPlanCategoryId) ||
+                                        pCatObjId === String(assignPlanCategoryId) ||
+                                        (selectedCatName && (pCatName === selectedCatName || pCatId === selectedCatName)) ||
+                                        (pCatName && pCatName === String(assignPlanCategoryId).toUpperCase());
+
+                                      return matchesCategory && p.status === 'ACTIVE' && !p.deletedAt;
+                                    });
+
+                                    return filteredPlans.length === 0 ? (
+                                      <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
+                                        No active plans found in this category.
+                                      </div>
+                                    ) : (
+                                      <div className="grid grid-cols-1 gap-2 max-h-[180px] overflow-y-auto pr-1">
+                                        {filteredPlans.map((p: any) => {
+                                          const isSelected = assignPlanId === p.id;
+                                          return (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                setAssignPlanId(p.id);
+                                                setAssignCouponCode('');
+                                                setAssignCustomAmount('');
+                                                setAssignCustomDays('');
+                                              }}
+                                              className={`cursor-pointer p-3 rounded-xl border text-left transition relative ${isSelected ? 'bg-violet-600/15 border-violet-500 shadow-md shadow-violet-500/5' : 'bg-slate-100 dark:bg-slate-800/40 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-slate-800/60'}`}
+                                            >
+                                              <div className="flex justify-between items-start">
+                                                <div>
+                                                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</h4>
+                                                  <div className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 max-w-[200px] truncate" dangerouslySetInnerHTML={{ __html: p.description || '' }} />
+                                                </div>
+                                                <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
+                                                  {gstCalculationType === 'EXCLUSIVE' ? (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
+                                                    </div>
+                                                  ) : (
+                                                    <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
+                                                      <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
+                                                      <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
+                                                      <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
+                                                    </div>
+                                                  )}
+                                                  <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
+                                                </div>
                                               </div>
-                                              <div className="text-right flex flex-col items-end text-[10px] min-w-[120px]">
-                                                {gstCalculationType === 'EXCLUSIVE' ? (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST (18%):</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{Math.round(p.price * 0.18).toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{Math.round(p.price * 1.18).toLocaleString()}</span></div>
-                                                  </div>
-                                                ) : (
-                                                  <div className="space-y-0.5 text-slate-600 dark:text-slate-400">
-                                                    <div className="flex justify-between gap-2"><span>Base:</span> <span className="font-semibold text-slate-700 dark:text-slate-300">₹{p.price.toLocaleString()}</span></div>
-                                                    <div className="flex justify-between gap-2 border-b border-slate-300 dark:border-white/5 pb-0.5"><span>GST:</span> <span className="font-semibold text-emerald-600 dark:text-emerald-400">Inclusive</span></div>
-                                                    <div className="flex justify-between gap-2 text-violet-400 font-extrabold pt-0.5"><span>Total:</span> <span>₹{p.price.toLocaleString()}</span></div>
-                                                  </div>
-                                                )}
-                                                <span className="text-[9px] text-slate-500 dark:text-slate-500 mt-1">{p.durationMonths} month{p.durationMonths > 1 ? 's' : ''}</span>
-                                              </div>
+                                              {isSelected && (
+                                                <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
+                                                  <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
+                                                </div>
+                                              )}
                                             </div>
-                                            {isSelected && (
-                                              <div className="absolute top-2 right-2 bg-violet-500 rounded-full p-0.5">
-                                                <CheckCircle className="h-3 w-3 text-slate-900 dark:text-white" />
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
 
-                              {/* Coupon Input with Datalist */}
+                              {/* Coupon Input with Dropdown & Badges */}
                               <div>
-                                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Apply Coupon (Optional)</label>
-                                <input
-                                  type="text"
-                                  list="active-coupons-list"
-                                  value={assignCouponCode}
-                                  placeholder="Type or select a coupon code"
-                                  onChange={e => {
-                                    const newCode = e.target.value;
-                                    setAssignCouponCode(newCode);
-                                    // Recalculate custom amount if custom days is present, or vice versa
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Apply Coupon (Optional)</label>
+                                  {Boolean((assignCustomAmount && assignCustomAmount.trim()) || (assignCustomDays && assignCustomDays.trim())) ? (
+                                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 px-2 py-0.5 rounded">
+                                      Coupons disabled for Custom Amount / Days
+                                    </span>
+                                  ) : assignCouponCode ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setAssignCouponCode('')}
+                                      className="text-[10px] text-rose-500 hover:underline font-bold"
+                                    >
+                                      ✕ Remove Coupon
+                                    </button>
+                                  ) : null}
+                                </div>
+
+                                {(() => {
+                                  const isCustomPlanMode = Boolean((assignCustomAmount && assignCustomAmount.trim()) || (assignCustomDays && assignCustomDays.trim()));
+                                  const selPlanObj = adminPlans.find((x: any) => x.id === assignPlanId);
+                                  const effectivePlanBasePrice = assignCustomAmount ? Number(assignCustomAmount) : (selPlanObj ? (selPlanObj.price || selPlanObj.amount || 0) : null);
+                                  const applicableCouponsForAssign = coupons.filter((c: any) => isCouponApplicableToPlan(c, assignPlanId, assignPlanCategoryId, effectivePlanBasePrice));
+                                  const handleAssignCouponChange = (newCode: string) => {
+                                    if (isCustomPlanMode) return;
+                                    const code = newCode.trim().toUpperCase();
+                                    if (code && assignPlanId) {
+                                      const p = adminPlans.find((x: any) => x.id === assignPlanId);
+                                      const cp = coupons.find((c: any) => String(c.code).trim().toUpperCase() === code && c.status === 'ACTIVE');
+                                      const curPlanPrice = assignCustomAmount ? Number(assignCustomAmount) : (p ? (p.price || p.amount || 0) : 0);
+                                      if (cp && cp.minPurchaseValue && curPlanPrice < Number(cp.minPurchaseValue)) {
+                                        toast.error(`Minimum purchase of ₹${Number(cp.minPurchaseValue).toLocaleString('en-IN')} required for coupon "${code}" (Plan amount: ₹${curPlanPrice.toLocaleString('en-IN')})`);
+                                        setAssignCouponCode('');
+                                        return;
+                                      }
+                                    }
+                                    setAssignCouponCode(code);
                                     if (assignPlanId) {
                                       const p = adminPlans.find((x: any) => x.id === assignPlanId);
                                       if (p) {
-                                        const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, newCode);
-                                        const totalDays = p.durationMonths * 30;
-                                        if (assignCustomAmount) {
-                                          let val = Number(assignCustomAmount);
-                                          if (val > totalAmt) val = totalAmt;
-                                          setAssignCustomAmount(val.toString());
-                                          if (totalAmt > 0) {
-                                            setAssignCustomDays(Math.round(val / (totalAmt / totalDays)).toString());
+                                        const planTotalDays = (p.durationMonths || 1) * 30;
+                                        const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planBasePrice = (gstEnabled && !isExclusive)
+                                          ? (p.price / 1.18)
+                                          : p.price;
+                                        
+                                        let cpDisc = 0;
+                                        if (code) {
+                                          const cp = coupons.find((c: any) => String(c.code).trim().toUpperCase() === code && c.status === 'ACTIVE');
+                                          if (cp) {
+                                            if (cp.discountType === 'FLAT' || cp.discountType === 'FIXED') {
+                                              cpDisc = (gstEnabled && !isExclusive) ? (Number(cp.discountValue || 0) / 1.18) : Number(cp.discountValue || 0);
+                                            } else if (cp.discountType === 'PERCENTAGE') {
+                                              cpDisc = (planBasePrice * Number(cp.discountValue || 0)) / 100;
+                                              if (cp.percentageType === 'CAPPED' && cp.maxDiscountValue && cpDisc > Number(cp.maxDiscountValue)) {
+                                                cpDisc = Number(cp.maxDiscountValue);
+                                              }
+                                            }
+                                            if (cpDisc > planBasePrice) cpDisc = planBasePrice;
                                           }
-                                        } else if (assignCustomDays) {
-                                          let dVal = Number(assignCustomDays);
-                                          if (dVal > totalDays) dVal = totalDays;
-                                          setAssignCustomDays(dVal.toString());
-                                          if (totalDays > 0) {
-                                            setAssignCustomAmount(Math.round(dVal * (totalAmt / totalDays)).toString());
+                                        }
+                                        const effPlanBase = Math.max(0, planBasePrice - cpDisc);
+                                        const dailyBaseRate = planTotalDays > 0 ? (effPlanBase / planTotalDays) : 0;
+
+                                        if (assignCustomDays) {
+                                          const numDays = Math.round(Number(assignCustomDays));
+                                          if (dailyBaseRate > 0) {
+                                            const daysBase = numDays * dailyBaseRate;
+                                            const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
+                                            setAssignCustomAmount(Math.round(totalGross).toString());
+                                          }
+                                        } else if (assignCustomAmount) {
+                                          const val = Number(assignCustomAmount);
+                                          const enteredBase = gstEnabled ? (val / 1.18) : val;
+                                          if (dailyBaseRate > 0) {
+                                            const calcDays = Math.max(1, Math.round(enteredBase / dailyBaseRate));
+                                            setAssignCustomDays(calcDays.toString());
                                           }
                                         }
                                       }
                                     }
-                                  }}
-                                  className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase"
-                                />
-                                <datalist id="active-coupons-list">
-                                  {coupons.filter(c => c.status === 'ACTIVE').map(c => (
-                                    <option key={c.id} value={c.code}>{c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}%` : `₹${c.discountValue}`})</option>
-                                  ))}
-                                </datalist>
+                                  };
+
+                                  return (
+                                    <>
+                                      <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                          type="text"
+                                          autoComplete="off"
+                                          disabled={isCustomPlanMode}
+                                          name="assign_plan_coupon_no_autofill"
+                                          value={isCustomPlanMode ? '' : assignCouponCode}
+                                          placeholder={isCustomPlanMode ? "Coupon disabled for custom amount / days" : "Type coupon code (e.g. SUMMER50)"}
+                                          onChange={e => handleAssignCouponChange(e.target.value)}
+                                          className={`flex-1 border rounded-xl py-2 px-3 text-xs transition uppercase ${
+                                            isCustomPlanMode
+                                              ? 'bg-slate-200/50 dark:bg-slate-800/50 border-dashed border-slate-300 dark:border-white/5 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                                              : 'bg-slate-100 dark:bg-slate-800 border-slate-400 dark:border-white/10 text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30'
+                                          }`}
+                                        />
+                                        <select
+                                          disabled={isCustomPlanMode}
+                                          value={isCustomPlanMode ? '' : assignCouponCode.trim().toUpperCase()}
+                                          onChange={e => handleAssignCouponChange(e.target.value)}
+                                          className={`border rounded-xl px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-violet-500 max-w-full sm:max-w-[220px] ${
+                                            isCustomPlanMode
+                                              ? 'bg-slate-200/50 dark:bg-slate-800/50 border-dashed border-slate-300 dark:border-white/5 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                                              : 'bg-slate-100 dark:bg-slate-800 border-slate-400 dark:border-white/10 text-slate-800 dark:text-slate-200'
+                                          }`}
+                                        >
+                                          <option value="">{isCustomPlanMode ? '-- Disabled for Custom Mode --' : (applicableCouponsForAssign.length > 0 ? `-- Select Coupon (${applicableCouponsForAssign.length}) --` : '-- No Coupon --')}</option>
+                                          {!isCustomPlanMode && applicableCouponsForAssign.map((c: any) => (
+                                            <option key={c.id || c._id || c.code} value={String(c.code).trim().toUpperCase()}>
+                                              {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Quick-Pick Clickable Badges for Plan/Category Coupons */}
+                                      {applicableCouponsForAssign.length > 0 && !isCustomPlanMode && (
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicable Coupons:</span>
+                                          {applicableCouponsForAssign.map((c: any) => {
+                                            const isSelected = assignCouponCode.trim().toUpperCase() === String(c.code).trim().toUpperCase();
+                                            return (
+                                              <button
+                                                key={c.id || c._id || c.code}
+                                                type="button"
+                                                onClick={() => handleAssignCouponChange(isSelected ? '' : c.code)}
+                                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
+                                                  isSelected
+                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm ring-1 ring-violet-500'
+                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:border-violet-500 hover:text-violet-600'
+                                                }`}
+                                                title={isSelected ? 'Click to deselect' : `Click to apply ${c.code}`}
+                                              >
+                                                <Tag className="w-3 h-3 text-violet-500" />
+                                                <span>{c.code}</span>
+                                                <span className="text-[10px] opacity-80 font-normal">
+                                                  ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                                </span>
+                                                {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
 
                               {/* Payment Details */}
@@ -6053,35 +6807,42 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Custom Amount (₹)</label>
                                   <input
                                     type="number"
+                                    step="any"
                                     min="0"
                                     value={assignCustomAmount}
                                     onChange={e => {
-                                      let val = e.target.value;
+                                      const val = e.target.value;
+                                      if (val) {
+                                        setAssignCouponCode('');
+                                      }
                                       if (!val || !assignPlanId) {
                                         setAssignCustomAmount(val);
                                         setAssignCustomDays('');
                                         return;
                                       }
+                                      setAssignCustomAmount(val);
                                       const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
                                       if (selectedPlan) {
-                                        const totalDays = selectedPlan.durationMonths * 30;
-                                        const basePrice = selectedPlan.price;
-                                        const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, assignCouponCode);
-
-                                        let numericVal = Number(val);
-                                        if (numericVal > totalAmt) numericVal = totalAmt;
-                                        val = numericVal.toString();
-                                        setAssignCustomAmount(val);
-
-                                        if (totalAmt > 0) {
-                                          const costPerDay = totalAmt / totalDays;
-                                          setAssignCustomDays(Math.round(numericVal / costPerDay).toString());
+                                        const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
+                                        const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planBasePrice = (gstEnabled && !isExclusive)
+                                          ? (selectedPlan.price / 1.18)
+                                          : selectedPlan.price;
+                                        
+                                        // In custom mode, coupons do not apply
+                                        const effPlanBase = planBasePrice;
+                                        const dailyBaseRate = planTotalDays > 0 ? (effPlanBase / planTotalDays) : 0;
+                                        const numericVal = parseFloat(val);
+                                        if (!isNaN(numericVal) && numericVal > 0 && dailyBaseRate > 0) {
+                                          const enteredBase = gstEnabled ? (numericVal / 1.18) : numericVal;
+                                          const calcDays = Math.max(1, Math.round(enteredBase / dailyBaseRate));
+                                          setAssignCustomDays(calcDays.toString());
+                                        } else if (!val) {
+                                          setAssignCustomDays('');
                                         }
-                                      } else {
-                                        setAssignCustomAmount(val);
                                       }
                                     }}
-                                    placeholder="e.g. 500"
+                                    placeholder="e.g. 5900"
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
                                 </div>
@@ -6090,31 +6851,36 @@ function AdminDashboardContent() {
                                   <input
                                     type="number"
                                     min="1"
+                                    step="1"
                                     value={assignCustomDays}
                                     onChange={e => {
-                                      let val = e.target.value;
+                                      const val = e.target.value;
+                                      if (val) {
+                                        setAssignCouponCode('');
+                                      }
                                       if (!val || !assignPlanId) {
                                         setAssignCustomDays(val);
                                         setAssignCustomAmount('');
                                         return;
                                       }
+                                      const numDays = Math.round(Number(val));
+                                      setAssignCustomDays(val);
                                       const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
-                                      if (selectedPlan) {
-                                        const totalDays = selectedPlan.durationMonths * 30;
-                                        const basePrice = selectedPlan.price;
-                                        const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, assignCouponCode);
-
-                                        let numericVal = Number(val);
-                                        if (numericVal > totalDays) numericVal = totalDays;
-                                        val = numericVal.toString();
-                                        setAssignCustomDays(val);
-
-                                        if (totalDays > 0) {
-                                          const costPerDay = totalAmt / totalDays;
-                                          setAssignCustomAmount(Math.round(numericVal * costPerDay).toString());
+                                      if (selectedPlan && !isNaN(numDays) && numDays > 0) {
+                                        const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
+                                        const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planBasePrice = (gstEnabled && !isExclusive)
+                                          ? (selectedPlan.price / 1.18)
+                                          : selectedPlan.price;
+                                        
+                                        // In custom mode, coupons do not apply
+                                        const effPlanBase = planBasePrice;
+                                        const dailyBaseRate = planTotalDays > 0 ? (effPlanBase / planTotalDays) : 0;
+                                        if (dailyBaseRate > 0) {
+                                          const daysBase = numDays * dailyBaseRate;
+                                          const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
+                                          setAssignCustomAmount(Math.round(totalGross).toString());
                                         }
-                                      } else {
-                                        setAssignCustomDays(val);
                                       }
                                     }}
                                     placeholder="e.g. 15"
@@ -6134,6 +6900,85 @@ function AdminDashboardContent() {
                                   className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 resize-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                 />
                               </div>
+
+                              {/* Price Breakdown Card */}
+                              {(() => {
+                                const selPlan = (adminPlans || []).find((p: any) => p.id === assignPlanId);
+                                if (!selPlan) return null;
+                                const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                const hasCustom = Boolean((assignCustomAmount && assignCustomAmount.trim()) || (assignCustomDays && assignCustomDays.trim()));
+                                
+                                let defaultTotal = selPlan.price;
+                                if (!hasCustom && isExclusive) {
+                                  defaultTotal = parseFloat((selPlan.price * 1.18).toFixed(2));
+                                }
+                                const enteredTotal = hasCustom ? Number(assignCustomAmount) : defaultTotal;
+
+                                const preTaxBase = hasCustom
+                                  ? (gstEnabled ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal)
+                                  : ((gstEnabled && !isExclusive) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal);
+
+                                const cleanCode = assignCouponCode.trim().toUpperCase();
+                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE') : null;
+
+                                let discOnBase = 0;
+                                if (matchedCoupon && !hasCustom) {
+                                  if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+                                    discOnBase = (gstEnabled && !isExclusive)
+                                      ? parseFloat((Number(matchedCoupon.discountValue || 0) / 1.18).toFixed(2))
+                                      : Number(matchedCoupon.discountValue || 0);
+                                  } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+                                    discOnBase = parseFloat(((preTaxBase * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+                                    if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && discOnBase > Number(matchedCoupon.maxDiscountValue)) {
+                                      discOnBase = Number(matchedCoupon.maxDiscountValue);
+                                    }
+                                  }
+                                  if (discOnBase > preTaxBase) discOnBase = preTaxBase;
+                                }
+
+                                const taxableBase = Math.max(0, parseFloat((preTaxBase - discOnBase).toFixed(2)));
+                                const gstAmt = gstEnabled ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+                                const finalPayable = parseFloat((taxableBase + gstAmt).toFixed(2));
+
+                                return (
+                                  <div className="bg-slate-100 dark:bg-slate-900/80 border border-slate-300 dark:border-white/10 rounded-xl p-3 space-y-1.5 text-xs font-mono">
+                                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                      <span>Pre-tax Base Value:</span>
+                                      <span className={discOnBase > 0 ? 'line-through text-slate-500' : 'text-slate-800 dark:text-slate-200'}>
+                                        ₹{preTaxBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                    {discOnBase > 0 && matchedCoupon && (
+                                      <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                                        <span className="flex items-center gap-1">
+                                          <Tag className="w-3.5 h-3.5" />
+                                          Coupon Discount on Base ({matchedCoupon.code} - {matchedCoupon.discountType === 'PERCENTAGE' ? `${matchedCoupon.discountValue}%` : `₹${matchedCoupon.discountValue}`}):
+                                        </span>
+                                        <span>-₹{discOnBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    )}
+                                    {gstEnabled && (
+                                      <>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-200 dark:border-white/5 pt-1">
+                                          <span>Taxable Value:</span>
+                                          <span>₹{taxableBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                          <span>GST (18%):</span>
+                                          <span>₹{gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div className="flex justify-between border-t border-slate-300 dark:border-white/10 pt-1.5 font-extrabold text-sm text-violet-600 dark:text-violet-400">
+                                      <span>Total Payable:</span>
+                                      <span>
+                                        ₹{finalPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {gstEnabled ? ' (GST Incl.)' : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               {/* Info note */}
                               <div className="flex items-start gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl text-[10px] text-amber-700 dark:text-amber-300">
@@ -6170,242 +7015,186 @@ function AdminDashboardContent() {
                       {/* Add Client Modal */}
                       {isClientModalOpen && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                          <div className="bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+                          <div className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-xl shadow-2xl max-h-[90vh] overflow-y-auto">
                             {/* Modal Header */}
-                            <div className="flex items-center justify-between px-8 py-6 border-b border-slate-400 dark:border-white/10">
+                            <div className="flex items-center justify-between px-8 py-5 border-b border-slate-200 dark:border-white/10">
                               <div>
                                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Register New Client</h3>
-                                <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-0.5">Client will be onboarded with KYC_PENDING status</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Quick Direct Onboarding • Zero Manual KYC Paperwork</p>
                               </div>
-                              <button onClick={() => setIsClientModalOpen(false)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white transition">
-                                <X className="h-5 w-5" />
-                              </button>
-                            </div>
-
-                            <div className="px-8 py-6 space-y-5">
-                              {/* Personal Info */}
-                              <div>
-                                <p className="text-[10px] text-primary-600 dark:text-primary-400 font-bold uppercase tracking-widest mb-3">Personal Information</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Full Name *</label>
-                                    <input
-                                      value={clientName}
-                                      onChange={e => setClientName(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Rahul Sharma"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Email *</label>
-                                    <input
-                                      type="email"
-                                      value={clientEmail}
-                                      onChange={e => {
-                                        setClientEmail(e.target.value);
-                                        if (clientDuplicateField === 'email') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="rahul@example.com"
-                                    />
-                                    {clientDuplicateField === 'email' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Mobile *</label>
-                                    <input
-                                      type="tel"
-                                      value={clientMobile}
-                                      onChange={e => {
-                                        setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
-                                        if (clientDuplicateField === 'mobile') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-primary-500'}`}
-                                      placeholder="10-digit mobile number"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'mobile' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Password *</label>
-                                    <input
-                                      type="password" value={clientPassword}
-                                      onChange={e => setClientPassword(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="Min 8 characters"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Occupation</label>
-                                    <input
-                                      value={clientOccupation}
-                                      onChange={e => setClientOccupation(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-primary-500 focus:outline-none transition"
-                                      placeholder="e.g. Engineer, Business"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* KYC Info */}
-                              <div>
-                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-widest mb-3">KYC Documents</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">PAN Number *</label>
-                                    <input
-                                      value={clientPan}
-                                      onChange={e => {
-                                        setClientPan(formatPan(e.target.value));
-                                        if (clientDuplicateField === 'pan') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'pan' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="ABCDE1234F"
-                                      maxLength={10}
-                                    />
-                                    {clientDuplicateField === 'pan' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Aadhaar Number *</label>
-                                    <input
-                                      value={clientAadhaar}
-                                      onChange={e => {
-                                        setClientAadhaar(formatAadhaar(e.target.value));
-                                        if (clientDuplicateField === 'aadhaar') {
-                                          setClientDuplicateField(null);
-                                          setClientDuplicateError(null);
-                                        }
-                                      }}
-                                      className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white font-mono placeholder-slate-600 focus:outline-none transition ${clientDuplicateField === 'aadhaar' ? 'border-red-500 focus:border-red-500' : 'border-slate-400 dark:border-white/10 focus:border-emerald-500'}`}
-                                      placeholder="12-digit Aadhaar"
-                                      maxLength={12}
-                                    />
-                                    {clientDuplicateField === 'aadhaar' && (
-                                      <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
-                                    )}
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Category</label>
-                                    <select
-                                      value={clientCategory}
-                                      onChange={e => setClientCategory(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none transition"
-                                    >
-                                      <option value="INDIVIDUAL">INDIVIDUAL</option>
-                                      <option value="NON_INDIVIDUAL">NON-INDIVIDUAL</option>
-                                    </select>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Address */}
-                              <div>
-                                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-widest mb-3">Address</p>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="col-span-2">
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">Address Line 1</label>
-                                    <input
-                                      value={clientAddress}
-                                      onChange={e => setClientAddress(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Street address, Area"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">State</label>
-                                    <select
-                                      value={clientState}
-                                      onChange={e => {
-                                        setClientState(e.target.value);
-                                        setClientCity(''); // Reset city when state changes
-                                      }}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition appearance-none"
-                                    >
-                                      <option value="">Select State</option>
-                                      {states.map((s: any) => (
-                                        <option key={s.id} value={s.name}>{s.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">City</label>
-                                    <input
-                                      value={clientCity}
-                                      onChange={e => setClientCity(e.target.value)}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="Select or type city"
-                                      list="client-city-options"
-                                      disabled={!clientState}
-                                    />
-                                    <datalist id="client-city-options">
-                                      {clientCities.map((c: any, i: number) => (
-                                        <option key={i} value={c.name} />
-                                      ))}
-                                    </datalist>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[10px] text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wide">ZIP Code</label>
-                                    <input
-                                      value={clientZip}
-                                      onChange={e => setClientZip(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                      className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-amber-500 focus:outline-none transition"
-                                      placeholder="400001"
-                                      maxLength={6}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Footer */}
-                            <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 flex space-x-3">
                               <button
                                 onClick={() => {
                                   setIsClientModalOpen(false);
                                   setClientDuplicateField(null);
                                   setClientDuplicateError(null);
                                 }}
-                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 border border-slate-400 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
+                                className="text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            <div className="px-8 py-6 space-y-5">
+                              {/* SEBI DigiLocker Notice */}
+                              <div className="p-3.5 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-xl flex items-start space-x-3">
+                                <ShieldCheck className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+                                <div className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                                  <span className="font-bold">DigiLocker KYC Compliance:</span> Full Legal Name, PAN, Aadhaar, DOB, and Address will be automatically fetched directly from DigiLocker when the client logs in. Direct registration requires no manual KYC paperwork or OTP verification.
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Email */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Email Address *
+                                  </label>
+                                  <input
+                                    type="email"
+                                    value={clientEmail}
+                                    onChange={e => {
+                                      setClientEmail(e.target.value);
+                                      if (clientDuplicateField === 'email') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'email' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="client@example.com"
+                                  />
+                                  {clientDuplicateField === 'email' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Mobile */}
+                                <div className="col-span-2 sm:col-span-1">
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Mobile Number *
+                                  </label>
+                                  <input
+                                    type="tel"
+                                    value={clientMobile}
+                                    onChange={e => {
+                                      setClientMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
+                                      if (clientDuplicateField === 'mobile') {
+                                        setClientDuplicateField(null);
+                                        setClientDuplicateError(null);
+                                      }
+                                    }}
+                                    className={`w-full bg-slate-100 dark:bg-slate-800 border rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none transition ${clientDuplicateField === 'mobile' ? 'border-red-500 focus:border-red-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                                    placeholder="10-digit mobile number"
+                                    maxLength={10}
+                                  />
+                                  {clientDuplicateField === 'mobile' && (
+                                    <p className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold animate-pulse">{clientDuplicateError}</p>
+                                  )}
+                                </div>
+
+                                {/* Password */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Password *
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+                                        let pwd = 'Pass@';
+                                        for (let i = 0; i < 5; i++) {
+                                          pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+                                        }
+                                        setClientPassword(pwd);
+                                        toast.success(`Generated password: ${pwd}`);
+                                      }}
+                                      className="text-[10px] font-semibold text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
+                                    >
+                                      <span>🎲 Generate Password</span>
+                                    </button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={clientPassword}
+                                    onChange={e => setClientPassword(e.target.value)}
+                                    maxLength={15}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition font-mono"
+                                    placeholder="8 - 15 characters (e.g. Pass@12345)"
+                                  />
+                                </div>
+
+                                {/* Full Name (Optional) */}
+                                <div className="col-span-2">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                                      Full Name <span className="text-slate-400 font-normal lowercase">(optional)</span>
+                                    </label>
+                                    <span className="text-[10px] text-slate-400">Synced from DigiLocker on KYC</span>
+                                  </div>
+                                  <input
+                                    value={clientName}
+                                    onChange={e => setClientName(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Rahul Sharma"
+                                  />
+                                </div>
+
+                                {/* Category */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Category
+                                  </label>
+                                  <select
+                                    value={clientCategory}
+                                    onChange={e => setClientCategory(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white focus:border-primary-500 focus:outline-none transition cursor-pointer"
+                                  >
+                                    <option value="INDIVIDUAL">INDIVIDUAL</option>
+                                    <option value="HUF">HUF</option>
+                                    <option value="COMPANY">COMPANY</option>
+                                    <option value="PARTNERSHIP">PARTNERSHIP / LLP</option>
+                                  </select>
+                                </div>
+
+                                {/* Occupation */}
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                                    Occupation
+                                  </label>
+                                  <input
+                                    value={clientOccupation}
+                                    onChange={e => setClientOccupation(e.target.value)}
+                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl py-2.5 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:border-primary-500 focus:outline-none transition"
+                                    placeholder="e.g. Salaried, Business"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-8 py-5 border-t border-slate-200 dark:border-white/10 flex space-x-3">
+                              <button
+                                onClick={() => {
+                                  setIsClientModalOpen(false);
+                                  setClientDuplicateField(null);
+                                  setClientDuplicateError(null);
+                                }}
+                                className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 transition"
                               >
                                 Cancel
                               </button>
                               <button
                                 disabled={clientModalLoading}
                                 onClick={async () => {
-                                  // Validate required fields
-                                  if (!clientName.trim() || clientName.trim().length < 2) {
-                                    toast('Full name must be at least 2 characters.'); return;
-                                  }
                                   const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                                  if (!emailRx.test(clientEmail)) {
-                                    setWizardErrors({ coEmail: 'Please enter a valid email address.' }); return;
+                                  if (!emailRx.test(clientEmail.trim())) {
+                                    toast.error('Please enter a valid email address.'); return;
                                   }
-                                  if (!/^\d{10}$/.test(clientMobile)) {
-                                    toast('Mobile number must be exactly 10 digits.'); return;
+                                  if (!/^\d{10}$/.test(clientMobile.trim())) {
+                                    toast.error('Mobile number must be exactly 10 digits.'); return;
                                   }
-                                  if (!clientPassword || clientPassword.length < 8) {
-                                    toast('Password must be at least 8 characters.'); return;
-                                  }
-                                  const panRx = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
-                                  if (!panRx.test(clientPan)) {
-                                    toast('PAN must be in format: ABCDE1234F (10 characters).'); return;
-                                  }
-                                  if (!/^\d{12}$/.test(clientAadhaar)) {
-                                    toast('Aadhaar number must be exactly 12 digits.'); return;
+                                  if (!clientPassword || clientPassword.length < 8 || clientPassword.length > 15) {
+                                    toast.error('Password must be between 8 and 15 characters.'); return;
                                   }
 
                                   setClientModalLoading(true);
@@ -6414,38 +7203,42 @@ function AdminDashboardContent() {
                                   try {
                                     const payload = {
                                       tenantId: user.tenantId,
-                                      name: clientName.trim(),
-                                      email: clientEmail.trim(),
+                                      name: clientName.trim() || clientEmail.split('@')[0],
+                                      email: clientEmail.trim().toLowerCase(),
                                       mobile: clientMobile.trim(),
                                       password: clientPassword,
-                                      pan: clientPan.toUpperCase(),
-                                      aadhaar: clientAadhaar,
-                                      category: clientCategory,
+                                      category: clientCategory || 'INDIVIDUAL',
                                       occupation: clientOccupation || undefined,
-                                      addressLine1: clientAddress || undefined,
-                                      city: clientCity || undefined,
-                                      state: clientState || undefined,
-                                      zipCode: clientZip || undefined,
                                       createdById: user.id
                                     };
                                     const r = await api.registerClient(payload);
                                     if (r.success) {
                                       setIsClientModalOpen(false);
+                                      setClientName('');
+                                      setClientEmail('');
+                                      setClientMobile('');
+                                      setClientPassword('');
+                                      setClientOccupation('');
+                                      setClientCategory('INDIVIDUAL');
                                       loadData();
-                                      toast.success(`Client "${clientName}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete KYC.`);
+                                      toast.success(`Client "${payload.name}" registered successfully!\nStatus: KYC Pending\nThey can now login and complete DigiLocker KYC.`);
                                     }
                                   } catch (e: any) {
                                     if (e.duplicateField) {
                                       setClientDuplicateField(e.duplicateField);
-                                      setClientDuplicateError(e.message || 'Duplicate value detected.');
+                                      const msg = e.duplicateField === 'email'
+                                        ? 'This email address is already registered.'
+                                        : 'This mobile number is already registered.';
+                                      setClientDuplicateError(msg);
+                                      toast.error(msg);
                                     } else {
-                                      toast.error(e.message || 'Failed to register client.');
+                                      toast.error(e.message || (e.errors && e.errors[0]) || 'Failed to register client.');
                                     }
                                   } finally {
                                     setClientModalLoading(false);
                                   }
                                 }}
-                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition"
+                                className="flex-1 flex items-center justify-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-600/20"
                               >
                                 {clientModalLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                                 <span>{clientModalLoading ? 'Registering...' : 'Register Client'}</span>
@@ -6707,29 +7500,6 @@ function AdminDashboardContent() {
                                       <div className="flex justify-between"><span className="text-slate-600 dark:text-slate-400">Country</span><strong className="text-slate-900 dark:text-white">{selectedClient.profile?.country || 'India'}</strong></div>
                                     </div>
                                   </div>
-
-                                  {/* Investment Profile */}
-                                  <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4 md:col-span-2">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Risk & Investment Profile</h4>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Risk Profile</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.riskProfile || 'MODERATE'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Net Worth</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.netWorth ? `₹${selectedClient.profile.netWorth.toLocaleString()}` : '—'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Investment Limit</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.investmentLimit ? `₹${selectedClient.profile.investmentLimit.toLocaleString()}` : '—'}</strong>
-                                      </div>
-                                      <div className="bg-slate-100 dark:bg-slate-950/40 p-3 rounded-lg border border-slate-300 dark:border-white/5">
-                                        <span className="text-slate-600 dark:text-slate-400 block text-[10px] uppercase">Investment Period</span>
-                                        <strong className="text-slate-900 dark:text-white block mt-1">{selectedClient.profile?.investmentPeriod ? `${selectedClient.profile.investmentPeriod} Months` : '—'}</strong>
-                                      </div>
-                                    </div>
-                                  </div>
                                 </div>
                               )}
 
@@ -6740,8 +7510,14 @@ function AdminDashboardContent() {
                                     <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">KYC Verification Status</h4>
                                     <div className="flex items-center space-x-3 text-xs mb-2">
                                       <span className="text-slate-600 dark:text-slate-400">KYC Status:</span>
-                                      <span className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] border ${selectedClient.status === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'}`}>
-                                        {selectedClient.status?.replace(/_/g, ' ')}
+                                      <span className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] border ${
+                                        ['VERIFIED', 'APPROVED', 'COMPLETED'].includes(selectedClient.kycStatus)
+                                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                                          : ['REJECTED', 'FAILED'].includes(selectedClient.kycStatus)
+                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                                      }`}>
+                                        {(selectedClient.kycStatus || 'PENDING')?.replace(/_/g, ' ')}
                                       </span>
                                     </div>
 
@@ -6770,20 +7546,20 @@ function AdminDashboardContent() {
 
                                   {/* Agreements status */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Advisory Agreements</h4>
+                                    <h4 className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Client Service Agreements</h4>
                                     {selectedClient.agreements && selectedClient.agreements.length > 0 ? (
                                       <div className="space-y-3">
                                         {selectedClient.agreements.map((agr: any) => (
                                           <div key={agr.id} className="p-3.5 bg-slate-100 dark:bg-slate-950/40 border border-slate-300 dark:border-white/5 rounded-lg flex items-center justify-between text-xs">
                                             <div className="space-y-1">
                                               <div className="flex items-center space-x-2">
-                                                <strong className="text-slate-900 dark:text-white">Advisory Agreement v{agr.version}</strong>
+                                                <strong className="text-slate-900 dark:text-white">Service Agreement v{agr.version}</strong>
                                                 <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/20 uppercase">{agr.status}</span>
                                               </div>
                                               <div className="text-[10px] text-slate-500 dark:text-slate-500">Signed on {new Date(agr.signedAt).toLocaleDateString('en-IN')} via {agr.esignMode}</div>
                                             </div>
                                             <a
-                                              href={`${api.getBaseUrl()}${agr.agreementUrl}`}
+                                              href={api.getDownloadUrl(agr.agreementUrl)}
                                               target="_blank"
                                               rel="noreferrer"
                                               className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-400 dark:border-white/10 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 transition"
@@ -6795,7 +7571,7 @@ function AdminDashboardContent() {
                                         ))}
                                       </div>
                                     ) : (
-                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed advisory agreement on file.</div>
+                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No signed service agreement on file.</div>
                                     )}
                                   </div>
                                 </div>
@@ -6993,7 +7769,7 @@ function AdminDashboardContent() {
 
                             {/* Modal Footer */}
                             <div className="px-8 py-5 border-t border-slate-400 dark:border-white/10 bg-slate-100 dark:bg-slate-800/40 flex justify-end space-x-3 text-xs">
-                              {selectedClient.user?.deletedAt === null && (
+                              {selectedClient.user?.deletedAt === null && (!isStaff || hasPermission('EDIT_CLIENTS')) && (
                                 <button
                                   onClick={() => {
                                     setIsViewClientModalOpen(false);
@@ -7028,7 +7804,7 @@ function AdminDashboardContent() {
           SIGNAL MANAGEMENT TAB
          ==================================================== */}
                   {activeTab === 'research' && hasPermission('ACCESS_RESEARCH') && (
-                    <SignalManagement adminPlans={adminPlans} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
+                    <SignalManagement adminPlans={adminPlans} categories={categories} user={user} hasPermission={hasPermission} showMobilePreview={showMobilePreview} />
                   )}
 
                   {/* ====================================================
@@ -7036,6 +7812,28 @@ function AdminDashboardContent() {
          ==================================================== */}
                   {activeTab === 'research-reports' && hasPermission('ACCESS_RESEARCH') && (
                     <AdminResearchReports />
+                  )}
+
+                  {/* ====================================================
+          MULTI-CHANNEL DELIVERY REPORTS TAB
+         ==================================================== */}
+                  {(activeTab === 'delivery-reports' || activeTab.startsWith('deliveryReports_')) && (hasPermission('ACCESS_DELIVERY_REPORTS') || ['SUPER_ADMIN', 'ADMIN'].includes(user?.role)) && (
+                    <div className="mx-6 space-y-6 animate-fade-in">
+                      <TradeDeliveryReports
+                        key={activeTab}
+                        initialChannel={
+                          activeTab === 'deliveryReports_telegram' ? 'TELEGRAM' :
+                          activeTab === 'deliveryReports_sms' ? 'SMS' :
+                          activeTab === 'deliveryReports_inapp' ? 'INAPP' : 'ALL'
+                        }
+                        onChannelChange={(ch) => {
+                          if (ch === 'TELEGRAM') setActiveTab('deliveryReports_telegram');
+                          else if (ch === 'SMS') setActiveTab('deliveryReports_sms');
+                          else if (ch === 'INAPP') setActiveTab('deliveryReports_inapp');
+                          else setActiveTab('deliveryReports_all');
+                        }}
+                      />
+                    </div>
                   )}
 
                   {activeTab === 'plans' && (
@@ -7086,23 +7884,25 @@ function AdminDashboardContent() {
                             </div>
                           </div>
 
-                          {/* Category Filter Pills */}
-                          <div className="flex space-x-3 mb-6 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                          {/* Category Filter Pills - Multi-line Flex Wrap (No scroll required) & Active Categories Only */}
+                          <div className="flex flex-wrap gap-2.5 mb-6">
                             <button
                               onClick={() => setSelectedCategoryFilter('ALL')}
-                              className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                              className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === 'ALL' ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
                             >
                               All Plans
                             </button>
-                            {categories.map(cat => (
-                              <button
-                                key={cat.id}
-                                onClick={() => setSelectedCategoryFilter(cat.id)}
-                                className={`px-6 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-colors ${selectedCategoryFilter === cat.id ? 'bg-[#E1F13D] text-slate-950' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
-                              >
-                                {cat.name}
-                              </button>
-                            ))}
+                            {categories
+                              .filter(cat => cat.status === 'ACTIVE' || (!cat.status && !cat.deletedAt))
+                              .map(cat => (
+                                <button
+                                  key={cat.id || cat._id}
+                                  onClick={() => setSelectedCategoryFilter(cat.id || cat._id)}
+                                  className={`px-5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${selectedCategoryFilter === (cat.id || cat._id) ? 'bg-[#E1F13D] text-slate-950 shadow-sm font-extrabold' : 'bg-transparent border border-slate-400 dark:border-white/20 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 dark:bg-white/5'}`}
+                                >
+                                  {cat.name}
+                                </button>
+                              ))}
                           </div>
 
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -7287,49 +8087,262 @@ function AdminDashboardContent() {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Terms & Conditions PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setTermsPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
+                              {/* Terms & Conditions PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Terms & Conditions PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      termsPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : termsPdfUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {termsPdf ? '● New File Selected' : termsPdfUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Sent automatically to client in the Welcome Email upon onboarding.
+                                  </p>
+
+                                  <div className="space-y-3">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setTermsPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('terms', 'Terms & Conditions PDF', termsPdf, termsPdfUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Terms PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('terms', termsPdf, termsPdfUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Privacy Policy PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setPrivacyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Sent automatically with Welcome Email.</p>
+
+                              {/* Privacy Policy PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Privacy Policy PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      privacyPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : privacyPdfUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {privacyPdf ? '● New File Selected' : privacyPdfUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Sent automatically to client in the Welcome Email upon onboarding.
+                                  </p>
+
+                                  <div className="space-y-3">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setPrivacyPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('privacy', 'Privacy Policy PDF', privacyPdf, privacyPdfUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Privacy PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('privacy', privacyPdf, privacyPdfUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-white/5 md:col-span-2">
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Internal Policy PDF</label>
-                                <input type="file" accept="application/pdf" onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100" />
-                                <p className="text-xs text-slate-500 mt-2">Written internal policies & controls for SEBI compliance. Not visible to clients.</p>
+
+                              {/* Internal Policy PDF Card */}
+                              <div className="bg-white dark:bg-slate-900/90 p-5 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col justify-between hover:border-primary-500/30 transition-all md:col-span-2">
+                                <div>
+                                  <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                      Internal Policy PDF
+                                    </label>
+                                    <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full ${
+                                      internalPolicyPdf 
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                                        : policyUrl 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700' 
+                                        : 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    }`}>
+                                      {internalPolicyPdf ? '● New File Selected' : policyUrl ? '● Custom PDF Active' : '● Default SEBI Template'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                    Written internal supervisory policies & controls for SEBI compliance audit trail. Not visible to clients.
+                                  </p>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                                    <input
+                                      type="file"
+                                      accept="application/pdf"
+                                      onChange={e => setInternalPolicyPdf(e.target.files?.[0] as any)}
+                                      className="w-full text-xs text-slate-500 dark:text-slate-400 file:mr-3 file:py-2 file:px-3.5 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-primary-50 dark:file:bg-primary-950/60 file:text-primary-700 dark:file:text-primary-300 hover:file:bg-primary-100 dark:hover:file:bg-primary-900/50 cursor-pointer border border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-800/30"
+                                    />
+
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => openPdfPreview('internal', 'Internal Policy PDF', internalPolicyPdf, policyUrl)}
+                                        className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2.5 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/50 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800/60 rounded-xl text-xs font-bold transition-all shadow-sm group"
+                                      >
+                                        <Eye className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span>Preview Internal Policy PDF</span>
+                                      </button>
+                                      <a
+                                        href={getPdfDirectUrl('internal', internalPolicyPdf, policyUrl)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="p-2.5 text-slate-500 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                                        title="Open in new window"
+                                      >
+                                        <ExternalLink className="w-4 h-4" />
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
 
-                            <div className="border-t border-slate-400 dark:border-white/10 pt-6 space-y-6">
+                            <div className="border-t border-slate-300 dark:border-white/10 pt-6 space-y-6">
                               <div>
-                                <div className="flex justify-between items-center mb-1">
-                                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Service Agreement Content</label>
-                                  <span className="text-[10px] bg-primary-100 text-primary-700 px-2 py-1 rounded">Supports Variables</span>
+                                <div className="flex justify-between items-center mb-2">
+                                  <label className="block text-sm font-bold text-slate-800 dark:text-slate-200">
+                                    Service Agreement Content
+                                  </label>
+                                  <span className="text-[10px] bg-primary-100 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 px-2.5 py-1 rounded-full font-bold border border-primary-200 dark:border-primary-800/60">
+                                    Supports Dynamic Variables
+                                  </span>
                                 </div>
-                                <p className="text-[11px] text-slate-500 mb-2">
-                                  Available variables: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_EMAIL}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_MOBILE}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{PAN_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{AADHAAR_NUMBER}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{CLIENT_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_NAME}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{COMPANY_ADDRESS}}"}</code>, <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">{"{{DATE}}"}</code>
-                                </p>
-                                <textarea
-                                  value={agreementContent}
-                                  onChange={e => setAgreementContent(e.target.value)}
-                                  rows={6}
-                                  className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
-                                  placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
-                                />
+                                <div className="bg-slate-50 dark:bg-slate-900/60 p-3.5 rounded-xl border border-slate-200 dark:border-white/5 mb-3">
+                                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1.5">
+                                    <span>Click any variable below to copy it with one click:</span>
+                                  </p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {AGREEMENT_VARIABLES.map(v => {
+                                      const isCopied = copiedVariable === v.key;
+                                      return (
+                                        <button
+                                          key={v.key}
+                                          type="button"
+                                          onClick={() => handleCopyVariable(v.key, v.label)}
+                                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all duration-150 border cursor-pointer ${
+                                            isCopied
+                                              ? 'bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-300 shadow-sm'
+                                              : 'bg-white hover:bg-primary-50 dark:bg-slate-800 dark:hover:bg-primary-950/40 border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600 text-slate-700 dark:text-slate-200 hover:text-primary-700 dark:hover:text-primary-300'
+                                          }`}
+                                          title={`Click to copy ${v.key} (${v.label})`}
+                                        >
+                                          {isCopied ? (
+                                            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                          ) : (
+                                            <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition-colors" />
+                                          )}
+                                          <span className="font-semibold">{v.key}</span>
+                                          <span className="text-[10px] text-slate-400 font-sans group-hover:text-primary-500">
+                                            {isCopied ? 'Copied!' : `(${v.label})`}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={agreementContent}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setAgreementContent(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea
+                                      value={agreementContent}
+                                      onChange={e => setAgreementContent(e.target.value)}
+                                      rows={6}
+                                      className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-xs font-mono"
+                                      placeholder={`Enter the Service Agreement terms here...\n\nThis agreement is made between {{COMPANY_NAME}} and {{CLIENT_NAME}}...`}
+                                    />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Welcome Email Custom Text</label>
-                                <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={welcomeEmailText}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setWelcomeEmailText(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={welcomeEmailText} onChange={e => setWelcomeEmailText(e.target.value)} rows={3} placeholder="Add custom text to the welcome email..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                               </div>
 
                               <div>
                                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Research Report Disclaimer</label>
-                                <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                <div className="text-black bg-white rounded-xl overflow-hidden border border-slate-300 dark:border-white/10 shadow-inner">
+                                  {ClassicEditor ? (
+                                    <CKEditor
+                                      editor={ClassicEditor as any}
+                                      data={reportDisclaimer}
+                                      onChange={(event: any, editor: any) => {
+                                        const data = editor.getData();
+                                        setReportDisclaimer(data);
+                                      }}
+                                    />
+                                  ) : (
+                                    <textarea value={reportDisclaimer} onChange={e => setReportDisclaimer(e.target.value)} rows={4} placeholder="Type your full research report disclaimer and disclosure here..." className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm focus:border-primary-500 outline-none transition" />
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500 mt-1">This text will automatically appear at the bottom of generated PDF Research Reports.</p>
                               </div>
                             </div>
@@ -7524,6 +8537,48 @@ function AdminDashboardContent() {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Gateway Live Verification Section */}
+                              <div className="pt-3 border-t border-slate-200 dark:border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+                                <div className="flex-1">
+                                  {gatewayVerifyResult ? (
+                                    <div className={`flex items-center space-x-2.5 text-xs p-3 rounded-xl transition-all ${gatewayVerifyResult.success ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30'}`}>
+                                      <span className="text-base leading-none">{gatewayVerifyResult.success ? '✅' : '❌'}</span>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="font-semibold">{gatewayVerifyResult.message}</p>
+                                        {gatewayVerifyResult.mode && (
+                                          <span className="inline-block mt-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border border-emerald-500/30">
+                                            Status: {gatewayVerifyResult.mode} MODE
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      Click Verify to test authentication with <span className="font-semibold text-slate-700 dark:text-slate-300">{activePaymentGateway}</span> servers.
+                                    </p>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyPaymentGateway}
+                                  disabled={verifyingGateway}
+                                  className="inline-flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 whitespace-nowrap self-end sm:self-center"
+                                >
+                                  {verifyingGateway ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      <span>Verifying Credentials...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-4 w-4" />
+                                      <span>Verify Gateway Connection</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -7549,6 +8604,114 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Password (App Password)</label>
                                   <input type="password" value={smtpPassword} onChange={e => setSmtpPassword(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Enter password to update" />
                                 </div>
+                                <div className="md:col-span-2">
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Sender Name / From Header (Optional)</label>
+                                  <input type="text" value={smtpFrom} onChange={e => setSmtpFrom(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. RAGCP Support or leave blank to use Username" />
+                                </div>
+                              </div>
+
+                              {/* CC Invoice & CC Agreement Configuration */}
+                              <div className="border-t border-slate-200 dark:border-slate-800 pt-5">
+                                <div className="mb-4">
+                                  <h4 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                                    <span>📬 CC (Carbon Copy) Automated Email Dispatch</span>
+                                  </h4>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Configure CC email addresses for automatic carbon copies when client invoices and signed agreements are sent.
+                                  </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* CC Invoice Card */}
+                                  <div className={`p-4 rounded-xl border transition-all ${
+                                    ccInvoiceEnabled
+                                      ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/60 shadow-sm'
+                                      : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800'
+                                  }`}>
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center text-sm font-bold">
+                                          🧾
+                                        </div>
+                                        <div>
+                                          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">CC Invoice</label>
+                                          <p className="text-[11px] text-slate-500">Auto-copy for client Tax Invoices</p>
+                                        </div>
+                                      </div>
+                                      <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="sr-only peer"
+                                          checked={ccInvoiceEnabled}
+                                          onChange={e => setCcInvoiceEnabled(e.target.checked)}
+                                        />
+                                        <div className="w-10 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600"></div>
+                                      </label>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                        CC Invoice Email Address {ccInvoiceEnabled && <span className="text-red-500">*</span>}
+                                      </label>
+                                      <input
+                                        type="email"
+                                        disabled={!ccInvoiceEnabled}
+                                        value={ccInvoiceEmail}
+                                        onChange={e => setCcInvoiceEmail(e.target.value)}
+                                        placeholder="e.g. accounts@yourcompany.com"
+                                        className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800/60 focus:border-primary-500 outline-none transition"
+                                      />
+                                      <p className="text-[10px] text-slate-400 mt-1">
+                                        When enabled, an exact PDF copy of every generated client invoice is sent here.
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* CC Agreement Card */}
+                                  <div className={`p-4 rounded-xl border transition-all ${
+                                    ccAgreementEnabled
+                                      ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60 shadow-sm'
+                                      : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800'
+                                  }`}>
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-sm font-bold">
+                                          📜
+                                        </div>
+                                        <div>
+                                          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">CC Agreement</label>
+                                          <p className="text-[11px] text-slate-500">Auto-copy for signed Service Agreements</p>
+                                        </div>
+                                      </div>
+                                      <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          className="sr-only peer"
+                                          checked={ccAgreementEnabled}
+                                          onChange={e => setCcAgreementEnabled(e.target.checked)}
+                                        />
+                                        <div className="w-10 h-5 bg-slate-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600"></div>
+                                      </label>
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                        CC Agreement Email Address {ccAgreementEnabled && <span className="text-red-500">*</span>}
+                                      </label>
+                                      <input
+                                        type="email"
+                                        disabled={!ccAgreementEnabled}
+                                        value={ccAgreementEmail}
+                                        onChange={e => setCcAgreementEmail(e.target.value)}
+                                        placeholder="e.g. compliance@yourcompany.com"
+                                        className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800/60 focus:border-primary-500 outline-none transition"
+                                      />
+                                      <p className="text-[10px] text-slate-400 mt-1">
+                                        When enabled, an executed copy of client service agreements with PDF is sent here.
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -7568,7 +8731,18 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Client Secret</label>
                                   <input type="password" value={digioClientSecret} onChange={e => setDigioClientSecret(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="Leave blank to keep unchanged" />
                                 </div>
-                                <div className="md:col-span-2">
+                                <div>
+                                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio Environment</label>
+                                  <select
+                                    value={digioEnvironment}
+                                    onChange={e => setDigioEnvironment(e.target.value)}
+                                    className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs"
+                                  >
+                                    <option value="SANDBOX">Sandbox / UAT (ext.digio.in:444) — For Testing (ACK/AIK keys)</option>
+                                    <option value="PRODUCTION">Production (api.digio.in) — Live Accounts</option>
+                                  </select>
+                                </div>
+                                <div>
                                   <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Digio KYC Template Name</label>
                                   <input type="text" value={digioKycTemplateName} onChange={e => setDigioKycTemplateName(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs" placeholder="e.g. KYC_TEMPLATE_1" />
                                 </div>
@@ -7600,6 +8774,8 @@ function AdminDashboardContent() {
                                 <input
                                   type="password" required
                                   minLength={8}
+                                  maxLength={15}
+                                  placeholder="8 - 15 characters"
                                   value={profileNewPassword}
                                   onChange={e => setProfileNewPassword(e.target.value)}
                                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
@@ -7610,6 +8786,8 @@ function AdminDashboardContent() {
                                 <input
                                   type="password" required
                                   minLength={8}
+                                  maxLength={15}
+                                  placeholder="8 - 15 characters"
                                   value={profileConfirmPassword}
                                   onChange={e => setProfileConfirmPassword(e.target.value)}
                                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-3 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-primary-500 focus:outline-none"
@@ -7635,89 +8813,13 @@ function AdminDashboardContent() {
                   {activeTab === 'complaintReport' && <ComplaintReportAdmin />}
 
                   {activeTab === 'signature_settings' && (
-                    <div className="max-w-4xl mx-auto space-y-6 pb-20">
-                      <div className="flex items-center space-x-3 mb-6">
-                        <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                          <Settings className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Personal Settings</h2>
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Configure your UI preferences and signature</p>
-                        </div>
-                      </div>
-
-                      {/* UI Preferences Section */}
-                      <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/10 p-6">
-                        <h3 className="text-lg font-bold mb-4">UI Preferences</h3>
-                        <div className="flex items-center justify-between p-4 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                          <div>
-                            <h4 className="font-bold text-sm">Show Mobile Preview in Signal Desk</h4>
-                            <p className="text-xs text-slate-500 mt-1">Enable or disable the right-side mobile app preview panel when managing signals.</p>
-                          </div>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
-                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
-                          </label>
-                        </div>
-                      </div>
-
-                      {/* Signature Section */}
-                      {(user?.role === 'RESEARCHER' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                        <div className="glassmorphism rounded-2xl border border-slate-300 dark:border-white/10 p-6">
-                          <h3 className="text-lg font-bold mb-4">Research Analyst Signature</h3>
-                          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 p-4 rounded-xl mb-6 flex items-start space-x-3">
-                            <AlertTriangle className="h-5 w-5 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <h4 className="font-bold text-sm">Why is this required?</h4>
-                              <p className="text-xs mt-1 leading-relaxed">
-                                As per SEBI guidelines, every Research Report generated must bear the signature of the responsible Research Analyst.
-                                When you upload your signature here, it will be securely saved and automatically appended to the footer of all PDF
-                                Research Reports generated from the Signal Management desk.
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="space-y-4">
-                            {user?.tenant?.coSignatureUrl && (
-                              <div className="mb-4 p-4 bg-slate-50 dark:bg-[#1A2235] rounded-xl border border-slate-200 dark:border-white/10 inline-block">
-                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2 font-bold uppercase">Current Signature</p>
-                                <img
-                                  src={user.tenant.coSignatureUrl.startsWith('http') ? user.tenant.coSignatureUrl : `${api.getBaseUrl()}${user.tenant.coSignatureUrl}`}
-                                  alt="Current Signature"
-                                  className="h-20 object-contain mix-blend-multiply dark:mix-blend-normal bg-white"
-                                />
-                              </div>
-                            )}
-                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Upload Your Signature</label>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">Accepted formats: PNG, JPG, JPEG (Max 2MB). A clear signature on a white background is recommended.</p>
-
-                            <div className="mt-2">
-                              <input
-                                type="file"
-                                id="coSignatureUploadSettings"
-                                className="hidden"
-                                accept="image/*"
-                                onChange={(e) => {
-                                  if (window.confirm("Notice: This signature will be applied to all your generated PDF Research Reports. Do you want to proceed?")) {
-                                    handleUploadCoSignature(e);
-                                  } else {
-                                    e.target.value = '';
-                                  }
-                                }}
-                                disabled={uploadingCoSignature}
-                              />
-                              <label
-                                htmlFor="coSignatureUploadSettings"
-                                className={`inline-flex px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer ${uploadingCoSignature ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              >
-                                {uploadingCoSignature ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                                <span>Select & Upload Signature File</span>
-                              </label>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <SignatureSettingsTab
+                      user={user}
+                      setUser={setUser}
+                      loadData={loadData}
+                      showMobilePreview={showMobilePreview}
+                      toggleMobilePreview={toggleMobilePreview}
+                    />
                   )}
 
                   {activeTab === 'resources' && (
@@ -7764,7 +8866,7 @@ function AdminDashboardContent() {
                             )}
                           </div>
 
-                          <div className="space-y-2">
+                          <div className="space-y-2 max-h-[480px] overflow-y-auto custom-scrollbar pr-1.5">
                             {roles.filter((r: any) => !(user?.role === 'ADMIN' && r.name === 'SUPER_ADMIN')).map((r: any) => {
                               const isSelected = selectedRole?.id === r.id;
                               const isSystemRole = ['SUPER_ADMIN', 'ADMIN', 'PRINCIPAL_OFFICER', 'COMPLIANCE_OFFICER', 'RESEARCHER', 'PERSON_ASSOCIATED', 'CLIENT'].includes(r.name);
@@ -8004,7 +9106,7 @@ function AdminDashboardContent() {
                           <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase tracking-wider">Plan Category</label>
                           <select value={planCategoryId} onChange={e => setPlanCategoryId(e.target.value)} required className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-400 dark:border-white/10 rounded-xl py-3 px-4 text-sm">
                             <option value="">Select Category</option>
-                            {categories.map(c => <option key={c.id} value={c.id}>{c.name} ({c.segments})</option>)}
+                            {categories.map(c => <option key={c.id || c._id} value={c.id || c._id}>{c.name} ({c.segments})</option>)}
                           </select>
                         </div>
 
@@ -8448,6 +9550,176 @@ function AdminDashboardContent() {
                 </div>
               )}
 
+              {/* COMPLAINT DETAILS & ATR RESOLUTION MODAL */}
+              {viewingComplaint && (() => {
+                const isClosed = viewingComplaint.status === 'CLOSED' || viewingComplaint.status === 'RESOLVED';
+                const resDate = viewingComplaint.resolvedAt || (isClosed ? viewingComplaint.updatedAt : null);
+                const resolvedTime = resDate ? new Date(resDate).getTime() : 0;
+                const deadlineTime = viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).getTime() : 0;
+                const diffDays = (isClosed && resolvedTime && deadlineTime)
+                  ? Math.ceil((resolvedTime - deadlineTime) / (1000 * 3600 * 24))
+                  : 0;
+                const isOverdueClosed = isClosed && diffDays > 0;
+                const fullProofUrl = viewingComplaint.atrProofUrl ? (`${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl()}${viewingComplaint.atrProofUrl}`) : null;
+                const isImage = fullProofUrl && fullProofUrl.match(/\.(jpg|jpeg|png|webp|gif)$/i);
+
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white dark:bg-[#0f1523] border border-slate-300 dark:border-white/10 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-200">
+                      <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 rounded-xl bg-primary-500/10 text-primary-600 dark:text-primary-400">
+                            <ShieldAlert className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">Complaint & Resolution Details</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">SEBI Grievance / Action Taken Report (ATR)</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setViewingComplaint(null)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+
+                      <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+                        <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
+                          isClosed
+                            ? (isOverdueClosed ? 'bg-rose-500/10 border-rose-500/25 text-rose-700 dark:text-rose-300' : 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300')
+                            : 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300'
+                        }`}>
+                          <div className="flex items-center gap-2.5">
+                            {isClosed ? (
+                              isOverdueClosed ? <AlertTriangle className="h-5 w-5 text-rose-500 shrink-0" /> : <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />
+                            ) : (
+                              <Clock className="h-5 w-5 text-amber-500 shrink-0" />
+                            )}
+                            <div>
+                              <p className="text-xs font-bold uppercase tracking-wider">
+                                {isClosed ? (isOverdueClosed ? `Resolved Overdue (${diffDays} days past deadline)` : 'Resolved Timely (Within SEBI 21-Day TAT)') : 'Complaint Status: OPEN'}
+                              </p>
+                              <p className="text-[11px] opacity-80 mt-0.5">
+                                {isClosed ? `Closed on ${new Date(resDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : `Resolution due by ${viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).toLocaleDateString() : 'N/A'}`}
+                              </p>
+                            </div>
+                          </div>
+                          <span className={`px-2.5 py-1 rounded-md text-xs font-black uppercase ${
+                            isClosed
+                              ? (isOverdueClosed ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30')
+                              : 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                          }`}>
+                            {viewingComplaint.status}
+                          </span>
+                        </div>
+
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Complainant & Grievance Information</h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Client Name</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.clientName || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Client PAN</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">{viewingComplaint.clientPan || 'N/A'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Source</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.source} {viewingComplaint.scoresRefId ? `(${viewingComplaint.scoresRefId})` : ''}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Date Received</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.receivedAt ? new Date(viewingComplaint.receivedAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">SEBI Deadline</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200">{viewingComplaint.deadlineAt ? new Date(viewingComplaint.deadlineAt).toLocaleDateString() : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 block text-[10px]">Contact</span>
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">{viewingComplaint.clientMobile || viewingComplaint.clientEmail || '-'}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-200 dark:border-white/5 space-y-1.5">
+                            <span className="text-slate-500 block text-[10px]">Subject</span>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">{viewingComplaint.subject}</p>
+                            {viewingComplaint.description && (
+                              <>
+                                <span className="text-slate-500 block text-[10px] pt-1">Grievance Description</span>
+                                <p className="text-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900/60 p-2.5 rounded-lg border border-slate-200 dark:border-white/5 whitespace-pre-wrap">{viewingComplaint.description}</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-4 border border-slate-200 dark:border-white/5 space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Action Taken Report (ATR) & Resolution</h4>
+                          <div>
+                            <span className="text-slate-500 block text-[10px] mb-1 font-semibold">Action Taken Remarks (Entered during resolution):</span>
+                            <div className="p-3 bg-white dark:bg-slate-900/60 rounded-xl border border-primary-500/20 text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
+                              {viewingComplaint.resolutionNote || viewingComplaint.remarks ? (
+                                <p className="whitespace-pre-wrap">{viewingComplaint.resolutionNote || viewingComplaint.remarks}</p>
+                              ) : (
+                                <p className="text-slate-400 italic">No action taken remarks entered.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <span className="text-slate-500 block text-[10px] mb-1.5 font-semibold">Attached ATR Proof Document:</span>
+                            {fullProofUrl ? (
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-white/5 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate max-w-xs block">
+                                    📎 {viewingComplaint.atrProofUrl.split('/').pop()}
+                                  </span>
+                                  <a
+                                    href={fullProofUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold flex items-center gap-1 transition"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" /> Open File
+                                  </a>
+                                </div>
+
+                                {isImage && (
+                                  <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-white/10 bg-black/5 dark:bg-black/30 p-2 flex justify-center">
+                                    <img
+                                      src={fullProofUrl}
+                                      alt="ATR Proof Attachment"
+                                      className="max-h-60 object-contain rounded cursor-pointer hover:opacity-95 transition"
+                                      onClick={() => window.open(fullProofUrl, '_blank')}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900/40 border border-dashed border-slate-300 dark:border-white/10 text-slate-400 text-xs italic">
+                                No ATR document was uploaded for this record.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end p-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02]">
+                        <button
+                          type="button"
+                          onClick={() => setViewingComplaint(null)}
+                          className="px-5 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* NON-ADMIN CLIENT VIEWS */}
               {activeTab === 'complaintDataView' && (
                 <CustomPageView page={{ slug: 'complaint-status', title: 'Complaint Data' }} />
@@ -8728,6 +10000,7 @@ function AdminDashboardContent() {
                         <select required value={complaintSource} onChange={(e) => setComplaintSource(e.target.value)} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500">
                           <option value="MANUAL">Manual</option>
                           <option value="SCORES">SCORES</option>
+                          <option value="ODR">ODR</option>
                           <option value="EMAIL">Email</option>
                           <option value="PORTAL">Portal</option>
                         </select>
@@ -8744,7 +10017,7 @@ function AdminDashboardContent() {
                       </div>
                       <div>
                         <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1 uppercase tracking-wider">Client PAN</label>
-                        <input type="text" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500" />
+                        <input type="text" maxLength={10} placeholder="ABCDE1234F" value={complaintPan} onChange={(e) => setComplaintPan(formatPan(e.target.value))} className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 uppercase font-mono" />
                       </div>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -8773,6 +10046,79 @@ function AdminDashboardContent() {
             </div>
           </div>
         )}
+
+        {/* PDF Preview Modal */}
+        {pdfPreviewModal?.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-900/80 backdrop-blur-md animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-5xl h-[92vh] rounded-3xl shadow-2xl border border-slate-200 dark:border-white/10 flex flex-col overflow-hidden animate-fade-in-up">
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/50">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 rounded-xl">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {pdfPreviewModal.title}
+                      </h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/60 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-700">
+                        {pdfPreviewModal.badgeText}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Live document view with official compliance headers and formatting
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={pdfPreviewModal.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setPdfPreviewModal(null)}
+                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF View Container */}
+              <div className="flex-1 bg-slate-100 dark:bg-slate-950 p-2 sm:p-4 overflow-hidden">
+                <iframe
+                  src={pdfPreviewModal.url}
+                  className="w-full h-full rounded-2xl border border-slate-300 dark:border-slate-800 shadow-inner bg-white"
+                  title={pdfPreviewModal.title}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* L2 Payment Review Modal */}
+        <L2PaymentReviewModal
+          isOpen={!!selectedL2Payment}
+          payment={selectedL2Payment}
+          plans={adminPlans}
+          categories={categories}
+          currentUser={user}
+          onClose={() => setSelectedL2Payment(null)}
+          onSuccess={() => {
+            api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+          }}
+          onApproved={() => {
+            api.getAdminPayments().then(res => { if (res.success) setAllPayments(res.data); }).catch(() => { });
+          }}
+        />
 
         {/* Logout Modal */}
         {isLogoutModalOpen && (

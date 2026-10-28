@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
-import prisma from '../config/db';
+import { User, Role, Permission, RolePermission, centralModels, Tenant, dynamicDb } from '../config/db';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-12345';
+import { getJwtSecret } from '../config/jwtSecret';
+const JWT_SECRET = getJwtSecret();
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -32,65 +33,64 @@ export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: 
       // Check user status in DB to auto-logout inactive/suspended users
       try {
         if (!decoded.isImpersonated) {
-          const user = await prisma.user.findUnique({
-            where: { id: decoded.id },
-            select: { 
-              status: true, 
-              tokenVersion: true,
-              currentSessionId: true,
-              role: { select: { name: true, allowMultiDeviceLogin: true } }, 
-              tenant: { select: { status: true } } 
-            }
-          });
+          let user: any = await User.findById(decoded.id)
+            .populate('role', 'name allowMultiDeviceLogin')
+            .populate('tenant', 'status')
+            .select('status tokenVersion currentSessionId roleId tenantId')
+            .lean();
 
-          if (!user || user.status !== 'ACTIVE') {
-            return res.status(403).json({
-              success: false,
-              message: 'Your account has been deactivated. Please contact admin.',
-              errors: ['User inactive or suspended']
-            });
+          if (!user) {
+            user = await centralModels.User.findById(decoded.id)
+              .populate('role', 'name allowMultiDeviceLogin')
+              .populate('tenant', 'status')
+              .select('status tokenVersion currentSessionId roleId tenantId')
+              .lean();
           }
 
-          // Session validation
-          if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
-            return res.status(401).json({
-              success: false,
-              message: 'Session revoked. Please login again.',
-              errors: ['Token version mismatch']
-            });
-          }
-
-          if (!user.role.allowMultiDeviceLogin && decoded.sessionId && decoded.sessionId !== user.currentSessionId) {
-            return res.status(401).json({
-              success: false,
-              message: 'Logged out because you logged in from another device.',
-              errors: ['Single device constraint violated']
-            });
-          }
-
-
-
-          if (user.tenant) {
-            const tenantStatus = user.tenant.status;
-            
-            if (tenantStatus === 'DELETED') {
-              return res.status(403).json({
+          if (user) {
+            // Session validation
+            const decodedTokenVersion = Number(decoded.tokenVersion || 0);
+            const userTokenVersion = Number(user.tokenVersion || 0);
+            if (decoded.tokenVersion !== undefined && decodedTokenVersion !== userTokenVersion) {
+              return res.status(401).json({
                 success: false,
-                message: 'Your organization account has been deleted.',
-                errors: ['User inactive or suspended']
+                message: 'Session revoked. Please login again.',
+                errors: ['Token version mismatch']
               });
             }
 
-            if (tenantStatus === 'SUSPENDED' && user.role.name !== 'CLIENT') {
-              return res.status(403).json({
+            const allowMultiDevice = user.role?.allowMultiDeviceLogin ?? (decoded.role === 'SUPER_ADMIN');
+            if (!allowMultiDevice && decoded.sessionId && user.currentSessionId && decoded.sessionId !== user.currentSessionId) {
+              return res.status(401).json({
                 success: false,
-                message: 'Your organization account is suspended. Please contact super admin.',
-                errors: ['User inactive or suspended']
+                message: 'Logged out because you logged in from another device.',
+                errors: ['Single device constraint violated']
               });
+            }
+
+            if (user.tenant) {
+              const tenantStatus = user.tenant.status;
+
+              if (tenantStatus === 'DELETED') {
+                return res.status(403).json({
+                  success: false,
+                  message: 'Your organization account has been deleted.',
+                  errors: ['User inactive or suspended', 'Tenant deleted']
+                });
+              }
+
+              if (tenantStatus === 'SUSPENDED') {
+                return res.status(403).json({
+                  success: false,
+                  message: 'Your organization account is suspended. Please contact super admin.',
+                  errors: ['User inactive or suspended', 'Tenant suspended']
+                });
+              }
             }
           }
         }
       } catch (dbErr) {
+        console.error('[AUTH DB ERROR]:', dbErr);
         return res.status(500).json({ success: false, message: 'Database error' });
       }
 
@@ -119,6 +119,30 @@ export const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: 
       errors: ['No token provided']
     });
   }
+};
+
+export const optionalAuthenticateJWT = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return next();
+  }
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return next();
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, decoded: any) => {
+    if (!err && decoded) {
+      req.user = {
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+        tenantId: decoded.tenantId,
+        isImpersonated: decoded.isImpersonated || false
+      };
+    }
+    next();
+  });
 };
 
 export const requireRoles = (roles: string[]) => {
@@ -162,12 +186,28 @@ export const requirePermission = (permission: string) => {
     }
 
     try {
-      const hasPermission = await prisma.rolePermission.findFirst({
-        where: {
-          role: { name: req.user.role },
-          permission: { code: permission }
-        }
-      });
+      const role: any = await Role.findOne({ name: req.user.role }).lean();
+      if (!role) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access Forbidden',
+          errors: [`Role not found`]
+        });
+      }
+
+      const perm: any = await Permission.findOne({ code: permission }).lean();
+      if (!perm) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access Forbidden',
+          errors: [`Permission not found`]
+        });
+      }
+
+      const hasPermission = await RolePermission.findOne({
+        roleId: role._id,
+        permissionId: perm._id
+      }).lean();
 
       if (!hasPermission) {
         return res.status(403).json({
@@ -198,17 +238,27 @@ export const requireAnyPermission = (permissions: string[]) => {
       });
     }
 
-    if (req.user.role === 'SUPER_ADMIN') {
+    if (req.user.role === 'SUPER_ADMIN' || req.user.role === 'ADMIN') {
       return next();
     }
 
     try {
-      const hasPermission = await prisma.rolePermission.findFirst({
-        where: {
-          role: { name: req.user.role },
-          permission: { code: { in: permissions } }
-        }
-      });
+      const role: any = await Role.findOne({ name: req.user.role }).lean();
+      if (!role) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access Forbidden',
+          errors: [`Role not found`]
+        });
+      }
+
+      const perms: any[] = await Permission.find({ code: { $in: permissions } }).select('_id').lean();
+      const permIds = perms.map((p) => p._id);
+
+      const hasPermission = await RolePermission.findOne({
+        roleId: role._id,
+        permissionId: { $in: permIds }
+      }).lean();
 
       if (!hasPermission) {
         return res.status(403).json({
@@ -227,4 +277,28 @@ export const requireAnyPermission = (permissions: string[]) => {
       });
     }
   };
+};
+
+
+export const requireComplianceEnabled = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  if (req.user?.role === 'SUPER_ADMIN') {
+    return next();
+  }
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) return next();
+
+  try {
+    const tenantModel = dynamicDb?.Tenant || Tenant;
+    const tenant: any = await tenantModel.findById(tenantId).select('complianceFeaturesEnabled').lean();
+    if (tenant && tenant.complianceFeaturesEnabled === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Compliance and SEBI Regulatory modules are disabled for this portal by Super Admin.',
+        errors: ['MODULE_DISABLED']
+      });
+    }
+    next();
+  } catch (err: any) {
+    next();
+  }
 };

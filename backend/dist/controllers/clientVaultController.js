@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.downloadSingleResearchReport = exports.exportSingleFolder = exports.exportClientVaultZip = exports.downloadAgreementPdf = exports.downloadSingleInvoice = exports.deleteCallRecording = exports.uploadCallRecording = exports.getClientVaultDetails = exports.listClientVaults = void 0;
+exports.downloadSingleResearchReport = exports.exportSingleFolder = exports.exportClientVaultZip = exports.downloadAgreementPdf = exports.downloadSingleInvoice = exports.deleteCallRecording = exports.uploadCallRecording = exports.getClientVaultDetails = exports.listClientVaults = exports.maskDocument = exports.maskMobile = exports.maskEmail = void 0;
+exports.checkVaultAccessAndMasking = checkVaultAccessAndMasking;
 const mongoose_1 = __importDefault(require("mongoose"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -162,6 +163,65 @@ function generateResearchReportPdf(report, tenant) {
         }
     });
 }
+/**
+ * Sensitive Data Masking Helpers
+ */
+const maskEmail = (email) => {
+    if (!email)
+        return 'N/A';
+    const parts = email.split('@');
+    if (parts.length !== 2)
+        return '***@***.com';
+    const name = parts[0];
+    const maskedName = name.length > 2 ? name.substring(0, 2) + '*'.repeat(name.length - 2) : name + '*';
+    return `${maskedName}@${parts[1]}`;
+};
+exports.maskEmail = maskEmail;
+const maskMobile = (mobile) => {
+    if (!mobile)
+        return 'N/A';
+    const clean = mobile.replace(/\D/g, '');
+    if (clean.length < 4)
+        return '******' + clean;
+    return clean.substring(0, 4) + '****' + clean.substring(clean.length - 2);
+};
+exports.maskMobile = maskMobile;
+const maskDocument = (doc) => {
+    if (!doc)
+        return 'N/A';
+    const clean = doc.trim();
+    if (clean.length <= 4)
+        return '****';
+    return clean.substring(0, 2) + '*'.repeat(clean.length - 4) + clean.substring(clean.length - 2);
+};
+exports.maskDocument = maskDocument;
+/**
+ * Checks role-based permission for vault downloads and sensitive data masking
+ */
+async function checkVaultAccessAndMasking(req) {
+    const roleName = (req.user?.role || '').trim().toUpperCase();
+    const isFullAdmin = !roleName || roleName === 'SUPER_ADMIN' || roleName === 'ADMIN' || roleName === 'TENANT_ADMIN' || roleName.includes('ADMIN');
+    if (isFullAdmin) {
+        return { canDownload: true, isMasked: false };
+    }
+    const userRole = await db_1.default.Role.findOne({
+        $or: [
+            { name: req.user?.role },
+            { name: { $regex: new RegExp(`^${req.user?.role}$`, 'i') } }
+        ]
+    }).lean();
+    if (!userRole) {
+        return { canDownload: true, isMasked: false };
+    }
+    const rolePerms = await db_1.default.RolePermission.find({
+        roleId: userRole._id || userRole.id
+    }).populate('permissionId').lean();
+    const permCodes = rolePerms.map((rp) => rp.permissionId?.code || rp.permission?.code || rp.permissionCode).filter(Boolean);
+    const hasMask = permCodes.includes('MASK_VAULT_DATA');
+    const isMasked = hasMask;
+    const canDownload = !hasMask;
+    return { canDownload, isMasked };
+}
 // ============================================================================
 // 1. LIST CLIENT VAULTS (with Plan Status Filter & Registration Sorting)
 // ============================================================================
@@ -258,10 +318,17 @@ const listClientVaults = async (req, res) => {
                 existing.push(planName);
             clientActivePlansMap.set(cId, existing);
         }
+        // Check user role permissions for download ability and data masking
+        const { canDownload, isMasked } = await checkVaultAccessAndMasking(req);
         let vaults = clients.map((client) => {
             const cId = String(client._id || client.id);
             const subs = subMap.get(cId) || { total: 0, active: 0 };
-            const folderName = buildClientFolderName(client);
+            const displayMobile = isMasked ? (0, exports.maskMobile)(client.mobile) : client.mobile;
+            const displayEmail = isMasked ? (0, exports.maskEmail)(client.email) : client.email;
+            const displayPan = isMasked ? (0, exports.maskDocument)(client.pan) : client.pan;
+            const folderName = isMasked
+                ? `${sanitizeFileName(client.name || 'Client')}_${sanitizeFileName(displayMobile)}_${sanitizeFileName(displayEmail)}`
+                : buildClientFolderName(client);
             // Determine plan status category
             let planStatus = 'NO_PLAN';
             if (subs.active > 0) {
@@ -286,9 +353,9 @@ const listClientVaults = async (req, res) => {
             return {
                 clientId: cId,
                 name: client.name,
-                mobile: client.mobile,
-                email: client.email,
-                pan: client.pan,
+                mobile: displayMobile,
+                email: displayEmail,
+                pan: displayPan,
                 category: client.category || 'INDIVIDUAL',
                 status: client.status || 'ACTIVE',
                 kycStatus: client.kycStatus || 'PENDING',
@@ -298,6 +365,8 @@ const listClientVaults = async (req, res) => {
                 folderName,
                 planStatus,
                 activePlanNames,
+                canDownload,
+                isMasked,
                 metrics: {
                     totalSubscriptions: subs.total,
                     activeSubscriptions: subs.active,
@@ -324,6 +393,8 @@ const listClientVaults = async (req, res) => {
             success: true,
             data: vaults,
             totalCount: totalClients,
+            canDownload,
+            isMasked,
             pagination: {
                 page: pageNum,
                 limit: limitNum,
@@ -353,9 +424,15 @@ const getClientVaultDetails = async (req, res) => {
         if (!client) {
             return res.status(404).json({ success: false, message: 'Client vault not found.' });
         }
-        const folderName = buildClientFolderName(client);
+        const { canDownload, isMasked } = await checkVaultAccessAndMasking(req);
+        const displayMobile = isMasked ? (0, exports.maskMobile)(client.mobile) : client.mobile;
+        const displayEmail = isMasked ? (0, exports.maskEmail)(client.email) : client.email;
+        const displayPan = isMasked ? (0, exports.maskDocument)(client.pan) : client.pan;
+        const folderName = isMasked
+            ? `${sanitizeFileName(client.name || 'Client')}_${sanitizeFileName(displayMobile)}_${sanitizeFileName(displayEmail)}`
+            : buildClientFolderName(client);
         // Parallel fetch all data required for 8 subfolders
-        const [clientProfile, userAccount, subscriptions, payments, documents, agreements, recordings, activityLogs, researchReports] = await Promise.all([
+        const [clientProfile, userAccount, subscriptions, payments, documents, agreements, recordings, activityLogs, researchReports, videoKycSessions] = await Promise.all([
             db_1.default.ClientProfile.findOne({ clientId: client._id }).lean(),
             client.userId ? db_1.default.User.findById(client.userId).lean() : null,
             db_1.default.Subscription.find({ clientId: client._id }).populate('plan').sort({ createdAt: -1 }).lean(),
@@ -364,7 +441,8 @@ const getClientVaultDetails = async (req, res) => {
             db_1.default.Agreement.find({ clientId: client._id }).sort({ signedAt: -1 }).lean(),
             db_1.default.ClientCallRecording.find({ clientId: client._id, tenantId }).sort({ callDate: -1, createdAt: -1 }).lean(),
             db_1.default.ActivityLog.find({ targetClientId: client._id }).sort({ timestamp: -1 }).limit(100).lean(),
-            db_1.default.ResearchReport.find({ tenantId, status: 'PUBLISHED' }).sort({ publishedAt: -1 }).limit(50).lean()
+            db_1.default.ResearchReport.find({ tenantId, status: 'PUBLISHED' }).sort({ publishedAt: -1 }).limit(50).lean(),
+            db_1.default.VideoKycSession.find({ clientId: client._id, tenantId, status: { $in: ['COMPLETED', 'APPROVED'] } }).sort({ createdAt: -1 }).lean()
         ]);
         // Trade signals related strictly to client's subscribed plans
         const planIds = (subscriptions || [])
@@ -400,7 +478,7 @@ const getClientVaultDetails = async (req, res) => {
                 const name = sig.stockId?.name || sig.stockName || sym;
                 clientResearchReports.push({
                     _id: sig._id,
-                    title: `Research Report - ${sym} (${sig.callType || 'Advisory Call'})`,
+                    title: `Research Report - ${sym} (${sig.callType || 'Service Call'})`,
                     stockSymbol: sym,
                     stockName: name,
                     segment: sig.segment || 'EQUITY',
@@ -465,7 +543,7 @@ const getClientVaultDetails = async (req, res) => {
                     day: '2-digit', month: 'short', year: 'numeric',
                     hour: '2-digit', minute: '2-digit', hour12: true
                 }),
-                planName: sub.plan?.name || 'Advisory Plan',
+                planName: sub.plan?.name || 'Service Plan',
                 segment: sub.plan?.researchSegments || sub.segment || 'N/A',
                 durationMonths: sub.plan?.durationMonths || 1,
                 amount: sub.amount || sub.amountTotal || sub.plan?.price || 0,
@@ -501,11 +579,20 @@ const getClientVaultDetails = async (req, res) => {
                 description: 'Account Dossier, KYC Bio, Risk Profiling, Contact Details',
                 fileCount: 1,
                 data: {
-                    client,
-                    profile: clientProfile,
+                    client: {
+                        ...client,
+                        mobile: displayMobile,
+                        email: displayEmail,
+                        pan: displayPan
+                    },
+                    profile: clientProfile ? {
+                        ...clientProfile,
+                        panNumber: isMasked ? (0, exports.maskDocument)(clientProfile.panNumber) : clientProfile.panNumber,
+                        aadharNumber: isMasked ? (0, exports.maskDocument)(clientProfile.aadharNumber) : clientProfile.aadharNumber
+                    } : null,
                     user: userAccount ? {
                         id: userAccount._id,
-                        email: userAccount.email,
+                        email: isMasked ? (0, exports.maskEmail)(userAccount.email) : userAccount.email,
                         status: userAccount.status,
                         createdAt: userAccount.createdAt,
                         lastLogin: userAccount.lastLogin
@@ -515,7 +602,7 @@ const getClientVaultDetails = async (req, res) => {
             subscriptions: {
                 key: '02_Subscriptions_&_Invoices',
                 title: '02. Subscriptions & Invoices',
-                description: 'Active/Expired Advisory Plans, Payments & Tax Invoices',
+                description: 'Active/Expired Service Plans, Payments & Tax Invoices',
                 fileCount: (enrichedSubscriptions.length || 0) + (enrichedPayments.length || 0),
                 data: {
                     subscriptions: enrichedSubscriptions,
@@ -524,7 +611,7 @@ const getClientVaultDetails = async (req, res) => {
             },
             tradeSignals: {
                 key: '03_Trade_Signals',
-                title: '03. Trade Signals & Advisory Calls',
+                title: '03. Trade Signals & Service Calls',
                 description: 'Open vs. Closed Recommendations, Targets Hit, Stoploss & P&L',
                 fileCount: signals.length,
                 metrics: {
@@ -579,13 +666,84 @@ const getClientVaultDetails = async (req, res) => {
             kycDocuments: {
                 key: '05_KYC_Documents',
                 title: '05. KYC Documents & Identity Proofs',
-                description: 'PAN Card, Aadhaar, DigiLocker Verification Dossier',
-                fileCount: documents.length,
-                data: documents
+                description: 'PAN Card, Aadhaar, DigiLocker Verification Dossier, SEBI CAMS KRA PDF, Video KYC Recordings & Snapshots',
+                fileCount: (documents || []).length +
+                    ((client.camsKraData || client.camsKraPdfUrl) && !(documents || []).some((d) => d.docType === 'CAMS_KRA_KYC_REPORT') ? 1 : 0) +
+                    (videoKycSessions || []).reduce((acc, s) => acc + (s.videoUrl ? 1 : 0) + (s.snapshots?.length || 0), 0),
+                data: [
+                    ...(((client.camsKraData || client.camsKraPdfUrl) && !(documents || []).some((d) => d.docType === 'CAMS_KRA_KYC_REPORT'))
+                        ? [
+                            {
+                                _id: 'cams-kra-doc-' + client._id,
+                                clientId: client._id,
+                                docType: 'CAMS_KRA_KYC_REPORT',
+                                fileName: `CAMS_KRA_KYC_${client.pan || 'REPORT'}.pdf`,
+                                fileUrl: client.camsKraPdfUrl || `/api/v1/admin/cams-kra/pdf/${client._id}`,
+                                status: 'VERIFIED',
+                                uploadedAt: client.updatedAt || new Date()
+                            }
+                        ]
+                        : []),
+                    ...(documents || []),
+                    // Video KYC items (Video file + Snapshots)
+                    ...(videoKycSessions || []).flatMap((v) => {
+                        const items = [];
+                        if (v.videoUrl) {
+                            items.push({
+                                _id: 'vkyc-vid-' + v._id,
+                                clientId: client._id,
+                                docType: 'VIDEO_KYC_RECORDING',
+                                fileName: v.fileName || `Video_KYC_${v.sessionId}.webm`,
+                                fileUrl: v.videoUrl,
+                                status: v.status,
+                                uploadedAt: v.createdAt,
+                                durationSeconds: v.durationSeconds
+                            });
+                        }
+                        if (v.snapshots && Array.isArray(v.snapshots)) {
+                            v.snapshots.forEach((snap, sIdx) => {
+                                items.push({
+                                    _id: `vkyc-snap-${v._id}-${sIdx}`,
+                                    clientId: client._id,
+                                    docType: `VIDEO_KYC_${snap.type}_SNAPSHOT`,
+                                    fileName: `${snap.type}_Snapshot_${sIdx + 1}.jpg`,
+                                    fileUrl: snap.url,
+                                    status: v.status,
+                                    uploadedAt: snap.capturedAt || v.createdAt
+                                });
+                            });
+                        }
+                        else {
+                            if (v.panSnapshotUrl) {
+                                items.push({
+                                    _id: 'vkyc-snap-pan-' + v._id,
+                                    clientId: client._id,
+                                    docType: 'VIDEO_KYC_PAN_SNAPSHOT',
+                                    fileName: `PAN_Snapshot_${v.sessionId}.jpg`,
+                                    fileUrl: v.panSnapshotUrl,
+                                    status: v.status,
+                                    uploadedAt: v.createdAt
+                                });
+                            }
+                            if (v.clientFaceSnapshotUrl) {
+                                items.push({
+                                    _id: 'vkyc-snap-face-' + v._id,
+                                    clientId: client._id,
+                                    docType: 'VIDEO_KYC_FACE_SNAPSHOT',
+                                    fileName: `Face_Snapshot_${v.sessionId}.jpg`,
+                                    fileUrl: v.clientFaceSnapshotUrl,
+                                    status: v.status,
+                                    uploadedAt: v.createdAt
+                                });
+                            }
+                        }
+                        return items;
+                    })
+                ]
             },
             agreements: {
                 key: '06_Signed_Agreements',
-                title: '06. Signed Advisory Agreements',
+                title: '06. Signed Service Agreements',
                 description: 'SEBI Mandatory Client Agreements & Aadhaar eSign Audit Records',
                 fileCount: enrichedAgreements.length,
                 data: enrichedAgreements
@@ -593,7 +751,7 @@ const getClientVaultDetails = async (req, res) => {
             callRecordings: {
                 key: '07_Call_Recordings',
                 title: '07. Audio Call Recordings',
-                description: 'SEBI Compliance Call Recordings, Advisory Audio & Transcripts',
+                description: 'SEBI Compliance Call Recordings, Service Audio & Transcripts',
                 fileCount: recordings.length,
                 data: recordings
             },
@@ -611,9 +769,9 @@ const getClientVaultDetails = async (req, res) => {
                 client: {
                     id: client._id,
                     name: client.name,
-                    mobile: client.mobile,
-                    email: client.email,
-                    pan: client.pan,
+                    mobile: displayMobile,
+                    email: displayEmail,
+                    pan: displayPan,
                     category: client.category,
                     status: client.status,
                     agreementSigned: Boolean(client.agreementSigned || (agreements && agreements.length > 0)),
@@ -624,6 +782,8 @@ const getClientVaultDetails = async (req, res) => {
                     })
                 },
                 folderName,
+                canDownload,
+                isMasked,
                 folders
             }
         });
@@ -763,6 +923,10 @@ exports.deleteCallRecording = deleteCallRecording;
 // ============================================================================
 const downloadSingleInvoice = async (req, res) => {
     try {
+        const { canDownload } = await checkVaultAccessAndMasking(req);
+        if (!canDownload) {
+            return res.status(403).json({ success: false, message: 'Downloading invoice PDF is disabled for your role permissions.' });
+        }
         const { paymentId } = req.params;
         if (!paymentId)
             return res.status(400).json({ success: false, message: 'Payment ID is required.' });
@@ -785,6 +949,10 @@ exports.downloadSingleInvoice = downloadSingleInvoice;
 // ============================================================================
 const downloadAgreementPdf = async (req, res) => {
     try {
+        const { canDownload } = await checkVaultAccessAndMasking(req);
+        if (!canDownload) {
+            return res.status(403).json({ success: false, message: 'Downloading agreement PDF is disabled for your role permissions.' });
+        }
         const { clientId } = req.params;
         if (!clientId)
             return res.status(400).json({ success: false, message: 'Client ID is required.' });
@@ -821,6 +989,10 @@ exports.downloadAgreementPdf = downloadAgreementPdf;
 // ============================================================================
 const exportClientVaultZip = async (req, res) => {
     try {
+        const { canDownload } = await checkVaultAccessAndMasking(req);
+        if (!canDownload) {
+            return res.status(403).json({ success: false, message: 'Downloading client vault ZIP is disabled for your role permissions.' });
+        }
         const tenantId = req.user?.tenantId;
         const { clientId } = req.params;
         if (!tenantId)
@@ -831,7 +1003,7 @@ const exportClientVaultZip = async (req, res) => {
         const tenant = await db_1.default.Tenant.findById(tenantId).lean();
         const folderName = buildClientFolderName(client);
         // Parallel fetch all data
-        const [clientProfile, userAccount, subscriptions, payments, documents, agreements, recordings, activityLogs, researchReports] = await Promise.all([
+        const [clientProfile, userAccount, subscriptions, payments, documents, agreements, recordings, activityLogs, researchReports, videoKycSessions] = await Promise.all([
             db_1.default.ClientProfile.findOne({ clientId: client._id }).lean(),
             client.userId ? db_1.default.User.findById(client.userId).lean() : null,
             db_1.default.Subscription.find({ clientId: client._id }).populate('plan').sort({ createdAt: -1 }).lean(),
@@ -840,7 +1012,8 @@ const exportClientVaultZip = async (req, res) => {
             db_1.default.Agreement.find({ clientId: client._id }).sort({ signedAt: -1 }).lean(),
             db_1.default.ClientCallRecording.find({ clientId: client._id, tenantId }).sort({ callDate: -1, createdAt: -1 }).lean(),
             db_1.default.ActivityLog.find({ targetClientId: client._id }).sort({ timestamp: -1 }).limit(500).lean(),
-            db_1.default.ResearchReport.find({ tenantId, status: 'PUBLISHED' }).sort({ publishedAt: -1 }).limit(50).lean()
+            db_1.default.ResearchReport.find({ tenantId, status: 'PUBLISHED' }).sort({ publishedAt: -1 }).limit(50).lean(),
+            db_1.default.VideoKycSession ? db_1.default.VideoKycSession.find({ clientId: client._id, tenantId }).sort({ createdAt: -1 }).lean() : Promise.resolve([])
         ]);
         // Trade signals related strictly to client's subscribed plans
         const planIds = (subscriptions || []).map((s) => s.planId || s.plan?._id).filter(Boolean);
@@ -866,7 +1039,7 @@ const exportClientVaultZip = async (req, res) => {
                 const name = sig.stockId?.name || sig.stockName || sym;
                 clientResearchReports.push({
                     _id: sig._id,
-                    title: `Research Report - ${sym} (${sig.callType || 'Advisory Call'})`,
+                    title: `Research Report - ${sym} (${sig.callType || 'Service Call'})`,
                     stockSymbol: sym,
                     stockName: name,
                     segment: sig.segment || 'EQUITY',
@@ -922,7 +1095,7 @@ PAN Card:           ${client.pan || 'N/A'}
 Client Category:    ${client.category || 'INDIVIDUAL'}
 Registration Date:  ${client.createdAt ? new Date(client.createdAt).toLocaleString() : 'N/A'}
 
-Advisory Entity:    ${tenant?.companyName || 'SEBI Registered Research Analyst'}
+Research Entity:    ${tenant?.companyName || 'SEBI Registered Research Analyst'}
 SEBI Reg. Number:   ${tenant?.sebiRegistration || 'N/A'}
 Export Date & Time: ${new Date().toLocaleString()}
 
@@ -932,7 +1105,7 @@ CONTENTS OF THIS DOSSIER:
 - 03_Trade_Signals/: Trade recommendations ledger (Open vs Closed, Targets Hit, Stoploss & P&L).
 - 04_Research_Reports/: Published technical and fundamental research reports (with PDFs).
 - 05_KYC_Documents/: Client identity proofs (PAN, Aadhaar, DigiLocker verification certificates).
-- 06_Signed_Agreements/: SEBI-mandated advisory service agreement (Official Signed PDF & Aadhaar eSign records).
+- 06_Signed_Agreements/: SEBI-mandated service agreement (Official Signed PDF & Aadhaar eSign records).
 - 07_Call_Recordings/: Recorded telephone conversations, audio calls (.mp3/.wav), and call metadata ledger.
 - 08_Audit_Trail/: Complete immutable activity logs (Signups, OTP verifications, login IPs, and staff actions).
 
@@ -1031,6 +1204,40 @@ Regulations, 2014. Unauthorized reproduction, transmission, or dissemination is 
                 }
             }
         }
+        // Append Video KYC physical recordings & snapshots into Folder 05
+        for (const v of videoKycSessions || []) {
+            if (v.videoUrl) {
+                const physical = (0, pdfService_1.resolveAttachmentFilePath)(v.videoUrl);
+                if (physical && fs_1.default.existsSync(physical)) {
+                    const ext = path_1.default.extname(v.videoUrl) || '.webm';
+                    archive.file(physical, { name: `${folderName}/05_KYC_Documents/Video_KYC_Recording_${v.sessionId}${ext}` });
+                }
+            }
+            if (v.snapshots && Array.isArray(v.snapshots)) {
+                v.snapshots.forEach((snap, idx) => {
+                    if (snap.url) {
+                        const physical = (0, pdfService_1.resolveAttachmentFilePath)(snap.url);
+                        if (physical && fs_1.default.existsSync(physical)) {
+                            archive.file(physical, { name: `${folderName}/05_KYC_Documents/Video_KYC_${snap.type}_Snapshot_${idx + 1}_${v.sessionId}.jpg` });
+                        }
+                    }
+                });
+            }
+            else {
+                if (v.panSnapshotUrl) {
+                    const physical = (0, pdfService_1.resolveAttachmentFilePath)(v.panSnapshotUrl);
+                    if (physical && fs_1.default.existsSync(physical)) {
+                        archive.file(physical, { name: `${folderName}/05_KYC_Documents/Video_KYC_PAN_Snapshot_${v.sessionId}.jpg` });
+                    }
+                }
+                if (v.clientFaceSnapshotUrl) {
+                    const physical = (0, pdfService_1.resolveAttachmentFilePath)(v.clientFaceSnapshotUrl);
+                    if (physical && fs_1.default.existsSync(physical)) {
+                        archive.file(physical, { name: `${folderName}/05_KYC_Documents/Video_KYC_Face_Snapshot_${v.sessionId}.jpg` });
+                    }
+                }
+            }
+        }
         // ------------------------------------------------------------------------
         // SUBFOLDER 06: Signed Agreements (Official Advisory Agreement PDF)
         // ------------------------------------------------------------------------
@@ -1098,6 +1305,10 @@ exports.exportClientVaultZip = exportClientVaultZip;
 // ============================================================================
 const exportSingleFolder = async (req, res) => {
     try {
+        const { canDownload } = await checkVaultAccessAndMasking(req);
+        if (!canDownload) {
+            return res.status(403).json({ success: false, message: 'Exporting vault folder is disabled for your role permissions.' });
+        }
         const tenantId = req.user?.tenantId;
         const { clientId, folderKey } = req.params;
         if (!tenantId)
@@ -1152,7 +1363,7 @@ const exportSingleFolder = async (req, res) => {
                 const matchingPay = (payments || []).find((p) => String(p.planId) === String(s.planId || s.plan?._id));
                 const purchaseTime = s.createdAt || matchingPay?.createdAt || s.startDate;
                 return {
-                    planName: s.plan?.name || 'Advisory Plan',
+                    planName: s.plan?.name || 'Service Plan',
                     segment: s.plan?.researchSegments || s.segment || 'N/A',
                     purchaseTimestamp: purchaseTime ? new Date(purchaseTime).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata' }) : 'N/A',
                     startDate: s.startDate ? new Date(s.startDate).toISOString().split('T')[0] : '',
@@ -1300,7 +1511,7 @@ const exportSingleFolder = async (req, res) => {
                     const name = sig.stockId?.name || sig.stockName || sym;
                     clientResearchReports.push({
                         _id: sig._id,
-                        title: `Research Report - ${sym} (${sig.callType || 'Advisory Call'})`,
+                        title: `Research Report - ${sym} (${sig.callType || 'Service Call'})`,
                         stockSymbol: sym,
                         stockName: name,
                         segment: sig.segment || 'EQUITY',
@@ -1386,7 +1597,10 @@ const exportSingleFolder = async (req, res) => {
         // FOLDER 5: 05_KYC_Documents -> ZIP with KYC Proof Files + Index Excel
         // ------------------------------------------------------------------------
         if (folderKey === '05_KYC_Documents' || folderKey === 'kyc-documents' || folderKey === '05' || folderKey === 'kyc') {
-            const documents = await db_1.default.ClientDocument.find({ clientId: client._id }).sort({ uploadedAt: -1 }).lean();
+            const [documents, videoKycSessions] = await Promise.all([
+                db_1.default.ClientDocument.find({ clientId: client._id }).sort({ uploadedAt: -1 }).lean(),
+                db_1.default.VideoKycSession.find({ clientId: client._id, tenantId, status: { $in: ['COMPLETED', 'APPROVED'] } }).sort({ createdAt: -1 }).lean()
+            ]);
             res.setHeader('Content-Type', 'application/zip');
             res.setHeader('Content-Disposition', `attachment; filename="KYC_Documents_${safeClientTag}.zip"`);
             const archive = (typeof archiver === 'function')
@@ -1399,9 +1613,30 @@ const exportSingleFolder = async (req, res) => {
                 status: d.status || 'VERIFIED',
                 uploadedAt: (d.uploadedAt || d.createdAt) ? new Date(d.uploadedAt || d.createdAt).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata' }) : 'N/A'
             }));
+            // Add Video KYC recordings to ledger
+            videoKycSessions.forEach((v) => {
+                if (v.videoUrl) {
+                    docRows.push({
+                        docType: 'VIDEO_KYC_RECORDING',
+                        fileName: v.fileName || `Video_KYC_${v.sessionId}.webm`,
+                        status: v.status,
+                        uploadedAt: v.createdAt ? new Date(v.createdAt).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata' }) : 'N/A'
+                    });
+                }
+                if (v.snapshots && Array.isArray(v.snapshots)) {
+                    v.snapshots.forEach((snap, idx) => {
+                        docRows.push({
+                            docType: `VIDEO_KYC_${snap.type}_SNAPSHOT`,
+                            fileName: `${snap.type}_Snapshot_${idx + 1}.jpg`,
+                            status: v.status,
+                            uploadedAt: snap.capturedAt ? new Date(snap.capturedAt).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata' }) : 'N/A'
+                        });
+                    });
+                }
+            });
             const excelBuffer = await (0, vaultExcelService_1.generateSingleSheetExcel)('KYC_Verification_Ledger', [
-                { header: 'Document Type', key: 'docType', width: 22 },
-                { header: 'File Name', key: 'fileName', width: 32 },
+                { header: 'Document Type', key: 'docType', width: 28 },
+                { header: 'File Name', key: 'fileName', width: 34 },
                 { header: 'Verification Status', key: 'status', width: 20 },
                 { header: 'Uploaded Date & Time (IST)', key: 'uploadedAt', width: 24 }
             ], docRows, 'FF0891B2' // Cyan
@@ -1414,6 +1649,40 @@ const exportSingleFolder = async (req, res) => {
                         const ext = path_1.default.extname(doc.fileUrl) || path_1.default.extname(doc.fileName) || '.pdf';
                         const safeName = sanitizeFileName(`${doc.docType}_${doc.fileName.replace(/\.[^/.]+$/, '')}`);
                         archive.file(physical, { name: `${safeName}${ext}` });
+                    }
+                }
+            }
+            // Append Video KYC physical recording files & snapshots
+            for (const v of videoKycSessions) {
+                if (v.videoUrl) {
+                    const physical = (0, pdfService_1.resolveAttachmentFilePath)(v.videoUrl);
+                    if (physical && fs_1.default.existsSync(physical)) {
+                        const ext = path_1.default.extname(v.videoUrl) || '.webm';
+                        archive.file(physical, { name: `Video_KYC_Recording_${v.sessionId}${ext}` });
+                    }
+                }
+                if (v.snapshots && Array.isArray(v.snapshots)) {
+                    v.snapshots.forEach((snap, idx) => {
+                        if (snap.url) {
+                            const physical = (0, pdfService_1.resolveAttachmentFilePath)(snap.url);
+                            if (physical && fs_1.default.existsSync(physical)) {
+                                archive.file(physical, { name: `Video_KYC_${snap.type}_Snapshot_${idx + 1}_${v.sessionId}.jpg` });
+                            }
+                        }
+                    });
+                }
+                else {
+                    if (v.panSnapshotUrl) {
+                        const physical = (0, pdfService_1.resolveAttachmentFilePath)(v.panSnapshotUrl);
+                        if (physical && fs_1.default.existsSync(physical)) {
+                            archive.file(physical, { name: `Video_KYC_PAN_Snapshot_${v.sessionId}.jpg` });
+                        }
+                    }
+                    if (v.clientFaceSnapshotUrl) {
+                        const physical = (0, pdfService_1.resolveAttachmentFilePath)(v.clientFaceSnapshotUrl);
+                        if (physical && fs_1.default.existsSync(physical)) {
+                            archive.file(physical, { name: `Video_KYC_Face_Snapshot_${v.sessionId}.jpg` });
+                        }
                     }
                 }
             }
@@ -1535,6 +1804,10 @@ exports.exportSingleFolder = exportSingleFolder;
 // ============================================================================
 const downloadSingleResearchReport = async (req, res) => {
     try {
+        const { canDownload } = await checkVaultAccessAndMasking(req);
+        if (!canDownload) {
+            return res.status(403).json({ success: false, message: 'Downloading research report PDF is disabled for your role permissions.' });
+        }
         const tenantId = req.user?.tenantId;
         const { clientId, reportId } = req.params;
         if (!tenantId)

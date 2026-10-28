@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node --max-old-space-size=8192 node_modules/next/dist/bin/next build",
     "start": "next start",
     "lint": "next lint"
   },
@@ -27,6 +27,8 @@
     "react-hot-toast": "^2.6.0",
     "react-quill": "^2.0.0",
     "recharts": "^2.12.7",
+    "socket.io-client": "^4.8.4",
+    "socket.io-parser": "^4.2.7",
     "styled-components": "^6.5.3",
     "xlsx": "^0.18.5"
   },
@@ -39,5 +41,8 @@
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
     "typescript": "^5.4.5"
+  },
+  "optionalDependencies": {
+    "@next/swc-win32-x64-msvc": "^14.2.33"
   }
 }

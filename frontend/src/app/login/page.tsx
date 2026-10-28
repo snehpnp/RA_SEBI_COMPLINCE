@@ -11,6 +11,18 @@ export default function UnifiedLoginPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const hasError = params && (params.has('error') || params.get('error'));
+
+    if (hasError) {
+      localStorage.removeItem('user');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('tenantId');
+      setChecking(false);
+      return;
+    }
+
     const userStr = localStorage.getItem('user');
     if (userStr) {
       try {

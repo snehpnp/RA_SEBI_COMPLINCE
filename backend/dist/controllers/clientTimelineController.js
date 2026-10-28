@@ -175,7 +175,7 @@ const getClientTimeline = async (req, res) => {
                 source: 'HISTORICAL',
                 category: 'KYC_COMPLIANCE',
                 action: 'AGREEMENT_SIGNED',
-                title: `Advisory Agreement Signed (v${agr.version || '1.0'})`,
+                title: `Service Agreement Signed (v${agr.version || '1.0'})`,
                 description: `Service terms digitally signed via ${friendlyEsign}`,
                 status: 'SUCCESS',
                 timestamp: agrTime > now ? now : agrTime,
@@ -208,7 +208,7 @@ const getClientTimeline = async (req, res) => {
                 pay.assignedByStaffName ||
                 pay.paymentMode === 'CUSTOM_PRO_RATA' ||
                 pay.paymentMode === 'ADMIN_ASSIGNED');
-            const planName = pay.planId?.name || 'Advisory Plan';
+            const planName = pay.planId?.name || 'Service Plan';
             const friendlyPaymentMode = humanizePaymentMode(pay.paymentMode);
             const cleanNote = cleanRemark(pay.remarks);
             // Match with an unhandled subscription if exists
@@ -263,13 +263,40 @@ const getClientTimeline = async (req, res) => {
                     receiptUrl: pay.receiptUrl
                 }
             });
+            if (pay.invoiceSentAt) {
+                const invTime = new Date(pay.invoiceSentAt);
+                const safeInvTime = invTime > now ? now : invTime;
+                const invNum = pay.transactionRef
+                    ? `INV/${invTime.getFullYear()}/${String(pay.transactionRef).slice(-6).toUpperCase()}`
+                    : 'Tax Invoice';
+                historicalEvents.push({
+                    id: `hist_inv_${pay._id}`,
+                    source: 'HISTORICAL',
+                    category: 'PAYMENT',
+                    action: 'INVOICE_SENT',
+                    title: `Tax Invoice Dispatched (${invNum})`,
+                    description: `Official Tax Invoice (${invNum}) for ${planName} (₹${(pay.amount || 0).toLocaleString('en-IN')}) emailed to ${pay.lastEmailedTo || client.email}`,
+                    status: 'SUCCESS',
+                    timestamp: safeInvTime,
+                    actorName: 'Admin / Billing System',
+                    actorType: 'STAFF',
+                    metadata: {
+                        invoiceNumber: invNum,
+                        transactionRef: pay.transactionRef,
+                        amount: `₹${(pay.amount || 0).toLocaleString('en-IN')}`,
+                        plan: planName,
+                        emailedTo: pay.lastEmailedTo || client.email,
+                        sentAt: pay.invoiceSentAt
+                    }
+                });
+            }
         }
         // 3F. Standalone Subscriptions (only those not already attached to a payment card above)
         for (const sub of subscriptions) {
             if (handledSubIds.has(String(sub._id))) {
                 continue; // Deduplicated with payment card!
             }
-            const planName = sub.planId?.name || 'Advisory Plan';
+            const planName = sub.planId?.name || 'Service Plan';
             const sDate = new Date(sub.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
             const eDate = new Date(sub.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
             // IMPORTANT: Activity event timestamp is when this happened (sub.createdAt), NEVER future startDate/endDate!
@@ -387,8 +414,8 @@ const getClientTimeline = async (req, res) => {
             },
             {
                 step: 3,
-                key: 'ADVISORY_ESIGN',
-                label: 'Advisory eSign',
+                key: 'SERVICE_ESIGN',
+                label: 'Service eSign',
                 completed: hasAgreement,
                 current: hasKyc && !hasAgreement,
                 timestamp: hasAgreement ? agreements[0].signedAt : null,

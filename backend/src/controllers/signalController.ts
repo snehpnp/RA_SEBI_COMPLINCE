@@ -1,30 +1,36 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import mongoose from 'mongoose';
+import fs from 'fs';
+import path from 'path';
+import { PDFDocument } from 'pdf-lib';
+import dynamicDb, { centralModels } from '../config/db';
+import { broadcastSignalNotification } from '../services/notificationService';
 
 export const getStocks = async (req: Request, res: Response) => {
- 
   try {
     const { query } = req.query;
-    let whereClause = {};
+    let whereClause: any = {};
     if (query && typeof query === 'string' && query.trim() !== '') {
-      const q = query.trim().toUpperCase();
+      const q = query.trim();
       whereClause = {
-        OR: [
-          { symbol: { contains: q } },
-          { name: { contains: q } }
+        $or: [
+          { symbol: { $regex: q, $options: 'i' } },
+          { name: { $regex: q, $options: 'i' } }
         ]
       };
     }
 
-    const stocks = await prisma.stock.findMany({
-      where: whereClause,
-      take: 50, // Limit to 50 results for dropdown performance
-      orderBy: { symbol: 'asc' }
-    });
+    const stocks = await dynamicDb.Stock.find(whereClause)
+      .limit(50)
+      .sort({ symbol: 1 })
+      .lean();
 
-    return res.json({ success: true, data: stocks });
+    const formattedStocks = stocks.map((s: any) => ({
+      ...s,
+      id: s._id?.toString() || s.id
+    }));
+
+    return res.json({ success: true, data: formattedStocks });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -36,7 +42,7 @@ export const createSignal = async (req: Request, res: Response) => {
     const userId = (req as any).user.id;
 
     const {
-      segment, planIds, callType, tradeDuration, stockId,
+      segment, categoryIds, planCategoryIds, planIds, callType, tradeDuration, stockId,
       expiryDate, strikePrice, optionType, entryPrice, entryType, suggestedQuantity,
       target1, target2, target3, stoploss, description
     } = req.body;
@@ -49,77 +55,220 @@ export const createSignal = async (req: Request, res: Response) => {
     const userRole = (req as any).user.role;
     const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
     if (!isFullAdmin) {
-      const hasAdd = await prisma.rolePermission.findFirst({
-        where: { role: { name: userRole }, permission: { code: 'ADD_RESEARCH' } }
-      });
-      const hasOwn = await prisma.rolePermission.findFirst({
-        where: { role: { name: userRole }, permission: { code: 'OWN_RESEARCH' } }
-      });
+      const roleDoc = await dynamicDb.Role.findOne({ name: userRole }).lean();
+      const roleId = roleDoc?._id;
+      const addPerm = await dynamicDb.Permission.findOne({ code: 'ADD_RESEARCH' }).lean();
+      const ownPerm = await dynamicDb.Permission.findOne({ code: 'OWN_RESEARCH' }).lean();
+
+      const hasAdd = addPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: addPerm._id }).lean() : null;
+      const hasOwn = ownPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: ownPerm._id }).lean() : null;
 
       if (!hasAdd && !hasOwn) {
         return res.status(403).json({ success: false, message: 'You do not have permission to create signals.' });
       }
     }
 
-    let parsedPlanIds: string[] = [];
+    let rawTargetIds: string[] = [];
+    const sourceParam = categoryIds || planCategoryIds || planIds;
     try {
-      parsedPlanIds = JSON.parse(planIds);
+      rawTargetIds = JSON.parse(sourceParam);
     } catch (e) {
-      if (typeof planIds === 'string') parsedPlanIds = [planIds];
+      if (typeof sourceParam === 'string') rawTargetIds = [sourceParam];
+    }
+    if (!Array.isArray(rawTargetIds)) rawTargetIds = [rawTargetIds].filter(Boolean);
+    rawTargetIds = [...new Set(rawTargetIds.map((id: any) => (id ? (id._id?.toString() || id.id || id.toString()) : null)).filter(Boolean))];
+
+    if (!rawTargetIds || rawTargetIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'Please select at least one plan category.' });
     }
 
-    if (!parsedPlanIds || parsedPlanIds.length === 0) {
-      return res.status(400).json({ success: false, message: 'Please select at least one plan.' });
-    }
+    // Match which IDs are categories vs plans
+    const validObjectIds = rawTargetIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+    const matchedCategories = await dynamicDb.PlanCategory.find({
+      $or: [
+        { _id: { $in: validObjectIds } },
+        { id: { $in: rawTargetIds } }
+      ]
+    }).lean();
+
+    const categoryMap = new Map<string, any>();
+    matchedCategories.forEach((c: any) => {
+      categoryMap.set(c._id.toString(), c);
+      if (c.id) categoryMap.set(c.id.toString(), c);
+    });
 
     const createdSignals: any[] = [];
+    const allPlanIdsToNotify: string[] = [];
+    const allCategoryIdsToNotify: string[] = [];
 
-    // Use transaction to ensure all or nothing
-    await prisma.$transaction(async (tx) => {
-      for (const pId of parsedPlanIds) {
-        const newSignal = await tx.signal.create({
+    for (const tId of rawTargetIds) {
+      let catId: any = null;
+      let pId: any = null;
+
+      if (categoryMap.has(tId)) {
+        const matchedCat = categoryMap.get(tId);
+        catId = matchedCat._id;
+        allCategoryIdsToNotify.push(catId.toString());
+
+        const plansUnderCategory = await dynamicDb.Plan.find({
+          $or: [
+            { categoryId: catId },
+            { categoryId: catId.toString() }
+          ]
+        }).select('_id id').lean();
+
+        if (plansUnderCategory.length > 0) {
+          pId = plansUnderCategory[0]._id;
+          plansUnderCategory.forEach((p: any) => {
+            allPlanIdsToNotify.push(p._id.toString());
+            if (p.id) allPlanIdsToNotify.push(p.id.toString());
+          });
+        }
+      } else {
+        const planDoc = await dynamicDb.Plan.findById(tId).lean() || await dynamicDb.Plan.findOne({ id: tId }).lean();
+        if (planDoc) {
+          pId = planDoc._id || planDoc.id;
+          catId = planDoc.categoryId || null;
+          allPlanIdsToNotify.push(pId.toString());
+          if (catId) allCategoryIdsToNotify.push(catId.toString());
+        } else {
+          pId = tId;
+          allPlanIdsToNotify.push(tId.toString());
+        }
+      }
+
+      const newSignal = await dynamicDb.Signal.create({
+        tenantId,
+        segment,
+        categoryId: catId,
+        planId: pId,
+        callType,
+        tradeDuration,
+        stockId,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
+        strikePrice: strikePrice ? parseFloat(strikePrice) : null,
+        optionType: optionType || null,
+        entryPrice: parseFloat(entryPrice),
+        entryType,
+        suggestedQuantity,
+        target1: parseFloat(target1),
+        target2: target2 ? parseFloat(target2) : null,
+        target3: target3 ? parseFloat(target3) : null,
+        stoploss: parseFloat(stoploss),
+        description,
+        reportUrl,
+        createdById: userId,
+        status: 'OPEN'
+      });
+
+      createdSignals.push({
+        ...newSignal.toObject(),
+        id: newSignal._id.toString()
+      });
+    }
+
+    // Return immediate response so researcher modal closes in milliseconds without waiting for external SMS/Telegram network latency
+    res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
+
+    // Broadcast real-time alerts asynchronously in the background
+    setImmediate(async () => {
+      try {
+        const stockDoc = await dynamicDb.Stock.findById(stockId).lean();
+        const stockSymbol = stockDoc?.symbol || 'Trade Signal';
+        const user = (req as any).user;
+        const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+
+        await broadcastSignalNotification({
+          tenantId,
+          planIds: allPlanIdsToNotify.length > 0 ? allPlanIdsToNotify : rawTargetIds,
+          categoryIds: allCategoryIdsToNotify,
+          title: `🚀 New Trade Alert: ${stockSymbol} (${segment})`,
+          message: `New ${callType} recommendation for ${stockSymbol} at ₹${entryPrice}. Target: ${target1}${target2 ? `/${target2}` : ''}, SL: ₹${stoploss}. View: ${tradeDuration || 'INTRADAY'}.`,
+          type: 'signal',
           data: {
-            tenantId,
-            segment,
-            planId: pId,
+            signalId: createdSignals[0]?.id,
+            stockSymbol,
             callType,
-            tradeDuration,
-            stockId,
-            expiryDate: expiryDate ? new Date(expiryDate) : null,
-            strikePrice: strikePrice ? parseFloat(strikePrice) : null,
+            entryPrice,
+            target1,
+            target2,
+            target3,
+            stoploss,
+            segment,
+            expiryDate: expiryDate || null,
+            strikePrice: strikePrice || null,
             optionType: optionType || null,
-            entryPrice: parseFloat(entryPrice),
-            entryType,
-            suggestedQuantity,
-            target1: parseFloat(target1),
-            target2: target2 ? parseFloat(target2) : null,
-            target3: target3 ? parseFloat(target3) : null,
-            stoploss: parseFloat(stoploss),
-            description,
-            reportUrl,
-            createdById: userId,
-            status: 'OPEN'
-          }
+            tradeDuration,
+            action: 'NEW_TRADE',
+            smsOrderedVariables: req.body.smsOrderedVariables ? (
+              (() => {
+                try {
+                  return typeof req.body.smsOrderedVariables === 'string' ? JSON.parse(req.body.smsOrderedVariables) : req.body.smsOrderedVariables;
+                } catch (e) {
+                  return undefined;
+                }
+              })()
+            ) : undefined
+          },
+          adminTitle: `📢 New Trade Published: ${stockSymbol} (${segment})`,
+          adminMessage: `${researcherName} published a new ${callType} trade for ${stockSymbol} at ₹${entryPrice} in ${segment}.`
         });
-        createdSignals.push(newSignal);
+      } catch (notifErr) {
+        console.warn('[Notification] Failed to broadcast new signal notification in background:', notifErr);
       }
     });
 
-    return res.json({ success: true, data: createdSignals, message: 'Signals added successfully.' });
+    return;
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+function calculatePotential(s: any) {
+  const callType = (s.callType || 'BUY').toUpperCase();
+  const isBuy = callType === 'BUY';
+  const lastTarget = Number(s.target3 || s.target2 || s.target1 || s.entryPrice || 0);
+  const entryPrice = Number(s.entryPrice || 0);
+  const target1 = Number(s.target1 || entryPrice);
+
+  const isTarget1Done = Boolean(
+    (s.closeTargets && s.closeTargets.includes('TARGET1')) ||
+    s.closeStatus === 'PARTIALLY_CLOSED' ||
+    s.closeStatus === 'TARGET1_DONE' ||
+    s.closeStatus === 'TARGET_1_REACHED'
+  );
+
+  const basePrice = isTarget1Done ? target1 : entryPrice;
+  let remainingPct = 0;
+  if (basePrice > 0 && lastTarget > 0) {
+    if (isBuy) {
+      remainingPct = Math.max(0, ((lastTarget - basePrice) / basePrice) * 100);
+    } else {
+      remainingPct = Math.max(0, ((basePrice - lastTarget) / basePrice) * 100);
+    }
+  }
+
+  const formattedPct = remainingPct.toFixed(1);
+  const directionText = isBuy ? 'Upside' : 'Downside';
+  const potentialMessage = isTarget1Done
+    ? `🎯 Target 1 Done • +${formattedPct}% ${directionText} Remaining`
+    : `🔥 +${formattedPct}% Potential ${directionText} Remaining`;
+
+  return {
+    remainingPotentialPercent: parseFloat(formattedPct),
+    isTarget1Done,
+    potentialMessage,
+    directionText
+  };
+}
 
 export const listSignals = async (req: Request, res: Response) => {
   try {
     const tenantId = (req as any).user.tenantId;
     const userRole = (req as any).user.role;
 
-    let whereClause: any = { tenantId };
-
     if (userRole === 'CLIENT') {
-      const client = await prisma.client.findFirst({ where: { userId: (req as any).user.id } });
+      const client = await dynamicDb.Client.findOne({ userId: (req as any).user.id }).lean();
       if (!client) {
         return res.status(403).json({
           success: false,
@@ -128,91 +277,336 @@ export const listSignals = async (req: Request, res: Response) => {
         });
       }
 
-      // Find all subscriptions (active, expired, etc.)
-      const allSubs = await prisma.subscription.findMany({
-        where: { clientId: client.id }
-      });
+      // Check KYC and Agreement compliance
+      const isKycDone = Boolean((client as any).kraVerified === true || (client as any).kycStatus === 'VERIFIED' || (client as any).kycStatus === 'APPROVED');
+      const hasAgreementDoc = await dynamicDb.Agreement.findOne({
+        $or: [{ clientId: client._id }, { clientId: (client as any).userId }],
+        status: { $in: ['SIGNED', 'ACTIVE'] }
+      }).lean();
+      const isAgreementDone = Boolean((client as any).agreementSigned === true || hasAgreementDoc);
+      const isCompliant = isKycDone && isAgreementDone;
 
-      if (allSubs.length === 0) {
-        return res.json({ success: true, data: [] });
-      } else {
-        // Construct OR clause: Signal must be created during the active window of the subscription
-        const subConditions = allSubs.map(sub => {
+      // Find all subscriptions for this client
+      const allSubs = await dynamicDb.Subscription.find({
+        clientId: client._id,
+        status: { $in: ['ACTIVE', 'active'] }
+      }).lean();
+
+      // If client has an assigned/active plan BUT KYC or Agreement is pending:
+      // STRICT SEBI COMPLIANCE: Do not show open trades on dashboard or signals list
+      if (allSubs.length > 0 && !isCompliant) {
+        return res.json({
+          success: true,
+          data: [],
+          compliancePending: true,
+          message: 'Compliance Pending: Please complete KYC & Sign Agreement to access active trade recommendations.'
+        });
+      }
+
+      // Fetch tenant settings to get lockedTradesPreviewCount and potential toggles
+      const tenantDoc = await dynamicDb.Tenant.findById(tenantId).lean() || await dynamicDb.Tenant.findOne({ deletedAt: null }).lean();
+      const previewLimit = tenantDoc?.lockedTradesPreviewCount !== undefined ? tenantDoc.lockedTradesPreviewCount : 5;
+      const showOpenTradePotential = tenantDoc?.showOpenTradePotential !== false;
+      const showLockedTradePotential = tenantDoc?.showLockedTradePotential !== false;
+
+      let unlockedSignals: any[] = [];
+      const subscribedPlanIds = allSubs.map((s: any) => s.planId.toString());
+      const validSubPlanObjectIds = subscribedPlanIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+      const subscribedPlans = await dynamicDb.Plan.find({
+        $or: [
+          ...(validSubPlanObjectIds.length > 0 ? [{ _id: { $in: validSubPlanObjectIds } }] : []),
+          { id: { $in: subscribedPlanIds } }
+        ]
+      }).select('categoryId').lean();
+
+      const planCategoryMap = new Map<string, string>();
+      const subscribedCategoryIds: string[] = [];
+      subscribedPlans.forEach((p: any) => {
+        if (p.categoryId) {
+          const cId = p.categoryId.toString();
+          subscribedCategoryIds.push(cId);
+          planCategoryMap.set(p._id.toString(), cId);
+          if (p.id) planCategoryMap.set(p.id.toString(), cId);
+        }
+      });
+      const validSubCatObjectIds = subscribedCategoryIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id));
+
+      if (allSubs.length > 0) {
+        const subConditions = allSubs.map((sub: any) => {
+          const subPlanIdStr = sub.planId.toString();
+          const subCatId = planCategoryMap.get(subPlanIdStr);
+
+          const orConditions: any[] = [{ planId: sub.planId }];
+          if (subCatId && mongoose.Types.ObjectId.isValid(subCatId)) {
+            orConditions.push({ categoryId: new mongoose.Types.ObjectId(subCatId) });
+          } else if (subCatId) {
+            orConditions.push({ categoryId: subCatId });
+          }
+
           const conditions: any = {
-            planId: sub.planId,
-            createdAt: { gte: sub.startDate }
+            $or: orConditions,
+            createdAt: { $gte: sub.startDate }
           };
           if (sub.endDate) {
-            conditions.createdAt.lte = sub.endDate;
+            const end = new Date(sub.endDate);
+            const endOfDayUtc = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate(), 23, 59, 59, 999));
+            const endOfDayLocal = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+            conditions.createdAt.$lte = new Date(Math.max(end.getTime(), endOfDayUtc.getTime(), endOfDayLocal.getTime()));
           }
           return conditions;
         });
 
-        if (whereClause.OR) {
-          // If there's already an OR clause, we need to wrap them in an AND
-          whereClause.AND = [
-            { OR: whereClause.OR },
-            { OR: subConditions }
-          ];
-          delete whereClause.OR;
-        } else {
-          whereClause.OR = subConditions;
-        }
+        unlockedSignals = await dynamicDb.Signal.find({
+          tenantId,
+          $or: subConditions
+        })
+          .populate({ path: 'messages', options: { sort: { createdAt: -1 } } })
+          .sort({ createdAt: -1 })
+          .lean();
       }
-    } else {
-      // Staff/Admin Permissions
-      const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
-      if (!isFullAdmin) {
-        const hasAdd = await prisma.rolePermission.findFirst({
-          where: { role: { name: userRole }, permission: { code: 'ADD_RESEARCH' } }
-        });
-        const hasView = await prisma.rolePermission.findFirst({
-          where: { role: { name: userRole }, permission: { code: 'VIEW_RESEARCH' } }
-        });
-        const hasOwn = await prisma.rolePermission.findFirst({
-          where: { role: { name: userRole }, permission: { code: 'OWN_RESEARCH' } }
-        });
 
-        if (!hasAdd && !hasView && !hasOwn) {
-          return res.status(403).json({ success: false, message: 'You do not have permission to view signals.' });
+      // Fetch teaser locked signals from plans the user does NOT have active subscriptions for
+      let lockedSignals: any[] = [];
+      if (previewLimit > 0) {
+        const lockedWhere: any = {
+          tenantId,
+          status: 'OPEN'
+        };
+        const excludeFilters: any[] = [];
+        if (subscribedPlanIds.length > 0) {
+          excludeFilters.push({ planId: { $nin: [...validSubPlanObjectIds, ...subscribedPlanIds] } });
+        }
+        if (subscribedCategoryIds.length > 0) {
+          excludeFilters.push({ categoryId: { $nin: [...validSubCatObjectIds, ...subscribedCategoryIds] } });
+        }
+        if (excludeFilters.length > 0) {
+          lockedWhere.$and = excludeFilters;
         }
 
-        if (!hasAdd && !hasView && hasOwn) {
-          whereClause.createdById = (req as any).user.id;
+        lockedSignals = await dynamicDb.Signal.find(lockedWhere)
+          .sort({ createdAt: -1 })
+          .limit(previewLimit)
+          .lean();
+      }
+
+      // Collect plan IDs and stock IDs for mapping
+      const allSignalsToMap = [...unlockedSignals, ...lockedSignals];
+      const rawPlanIds = allSignalsToMap.map((s: any) => s.planId?.toString?.() || s.planId).filter(Boolean);
+      const validPlanObjectIds = rawPlanIds
+        .filter((id: string) => mongoose.Types.ObjectId.isValid(id))
+        .map((id: string) => new mongoose.Types.ObjectId(id));
+
+      const plans = await dynamicDb.Plan.find({
+        $or: [
+          ...(validPlanObjectIds.length > 0 ? [{ _id: { $in: validPlanObjectIds } }] : []),
+          { id: { $in: rawPlanIds } }
+        ]
+      }).lean();
+
+      const categories = await dynamicDb.PlanCategory.find({
+        $or: [
+          ...(validPlanObjectIds.length > 0 ? [{ _id: { $in: validPlanObjectIds } }] : []),
+          { id: { $in: rawPlanIds } }
+        ]
+      }).lean();
+
+      const planMap = new Map<string, string>();
+      plans.forEach((p: any) => {
+        planMap.set(p._id.toString(), p.name);
+        if (p.id) planMap.set(p.id.toString(), p.name);
+      });
+      categories.forEach((c: any) => {
+        planMap.set(c._id.toString(), c.name);
+        if (c.id) planMap.set(c.id.toString(), c.name);
+      });
+
+      const userIds = [...new Set(allSignalsToMap.map((s: any) => s.createdById).filter(Boolean))];
+      const users = await dynamicDb.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
+      const userMap = new Map<string, string>();
+      users.forEach((u: any) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
+
+      const stockIdList = allSignalsToMap
+        .map((s: any) => s.stockId?._id || s.stockId || s.stock?._id || s.stock)
+        .filter(Boolean)
+        .map((id: any) => id.toString());
+      const uniqueStockIds = [...new Set(stockIdList)];
+      const validStockObjectIds = uniqueStockIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+
+      const stocks = await dynamicDb.Stock.find({
+        $or: [
+          ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+          { id: { $in: uniqueStockIds } }
+        ]
+      }).lean();
+
+      const stockMap = new Map<string, any>();
+      stocks.forEach((st: any) => {
+        const sId = String(st._id || st.id);
+        stockMap.set(sId, { ...st, id: sId });
+      });
+
+      // Map unlocked signals
+      const mappedUnlocked = unlockedSignals.map((s: any) => {
+        const pIdStr = s.planId?.toString();
+        const cIdStr = s.createdById?.toString();
+        const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+        const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+          (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
+          (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
+
+        const potential = showOpenTradePotential
+          ? calculatePotential(s)
+          : { remainingPotentialPercent: null, isTarget1Done: false, potentialMessage: null, directionText: null };
+
+        return {
+          ...s,
+          id: s._id?.toString() || s.id,
+          isLocked: false,
+          stockId: sIdStr,
+          stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
+          symbol: matchedStock?.symbol || s.symbol || '',
+          stockName: matchedStock?.name || s.stockName || '',
+          planId: pIdStr || (s.planId ? s.planId.toString() : ''),
+          planName: (s.categoryId && planMap.get(s.categoryId.toString())) || (pIdStr && planMap.get(pIdStr)) || pIdStr || '',
+          createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
+          ...potential
+        };
+      });
+
+      // Map locked teaser signals
+      const mappedLocked = lockedSignals.map((s: any) => {
+        const pIdStr = s.planId?.toString();
+        const potential = showLockedTradePotential
+          ? calculatePotential(s)
+          : { remainingPotentialPercent: null, isTarget1Done: false, potentialMessage: null, directionText: null };
+        const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+        const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+          (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null);
+
+        const rawSymbol = matchedStock?.symbol || 'STOCK';
+        const maskedSymbol = rawSymbol.length > 2 ? `${rawSymbol.slice(0, 1)}****` : 'T****';
+
+        return {
+          id: s._id?.toString() || s.id,
+          _id: s._id,
+          isLocked: true,
+          symbol: maskedSymbol,
+          stockName: 'Locked Recommendation',
+          segment: s.segment || 'CASH',
+          callType: s.callType || 'BUY',
+          tradeDuration: s.tradeDuration || 'INTRADAY',
+          planId: pIdStr || (s.planId ? s.planId.toString() : ''),
+          planName: (s.categoryId && planMap.get(s.categoryId.toString())) || (pIdStr && planMap.get(pIdStr)) || 'Premium Service Plan',
+          entryPrice: null,
+          target1: null,
+          target2: null,
+          target3: null,
+          stoploss: null,
+          status: 'OPEN',
+          createdAt: s.createdAt,
+          ...potential
+        };
+      });
+
+      return res.json({
+        success: true,
+        data: [...mappedUnlocked, ...mappedLocked],
+        hasActivePlan: allSubs.length > 0,
+        settings: {
+          showOpenTradePotential,
+          showLockedTradePotential
         }
+      });
+    }
+
+    // Staff / Admin logic
+    let whereClause: any = { tenantId };
+    const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
+    if (!isFullAdmin) {
+      const roleDoc = await dynamicDb.Role.findOne({ name: userRole }).lean();
+      const roleId = roleDoc?._id;
+      const addPerm = await dynamicDb.Permission.findOne({ code: 'ADD_RESEARCH' }).lean();
+      const viewPerm = await dynamicDb.Permission.findOne({ code: 'VIEW_RESEARCH' }).lean();
+      const ownPerm = await dynamicDb.Permission.findOne({ code: 'OWN_RESEARCH' }).lean();
+
+      const hasAdd = addPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: addPerm._id }).lean() : null;
+      const hasView = viewPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: viewPerm._id }).lean() : null;
+      const hasOwn = ownPerm && roleId ? await dynamicDb.RolePermission.findOne({ roleId, permissionId: ownPerm._id }).lean() : null;
+
+      if (!hasAdd && !hasView && !hasOwn) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to view signals.' });
+      }
+
+      if (!hasAdd && !hasView && hasOwn) {
+        whereClause.createdById = (req as any).user.id;
       }
     }
 
-    const signals = await prisma.signal.findMany({
-      where: whereClause,
-      include: {
-        stock: true,
-        messages: {
-          orderBy: { createdAt: 'desc' }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
+    const signals = await dynamicDb.Signal.find(whereClause)
+      .populate({
+        path: 'messages',
+        options: { sort: { createdAt: -1 } }
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const planIds = signals.map((s: any) => s.planId).filter(Boolean);
+    const categoryIds = signals.map((s: any) => s.categoryId).filter(Boolean);
+    const allLookupIds = [...new Set([...planIds, ...categoryIds])];
+    const plans = await dynamicDb.Plan.find({ _id: { $in: allLookupIds } }).lean();
+    const categories = await dynamicDb.PlanCategory.find({ _id: { $in: allLookupIds } }).lean();
+
+    const map = new Map<string, string>();
+    plans.forEach((p: any) => map.set(p._id.toString(), p.name));
+    categories.forEach((c: any) => map.set(c._id.toString(), c.name));
+
+    const userIds = [...new Set(signals.map((s: any) => s.createdById).filter(Boolean))];
+    const users = await dynamicDb.User.find({ _id: { $in: userIds } }).select('id firstName lastName').lean();
+    const userMap = new Map<string, string>();
+    users.forEach((u: any) => userMap.set(u._id.toString(), `${u.firstName || ''} ${u.lastName || ''}`.trim()));
+
+    const stockIdList = signals
+      .map((s: any) => s.stockId?._id || s.stockId || s.stock?._id || s.stock)
+      .filter(Boolean)
+      .map((id: any) => id.toString());
+    const uniqueStockIds = [...new Set(stockIdList)];
+    const validStockObjectIds = uniqueStockIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id));
+
+    const stocks = await dynamicDb.Stock.find({
+      $or: [
+        ...(validStockObjectIds.length > 0 ? [{ _id: { $in: validStockObjectIds } }] : []),
+        { id: { $in: uniqueStockIds } }
+      ]
+    }).lean();
+
+    const stockMap = new Map<string, any>();
+    stocks.forEach((st: any) => {
+      const sId = String(st._id || st.id);
+      stockMap.set(sId, { ...st, id: sId });
     });
 
-    const planIds = signals.map(s => s.planId);
-    const plans = await prisma.plan.findMany({ where: { id: { in: planIds } } });
-    const categories = await prisma.planCategory.findMany({ where: { id: { in: planIds } } });
+    const finalData = signals.map((s: any) => {
+      const pIdStr = s.planId?.toString();
+      const cIdStr = s.createdById?.toString();
+      const sIdStr = s.stockId ? String(s.stockId?._id || s.stockId) : (s.stock ? String(s.stock?._id || s.stock) : '');
+      const matchedStock = (sIdStr && stockMap.get(sIdStr)) ||
+        (typeof s.stockId === 'object' && s.stockId?.symbol ? s.stockId : null) ||
+        (typeof s.stock === 'object' && s.stock?.symbol ? s.stock : null);
 
-    const map = new Map();
-    plans.forEach(p => map.set(p.id, p.name));
-    categories.forEach(c => map.set(c.id, c.name));
+      const potential = calculatePotential(s);
 
-    // Manually fetch researcher names
-    const userIds = [...new Set(signals.map(s => s.createdById))];
-    const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, firstName: true, lastName: true } });
-    const userMap = new Map();
-    users.forEach(u => userMap.set(u.id, `${u.firstName} ${u.lastName}`));
-
-    const finalData = signals.map(s => ({
-      ...s,
-      planName: map.get(s.planId) || s.planId,
-      createdByName: userMap.get(s.createdById) || 'Unknown Researcher'
-    }));
+      return {
+        ...s,
+        id: s._id?.toString() || s.id,
+        stockId: sIdStr,
+        stock: matchedStock ? { ...matchedStock, id: String(matchedStock._id || matchedStock.id) } : null,
+        symbol: matchedStock?.symbol || '',
+        stockName: matchedStock?.name || '',
+        planName: (s.categoryId && map.get(s.categoryId.toString())) || (pIdStr && map.get(pIdStr)) || pIdStr || '',
+        createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
+        ...potential
+      };
+    });
 
     return res.json({ success: true, data: finalData });
   } catch (err: any) {
@@ -226,54 +620,131 @@ export const closeSignal = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { closeStatus, exitPrice, closeRemark, closeTargets, isFinalClose } = req.body;
 
-    const signal = await prisma.signal.findFirst({
-      where: { id, tenantId },
-      include: { stock: true }
-    });
+    const signal = await dynamicDb.Signal.findOne({ _id: id, tenantId })
+      .populate('stockId')
+      .lean();
 
     if (!signal) {
       return res.status(404).json({ success: false, message: 'Signal not found' });
     }
 
-    const updatedSignal = await prisma.signal.update({
-      where: { id },
-      data: {
-        status: isFinalClose ? 'CLOSED' : 'OPEN', // Only close if it's a final close
-        closeStatus,
-        exitPrice: exitPrice ? parseFloat(exitPrice) : null,
-        closeRemark,
-        closeTargets,
-        closedAt: isFinalClose ? new Date() : null
-      }
-    });
-
-    // Notify clients who were subscribed to this plan AT THE TIME the signal was created
-    const allSubs = await prisma.subscription.findMany({
-      where: {
-        planId: signal.planId,
-        startDate: { lte: signal.createdAt }
+    const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          status: isFinalClose ? 'CLOSED' : 'OPEN',
+          closeStatus,
+          exitPrice: exitPrice ? parseFloat(exitPrice) : null,
+          closeRemark,
+          closeTargets,
+          closedAt: isFinalClose ? new Date() : null
+        }
       },
-      include: { client: { include: { user: true } } }
-    });
+      { returnDocument: 'after', lean: true }
+    );
 
-    // Filter out subscriptions that expired BEFORE the signal was created
-    const eligibleSubs = allSubs.filter(sub => !sub.endDate || sub.endDate >= signal.createdAt);
+    // Determine specific target achieved (e.g. Target 1, Target 2, Target 3)
+    const targetList = typeof closeTargets === 'string' ? closeTargets.split(',').map((s: string) => s.trim().toUpperCase()) : [];
+    let targetLabel = '';
+    let specificTargetPrice = exitPrice ? parseFloat(exitPrice) : null;
 
-    const notificationPromises = eligibleSubs.map(sub => {
-      return prisma.notificationLog.create({
-        data: {
-          tenantId,
-          recipient: sub.client.userId,
-          channel: 'INAPP',
-          title: `Signal Update: ${signal.stock.symbol}`,
-          message: `The signal for ${signal.stock.symbol} has been closed/updated. Status: ${closeStatus}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`
+    if (targetList.includes('TARGET3')) {
+      targetLabel = 'Target 3';
+      if (!specificTargetPrice && signal.target3) specificTargetPrice = signal.target3;
+    } else if (targetList.includes('TARGET2')) {
+      targetLabel = 'Target 2';
+      if (!specificTargetPrice && signal.target2) specificTargetPrice = signal.target2;
+    } else if (targetList.includes('TARGET1')) {
+      targetLabel = 'Target 1';
+      if (!specificTargetPrice && signal.target1) specificTargetPrice = signal.target1;
+    }
+
+    const targetPlanId = signal.planId ? (signal.planId._id?.toString() || signal.planId.toString()) : null;
+    const planIdsToNotify = targetPlanId ? [targetPlanId] : [];
+
+    // Notify eligible subscribers and Admin
+    try {
+      const sig: any = signal;
+      let stockSymbol = 'Stock';
+      if (sig.stockId && typeof sig.stockId === 'object' && sig.stockId.symbol) {
+        stockSymbol = sig.stockId.symbol;
+      } else if (sig.stockId) {
+        const stockDoc = await dynamicDb.Stock.findById(sig.stockId).lean();
+        if (stockDoc?.symbol) stockSymbol = stockDoc.symbol;
+      }
+
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+
+      let notifTitle = `🎯 Trade Update: ${stockSymbol}`;
+      let notifMessage = `Trade ${stockSymbol} status: ${closeStatus}.${exitPrice ? ` Exit Price: ₹${exitPrice}.` : ''} ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+
+      if (closeStatus === 'Partially Closed') {
+        if (targetLabel) {
+          notifTitle = `🎯 ${targetLabel} Achieved: ${stockSymbol}`;
+          notifMessage = `${stockSymbol} hit ${targetLabel} at ₹${specificTargetPrice || exitPrice}! Book partial profit. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+        } else {
+          notifTitle = `🎯 Partially Closed: ${stockSymbol}`;
+          notifMessage = `${stockSymbol} partially closed at ₹${exitPrice}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+        }
+      } else if (closeStatus === 'Fully Closed') {
+        notifTitle = `🎯 Trade Closed: ${stockSymbol}`;
+        notifMessage = `${stockSymbol} trade fully closed at ₹${exitPrice}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+      } else if (closeStatus === 'SL Hit') {
+        notifTitle = `🛑 Stoploss Hit: ${stockSymbol}`;
+        notifMessage = `Stoploss triggered for ${stockSymbol} at ₹${exitPrice || signal.stoploss}. Exit position immediately. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+      } else if (closeStatus === 'Avoid Signal') {
+        notifTitle = `⚠️ Trade Avoided: ${stockSymbol}`;
+        notifMessage = `Recommendation to avoid ${stockSymbol}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+      }
+
+      // Fire-and-forget in background
+      setImmediate(async () => {
+        try {
+          await broadcastSignalNotification({
+            tenantId,
+            planIds: planIdsToNotify,
+            title: notifTitle,
+            message: notifMessage,
+            type: 'update',
+            data: {
+              signalId: id,
+              stockSymbol,
+              segment: signal.segment,
+              callType: signal.callType,
+              entryPrice: signal.entryPrice,
+              entryType: signal.entryType,
+              target1: signal.target1,
+              target2: signal.target2,
+              target3: signal.target3,
+              targetLabel,
+              specificTargetPrice,
+              closedTargetVal: specificTargetPrice ? String(specificTargetPrice) : '',
+              stoploss: signal.stoploss,
+              tradeDuration: signal.tradeDuration,
+              closeStatus,
+              exitPrice,
+              closeRemark,
+              closeTargets,
+              isFinalClose,
+              action: 'TRADE_UPDATE'
+            },
+            adminTitle: `🎯 Trade Status Updated: ${stockSymbol}`,
+            adminMessage: `${researcherName} updated trade ${stockSymbol} to status: ${closeStatus}.${closeRemark ? ` (${closeRemark})` : ''}`
+          });
+        } catch (notifErr) {
+          console.warn('[Notification] Failed to broadcast closeSignal notification in background:', notifErr);
         }
       });
+    } catch (notifErr) {
+      console.warn('[Notification] Failed to setup closeSignal notification:', notifErr);
+    }
+
+    return res.json({
+      success: true,
+      data: updatedSignal ? { ...updatedSignal, id: updatedSignal._id?.toString() || updatedSignal.id } : null,
+      message: 'Signal closed successfully and clients notified.'
     });
-
-    await Promise.all(notificationPromises);
-
-    return res.json({ success: true, data: updatedSignal, message: 'Signal closed successfully and clients notified.' });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -290,25 +761,116 @@ export const uploadReport = async (req: Request, res: Response) => {
 
     const reportUrl = `/uploads/research/${req.file.filename}`;
 
-    const signal = await prisma.signal.findFirst({
-      where: { id, tenantId }
-    });
+    const signal = await dynamicDb.Signal.findOne({ _id: id, tenantId });
 
     if (!signal) {
       return res.status(404).json({ success: false, message: 'Signal not found' });
     }
 
-    const updatedSignal = await prisma.signal.update({
-      where: { id },
-      data: { reportUrl }
-    });
+    const applySignature = req.body.applySignature === 'true';
+    const signatureMode = applySignature ? (req.body.signatureMode || 'UPLOAD_SIGN') : 'NONE';
 
-    return res.json({ success: true, data: updatedSignal, message: 'Report uploaded successfully.' });
+    // If researcher requested signature stamp on uploaded PDF
+    if (applySignature && signatureMode === 'UPLOAD_SIGN' && req.file.path) {
+      try {
+        const userId = (req as any).user.id || (req as any).user._id;
+        const userDoc = await dynamicDb.User.findById(userId).lean();
+        const tenantDoc = await dynamicDb.Tenant.findById(tenantId).lean();
+        const sigUrl = userDoc?.signatureUrl || tenantDoc?.coSignatureUrl;
+
+        if (sigUrl) {
+          const filePath = req.file.path;
+          const pdfBuffer = fs.readFileSync(filePath);
+          const pdfDoc = await PDFDocument.load(pdfBuffer);
+          const pages = pdfDoc.getPages();
+          const lastPage = pages[pages.length - 1];
+          const { width } = lastPage.getSize();
+
+          const cleanSigPath = sigUrl.replace(/^\/uploads\//, '');
+          const diskPath = path.join(process.cwd(), 'uploads', cleanSigPath);
+
+          if (fs.existsSync(diskPath)) {
+            const imgBytes = fs.readFileSync(diskPath);
+            let embeddedImg;
+            if (sigUrl.toLowerCase().endsWith('.png')) {
+              embeddedImg = await pdfDoc.embedPng(imgBytes);
+            } else {
+              embeddedImg = await pdfDoc.embedJpg(imgBytes);
+            }
+            const imgDims = embeddedImg.scale(0.25);
+            const boxWidth = Math.min(imgDims.width, 140);
+            const boxHeight = Math.min(imgDims.height, 40);
+            const x = width - boxWidth - 30;
+            const y = 30;
+
+            lastPage.drawImage(embeddedImg, {
+              x,
+              y,
+              width: boxWidth,
+              height: boxHeight,
+            });
+
+            const modifiedBytes = await pdfDoc.save();
+            fs.writeFileSync(filePath, Buffer.from(modifiedBytes));
+          }
+        }
+      } catch (stampErr) {
+        console.warn('[uploadReport] Warning: Could not stamp signature image on uploaded PDF:', stampErr);
+      }
+    }
+
+    const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          reportUrl,
+          signatureMode,
+          signatureMeta: {
+            method: applySignature ? 'UPLOADED_SIGN' : 'NONE',
+            uploadedAt: new Date(),
+            isDigitallySigned: applySignature
+          }
+        }
+      },
+      { returnDocument: 'after', lean: true }
+    );
+
+    // Broadcast report notification to subscribers and Admin
+    try {
+      const sig: any = await dynamicDb.Signal.findById(id).populate('stockId').lean() || signal;
+      const stockSymbol = sig?.stockId?.symbol || sig?.stock?.symbol || 'Trade Signal';
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+
+      await broadcastSignalNotification({
+        tenantId,
+        planIds: [signal.planId],
+        title: `📄 Research Report: ${stockSymbol}`,
+        message: `New official research report uploaded for ${stockSymbol}. Available in Research Reports.`,
+        type: 'report',
+        data: {
+          signalId: id,
+          stockSymbol,
+          reportUrl,
+          action: 'REPORT_UPLOADED'
+        },
+        signalCreatedAt: signal.createdAt,
+        adminTitle: `📄 Research Report Uploaded: ${stockSymbol}`,
+        adminMessage: `${researcherName} uploaded a research report for ${stockSymbol}.`
+      });
+    } catch (notifErr) {
+      console.warn('[Notification] Failed to broadcast uploadReport notification:', notifErr);
+    }
+
+    return res.json({
+      success: true,
+      data: updatedSignal ? { ...updatedSignal, id: updatedSignal._id?.toString() || updatedSignal.id } : null,
+      message: 'Report uploaded successfully.'
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 export const addSignalMessage = async (req: Request, res: Response) => {
   try {
@@ -319,49 +881,58 @@ export const addSignalMessage = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Message is required' });
     }
 
-    const signalMessage = await prisma.signalMessage.create({
-      data: {
-        signalId: id,
-        message
-      }
+    const signalMessage = await dynamicDb.SignalMessage.create({
+      signalId: id,
+      message
     });
 
-    const signal = await prisma.signal.findFirst({
-      where: { id },
-      include: { stock: true }
-    });
+    const signal = await dynamicDb.Signal.findById(id)
+      .populate('stockId')
+      .populate('stock')
+      .lean();
 
     if (signal) {
       const tenantId = (req as any).user.tenantId || signal.tenantId;
+      const sig: any = signal;
+      const stock = sig.stockId || sig.stock || {};
+      const stockSymbol = stock.symbol || 'Trade Signal';
+      const user = (req as any).user;
+      const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
+      const targetPlanId = signal.planId ? (signal.planId._id?.toString() || signal.planId.toString()) : null;
 
-      // Notify clients who were subscribed to this plan AT THE TIME the signal was created
-      const allSubs = await prisma.subscription.findMany({
-        where: {
-          planId: signal.planId,
-          startDate: { lte: signal.createdAt }
-        },
-        include: { client: { include: { user: true } } }
-      });
-
-      // Filter out subscriptions that expired BEFORE the signal was created
-      const eligibleSubs = allSubs.filter(sub => !sub.endDate || sub.endDate >= signal.createdAt);
-
-      const notificationPromises = eligibleSubs.map(sub => {
-        return prisma.notificationLog.create({
+      try {
+        await broadcastSignalNotification({
+          tenantId,
+          planIds: targetPlanId ? [targetPlanId] : [],
+          title: `🚨 Trade Alert: ${stockSymbol}`,
+          message: `${message}`,
+          type: 'alert',
           data: {
-            tenantId,
-            recipient: sub.client.userId,
-            channel: 'INAPP',
-            title: `Trade Update: ${signal.stock.symbol}`,
-            message: `New update on trade ${signal.stock.symbol}: ${message}`
-          }
+            signalId: id,
+            stockSymbol,
+            segment: signal.segment,
+            callType: signal.callType,
+            entryPrice: signal.entryPrice,
+            alertMessage: message,
+            message: message,
+            action: 'TRADE_ALERT'
+          },
+          adminTitle: `🚨 Trade Alert Sent: ${stockSymbol}`,
+          adminMessage: `${researcherName} sent alert for ${stockSymbol}: ${message}`
         });
-      });
-
-      await Promise.all(notificationPromises);
+      } catch (notifErr) {
+        console.warn('[Notification] Failed to broadcast alert message:', notifErr);
+      }
     }
 
-    res.status(201).json({ success: true, message: 'Alert sent successfully', data: signalMessage });
+    res.status(201).json({
+      success: true,
+      message: 'Alert sent successfully',
+      data: {
+        ...signalMessage.toObject(),
+        id: signalMessage._id.toString()
+      }
+    });
   } catch (error: any) {
     console.error('Error adding signal message:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });

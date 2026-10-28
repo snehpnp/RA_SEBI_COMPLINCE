@@ -1,4 +1,5 @@
 'use client';
+import { executeSmartDownload } from '@/utils/smartDownload';
 import { useState, useEffect } from 'react';
 import { Save, Loader2, History, X, Eye, Calendar, CheckCircle, Download } from 'lucide-react';
 import api from '../../services/api';
@@ -174,13 +175,11 @@ export default function ComplaintReportAdmin() {
 
       const csvContent = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `SEBI_Complaint_Reports_History_${new Date().toISOString().slice(0, 10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      await executeSmartDownload({
+        blob,
+        fileName: `SEBI_Complaint_Reports_History_${new Date().toISOString().slice(0, 10)}.csv`,
+        documentType: 'SEBI Complaint Reports History'
+      });
     } catch (err: any) {
       toast.error(err.message || 'Failed to download history CSV');
     } finally {

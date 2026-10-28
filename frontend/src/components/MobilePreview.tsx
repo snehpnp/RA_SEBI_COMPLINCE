@@ -14,7 +14,8 @@ interface MobilePreviewProps {
   title?: string;
 }
 
-export default function MobilePreview({ mode, signals = [], newSignalData = {}, onSendAlert, isViewOnly = false, checklistItems = [], complianceItems = [], title }: MobilePreviewProps) {
+export default function MobilePreview({ mode, signals = [], newSignalData = {}, onSendAlert, isViewOnly = false, checklistItems = [], complianceItems = [], title }: 
+  MobilePreviewProps) {
   const [composingAlertFor, setComposingAlertFor] = React.useState<any>(null);
   const [alertMessage, setAlertMessage] = React.useState('');
   const [isSending, setIsSending] = React.useState(false);
@@ -230,24 +231,24 @@ export default function MobilePreview({ mode, signals = [], newSignalData = {}, 
                 </div>
               ) : (
                 complianceItems?.map((item: any, idx: number) => {
-                  if (item._isOverview) {
+                  if (item?._isOverview) {
                     let cardColor = "border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#1A2235]";
                     let titleColor = "text-slate-500 dark:text-slate-400";
                     let valueColor = "text-slate-900 dark:text-white";
 
-                    if (item.colorType === 'primary') {
+                    if (item?.colorType === 'primary') {
                       cardColor = "border-primary-500/30 bg-primary-50 dark:bg-primary-500/10";
                       titleColor = "text-primary-600 dark:text-primary-400";
                       valueColor = "text-primary-700 dark:text-primary-300";
-                    } else if (item.colorType === 'rose') {
+                    } else if (item?.colorType === 'rose') {
                       cardColor = "border-rose-500/30 bg-rose-50 dark:bg-rose-500/10";
                       titleColor = "text-rose-600 dark:text-rose-400";
                       valueColor = "text-rose-700 dark:text-rose-300";
-                    } else if (item.colorType === 'emerald') {
+                    } else if (item?.colorType === 'emerald') {
                       cardColor = "border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10";
                       titleColor = "text-emerald-600 dark:text-emerald-400";
                       valueColor = "text-emerald-700 dark:text-emerald-300";
-                    } else if (item.colorType === 'amber') {
+                    } else if (item?.colorType === 'amber') {
                       cardColor = "border-amber-500/30 bg-amber-50 dark:bg-amber-500/10";
                       titleColor = "text-amber-600 dark:text-amber-400";
                       valueColor = "text-amber-700 dark:text-amber-300";
@@ -398,6 +399,7 @@ export default function MobilePreview({ mode, signals = [], newSignalData = {}, 
             </div>
           ) : mode === 'CHECKLIST' ? (
             <div className="space-y-3">
+
               {checklistItems && checklistItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-slate-400 opacity-50 space-y-3 py-10">
                   <CheckCircle2 className="w-8 h-8" />

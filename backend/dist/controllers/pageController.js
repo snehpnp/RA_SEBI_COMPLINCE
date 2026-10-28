@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getComplaintReportHistory = exports.saveComplaintReport = exports.getComplaintReport = exports.deletePage = exports.savePage = exports.getAdminPages = exports.getPageBySlug = exports.getActivePages = void 0;
 const db_1 = __importDefault(require("../config/db"));
+const tenantSyncDispatcher_1 = require("../services/tenantSyncDispatcher");
 const isValidObjectId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
 // ----------------------------------------------------
 // CUSTOM PAGES (POLICIES)
@@ -14,26 +15,16 @@ const getActivePages = async (req, res) => {
         const tenantId = req.headers['x-tenant-id'];
         if (!tenantId || !isValidObjectId(tenantId))
             throw new Error('Valid Tenant ID required');
-        let pages = await db_1.default.customPage.findMany({
-            where: {
-                tenantId,
-                status: 'ACTIVE'
-            },
-            select: {
-                id: true,
-                title: true,
-                slug: true,
-                type: true,
-                content: true,
-                externalUrl: true,
-                isSystem: true
-            },
-            orderBy: { createdAt: 'asc' }
-        });
+        let pages = await db_1.default.CustomPage.find({
+            tenantId,
+            status: 'ACTIVE'
+        })
+            .select('title slug type content externalUrl isSystem')
+            .sort({ createdAt: 1 })
+            .lean();
         // Only return pages explicitly marked ACTIVE by the admin
-        // Removed strict content checks so that the Active/Inactive toggle determines visibility.
         // Also, explicitly exclude complaint-status because it is now a dedicated sidebar feature, not a policy.
-        pages = pages.filter(p => p.slug !== 'complaint-status');
+        pages = pages.filter((p) => p.slug !== 'complaint-status');
         res.status(200).json({ success: true, data: pages });
     }
     catch (error) {
@@ -47,11 +38,10 @@ const getPageBySlug = async (req, res) => {
         if (!tenantId || !isValidObjectId(tenantId))
             throw new Error('Valid Tenant ID required');
         const { slug } = req.params;
-        const page = await db_1.default.customPage.findUnique({
-            where: {
-                tenantId_slug: { tenantId, slug }
-            }
-        });
+        const page = await db_1.default.CustomPage.findOne({
+            tenantId,
+            slug
+        }).lean();
         if (!page || page.status !== 'ACTIVE') {
             return res.status(404).json({ success: false, message: 'Page not found' });
         }
@@ -67,26 +57,9 @@ const getAdminPages = async (req, res) => {
         const tenantId = req.user.tenantId || req.headers['x-tenant-id'];
         if (!tenantId || !isValidObjectId(tenantId))
             throw new Error('Valid Tenant ID required');
-        let pages = await db_1.default.customPage.findMany({
-            where: { tenantId },
-            orderBy: { createdAt: 'asc' }
-        });
-        const mandatoryPagesTemplate = [
-            { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', isSystem: true, tenantId },
-            { title: 'Disclosure', slug: 'disclosure', type: 'CONTENT', isSystem: true, tenantId },
-            { title: 'Disclaimer', slug: 'disclaimer', type: 'CONTENT', isSystem: true, tenantId },
-            { title: 'Grievance Redressal Process', slug: 'grievance-redressal', type: 'CONTENT', isSystem: true, tenantId },
-            { title: 'Investor Charter', slug: 'investor-charter', type: 'CONTENT', isSystem: true, tenantId },
-        ];
-        const existingSlugs = new Set(pages.map(p => p.slug));
-        const missingPages = mandatoryPagesTemplate.filter(p => !existingSlugs.has(p.slug));
-        if (missingPages.length > 0) {
-            await db_1.default.customPage.createMany({ data: missingPages });
-            pages = await db_1.default.customPage.findMany({
-                where: { tenantId },
-                orderBy: { createdAt: 'asc' }
-            });
-        }
+        const pages = await db_1.default.CustomPage.find({ tenantId })
+            .sort({ createdAt: 1 })
+            .lean();
         res.status(200).json({ success: true, data: pages });
     }
     catch (error) {
@@ -107,9 +80,8 @@ const savePage = async (req, res) => {
         if (id) {
             if (!isValidObjectId(id))
                 throw new Error('Invalid Page ID format');
-            page = await db_1.default.customPage.update({
-                where: { id },
-                data: {
+            page = await db_1.default.CustomPage.findByIdAndUpdate(id, {
+                $set: {
                     title,
                     slug,
                     type,
@@ -117,21 +89,21 @@ const savePage = async (req, res) => {
                     externalUrl: type === 'URL' ? externalUrl : null,
                     status
                 }
-            });
+            }, { returnDocument: 'after', lean: true });
         }
         else {
-            page = await db_1.default.customPage.create({
-                data: {
-                    tenantId,
-                    title,
-                    slug,
-                    type,
-                    content: type === 'CONTENT' ? content : null,
-                    externalUrl: type === 'URL' ? externalUrl : null,
-                    status: status || 'ACTIVE'
-                }
+            page = await db_1.default.CustomPage.create({
+                tenantId,
+                title,
+                slug,
+                type,
+                content: type === 'CONTENT' ? content : null,
+                externalUrl: type === 'URL' ? externalUrl : null,
+                status: status || 'ACTIVE'
             });
         }
+        // Automatically sync updated page to tenant's domain DB
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PAGE_UPDATE' }).catch((e) => console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message));
         res.status(200).json({ success: true, message: 'Page saved successfully', data: page });
     }
     catch (error) {
@@ -147,12 +119,12 @@ const deletePage = async (req, res) => {
         const { id } = req.params;
         if (!isValidObjectId(id))
             throw new Error('Invalid Page ID format');
-        const page = await db_1.default.customPage.findUnique({ where: { id } });
+        const page = await db_1.default.CustomPage.findById(id);
         if (!page || page.tenantId !== tenantId)
             throw new Error('Page not found');
-        if (page.isSystem)
-            throw new Error('Cannot delete a system page');
-        await db_1.default.customPage.delete({ where: { id } });
+        await db_1.default.CustomPage.findByIdAndDelete(id);
+        // Automatically sync deletion to tenant's domain DB
+        (0, tenantSyncDispatcher_1.syncTenantToRemote)(tenantId, { reason: 'PAGE_DELETE' }).catch((e) => console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message));
         res.status(200).json({ success: true, message: 'Page deleted successfully' });
     }
     catch (error) {
@@ -168,7 +140,7 @@ const getComplaintReport = async (req, res) => {
         const tenantId = req.headers['x-tenant-id'];
         if (!tenantId || !isValidObjectId(tenantId))
             throw new Error('Valid Tenant ID required');
-        let { month, year } = req.query;
+        const { month, year } = req.query;
         let targetMonth;
         let targetYear;
         if (month && year) {
@@ -177,7 +149,8 @@ const getComplaintReport = async (req, res) => {
         }
         else {
             const now = new Date();
-            if (now.getMonth() === 0) { // Jan -> Dec of prev year
+            if (now.getMonth() === 0) {
+                // Jan -> Dec of prev year
                 targetMonth = 12;
                 targetYear = now.getFullYear() - 1;
             }
@@ -186,11 +159,11 @@ const getComplaintReport = async (req, res) => {
                 targetYear = now.getFullYear();
             }
         }
-        const report = await db_1.default.complaintMonthlyReport.findUnique({
-            where: {
-                tenantId_month_year: { tenantId, month: targetMonth, year: targetYear }
-            }
-        });
+        const report = await db_1.default.ComplaintMonthlyReport.findOne({
+            tenantId,
+            month: targetMonth,
+            year: targetYear
+        }).lean();
         res.status(200).json({
             success: true,
             data: report ? JSON.parse(report.data) : null,
@@ -213,18 +186,18 @@ const saveComplaintReport = async (req, res) => {
             throw new Error('Month, year, and data are required');
         }
         const jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
-        const report = await db_1.default.complaintMonthlyReport.upsert({
-            where: {
-                tenantId_month_year: { tenantId, month: parseInt(month), year: parseInt(year) }
-            },
-            update: { data: jsonStr },
-            create: {
+        const report = await db_1.default.ComplaintMonthlyReport.findOneAndUpdate({
+            tenantId,
+            month: parseInt(month),
+            year: parseInt(year)
+        }, {
+            $set: { data: jsonStr },
+            $setOnInsert: {
                 tenantId,
                 month: parseInt(month),
-                year: parseInt(year),
-                data: jsonStr
+                year: parseInt(year)
             }
-        });
+        }, { upsert: true, returnDocument: 'after', lean: true });
         res.status(200).json({ success: true, message: 'Complaint report saved successfully', data: report });
     }
     catch (error) {
@@ -237,12 +210,11 @@ const getComplaintReportHistory = async (req, res) => {
         const tenantId = req.headers['x-tenant-id'];
         if (!tenantId || !isValidObjectId(tenantId))
             throw new Error('Valid Tenant ID required');
-        const reports = await db_1.default.complaintMonthlyReport.findMany({
-            where: { tenantId },
-            orderBy: [{ year: 'desc' }, { month: 'desc' }]
-        });
-        const parsedReports = reports.map(r => ({
-            id: r.id,
+        const reports = await db_1.default.ComplaintMonthlyReport.find({ tenantId })
+            .sort({ year: -1, month: -1 })
+            .lean();
+        const parsedReports = reports.map((r) => ({
+            id: String(r._id || r.id),
             month: r.month,
             year: r.year,
             updatedAt: r.updatedAt,

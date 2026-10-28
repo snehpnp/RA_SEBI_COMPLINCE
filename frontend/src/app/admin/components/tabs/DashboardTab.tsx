@@ -314,7 +314,7 @@ export default function DashboardTab({
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-4 border-b border-slate-200 dark:border-white/5 mb-4">
                   <div>
                     <h3 className="font-bold text-slate-900 dark:text-white text-lg">Sales & Client Growth</h3>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">Advisory revenue and user onboarding</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">Service revenue and user onboarding</p>
                   </div>
 
                   {/* Controls */}
@@ -371,7 +371,7 @@ export default function DashboardTab({
                         fontSize={11}
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(v) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
+                        tickFormatter={(v: any) => dashboardMetric === 'sales' ? `₹${(v / 1000).toLocaleString()}K` : v}
                       />
                       <Tooltip
                         contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(255, 255, 255, 0.1)', borderRadius: '16px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)' }}

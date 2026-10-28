@@ -7,13 +7,15 @@ export default function WelcomeInstructionModal({ profile, onClose, onStart }: {
   const [isOpen, setIsOpen] = useState(false);
   
   useEffect(() => {
-    // Check if the user is genuinely new (e.g., PENDING_ONBOARDING)
-    // Or if they haven't seen the modal in this session
+    const hasAssignedPlan = Boolean(
+      (profile?.subscriptions && Array.isArray(profile.subscriptions) && profile.subscriptions.some((s: any) => s.status === 'ACTIVE' || s.status === 'active')) ||
+      (profile?.status === 'ACTIVE' && (profile?.subscriptions?.length > 0 || profile?.plan))
+    );
     const hasSeen = localStorage.getItem('hasSeenWelcomeModal');
     const isNew = ['PENDING_ONBOARDING', 'KYC_PENDING', 'AGREEMENT_PENDING'].includes(profile?.status) || 
                   ['PENDING_ONBOARDING', 'KYC_PENDING', 'AGREEMENT_PENDING'].includes(profile?.kycStatus);
     
-    if (isNew && !hasSeen) {
+    if (hasAssignedPlan && isNew && !hasSeen) {
       setIsOpen(true);
     }
   }, [profile]);

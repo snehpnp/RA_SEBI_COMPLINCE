@@ -1,3 +1,4 @@
+import { executeSmartDownload } from '@/utils/smartDownload';
 import React, { useState, useEffect, useMemo } from 'react';
 import DataTable from 'react-data-table-component';
 
@@ -5,24 +6,25 @@ const tableCustomStyles = {
   table: {
     style: {
       backgroundColor: 'transparent',
+      minWidth: '1000px',
     },
   },
   headRow: {
     style: {
-      backgroundColor: 'rgba(241, 245, 249, 0.5)',
-      borderBottomColor: 'rgba(203, 213, 225, 0.5)',
-      minHeight: '44px',
+      backgroundColor: 'rgba(241, 245, 249, 0.7)',
+      borderBottomColor: 'rgba(203, 213, 225, 0.6)',
+      minHeight: '46px',
     },
   },
   headCells: {
     style: {
-      fontSize: '10px',
+      fontSize: '11px',
       fontWeight: '700',
       textTransform: 'uppercase' as any,
       letterSpacing: '0.05em',
       color: 'rgb(71, 85, 105)',
-      paddingLeft: '16px',
-      paddingRight: '16px',
+      paddingLeft: '14px',
+      paddingRight: '14px',
     },
   },
   rows: {
@@ -31,40 +33,45 @@ const tableCustomStyles = {
       fontWeight: '500',
       color: 'rgb(51, 65, 85)',
       backgroundColor: 'transparent',
-      minHeight: '52px',
+      minHeight: '54px',
       borderBottomColor: 'rgba(203, 213, 225, 0.4)',
       '&:hover': {
-        backgroundColor: 'rgba(248, 250, 252, 0.5)',
+        backgroundColor: 'rgba(248, 250, 252, 0.6)',
       },
     },
   },
   cells: {
     style: {
-      paddingLeft: '16px',
-      paddingRight: '16px',
+      paddingLeft: '14px',
+      paddingRight: '14px',
     },
   },
 };
-import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff } from 'lucide-react';
+import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send, Users, MessageSquare } from 'lucide-react';
 import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
 
 import MobilePreview from './MobilePreview';
 import ReportPreviewModal from './ReportPreviewModal';
+import UploadSignConfirmModal from './UploadSignConfirmModal';
+import TradeDeliveryReports from './admin/TradeDeliveryReports';
 import toast from 'react-hot-toast';
 
 export default function SignalManagement({
   adminPlans,
+  categories,
   user,
   hasPermission,
   showMobilePreview = false
 }: {
   adminPlans: any[];
+  categories?: any[];
   user?: any;
   hasPermission?: (permCode: string) => boolean;
   showMobilePreview?: boolean;
 }) {
+  const [mainTab, setMainTab] = useState<'SIGNALS' | 'REPORTS'>('SIGNALS');
   const [view, setView] = useState<'TABLE' | 'CARD' | 'STRATEGY' | 'ADD'>('TABLE');
   const [signalStatusFilter, setSignalStatusFilter] = useState<'OPEN' | 'CLOSED'>('OPEN');
 
@@ -89,6 +96,52 @@ export default function SignalManagement({
   // Add Signal Form
   const [segment, setSegment] = useState('');
   const [planIds, setPlanIds] = useState<string[]>([]);
+  const [categoriesList, setCategoriesList] = useState<any[]>(Array.isArray(categories) ? categories : []);
+
+  useEffect(() => {
+    if (Array.isArray(categories) && categories.length > 0) {
+      setCategoriesList(categories);
+    }
+  }, [categories]);
+
+  const availableCategories = useMemo(() => {
+    if (categoriesList && categoriesList.length > 0) return categoriesList;
+    const source = (adminPlans && adminPlans.length > 0) ? adminPlans : localPlans;
+    const map = new Map<string, any>();
+    source.forEach((p: any) => {
+      if (p.category && (p.category.id || p.category._id)) {
+        const cId = p.category.id || p.category._id;
+        if (!map.has(cId)) {
+          map.set(cId, {
+            id: cId,
+            _id: cId,
+            name: p.category.name || 'Category',
+            segments: p.category.segments || p.researchSegments || ''
+          });
+        }
+      }
+    });
+    const allCategories = Array.from(map.values());
+    return allCategories.filter((c: any) => {
+      const pCount = (c.plansBreakdown && c.plansBreakdown.length) || c.plansCount || 0;
+      if (pCount > 0) return true;
+      return source.some((p: any) => String(p.categoryId || p.category?._id || p.category?.id) === String(c.id || c._id));
+    });
+  }, [categoriesList, adminPlans, localPlans]);
+
+  const filteredCategories = useMemo(() => {
+    if (!segment) return availableCategories;
+    const segLower = segment.toLowerCase().trim();
+    const filtered = availableCategories.filter((cat: any) => {
+      const rawSegs = cat.segments || '';
+      const segList = Array.isArray(rawSegs)
+        ? rawSegs.map((s: string) => s.toLowerCase().trim())
+        : String(rawSegs).toLowerCase().split(',').map((s: string) => s.trim());
+      if (segList.length === 0 || (segList.length === 1 && !segList[0])) return true;
+      return segList.includes(segLower) || segList.includes('all');
+    });
+    return filtered.length > 0 ? filtered : availableCategories;
+  }, [availableCategories, segment]);
   const [callType, setCallType] = useState('');
   const [tradeDuration, setTradeDuration] = useState('');
   const [stockId, setStockId] = useState('');
@@ -126,11 +179,180 @@ export default function SignalManagement({
   const [reportPreviewModal, setReportPreviewModal] = useState<any>(null);
   const [reportOptionsModal, setReportOptionsModal] = useState<any>(null);
   const [uploadingReportFor, setUploadingReportFor] = useState<any>(null);
+  const [uploadSignModalData, setUploadSignModalData] = useState<{ file: File; signal: any } | null>(null);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [alertTrade, setAlertTrade] = useState<any>(null);
   const [alertMessage, setAlertMessage] = useState('');
   const [sendingAlert, setSendingAlert] = useState(false);
   const [isMobileVisible, setIsMobileVisible] = useState(false);
+  const [smsTemplates, setSmsTemplates] = useState<any[]>([]);
+  const [customVariableValues, setCustomVariableValues] = useState<Record<number, string>>({});
+
+  // Selected stock details
+  const selectedStockObj = useMemo(() => {
+    return stocks.find((s: any) => s._id === stockId || s.id === stockId);
+  }, [stocks, stockId]);
+
+  const currentStockSymbol = useMemo(() => {
+    return selectedStockObj?.symbol || stockSearchQuery || '';
+  }, [selectedStockObj, stockSearchQuery]);
+
+  // Formatted instrument string
+  const formattedInstrument = useMemo(() => {
+    const sym = currentStockSymbol;
+    if (segment === 'OPTION') {
+      return [sym, strikePrice, optionType].filter(Boolean).join(' ');
+    }
+    if (segment === 'FUTURE') {
+      let futMonth = '';
+      if (expiryDate) {
+        try {
+          const d = new Date(expiryDate);
+          if (!isNaN(d.getTime())) {
+            futMonth = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+          }
+        } catch (e) {}
+      }
+      return [sym, futMonth, 'FUT'].filter(Boolean).join(' ');
+    }
+    return sym;
+  }, [segment, currentStockSymbol, strikePrice, optionType, expiryDate]);
+
+  // Formatted targets string (180/200/250)
+  const formattedTargets = useMemo(() => {
+    return [target1, target2, target3]
+      .filter((v: any) => v !== undefined && v !== null && String(v).trim() !== '')
+      .join('/');
+  }, [target1, target2, target3]);
+
+  // Matched Active SMS Template
+  const matchedSmsTemplate = useMemo(() => {
+    if (!segment || !callType) return null;
+    const triggerKey = `${segment.toUpperCase()}_${callType.toUpperCase()}`;
+    return smsTemplates.find((t: any) => (t.status === 'ACTIVE' || t.isActive) && (
+      (Array.isArray(t.applicableCombinations) && t.applicableCombinations.includes(triggerKey)) ||
+      (Array.isArray(t.applicableSegments) && t.applicableSegments.includes(segment.toUpperCase()) &&
+       Array.isArray(t.applicableActions) && t.applicableActions.includes(callType.toUpperCase()))
+    )) || null;
+  }, [segment, callType, smsTemplates]);
+
+  // Resolved SMS data with variable mappings
+  const resolvedSmsData = useMemo(() => {
+    if (!matchedSmsTemplate) return null;
+    const templateMsg = matchedSmsTemplate.content || matchedSmsTemplate.message || '';
+    const mappings: any[] = matchedSmsTemplate.variableMappings || [];
+
+    const detectedRegex = /\{#(var|alp|num|val|[a-z0-9_]+)#\}|\{([a-z0-9_]+)\}/gi;
+    const matches = Array.from(templateMsg.matchAll(detectedRegex));
+
+    const resolvedVars: { index: number; placeholder: string; fieldKey: string; label: string; value: string; isOverLimit: boolean }[] = [];
+
+    const FIELD_LABELS: Record<string, string> = {
+      callType: 'Call Type',
+      stock: 'Stock Name',
+      strikePrice: 'Strike Price',
+      optionType: 'Option Type',
+      expiryDate: 'Expiry Date',
+      entryType: 'Entry Type',
+      entryPrice: 'Entry Price',
+      targets: 'Targets',
+      target1: 'Target 1',
+      target2: 'Target 2',
+      target3: 'Target 3',
+      stoploss: 'Stoploss',
+      duration: 'Duration',
+      fullInstrument: 'Full Instrument'
+    };
+
+    matches.forEach((m: any, idx: number) => {
+      const placeholder = m[0];
+      const mapItem = mappings.find((mp: any) => mp.index === idx);
+      const selectedFields: string[] = Array.isArray(mapItem?.selectedFields) && mapItem.selectedFields.length > 0
+        ? mapItem.selectedFields
+        : (mapItem?.fieldKey ? mapItem.fieldKey.split(',').map((s: string) => s.trim()).filter(Boolean) : (idx === 0 ? ['callType', 'stock', 'entryPrice'] : idx === 1 ? ['targets'] : ['stoploss']));
+
+      const fieldValues: string[] = [];
+      for (const fKey of selectedFields) {
+        let partVal = '';
+        if (fKey === 'callType') partVal = callType;
+        else if (fKey === 'stock') partVal = currentStockSymbol;
+        else if (fKey === 'strikePrice') partVal = strikePrice;
+        else if (fKey === 'optionType') partVal = optionType;
+        else if (fKey === 'expiryDate') partVal = expiryDate;
+        else if (fKey === 'entryType') partVal = entryType;
+        else if (fKey === 'entryPrice') partVal = entryPrice;
+        else if (fKey === 'targets') partVal = formattedTargets;
+        else if (fKey === 'target1') partVal = target1;
+        else if (fKey === 'target2') partVal = target2;
+        else if (fKey === 'target3') partVal = target3;
+        else if (fKey === 'stoploss') partVal = stoploss;
+        else if (fKey === 'duration') partVal = tradeDuration;
+        else if (fKey === 'fullInstrument') partVal = formattedInstrument;
+        else if (fKey === 'instrumentWithPrice') partVal = [formattedInstrument, entryPrice ? `@ ${entryPrice}` : ''].filter(Boolean).join(' ');
+
+        if (partVal && String(partVal).trim()) {
+          fieldValues.push(String(partVal).trim());
+        }
+      }
+      const autoVal = fieldValues.join(' ');
+      const finalVal = customVariableValues[idx] !== undefined ? customVariableValues[idx] : autoVal;
+      const isOverLimit = finalVal.length > 30;
+
+      const label = selectedFields.length > 0
+        ? selectedFields.map(f => FIELD_LABELS[f] || f).join(' + ')
+        : 'No fields';
+
+      resolvedVars.push({
+        index: idx,
+        placeholder,
+        fieldKey: selectedFields.join(','),
+        label,
+        value: finalVal,
+        isOverLimit
+      });
+    });
+
+    let previewText = templateMsg;
+    resolvedVars.forEach(rv => {
+      previewText = previewText.replace(rv.placeholder, rv.value || `[${rv.placeholder}]`);
+    });
+
+    const charCount = previewText.length;
+    const smsCredits = charCount === 0 ? 0 : charCount <= 160 ? 1 : Math.ceil(charCount / 153);
+    const anyOverLimit = resolvedVars.some(r => r.isOverLimit);
+
+    return {
+      template: matchedSmsTemplate,
+      resolvedVars,
+      previewText,
+      charCount,
+      smsCredits,
+      anyOverLimit
+    };
+  }, [matchedSmsTemplate, formattedInstrument, currentStockSymbol, entryPrice, formattedTargets, target1, target2, target3, stoploss, callType, tradeDuration, customVariableValues]);
+
+  // Active Trade Alert template and DLT variable character limit (1 var = max 30 chars, 2 vars = max 60 chars)
+  const activeAlertTemplate = useMemo(() => {
+    return smsTemplates.find((t: any) => 
+      (t.status === 'ACTIVE' || t.isActive) && 
+      (t.category === 'TRADE_ALERT' || t.type === 'TRADE_ALERT')
+    ) || null;
+  }, [smsTemplates]);
+
+  const alertVariableCount = useMemo(() => {
+    if (!activeAlertTemplate) return 1;
+    if (Array.isArray(activeAlertTemplate.variableMappings) && activeAlertTemplate.variableMappings.length > 0) {
+      return activeAlertTemplate.variableMappings.length;
+    }
+    const msg = activeAlertTemplate.content || activeAlertTemplate.message || '';
+    const matches = msg.match(/\{#(var|alp|num|val)\d*#\}|\{(var|alp|num|val)\d*\}/gi) || [];
+    return matches.length >= 2 ? 2 : 1;
+  }, [activeAlertTemplate]);
+
+  // 1 variable = max 30 characters; 2 variables = max 60 characters
+  const maxAlertChars = useMemo(() => {
+    return alertVariableCount >= 2 ? 60 : 30;
+  }, [alertVariableCount]);
 
   // Smart download helper — checks if file exists before downloading
   const BASE_URL = base_ra_url;
@@ -148,20 +370,18 @@ export default function SignalManagement({
       if (!res.ok || contentType.includes('application/json')) {
         // Server returned JSON error (e.g. {success:false, message:"File not found"})
         let msg = 'File not found on server.';
-        try { const json = await res.json(); msg = json.message || msg; } catch {}
+        try { const json = await res.json(); msg = json.message || msg; } catch { }
         toast.error('❌ ' + msg);
         return;
       }
       // File exists — trigger download
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = reportUrl.split('/').pop() || 'report.pdf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      const resolvedFileName = reportUrl.split('/').pop() || 'report.pdf';
+      await executeSmartDownload({
+        blob,
+        fileName: resolvedFileName,
+        documentType: 'Signal Report'
+      });
     } catch (err: any) {
       toast.error('❌ Download failed: ' + (err.message || 'Network error'));
     }
@@ -203,7 +423,32 @@ export default function SignalManagement({
         setLocalPlans(res.data);
       }
     }).catch(() => { });
+    api.getAdminCategories().then(res => {
+      if (res && res.success && Array.isArray(res.data)) {
+        setCategoriesList(res.data);
+      }
+    }).catch(() => { });
+    api.getSmsTemplates().then(res => {
+      if (res && res.success && Array.isArray(res.data)) {
+        setSmsTemplates(res.data);
+      }
+    }).catch(() => { });
   }, []);
+
+  useEffect(() => {
+    if (view === 'ADD') {
+      api.getAdminCategories().then(res => {
+      if (res && res.success && Array.isArray(res.data)) {
+        setCategoriesList(res.data);
+      }
+    }).catch(() => { });
+    api.getSmsTemplates().then(res => {
+        if (res && res.success && Array.isArray(res.data)) {
+          setSmsTemplates(res.data);
+        }
+      }).catch(() => { });
+    }
+  }, [view]);
 
   useEffect(() => {
     if (stockSearchQuery.length >= 2 || view === 'ADD') {
@@ -282,40 +527,20 @@ export default function SignalManagement({
 
   }, [callType, entryPrice, stoploss, target1, target2, target3, view]);
 
-  const handleUploadReportFile = async (e: React.ChangeEvent<HTMLInputElement>, signal: any) => {
+  const handleUploadReportFile = (e: React.ChangeEvent<HTMLInputElement>, signal: any) => {
     if (!e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
-
-    setUploadingReportFor(signal.id);
-    try {
-      const formData = new FormData();
-      formData.append('report', file);
-      const res = await fetch(`${base_api_url}/signals/${signal.id}/report`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-          'x-tenant-id': localStorage.getItem('tenantId') || ''
-        },
-        body: formData
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success('Report uploaded successfully');
-        fetchSignals();
-        setReportOptionsModal(null);
-      } else {
-        toast.error(data.message || 'Failed to upload report');
-      }
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setUploadingReportFor(null);
-      e.target.value = '';
-    }
+    e.target.value = '';
+    setReportOptionsModal(null);
+    setUploadSignModalData({ file, signal });
   };
 
   const handleSendAlert = async () => {
     if (!alertMessage.trim() || !alertTrade) return;
+    if (alertMessage.length > maxAlertChars) {
+      toast.error(`Alert message cannot exceed ${maxAlertChars} characters under active DLT template rules.`);
+      return;
+    }
     setSendingAlert(true);
     try {
       const res = await api.request(`/signals/${alertTrade.id}/messages`, {
@@ -343,7 +568,7 @@ export default function SignalManagement({
     const newErrors: any = {};
     if (!segment) newErrors.segment = "Please Select a Segment";
     if (!stockId) newErrors.stockId = "Please Select a Stock";
-    if (planIds.length === 0) newErrors.planId = "Please Select at least one Plan";
+    if (planIds.length === 0) newErrors.planId = "Please Select at least one Plan Category";
     if (!callType) newErrors.callType = "Please Select a Call Type";
     if (!tradeDuration) newErrors.tradeDuration = "Please Select Trade Duration";
     if (!entryPrice) newErrors.entryPrice = "Please Select a Price";
@@ -405,6 +630,9 @@ export default function SignalManagement({
     formData.append('stoploss', stoploss);
     formData.append('description', description);
     if (reportFile) formData.append('report', reportFile);
+    if (resolvedSmsData && Array.isArray(resolvedSmsData.resolvedVars) && resolvedSmsData.resolvedVars.length > 0) {
+      formData.append('smsOrderedVariables', JSON.stringify(resolvedSmsData.resolvedVars.map(v => v.value)));
+    }
 
     try {
       const res = await api.createSignal(formData);
@@ -415,7 +643,7 @@ export default function SignalManagement({
         // Reset form
         setSegment(''); setPlanIds([]); setCallType(''); setTradeDuration(''); setStockId(''); setExpiryDate(''); setStrikePrice(''); setOptionType('');
         setEntryPrice(''); setEntryType(''); setTarget1(''); setTarget2(''); setTarget3('');
-        setStoploss(''); setDescription(''); setReportFile(null); setStockSearchQuery('');
+        setStoploss(''); setDescription(''); setReportFile(null); setStockSearchQuery(''); setCustomVariableValues({});
       } else {
         toast(res.message);
       }
@@ -492,7 +720,7 @@ export default function SignalManagement({
     const cols: any[] = [
       {
         name: 'S.No',
-        width: '70px',
+        width: '65px',
         selector: (row: any, index?: number) => index !== undefined ? index + 1 : 0,
         cell: (row: any, index?: number) => (
           <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400">
@@ -502,11 +730,11 @@ export default function SignalManagement({
       },
       {
         name: 'Segment',
-        width: '130px',
+        minWidth: '120px',
         selector: (row: any) => row.segment,
         cell: (row: any) => (
-          <div className="flex items-center space-x-2">
-            <span className="bg-slate-100 dark:bg-white/5 px-2 py-1 rounded-md text-xs border border-slate-400 dark:border-white/10 whitespace-nowrap">{row.segment}</span>
+          <div className="flex items-center space-x-1.5">
+            <span className="bg-slate-100 dark:bg-white/5 px-2.5 py-1 rounded-md text-xs font-semibold border border-slate-300 dark:border-white/10 whitespace-nowrap">{row.segment}</span>
             {row.closeStatus === 'Avoid Signal' && (
               <div className="flex items-center space-x-1 whitespace-nowrap">
                 <span className="text-red-600 dark:text-red-500 font-bold text-xs">(Avoid)</span>
@@ -517,35 +745,51 @@ export default function SignalManagement({
         ),
       },
       {
-        name: 'Symbol',
-        minWidth: '150px',
-        selector: (row: any) => row.stock?.symbol,
+        name: 'Symbol / Stock',
+        minWidth: '200px',
+        selector: (row: any) => row.stock?.symbol || row.symbol || row.stockName || '',
         cell: (row: any) => (
-          <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap">
-            {row.stock?.symbol}
-            {row.strikePrice && <span className="ml-2 text-xs font-semibold text-slate-500">{row.strikePrice} {row.optionType || ''}</span>}
-          </span>
+          <div className="flex flex-col py-1.5 pr-2">
+            <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap flex items-center gap-1.5">
+              {row.stock?.symbol || row.symbol || 'N/A'}
+              {row.strikePrice && <span className="text-xs font-semibold text-slate-500">({row.strikePrice} {row.optionType || ''})</span>}
+            </span>
+            {(row.stock?.name || row.stockName) && (
+              <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[190px]" title={row.stock?.name || row.stockName}>
+                {row.stock?.name || row.stockName}
+              </span>
+            )}
+          </div>
         ),
       },
       {
         name: 'Plan',
-        minWidth: '140px',
+        minWidth: '220px',
         selector: (row: any) => row.planName,
-        cell: (row: any) => <span className="text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.planName}</span>
+        cell: (row: any) => (
+          <div className="py-1.5 pr-3">
+            <span className="text-slate-700 dark:text-gray-300 font-medium text-xs whitespace-nowrap block" title={row.planName}>
+              {row.planName || 'N/A'}
+            </span>
+          </div>
+        )
       },
       {
         name: 'Entry Type',
-        width: '100px',
+        minWidth: '110px',
+        center: true,
         selector: (row: any) => row.callType,
         cell: (row: any) => (
-          <span className={`px-2 py-1 rounded-md text-[10px] font-bold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
-            {row.callType}
-          </span>
+          <div className="py-1 flex items-center justify-center">
+            <span className={`px-2.5 py-1 rounded-md text-[11px] font-extrabold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
+              {row.callType}
+            </span>
+          </div>
         )
       },
       {
         name: 'Entry Price',
-        width: '110px',
+        minWidth: '120px',
         selector: (row: any) => row.entryPrice,
         cell: (row: any) => <span className="font-semibold text-lime-700 dark:text-[#d4f23b] whitespace-nowrap">₹ {row.entryPrice}</span>
       }
@@ -554,15 +798,69 @@ export default function SignalManagement({
     if (signalStatusFilter === 'CLOSED') {
       cols.push({
         name: 'Exit Price',
-        width: '110px',
+        minWidth: '120px',
         selector: (row: any) => row.exitPrice,
         cell: (row: any) => <span className="font-semibold text-slate-700 dark:text-gray-300 whitespace-nowrap">{row.exitPrice ? `₹ ${row.exitPrice}` : 'N/A'}</span>
       });
     }
 
+    // Always show Status & Remark column
+    cols.push({
+      name: 'Status & Remark',
+      minWidth: '200px',
+      cell: (row: any) => {
+        const isClosed = row.status === 'CLOSED';
+        const hasCloseStatus = Boolean(row.closeStatus);
+        const statusText = row.closeStatus || (isClosed ? 'Closed' : 'Active');
+
+        let badgeStyle = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
+        if (row.closeStatus === 'Fully Closed') {
+          badgeStyle = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+        } else if (row.closeStatus === 'SL Hit' || row.closeStatus === 'Stoploss Triggered') {
+          badgeStyle = 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20';
+        } else if (row.closeStatus === 'Avoid Signal') {
+          badgeStyle = 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
+        } else if ((row.closeStatus || '').includes('Target') || row.closeStatus === 'Partially Closed') {
+          badgeStyle = 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20';
+        } else if (isClosed) {
+          badgeStyle = 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
+        }
+
+        return (
+          <div className="flex flex-col py-1.5 max-w-[210px]">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border whitespace-nowrap ${badgeStyle}`}>
+                {statusText}
+              </span>
+              {row.closeTargets && (
+                <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1 py-0.2 rounded">
+                  {row.closeTargets}
+                </span>
+              )}
+            </div>
+            {row.closeRemark ? (
+              <button
+                type="button"
+                onClick={() => setAvoidRemarkModal(row.closeRemark)}
+                className="flex items-center gap-1 text-[11px] text-slate-700 dark:text-slate-300 mt-1 hover:text-amber-600 dark:hover:text-amber-400 text-left transition-colors group cursor-pointer"
+                title={`Remark: ${row.closeRemark}\n(Click to view full remark)`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="truncate max-w-[170px] font-medium">{row.closeRemark}</span>
+              </button>
+            ) : (
+              hasCloseStatus && (
+                <span className="text-[10px] text-slate-400 italic mt-0.5">No remark</span>
+              )
+            )}
+          </div>
+        );
+      }
+    });
+
     cols.push({
       name: 'Entry Date',
-      minWidth: '160px',
+      minWidth: '170px',
       selector: (row: any) => row.createdAt,
       cell: (row: any) => <span className="text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{new Date(row.createdAt).toLocaleString()}</span>
     });
@@ -570,7 +868,7 @@ export default function SignalManagement({
     if (signalStatusFilter === 'CLOSED') {
       cols.push({
         name: 'Exit Date',
-        minWidth: '160px',
+        minWidth: '170px',
         selector: (row: any) => row.closedAt,
         cell: (row: any) => <span className="text-slate-600 dark:text-gray-400 whitespace-nowrap text-xs">{row.closedAt ? new Date(row.closedAt).toLocaleString() : 'N/A'}</span>
       });
@@ -579,7 +877,7 @@ export default function SignalManagement({
     if (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') {
       cols.push({
         name: 'Researcher',
-        minWidth: '140px',
+        minWidth: '160px',
         selector: (row: any) => row.createdByName,
         cell: (row: any) => <span className="whitespace-nowrap text-xs font-semibold text-slate-700 dark:text-slate-300">{row.createdByName || 'Unknown'}</span>
       });
@@ -587,7 +885,7 @@ export default function SignalManagement({
 
     cols.push({
       name: 'Action',
-      width: '180px',
+      minWidth: '180px',
       right: true,
       cell: (row: any) => (
         <div className="flex items-center justify-end space-x-2">
@@ -646,23 +944,23 @@ export default function SignalManagement({
     <div className={`text-slate-900 dark:text-white min-h-screen bg-white dark:bg-[#0f1523] pb-10 ${showMobilePreview ? 'lg:flex' : ''}`}>
       <div className={`flex-1 min-w-0`}>
         {view === 'ADD' && (
-        <div className="bg-white dark:bg-[#0B101E]/80 backdrop-blur-lg px-6 py-5 flex items-center justify-between border-b border-slate-300 dark:border-white/5 mb-6 shadow-xl sticky top-0 z-20">
-          <h1 className="text-lg font-bold flex items-center space-x-2">
-            <ArrowLeft className="h-5 w-5 cursor-pointer hover:text-primary-600 dark:text-primary-400" onClick={() => setView('TABLE')} />
-            <span>| Add Signal</span>
-          </h1>
-          <div className="flex items-center gap-2">
-            <div className="flex space-x-4">
-              <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
-                <ArrowLeft className="h-4 w-4" /> <span>Back</span>
-              </button>
-              <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
-                <Bell className="h-4 w-4" /> <span>Alert</span>
-              </button>
+          <div className="bg-white dark:bg-[#0B101E]/80 backdrop-blur-lg px-6 py-5 flex items-center justify-between border-b border-slate-300 dark:border-white/5 mb-6 shadow-xl sticky top-0 z-20">
+            <h1 className="text-lg font-bold flex items-center space-x-2">
+              <ArrowLeft className="h-5 w-5 cursor-pointer hover:text-primary-600 dark:text-primary-400" onClick={() => setView('TABLE')} />
+              <span>| Add Signal</span>
+            </h1>
+            <div className="flex items-center gap-2">
+              <div className="flex space-x-4">
+                <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
+                  <ArrowLeft className="h-4 w-4" /> <span>Back</span>
+                </button>
+                <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
+                  <Bell className="h-4 w-4" /> <span>Alert</span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {view !== 'ADD' && (
           <div className="bg-white dark:bg-[#151c2c]/60 backdrop-blur-md p-6 rounded-2xl border border-slate-300 dark:border-white/5 shadow-2xl mx-6">
@@ -683,31 +981,26 @@ export default function SignalManagement({
                 </button>
               </div>
 
-              {!isViewOnly && (
-                <div className="flex space-x-2">
-                  <button onClick={() => setView('TABLE')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'TABLE' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>Table View</button>
-                  <button onClick={() => setView('CARD')} className={`px-6 py-2 rounded-lg font-bold transition-all duration-300 ${view === 'CARD' ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-lg' : 'text-slate-900 dark:text-white border border-slate-400 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10'}`}>Card View</button>
-                </div>
-              )}
+             
             </div>
 
             {/* Action Bar */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
               {showMobilePreview && (
-              <button
-                onClick={() => setIsMobileVisible(prev => !prev)}
-                title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
+                <button
+                  onClick={() => setIsMobileVisible(prev => !prev)}
+                  title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
                     ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-slate-900 dark:border-white'
                     : 'text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/20 hover:bg-slate-100 dark:hover:bg-white/10'
-                  }`}
-              >
-                {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
-                <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
-              </button>
-            )}
-            
-            <div className="relative w-full md:w-64">
+                    }`}
+                >
+                  {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                  <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
+                </button>
+              )}
+
+              <div className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-600 dark:text-gray-400" />
                 <input
                   type="text"
@@ -824,7 +1117,7 @@ export default function SignalManagement({
           </div>
         )}
 
-        {view === 'ADD' && (
+        {mainTab === 'SIGNALS' && view === 'ADD' && (
           <div className="bg-white dark:bg-[#0f1523] p-6 rounded-lg border border-slate-300 dark:border-white/5 max-w-5xl">
             <form onSubmit={handleOpenConfirmModal}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -842,7 +1135,7 @@ export default function SignalManagement({
                     {errors.segment && <p className="text-red-600 dark:text-red-500 text-xs mt-1">{errors.segment}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-bold mb-1">Plan<span className="text-red-600 dark:text-red-500">*</span></label>
+                    <label className="block text-sm font-bold mb-1">Plan Category / Service<span className="text-red-600 dark:text-red-500">*</span></label>
                     <div className="relative">
                       {!segment ? (
                         <div className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-500 italic">
@@ -855,14 +1148,18 @@ export default function SignalManagement({
                             onClick={() => setPlanDropdownOpen(!planDropdownOpen)}
                           >
                             {planIds.length === 0 ? (
-                              <span className="text-slate-500 text-sm px-1 py-1.5">Select Plans</span>
+                              <span className="text-slate-500 text-sm px-1 py-1.5">Select Plan Category</span>
                             ) : (
                               planIds.map(id => {
-                                const availablePlans = (adminPlans && adminPlans.length > 0) ? adminPlans : localPlans;
-                                const p = availablePlans.find((ap: any) => (ap.id || ap._id) === id);
-                                return p ? (
+                                const c = availableCategories.find((cat: any) => (cat.id || cat._id) === id);
+                                return c ? (
                                   <span key={id} className="bg-primary-500/10 dark:bg-slate-800 border border-primary-500/30 text-primary-700 dark:text-primary-300 font-bold text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-sm">
-                                    {p.name}
+                                    {c.name}
+                                    {typeof c.activeClientCount === 'number' && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 font-semibold">
+                                        👥 {c.activeClientCount}
+                                      </span>
+                                    )}
                                     <X className="w-3 h-3 hover:text-red-500 cursor-pointer" onClick={(e) => { e.stopPropagation(); setPlanIds(planIds.filter(pid => pid !== id)); }} />
                                   </span>
                                 ) : null;
@@ -877,50 +1174,40 @@ export default function SignalManagement({
                           </div>
                           {planDropdownOpen && (
                             <div className="absolute z-50 w-full mt-2 bg-white dark:bg-[#1A2235] border border-slate-400 dark:border-white/10 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                              {(() => {
-                                const availablePlans = (adminPlans && adminPlans.length > 0) ? adminPlans : localPlans;
-                                const filtered = availablePlans.filter((p: any) => {
-                                  if (!segment) return true;
-                                  const segLower = segment.toLowerCase().trim();
-                                  const rSegs = Array.isArray(p.researchSegments)
-                                    ? p.researchSegments.map((s: string) => s.toLowerCase().trim())
-                                    : typeof p.researchSegments === 'string'
-                                      ? p.researchSegments.toLowerCase().split(',').map((s: string) => s.trim())
-                                      : [];
-                                  const cSegs = Array.isArray(p.category?.segments)
-                                    ? p.category.segments.map((s: string) => s.toLowerCase().trim())
-                                    : [];
-                                  if (rSegs.length === 0 && cSegs.length === 0) return true;
-                                  return rSegs.includes(segLower) || cSegs.includes(segLower);
-                                });
-
-                                const finalPlans = filtered.length > 0 ? filtered : availablePlans;
-
-                                if (finalPlans.length === 0) {
-                                  return <div className="px-4 py-3 text-sm text-slate-500 italic">No plans available</div>;
-                                }
-
-                                return finalPlans.map((p: any) => {
-                                  const pId = p.id || p._id;
+                              {filteredCategories.length === 0 ? (
+                                <div className="px-4 py-3 text-sm text-slate-500 italic">No categories available for {segment}</div>
+                              ) : (
+                                filteredCategories.map((c: any) => {
+                                  const cId = c.id || c._id;
                                   return (
                                     <div
-                                      key={pId}
+                                      key={cId}
                                       className="px-4 py-3 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between text-sm transition-colors border-b border-slate-200 dark:border-white/5 last:border-0"
                                       onClick={() => {
-                                        if (planIds.includes(pId)) {
-                                          setPlanIds(planIds.filter(id => id !== pId));
+                                        if (planIds.includes(cId)) {
+                                          setPlanIds(planIds.filter(id => id !== cId));
                                         } else {
-                                          setPlanIds([...planIds, pId]);
+                                          setPlanIds([...planIds, cId]);
                                         }
                                         setErrors((prev: any) => ({ ...prev, planId: '' }));
                                       }}
                                     >
-                                      <span className={planIds.includes(pId) ? 'font-bold text-lime-700 dark:text-[#d4f23b]' : ''}>{p.name}</span>
-                                      {planIds.includes(pId) && <Check className="w-4 h-4 text-lime-700 dark:text-[#d4f23b]" />}
+                                      <div className="flex items-center gap-2">
+                                        <span className={planIds.includes(cId) ? 'font-bold text-lime-700 dark:text-[#d4f23b]' : ''}>
+                                          {c.name} {c.segments ? `(${c.segments})` : ''}
+                                        </span>
+                                        {typeof c.activeClientCount === 'number' && (
+                                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                            <span>👥</span>
+                                            <span>{c.activeClientCount} Active</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                      {planIds.includes(cId) && <Check className="w-4 h-4 text-lime-700 dark:text-[#d4f23b]" />}
                                     </div>
                                   );
-                                });
-                              })()}
+                                })
+                              )}
                             </div>
                           )}
                         </>
@@ -1091,6 +1378,82 @@ export default function SignalManagement({
                 {errors.description && <p className="text-red-600 dark:text-red-500 text-xs mt-1">{errors.description}</p>}
               </div>
 
+              {/* DLT SMS NOTIFICATION LIVE PREVIEW */}
+              <div className="mb-8 p-4 rounded-xl border border-slate-300 dark:border-white/10 bg-slate-50 dark:bg-slate-900/40 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-white/5 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                      <Send className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                        DLT SMS Notification Preview
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Auto-matched based on Segment ({segment || 'None'}) &amp; Call Type ({callType || 'None'})
+                      </p>
+                    </div>
+                  </div>
+                  {matchedSmsTemplate ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Matched Template: {matchedSmsTemplate.name}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      ⚠️ No Active SMS Template
+                    </span>
+                  )}
+                </div>
+
+                {matchedSmsTemplate && resolvedSmsData ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-white dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                        <span>DLT Template ID: <strong className="text-slate-800 dark:text-slate-200">{matchedSmsTemplate.dltTemplateId}</strong></span>
+                        <span>
+                          Length: <strong className={resolvedSmsData.charCount > 160 ? 'text-amber-600' : 'text-emerald-600'}>{resolvedSmsData.charCount} chars</strong> ({resolvedSmsData.smsCredits} SMS credit{resolvedSmsData.smsCredits > 1 ? 's' : ''})
+                        </span>
+                      </div>
+                      <p className="text-xs font-mono text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-white/5 leading-relaxed break-words">
+                        {resolvedSmsData.previewText}
+                      </p>
+                    </div>
+
+                    {resolvedSmsData.resolvedVars.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                        {resolvedSmsData.resolvedVars.map((v, i) => (
+                          <div key={i} className={`p-2 rounded-lg border ${v.isOverLimit ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/40' : 'bg-white dark:bg-slate-950/40 border-slate-200 dark:border-slate-800'}`}>
+                            <div className="flex justify-between items-center text-[10px] text-slate-500 mb-0.5">
+                              <span className="font-mono">{v.placeholder}</span>
+                              <span className={v.isOverLimit ? 'text-rose-600 font-bold' : ''}>{v.value.length}/30 chars</span>
+                            </div>
+                            <div className="font-bold text-slate-800 dark:text-slate-200 truncate" title={v.value || '(Empty)'}>
+                              {v.value || <span className="text-slate-400 italic">Auto-filling...</span>}
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate mt-0.5">{v.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                      <span>
+                        Target Audience: Automatically dispatched to all clients holding an <strong>ACTIVE subscription</strong> in the selected category (regardless of 1M, 2M, 3M or 6M plan duration).
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-800/40 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                    <p className="font-bold">Notice: No SMS will be sent to clients for this trade</p>
+                    <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-relaxed">
+                      There is no active DLT SMS template assigned for <strong>{segment || 'Selected Segment'} + {callType || 'Call Type'}</strong>. Clients will still receive this signal on their Web/Mobile portal dashboard, but no telecom SMS will be dispatched. You can configure a template in <strong>Settings &rarr; DLT SMS Templates</strong>.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Buttons */}
               <div className="flex justify-end space-x-4">
                 <button type="button" onClick={() => setView('TABLE')} className="px-8 py-2 bg-[#d4f23b] text-black font-bold rounded hover:bg-[#c3e031]">
@@ -1122,10 +1485,32 @@ export default function SignalManagement({
 
               {/* Modal Body */}
               <div className="p-6 space-y-6 text-sm text-slate-700 dark:text-slate-300">
+                {/* SMS Broadcast Summary */}
+                <div className="p-3.5 bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/40 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
+                    <span className="flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5 text-blue-600" />
+                      SMS Notification Preview
+                    </span>
+                    <span className="text-[11px] font-mono font-normal">
+                      {matchedSmsTemplate ? `Template: ${matchedSmsTemplate.name}` : 'No SMS Template'}
+                    </span>
+                  </div>
+                  {matchedSmsTemplate && resolvedSmsData ? (
+                    <p className="text-xs font-mono text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 p-2 rounded border border-blue-100 dark:border-blue-900/40">
+                      {resolvedSmsData.previewText}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      No active DLT SMS template configured for this trade. Dispatched to Web Portal only.
+                    </p>
+                  )}
+                </div>
+
                 <div className="bg-white/50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-3">
                   <p className="text-xs uppercase font-bold text-slate-500 tracking-wider">Terms & Conditions</p>
                   <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                    By publishing this trade signal, you verify that this advisory recommendation complies with the SEBI (Research Analyst) Regulations, 2014. You confirm that you have conducted appropriate research/analysis, disclosed any conflict of interest, and that the advice is suitable for target plan subscribers.
+                    By publishing this trade signal, you verify that this research recommendation complies with the SEBI (Research Analyst) Regulations, 2014. You confirm that you have conducted appropriate research/analysis, disclosed any conflict of interest, and that the research recommendation is suitable for target plan subscribers.
                   </p>
                 </div>
 
@@ -1363,18 +1748,40 @@ export default function SignalManagement({
           />
         )}
 
-        {/* AVOID REMARK MODAL */}
+        {/* UPLOAD REPORT SIGNATURE CONFIRMATION MODAL */}
+        {uploadSignModalData && (
+          <UploadSignConfirmModal
+            file={uploadSignModalData.file}
+            signal={uploadSignModalData.signal}
+            user={user}
+            onClose={() => setUploadSignModalData(null)}
+            onSuccess={() => fetchSignals()}
+          />
+        )}
+
+        {/* TRADE UPDATE & CLOSE REMARK MODAL */}
         {avoidRemarkModal && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-slate-100 dark:bg-[#1A2235] border border-slate-400 dark:border-white/10 rounded-lg shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
-              <div className="flex justify-between items-center p-3 bg-[#4c1d95] border-b border-[#4c1d95]">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white px-2">Description</h3>
-                <button onClick={() => setAvoidRemarkModal(null)} className="text-slate-900 dark:text-white/80 hover:text-slate-900 dark:text-white transition">
+            <div className="bg-white dark:bg-[#151c2c] border border-slate-300 dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+              <div className="flex justify-between items-center p-4 bg-slate-100 dark:bg-[#0B101E] border-b border-slate-200 dark:border-white/10">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-amber-500" />
+                  <span>Trade Update &amp; Close Remark</span>
+                </h3>
+                <button onClick={() => setAvoidRemarkModal(null)} className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition">
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="p-8 bg-white min-h-[150px]">
-                <p className="text-black text-sm font-semibold">{avoidRemarkModal}</p>
+              <div className="p-6 space-y-2">
+                <span className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-400 block tracking-wider">Researcher Note / Close Remark</span>
+                <p className="text-sm font-medium leading-relaxed bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200 dark:border-white/10 whitespace-pre-wrap select-all text-slate-800 dark:text-slate-200">
+                  {avoidRemarkModal}
+                </p>
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-[#0B101E] border-t border-slate-200 dark:border-white/10 flex justify-end">
+                <button onClick={() => setAvoidRemarkModal(null)} className="px-5 py-2 bg-[#d4f23b] text-black rounded-xl text-xs font-bold hover:bg-[#c3e031] transition">
+                  Close
+                </button>
               </div>
             </div>
           </div>
@@ -1396,7 +1803,13 @@ export default function SignalManagement({
               <div className="p-6 overflow-y-auto space-y-6 bg-white dark:bg-[#151c2c]">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Segment</p><p className="font-semibold">{viewSignalDetails.segment || 'N/A'}</p></div>
-                  <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Stock Symbol</p><p className="font-bold text-lime-700 dark:text-[#d4f23b]">{viewSignalDetails.stock?.symbol || 'N/A'}</p></div>
+                  <div>
+                    <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Stock Symbol</p>
+                    <p className="font-bold text-lime-700 dark:text-[#d4f23b]">{viewSignalDetails.stock?.symbol || viewSignalDetails.symbol || 'N/A'}</p>
+                    {(viewSignalDetails.stock?.name || viewSignalDetails.stockName) && (
+                      <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{viewSignalDetails.stock?.name || viewSignalDetails.stockName}</p>
+                    )}
+                  </div>
                   <div>
                     <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Strike Price</p>
                     <p className="font-semibold">{viewSignalDetails.strikePrice ? `${viewSignalDetails.strikePrice} ${viewSignalDetails.optionType || ''}` : 'N/A'}</p>
@@ -1420,21 +1833,23 @@ export default function SignalManagement({
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Target 3</p><p className="font-semibold text-green-600 dark:text-green-400">{viewSignalDetails.target3 ? `₹ ${viewSignalDetails.target3}` : 'N/A'}</p></div>
                 </div>
 
-                {viewSignalDetails.status === 'CLOSED' && (() => {
-                  const isSuccess = viewSignalDetails.closeStatus === 'Fully Closed' || viewSignalDetails.closeStatus === 'Partially Closed' || viewSignalDetails.closeStatus === 'Target Hit';
+                {(viewSignalDetails.status === 'CLOSED' || viewSignalDetails.closeStatus || viewSignalDetails.closeRemark) && (() => {
+                  const isSuccess = viewSignalDetails.closeStatus === 'Fully Closed' || viewSignalDetails.closeStatus === 'Partially Closed' || viewSignalDetails.closeStatus === 'Target Hit' || (viewSignalDetails.closeStatus || '').includes('Target');
                   const isNeutral = viewSignalDetails.closeStatus === 'Avoid Signal';
                   const bgClass = isSuccess ? 'bg-green-50 dark:bg-green-900/20 border-green-500/20' : (isNeutral ? 'bg-slate-50 dark:bg-slate-900/20 border-slate-500/20' : 'bg-red-50 dark:bg-red-900/20 border-red-500/20');
                   const textClass = isSuccess ? 'text-green-600 dark:text-green-400' : (isNeutral ? 'text-slate-600 dark:text-slate-400' : 'text-red-600 dark:text-red-400');
                   return (
                     <div className={`border-t border-slate-300 dark:border-white/5 pt-6 grid grid-cols-2 md:grid-cols-4 gap-6 p-4 rounded-xl border ${bgClass}`}>
-                      <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Close Status</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.closeStatus || 'N/A'}</p></div>
+                      <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Close Status</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.closeStatus || viewSignalDetails.status || 'N/A'}</p></div>
                       <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Exit Price</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.exitPrice ? `₹ ${viewSignalDetails.exitPrice}` : 'N/A'}</p></div>
                       <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Targets Hit</p><p className={`font-semibold ${textClass} break-all`}>{viewSignalDetails.closeTargets || 'None'}</p></div>
                       <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Exit Date</p><p className={`font-semibold ${textClass}`}>{viewSignalDetails.closedAt ? new Date(viewSignalDetails.closedAt).toLocaleString() : 'N/A'}</p></div>
                       {viewSignalDetails.closeRemark && (
-                        <div className="col-span-2 md:col-span-4 mt-2">
-                          <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Close Remark</p>
-                          <p className="text-sm text-slate-700 dark:text-gray-300">{viewSignalDetails.closeRemark}</p>
+                        <div className="col-span-2 md:col-span-4 mt-2 p-3.5 bg-white dark:bg-slate-900/80 rounded-xl border border-slate-200 dark:border-white/10">
+                          <p className="text-xs uppercase font-extrabold text-amber-500 mb-1 flex items-center gap-1.5">
+                            <MessageSquare className="w-3.5 h-3.5" /> Close Remark / Trade Update Note
+                          </p>
+                          <p className="text-sm font-medium text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{viewSignalDetails.closeRemark}</p>
                         </div>
                       )}
                     </div>
@@ -1565,14 +1980,54 @@ export default function SignalManagement({
 
               {!isViewOnly && (
                 <div className="mb-4">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-2">New Alert Message</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">
+                      New Alert Message
+                    </label>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full transition-colors ${
+                      alertMessage.length >= maxAlertChars
+                        ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 font-bold'
+                        : alertMessage.length > maxAlertChars * 0.8
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    }`}>
+                      {alertMessage.length} / {maxAlertChars} chars
+                    </span>
+                  </div>
                   <textarea
                     value={alertMessage}
-                    onChange={(e) => setAlertMessage(e.target.value)}
+                    maxLength={maxAlertChars}
+                    onChange={(e) => {
+                      if (e.target.value.length <= maxAlertChars) {
+                        setAlertMessage(e.target.value);
+                      }
+                    }}
                     rows={4}
-                    className="w-full bg-slate-50 dark:bg-[#0f1523] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-colors resize-none"
-                    placeholder="Type your alert message here (e.g. Book partial profit)..."
+                    className="w-full bg-slate-50 dark:bg-[#0f1523] border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors resize-none"
+                    placeholder={
+                      maxAlertChars === 60
+                        ? "Type your alert message (Max 60 characters for 2 variables)..."
+                        : "Type your alert message (Max 30 characters for 1 variable)..."
+                    }
                   />
+                  <div className="flex items-center justify-between mt-1.5 text-[11px]">
+                    <span className="text-slate-500 dark:text-slate-400 truncate max-w-[270px]" title={activeAlertTemplate?.name}>
+                      {activeAlertTemplate ? (
+                        <>
+                          DLT Template: <strong className="text-slate-700 dark:text-slate-200">{activeAlertTemplate.name}</strong> ({alertVariableCount} {alertVariableCount > 1 ? 'variables = 60' : 'variable = 30'} chars)
+                        </>
+                      ) : (
+                        'DLT Rule: Max 30 characters for 1 variable'
+                      )}
+                    </span>
+                    {alertMessage.length >= maxAlertChars ? (
+                      <span className="text-rose-500 font-bold">Max limit reached</span>
+                    ) : (
+                      <span className="text-slate-400">
+                        {maxAlertChars - alertMessage.length} left
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

@@ -46,6 +46,7 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [gstEnabled, setGstEnabled] = useState<boolean>(profile?.user?.tenant?.gstEnabled !== false);
 
   const handleDownloadInvoice = async (paymentId: string, transactionRef: string) => {
     try {
@@ -103,48 +104,114 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
     },
     {
       name: 'Plan',
-      cell: (txn: any) => <span className="text-sm font-medium">{typeof txn.plan === 'object' ? txn.plan?.name : 'Premium Plan'}</span>,
+      cell: (txn: any) => {
+        const planName = typeof txn.plan === 'object' ? txn.plan?.name : (txn.planName || 'VIP');
+        const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+        return (
+          <div>
+            <span className="text-sm font-bold text-premium-text block">{planName}</span>
+            {couponCode && (
+              <span className="inline-block mt-0.5 text-[10px] font-bold text-emerald-500 font-mono">
+                Coupon: {couponCode}
+              </span>
+            )}
+          </div>
+        );
+      },
       sortable: true,
+      minWidth: '130px',
+    },
+    {
+      name: 'Coupon',
+      cell: (txn: any) => {
+        const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+        const discount = txn.discountApplied || txn.discountAmount || txn.discount || txn.coupon?.discountValue || 0;
+        if (!couponCode && (!discount || discount === 0)) {
+          return <span className="text-premium-text/40 text-xs font-mono">-</span>;
+        }
+        return (
+          <div className="space-y-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-mono">
+              🎟️ {couponCode || 'APPLIED'}
+            </span>
+            {discount > 0 && (
+              <span className="block text-[10px] font-semibold text-emerald-500">
+                -₹{discount}
+              </span>
+            )}
+          </div>
+        );
+      },
+      sortable: true,
+      minWidth: '120px',
     },
     {
       name: 'Amount',
       cell: (txn: any) => {
-        const basePrice = txn.plan?.price || txn.amount || 0;
-        const discount = txn.discountAmount || txn.discountApplied || 0;
-        const taxableAmount = basePrice - discount;
-        let gst = 0;
-        const totalAmount = txn.amount || txn.amountPaid || 0;
-        if (totalAmount > taxableAmount) {
-          gst = totalAmount - taxableAmount;
+        const totalAmount = Number(txn.amount || txn.amountPaid || 0);
+        const discount = Number(txn.discountApplied || txn.discountAmount || txn.discount || 0);
+        const couponCode = txn.coupon?.code || txn.couponId?.code || txn.couponCode;
+
+        // Check if GST is active for this tenant or transaction
+        const txnGstActive = txn.gstEnabled !== undefined ? Boolean(txn.gstEnabled) : gstEnabled;
+
+        if (!txnGstActive) {
+          // GST DISABLED (0% Non-GST Mode)
+          return (
+            <div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
+              {discount > 0 && (
+                <>
+                  <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                    <span>Plan Price:</span> <span className="font-mono">₹{(totalAmount + discount).toFixed(2)}</span>
+                  </div>
+                  <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
+                    <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
+              <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
+                <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
+              </div>
+            </div>
+          );
         }
-        
+
+        // GST ENABLED
+        const basePrice = totalAmount > 0 ? Number((totalAmount / 1.18).toFixed(2)) : 0;
+        const gst = Number((totalAmount - basePrice).toFixed(2));
+
         return (
-          <div className="flex flex-col gap-0.5 w-full min-w-[120px]">
-            {totalAmount !== basePrice && (
+          <div className="flex flex-col gap-1 w-full min-w-[155px] py-1">
+            {discount > 0 ? (
               <>
-                <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
-                  <span>Base:</span> <span>₹{basePrice.toFixed(2)}</span>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>Gross Base:</span> <span className="font-mono">₹{(basePrice + discount).toFixed(2)}</span>
                 </div>
-                {discount > 0 && (
-                  <div className="text-[10px] text-emerald-500 flex justify-between gap-4">
-                    <span>Discount {txn.coupon?.code && `(${txn.coupon.code})`}:</span> <span>-₹{discount.toFixed(2)}</span>
-                  </div>
-                )}
-                {gst > 0 && (
-                  <div className="text-[10px] text-premium-text/60 flex justify-between gap-4">
-                    <span>GST (18%):</span> <span>₹{gst.toFixed(2)}</span>
-                  </div>
-                )}
+                <div className="text-[10px] text-emerald-500 flex justify-between gap-2 font-semibold">
+                  <span>Discount {couponCode ? `(${couponCode})` : ''}:</span> <span className="font-mono">-₹{discount.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>Base:</span> <span className="font-mono">₹{basePrice.toFixed(2)}</span>
+                </div>
+                <div className="text-[10px] text-premium-text/60 flex justify-between gap-2">
+                  <span>GST (18%):</span> <span className="font-mono">₹{gst.toFixed(2)}</span>
+                </div>
               </>
             )}
-            <div className="font-bold text-sm flex justify-between gap-4 mt-1 border-t border-premium-border/50 pt-1">
-              <span>Total:</span> <span className="text-premium-primary">₹{totalAmount.toFixed(2)}</span>
+            <div className="font-bold text-sm flex justify-between gap-2 border-t border-premium-border/40 pt-1">
+              <span>Total:</span> <span className="text-premium-primary font-mono">₹{totalAmount.toFixed(2)}</span>
             </div>
           </div>
         );
       },
       sortable: true,
-      minWidth: '160px',
+      minWidth: '185px',
     },
     {
       name: 'Status',
@@ -163,24 +230,39 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
     },
     {
       name: 'Invoice',
-      cell: (txn: any) => (
-        txn.status === 'successful' || txn.status === 'SUCCESS' ? (
+      cell: (txn: any) => {
+        if (txn.status !== 'successful' && txn.status !== 'SUCCESS') {
+          return (
+            <button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
+              N/A
+            </button>
+          );
+        }
+
+        if (txn.invoiceStatus === 'PENDING_AGREEMENT') {
+          return (
+            <span 
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg text-xs font-medium"
+              title="Invoice will be generated and available once your KYC Agreement is completed"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-500" /> Agreement Pending
+            </span>
+          );
+        }
+
+        return (
           <button 
             onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
             disabled={downloadingId === (txn.id || txn._id)}
             className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-primary/10 hover:bg-premium-primary/20 text-premium-primary rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
           >
             {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} 
-            {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'GST Invoice'}
+            {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
           </button>
-        ) : (
-          <button className="inline-flex items-center gap-2 px-3 py-1.5 bg-premium-bg text-premium-text/40 rounded-lg text-xs font-medium cursor-not-allowed">
-            N/A
-          </button>
-        )
-      ),
+        );
+      },
       right: true,
-      minWidth: '140px',
+      minWidth: '150px',
     },
   ];
 
@@ -190,6 +272,9 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
         const res = await api.getClientPayments();
         if (res.success) {
           setTransactions(res.data?.docs || res.data || []);
+          if (res.gstEnabled !== undefined) {
+            setGstEnabled(Boolean(res.gstEnabled));
+          }
         }
       } catch (err) {
         console.error('Failed to fetch payments', err);
@@ -205,7 +290,7 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Payment History</h1>
-          <p className="text-sm text-premium-text/60 mt-1">View your past transactions and download GST invoices.</p>
+          <p className="text-sm text-premium-text/60 mt-1">View your past transactions and download {gstEnabled ? 'GST ' : ''}invoices.</p>
         </div>
       </div>
 
@@ -303,14 +388,21 @@ export default function PaymentCenter({ profile }: { profile?: any }) {
                 </div>
                 
                 {txn.status === 'successful' || txn.status === 'SUCCESS' ? (
-                  <button 
-                    onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
-                    disabled={downloadingId === (txn.id || txn._id)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-premium-primary/10 text-premium-primary hover:bg-premium-primary/20 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 mt-1"
-                  >
-                    {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} 
-                    {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
-                  </button>
+                  txn.invoiceStatus === 'PENDING_AGREEMENT' ? (
+                    <div className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl text-xs font-semibold mt-1">
+                      <Clock className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Invoice available after KYC Agreement</span>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => handleDownloadInvoice(txn.id || txn._id, txn.transactionRef || 'Unknown')}
+                      disabled={downloadingId === (txn.id || txn._id)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-premium-primary/10 text-premium-primary hover:bg-premium-primary/20 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 mt-1"
+                    >
+                      {downloadingId === (txn.id || txn._id) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />} 
+                      {downloadingId === (txn.id || txn._id) ? 'Downloading...' : 'Download Invoice'}
+                    </button>
+                  )
                 ) : null}
               </div>
             ))

@@ -15,7 +15,7 @@ export function useStates() {
     const fetchStates = async () => {
       try {
         const baseUrl = base_api_url;
-        
+
         const response = await fetch(`${baseUrl}/locations/states`);
         const data = await response.json();
         if (data.success) {

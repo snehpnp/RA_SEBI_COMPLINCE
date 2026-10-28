@@ -68,6 +68,7 @@ export default function ResearchReports() {
       cell: (row: any) => renderDate(row.createdAt),
       sortable: true,
       sortFunction: (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      minWidth: '140px',
     },
     {
       name: 'Trade Name',
@@ -79,6 +80,7 @@ export default function ResearchReports() {
         </span>
       ),
       sortable: true,
+      minWidth: '150px',
     },
     {
       name: 'Status',
@@ -88,22 +90,28 @@ export default function ResearchReports() {
         </span>
       ),
       sortable: true,
+      minWidth: '100px',
     },
     {
       name: 'Segment',
       cell: (row: any) => (
-        <span className="bg-premium-bg px-2 py-1 rounded-md text-xs border border-premium-border">{row.segment}</span>
+        <span className="bg-premium-bg px-2 py-1 rounded-md text-xs border border-premium-border font-semibold">{row.segment}</span>
       ),
       sortable: true,
+      minWidth: '100px',
     },
     {
       name: 'Action',
       cell: (row: any) => (
-        <a href={api.getDownloadUrl(row.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-4 py-2 bg-premium-primary/10 hover:bg-premium-primary text-premium-primary hover:text-white rounded-lg text-xs font-bold transition-all duration-300">
-          <Download className="w-4 h-4" /> Download
+        <a href={api.getDownloadUrl(row.reportUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-premium-primary/10 hover:bg-premium-primary text-premium-primary hover:text-white rounded-lg text-xs font-bold transition-all duration-300 whitespace-nowrap">
+          <Download className="w-3.5 h-3.5 shrink-0" />
+          <span>Download</span>
         </a>
       ),
+      minWidth: '140px',
       center: true,
+      ignoreRowClick: true,
+      button: true,
     },
   ];
 

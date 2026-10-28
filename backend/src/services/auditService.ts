@@ -1,4 +1,4 @@
-import prisma from '../config/db';
+import { AuditLog } from '../config/db';
 
 export const logAudit = async (params: {
   tenantId?: string | null;
@@ -10,16 +10,14 @@ export const logAudit = async (params: {
   ipAddress?: string;
 }) => {
   try {
-    await prisma.auditLog.create({
-      data: {
-        tenantId: params.tenantId || null,
-        userId: params.userId,
-        action: params.action,
-        module: params.module,
-        oldValue: params.oldValue ? JSON.stringify(params.oldValue) : null,
-        newValue: params.newValue ? JSON.stringify(params.newValue) : null,
-        ipAddress: params.ipAddress || null,
-      }
+    await AuditLog.create({
+      tenantId: params.tenantId || null,
+      userId: params.userId,
+      action: params.action,
+      module: params.module,
+      oldValue: params.oldValue ? JSON.stringify(params.oldValue) : null,
+      newValue: params.newValue ? JSON.stringify(params.newValue) : null,
+      ipAddress: params.ipAddress || null
     });
   } catch (err) {
     console.error('Audit logging failed:', err);

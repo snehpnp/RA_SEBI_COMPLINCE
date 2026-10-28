@@ -39,7 +39,23 @@ const _schemaOptions_1 = require("./_schemaOptions");
 exports.SmsTemplateSchema = new mongoose_1.Schema({
     tenantId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Tenant', default: null },
     name: { type: String, required: true, trim: true },
-    type: { type: String, required: true, trim: true, default: 'CUSTOM' },
+    type: { type: String, required: true, trim: true, default: 'TRADE_SIGNAL' },
+    category: { type: String, default: 'TRADE_SIGNAL', trim: true },
+    applicableSegments: { type: [String], default: [] },
+    applicableActions: { type: [String], default: [] },
+    applicableCombinations: { type: [String], default: [] },
+    variableMappings: {
+        type: [
+            {
+                index: { type: Number, required: true },
+                placeholder: { type: String, required: true },
+                fieldKey: { type: String, default: '' },
+                selectedFields: { type: [String], default: [] },
+                customLabel: { type: String, default: '' }
+            }
+        ],
+        default: []
+    },
     dltTemplateId: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     status: { type: String, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },
@@ -48,6 +64,7 @@ exports.SmsTemplateSchema = new mongoose_1.Schema({
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'SmsTemplate' });
 exports.SmsTemplateSchema.index({ tenantId: 1, type: 1 });
 exports.SmsTemplateSchema.index({ tenantId: 1, status: 1 });
+exports.SmsTemplateSchema.index({ tenantId: 1, applicableCombinations: 1 });
 exports.SmsTemplate = mongoose_1.default.models.SmsTemplate ||
     mongoose_1.default.model('SmsTemplate', exports.SmsTemplateSchema, 'SmsTemplate');
 exports.default = exports.SmsTemplate;

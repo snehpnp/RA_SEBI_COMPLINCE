@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import prisma from '../config/db';
+import dynamicDb from '../config/db';
+import { syncTenantToRemote } from '../services/tenantSyncDispatcher';
 
 interface AuthenticatedRequest extends Request {
   user?: any;
@@ -16,27 +17,17 @@ export const getActivePages = async (req: Request, res: Response) => {
     const tenantId = req.headers['x-tenant-id'] as string;
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
 
-    let pages = await prisma.customPage.findMany({
-      where: {
-        tenantId,
-        status: 'ACTIVE'
-      },
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        type: true,
-        content: true,
-        externalUrl: true,
-        isSystem: true
-      },
-      orderBy: { createdAt: 'asc' }
-    });
+    let pages = await dynamicDb.CustomPage.find({
+      tenantId,
+      status: 'ACTIVE'
+    })
+      .select('title slug type content externalUrl isSystem')
+      .sort({ createdAt: 1 })
+      .lean();
 
     // Only return pages explicitly marked ACTIVE by the admin
-    // Removed strict content checks so that the Active/Inactive toggle determines visibility.
     // Also, explicitly exclude complaint-status because it is now a dedicated sidebar feature, not a policy.
-    pages = pages.filter(p => p.slug !== 'complaint-status');
+    pages = pages.filter((p: any) => p.slug !== 'complaint-status');
 
     res.status(200).json({ success: true, data: pages });
   } catch (error: any) {
@@ -50,11 +41,10 @@ export const getPageBySlug = async (req: Request, res: Response) => {
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
     const { slug } = req.params;
 
-    const page = await prisma.customPage.findUnique({
-      where: {
-        tenantId_slug: { tenantId, slug }
-      }
-    });
+    const page = await dynamicDb.CustomPage.findOne({
+      tenantId,
+      slug
+    }).lean();
 
     if (!page || page.status !== 'ACTIVE') {
       return res.status(404).json({ success: false, message: 'Page not found' });
@@ -68,32 +58,11 @@ export const getPageBySlug = async (req: Request, res: Response) => {
 
 export const getAdminPages = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenantId = req.user!.tenantId || req.headers['x-tenant-id'] as string;
+    const tenantId = req.user!.tenantId || (req.headers['x-tenant-id'] as string);
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
-    let pages = await prisma.customPage.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'asc' }
-    });
-
-    const mandatoryPagesTemplate = [
-      { title: 'Refund Policy', slug: 'refund-policy', type: 'CONTENT', isSystem: true, tenantId },
-      { title: 'Disclosure', slug: 'disclosure', type: 'CONTENT', isSystem: true, tenantId },
-      { title: 'Disclaimer', slug: 'disclaimer', type: 'CONTENT', isSystem: true, tenantId },
-      { title: 'Grievance Redressal Process', slug: 'grievance-redressal', type: 'CONTENT', isSystem: true, tenantId },
-      { title: 'Investor Charter', slug: 'investor-charter', type: 'CONTENT', isSystem: true, tenantId },
-    ];
-
-    const existingSlugs = new Set(pages.map(p => p.slug));
-    const missingPages = mandatoryPagesTemplate.filter(p => !existingSlugs.has(p.slug));
-
-    // if (missingPages.length > 0) {
-    //   await prisma.customPage.createMany({ data: missingPages as any });
-    //   
-    //   pages = await prisma.customPage.findMany({
-    //     where: { tenantId },
-    //     orderBy: { createdAt: 'asc' }
-    //   });
-    // }
+    const pages = await dynamicDb.CustomPage.find({ tenantId })
+      .sort({ createdAt: 1 })
+      .lean();
 
     res.status(200).json({ success: true, data: pages });
   } catch (error: any) {
@@ -103,7 +72,7 @@ export const getAdminPages = async (req: AuthenticatedRequest, res: Response) =>
 
 export const savePage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenantId = req.user!.tenantId || req.headers['x-tenant-id'] as string;
+    const tenantId = req.user!.tenantId || (req.headers['x-tenant-id'] as string);
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
     const { id, title, slug, type, content, externalUrl, status } = req.body;
 
@@ -114,30 +83,36 @@ export const savePage = async (req: AuthenticatedRequest, res: Response) => {
     let page;
     if (id) {
       if (!isValidObjectId(id)) throw new Error('Invalid Page ID format');
-      page = await prisma.customPage.update({
-        where: { id },
-        data: {
-          title,
-          slug,
-          type,
-          content: type === 'CONTENT' ? content : null,
-          externalUrl: type === 'URL' ? externalUrl : null,
-          status
-        }
-      });
+      page = await dynamicDb.CustomPage.findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            title,
+            slug,
+            type,
+            content: type === 'CONTENT' ? content : null,
+            externalUrl: type === 'URL' ? externalUrl : null,
+            status
+          }
+        },
+        { returnDocument: 'after', lean: true }
+      );
     } else {
-      page = await prisma.customPage.create({
-        data: {
-          tenantId,
-          title,
-          slug,
-          type,
-          content: type === 'CONTENT' ? content : null,
-          externalUrl: type === 'URL' ? externalUrl : null,
-          status: status || 'ACTIVE'
-        }
+      page = await dynamicDb.CustomPage.create({
+        tenantId,
+        title,
+        slug,
+        type,
+        content: type === 'CONTENT' ? content : null,
+        externalUrl: type === 'URL' ? externalUrl : null,
+        status: status || 'ACTIVE'
       });
     }
+
+    // Automatically sync updated page to tenant's domain DB
+    syncTenantToRemote(tenantId, { reason: 'PAGE_UPDATE' }).catch((e: any) =>
+      console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message)
+    );
 
     res.status(200).json({ success: true, message: 'Page saved successfully', data: page });
   } catch (error: any) {
@@ -147,15 +122,20 @@ export const savePage = async (req: AuthenticatedRequest, res: Response) => {
 
 export const deletePage = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenantId = req.user!.tenantId || req.headers['x-tenant-id'] as string;
+    const tenantId = req.user!.tenantId || (req.headers['x-tenant-id'] as string);
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
     const { id } = req.params;
 
     if (!isValidObjectId(id)) throw new Error('Invalid Page ID format');
-    const page = await prisma.customPage.findUnique({ where: { id } });
+    const page = await dynamicDb.CustomPage.findById(id);
     if (!page || page.tenantId !== tenantId) throw new Error('Page not found');
 
-    await prisma.customPage.delete({ where: { id } });
+    await dynamicDb.CustomPage.findByIdAndDelete(id);
+
+    // Automatically sync deletion to tenant's domain DB
+    syncTenantToRemote(tenantId, { reason: 'PAGE_DELETE' }).catch((e: any) =>
+      console.warn(`[PageSync] Domain sync note for tenant ${tenantId}:`, e.message)
+    );
 
     res.status(200).json({ success: true, message: 'Page deleted successfully' });
   } catch (error: any) {
@@ -172,8 +152,8 @@ export const getComplaintReport = async (req: Request, res: Response) => {
     const tenantId = req.headers['x-tenant-id'] as string;
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
 
-    let { month, year } = req.query;
-    
+    const { month, year } = req.query;
+
     let targetMonth: number;
     let targetYear: number;
 
@@ -182,7 +162,8 @@ export const getComplaintReport = async (req: Request, res: Response) => {
       targetYear = parseInt(year as string);
     } else {
       const now = new Date();
-      if (now.getMonth() === 0) { // Jan -> Dec of prev year
+      if (now.getMonth() === 0) {
+        // Jan -> Dec of prev year
         targetMonth = 12;
         targetYear = now.getFullYear() - 1;
       } else {
@@ -191,14 +172,14 @@ export const getComplaintReport = async (req: Request, res: Response) => {
       }
     }
 
-    const report = await prisma.complaintMonthlyReport.findUnique({
-      where: {
-        tenantId_month_year: { tenantId, month: targetMonth, year: targetYear }
-      }
-    });
+    const report = await dynamicDb.ComplaintMonthlyReport.findOne({
+      tenantId,
+      month: targetMonth,
+      year: targetYear
+    }).lean();
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       data: report ? JSON.parse(report.data) : null,
       month: targetMonth,
       year: targetYear
@@ -210,7 +191,7 @@ export const getComplaintReport = async (req: Request, res: Response) => {
 
 export const saveComplaintReport = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tenantId = req.user!.tenantId || req.headers['x-tenant-id'] as string;
+    const tenantId = req.user!.tenantId || (req.headers['x-tenant-id'] as string);
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
     const { month, year, data } = req.body;
 
@@ -220,18 +201,22 @@ export const saveComplaintReport = async (req: AuthenticatedRequest, res: Respon
 
     const jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
 
-    const report = await prisma.complaintMonthlyReport.upsert({
-      where: {
-        tenantId_month_year: { tenantId, month: parseInt(month), year: parseInt(year) }
-      },
-      update: { data: jsonStr },
-      create: {
+    const report = await dynamicDb.ComplaintMonthlyReport.findOneAndUpdate(
+      {
         tenantId,
         month: parseInt(month),
-        year: parseInt(year),
-        data: jsonStr
-      }
-    });
+        year: parseInt(year)
+      },
+      {
+        $set: { data: jsonStr },
+        $setOnInsert: {
+          tenantId,
+          month: parseInt(month),
+          year: parseInt(year)
+        }
+      },
+      { upsert: true, returnDocument: 'after', lean: true }
+    );
 
     res.status(200).json({ success: true, message: 'Complaint report saved successfully', data: report });
   } catch (error: any) {
@@ -244,13 +229,12 @@ export const getComplaintReportHistory = async (req: Request, res: Response) => 
     const tenantId = req.headers['x-tenant-id'] as string;
     if (!tenantId || !isValidObjectId(tenantId)) throw new Error('Valid Tenant ID required');
 
-    const reports = await prisma.complaintMonthlyReport.findMany({
-      where: { tenantId },
-      orderBy: [{ year: 'desc' }, { month: 'desc' }]
-    });
+    const reports = await dynamicDb.ComplaintMonthlyReport.find({ tenantId })
+      .sort({ year: -1, month: -1 })
+      .lean();
 
-    const parsedReports = reports.map(r => ({
-      id: r.id,
+    const parsedReports = reports.map((r: any) => ({
+      id: String(r._id || r.id),
       month: r.month,
       year: r.year,
       updatedAt: r.updatedAt,
