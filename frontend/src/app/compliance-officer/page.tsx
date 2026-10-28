@@ -797,19 +797,44 @@ function AdminDashboardContent() {
     const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
     if (!selectedPlan) return;
 
-    let basePrice = selectedPlan.price;
-    let finalPrice = gstCalculationType === 'EXCLUSIVE' ? Math.round(basePrice * 1.18) : basePrice;
+    const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+    const isCustomActive = Boolean((assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount))) || (assignCustomDays && assignCustomDays.trim() && !isNaN(Number(assignCustomDays))));
+    const hasCustomAmount = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
+    
+    let defaultTotal = selectedPlan.price;
+    if (!hasCustomAmount && isExclusiveGst) {
+      defaultTotal = parseFloat((selectedPlan.price * 1.18).toFixed(2));
+    }
+    const enteredTotal = hasCustomAmount ? Number(assignCustomAmount) : defaultTotal;
 
-    if (assignCustomAmount.trim()) {
-      finalPrice = Number(assignCustomAmount);
-      if (gstCalculationType === 'EXCLUSIVE') {
-        basePrice = Math.round(finalPrice / 1.18);
-      } else {
-        basePrice = finalPrice;
+    const preTaxBase = hasCustomAmount
+      ? (gstEnabled ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal)
+      : ((gstEnabled && !isExclusiveGst) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal);
+
+    let discOnBase = 0;
+    if (!isCustomActive && assignCouponCode.trim()) {
+      const cleanCode = assignCouponCode.trim().toUpperCase();
+      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      if (matchedCoupon) {
+        if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+          discOnBase = (gstEnabled && !isExclusiveGst)
+            ? parseFloat((Number(matchedCoupon.discountValue || 0) / 1.18).toFixed(2))
+            : Number(matchedCoupon.discountValue || 0);
+        } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+          discOnBase = parseFloat(((preTaxBase * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+          if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && discOnBase > Number(matchedCoupon.maxDiscountValue)) {
+            discOnBase = Number(matchedCoupon.maxDiscountValue);
+          }
+        }
+        if (discOnBase > preTaxBase) discOnBase = preTaxBase;
       }
     }
 
-    const gstAmount = finalPrice - basePrice;
+    const taxableBase = Math.max(0, parseFloat((preTaxBase - discOnBase).toFixed(2)));
+    const gstAmt = gstEnabled ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+    let finalPrice = parseFloat((taxableBase + gstAmt).toFixed(2));
+    let basePrice = taxableBase;
+    const gstAmount = gstAmt;
 
     const messageNode = (
       <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
@@ -817,19 +842,19 @@ function AdminDashboardContent() {
           Are you sure you want to assign the plan <strong>"{selectedPlan.name}"</strong> to client <strong>"{assignPlanClient?.name || ''}"</strong>?
         </p>
         <div className="bg-slate-100 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-300 dark:border-white/5 space-y-1.5 font-mono text-[11px]">
-          <div className="flex justify-between"><span>Base Amount:</span> <span className="text-slate-800 dark:text-slate-200">₹{basePrice.toLocaleString()}</span></div>
-          {gstCalculationType === 'EXCLUSIVE' ? (
+          <div className="flex justify-between"><span>Base Amount:</span> <span className="text-slate-800 dark:text-slate-200">₹{basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+          {gstEnabled ? (
             <>
-              <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>GST (18%):</span> <span className="text-slate-700 dark:text-slate-300">₹{gstAmount.toLocaleString()}</span></div>
-              <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString()}</span></div>
+              <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>GST (18%):</span> <span className="text-slate-700 dark:text-slate-300">₹{gstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (GST Incl.)</span></div>
             </>
           ) : (
-            <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total (GST Incl.):</span> <span>₹{finalPrice.toLocaleString()}</span></div>
+            <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
           )}
           <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentRefId}</span></div>
           <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentDate}</span></div>
           {assignCustomDays.trim() && (
-            <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Service Validity:</span> <span className="text-emerald-600 dark:text-emerald-400 font-bold">{assignCustomDays} Days</span></div>
+            <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Service Validity:</span> <span className="text-emerald-600 dark:text-emerald-400 font-bold">{Math.round(Number(assignCustomDays))} Days</span></div>
           )}
         </div>
         <p className="text-slate-500 dark:text-slate-500 text-[10px]">This will immediately activate the plan. Any existing active subscription will be cancelled.</p>
@@ -850,8 +875,8 @@ function AdminDashboardContent() {
             paymentDate: assignPaymentDate
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
-          if (assignCustomDays.trim()) payload.customDays = Number(assignCustomDays);
-          if (assignCouponCode.trim()) payload.couponCode = assignCouponCode.trim().toUpperCase();
+          if (assignCustomDays.trim()) payload.customDays = Math.round(Number(assignCustomDays));
+          if (!isCustomActive && assignCouponCode.trim()) payload.couponCode = assignCouponCode.trim().toUpperCase();
 
           const res = await api.assignPlanByAdmin(assignPlanClient.id, payload);
           if (res.success) {
@@ -6587,124 +6612,108 @@ function AdminDashboardContent() {
                               )}
 
                               {/* Coupon Input with Dropdown & Badges */}
-                              <div>
-                                <div className="flex justify-between items-center mb-1.5">
-                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Apply Coupon (Optional)</label>
-                                  {assignCouponCode && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setAssignCouponCode('');
-                                        setAssignCustomAmount('');
-                                        setAssignCustomDays('');
-                                      }}
-                                      className="text-[10px] text-rose-500 hover:underline font-bold"
-                                    >
-                                      ✕ Remove Coupon
-                                    </button>
-                                  )}
-                                </div>
-
-                                {(() => {
-                                  const selPlanObj = adminPlans.find((x: any) => x.id === assignPlanId);
-                                  const effectivePlanBasePrice = assignCustomAmount ? Number(assignCustomAmount) : (selPlanObj ? (selPlanObj.price || selPlanObj.amount || 0) : null);
-                                  const applicableCouponsForAssign = coupons.filter((c: any) => isCouponApplicableToPlan(c, assignPlanId, assignPlanCategoryId, effectivePlanBasePrice));
-                                  const handleAssignCouponChange = (newCode: string) => {
-                                    const code = newCode.trim().toUpperCase();
-                                    if (code && assignPlanId) {
-                                      const p = adminPlans.find((x: any) => x.id === assignPlanId);
-                                      const cp = coupons.find((c: any) => String(c.code).trim().toUpperCase() === code && c.status === 'ACTIVE');
-                                      const curPlanPrice = assignCustomAmount ? Number(assignCustomAmount) : (p ? (p.price || p.amount || 0) : 0);
-                                      if (cp && cp.minPurchaseValue && curPlanPrice < Number(cp.minPurchaseValue)) {
-                                        toast.error(`Minimum purchase of ₹${Number(cp.minPurchaseValue).toLocaleString('en-IN')} required for coupon "${code}" (Plan amount: ₹${curPlanPrice.toLocaleString('en-IN')})`);
-                                        setAssignCouponCode('');
-                                        return;
-                                      }
+                              {(() => {
+                                const isCustomPlanMode = Boolean((assignCustomAmount && assignCustomAmount.trim()) || (assignCustomDays && assignCustomDays.trim()));
+                                const selPlanObj = adminPlans.find((x: any) => x.id === assignPlanId);
+                                const effectivePlanBasePrice = assignCustomAmount ? Number(assignCustomAmount) : (selPlanObj ? (selPlanObj.price || selPlanObj.amount || 0) : null);
+                                const applicableCouponsForAssign = coupons.filter((c: any) => isCouponApplicableToPlan(c, assignPlanId, assignPlanCategoryId, effectivePlanBasePrice));
+                                const handleAssignCouponChange = (newCode: string) => {
+                                  if (isCustomPlanMode) return;
+                                  const code = newCode.trim().toUpperCase();
+                                  if (code && assignPlanId) {
+                                    const p = adminPlans.find((x: any) => x.id === assignPlanId);
+                                    const cp = coupons.find((c: any) => String(c.code).trim().toUpperCase() === code && c.status === 'ACTIVE');
+                                    const curPlanPrice = p ? (p.price || p.amount || 0) : 0;
+                                    if (cp && cp.minPurchaseValue && curPlanPrice < Number(cp.minPurchaseValue)) {
+                                      toast.error(`Minimum purchase of ₹${Number(cp.minPurchaseValue).toLocaleString('en-IN')} required for coupon "${code}" (Plan amount: ₹${curPlanPrice.toLocaleString('en-IN')})`);
+                                      setAssignCouponCode('');
+                                      return;
                                     }
-                                    setAssignCouponCode(code);
-                                    if (assignPlanId) {
-                                      const p = adminPlans.find((x: any) => x.id === assignPlanId);
-                                      if (p) {
-                                        const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, code);
-                                        const totalDays = p.durationMonths * 30;
-                                        if (assignCustomAmount) {
-                                          let val = Number(assignCustomAmount);
-                                          if (val > totalAmt) val = totalAmt;
-                                          setAssignCustomAmount(val.toString());
-                                          if (totalAmt > 0) {
-                                            setAssignCustomDays(Math.round(val / (totalAmt / totalDays)).toString());
-                                          }
-                                        } else if (assignCustomDays) {
-                                          let dVal = Number(assignCustomDays);
-                                          if (dVal > totalDays) dVal = totalDays;
-                                          setAssignCustomDays(dVal.toString());
-                                          if (totalDays > 0) {
-                                            setAssignCustomAmount(Math.round(dVal * (totalAmt / totalDays)).toString());
-                                          }
-                                        }
-                                      }
-                                    }
-                                  };
+                                  }
+                                  setAssignCouponCode(code);
+                                };
 
-                                  return (
-                                    <>
-                                      <div className="flex flex-col sm:flex-row gap-2">
-                                        <input
-                                          type="text"
-                                          autoComplete="off"
-                                          name="assign_plan_coupon_no_autofill"
-                                          value={assignCouponCode}
-                                          placeholder="Type coupon code (e.g. SUMMER50)"
-                                          onChange={e => handleAssignCouponChange(e.target.value)}
-                                          className="flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase"
-                                        />
-                                        <select
-                                          value={assignCouponCode.trim().toUpperCase()}
-                                          onChange={e => handleAssignCouponChange(e.target.value)}
-                                          className="bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500 max-w-full sm:max-w-[220px]"
+                                return (
+                                  <div>
+                                    <div className="flex justify-between items-center mb-1.5">
+                                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Apply Coupon (Optional)</label>
+                                      {isCustomPlanMode ? (
+                                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 px-2 py-0.5 rounded">
+                                          Coupons disabled for Custom Amount / Days
+                                        </span>
+                                      ) : assignCouponCode ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setAssignCouponCode('')}
+                                          className="text-[10px] text-rose-500 hover:underline font-bold"
                                         >
-                                          <option value="">{applicableCouponsForAssign.length > 0 ? `-- Select Coupon (${applicableCouponsForAssign.length}) --` : '-- No Coupon --'}</option>
-                                          {applicableCouponsForAssign.map((c: any) => (
-                                            <option key={c.id || c._id || c.code} value={String(c.code).trim().toUpperCase()}>
-                                              {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
+                                          ✕ Remove Coupon
+                                        </button>
+                                      ) : null}
+                                    </div>
 
-                                      {/* Quick-Pick Clickable Badges for Plan/Category Coupons */}
-                                      {applicableCouponsForAssign.length > 0 && (
-                                        <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
-                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicable Coupons:</span>
-                                          {applicableCouponsForAssign.map((c: any) => {
-                                            const isSelected = assignCouponCode.trim().toUpperCase() === String(c.code).trim().toUpperCase();
-                                            return (
-                                              <button
-                                                key={c.id || c._id || c.code}
-                                                type="button"
-                                                onClick={() => handleAssignCouponChange(isSelected ? '' : c.code)}
-                                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
-                                                  isSelected
-                                                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm ring-1 ring-violet-500'
-                                                    : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:border-violet-500 hover:text-violet-600'
-                                                }`}
-                                                title={isSelected ? 'Click to deselect' : `Click to apply ${c.code}`}
-                                              >
-                                                <Tag className="w-3 h-3 text-violet-500" />
-                                                <span>{c.code}</span>
-                                                <span className="text-[10px] opacity-80 font-normal">
-                                                  ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
-                                                </span>
-                                                {isSelected && <Check className="w-3 h-3 ml-0.5" />}
-                                              </button>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                      <input
+                                        type="text"
+                                        autoComplete="off"
+                                        name="assign_plan_coupon_no_autofill"
+                                        value={isCustomPlanMode ? '' : assignCouponCode}
+                                        disabled={isCustomPlanMode}
+                                        placeholder={isCustomPlanMode ? "Coupons disabled for custom amount / days" : "Type coupon code (e.g. SUMMER50)"}
+                                        onChange={e => handleAssignCouponChange(e.target.value)}
+                                        className={`flex-1 bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition uppercase ${
+                                          isCustomPlanMode ? 'opacity-50 cursor-not-allowed bg-slate-200/50 dark:bg-slate-900/50 text-slate-400' : ''
+                                        }`}
+                                      />
+                                      <select
+                                        value={isCustomPlanMode ? '' : assignCouponCode.trim().toUpperCase()}
+                                        disabled={isCustomPlanMode}
+                                        onChange={e => handleAssignCouponChange(e.target.value)}
+                                        className={`bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-violet-500 max-w-full sm:max-w-[220px] ${
+                                          isCustomPlanMode ? 'opacity-50 cursor-not-allowed bg-slate-200/50 dark:bg-slate-900/50 text-slate-400' : ''
+                                        }`}
+                                      >
+                                        <option value="">{isCustomPlanMode ? '-- Disabled for Custom Mode --' : (applicableCouponsForAssign.length > 0 ? `-- Select Coupon (${applicableCouponsForAssign.length}) --` : '-- No Coupon --')}</option>
+                                        {!isCustomPlanMode && applicableCouponsForAssign.map((c: any) => (
+                                          <option key={c.id || c._id || c.code} value={String(c.code).trim().toUpperCase()}>
+                                            {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    {/* Quick-Pick Clickable Badges for Plan/Category Coupons */}
+                                    {!isCustomPlanMode && applicableCouponsForAssign.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Applicable Coupons:</span>
+                                        {applicableCouponsForAssign.map((c: any) => {
+                                          const isSelected = assignCouponCode.trim().toUpperCase() === String(c.code).trim().toUpperCase();
+                                          return (
+                                            <button
+                                              key={c.id || c._id || c.code}
+                                              type="button"
+                                              onClick={() => handleAssignCouponChange(isSelected ? '' : c.code)}
+                                              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border ${
+                                                isSelected
+                                                  ? 'bg-violet-600 text-white border-violet-600 shadow-sm ring-1 ring-violet-500'
+                                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:border-violet-500 hover:text-violet-600'
+                                              }`}
+                                              title={isSelected ? 'Click to deselect' : `Click to apply ${c.code}`}
+                                            >
+                                              <Tag className="w-3 h-3 text-violet-500" />
+                                              <span>{c.code}</span>
+                                              <span className="text-[10px] opacity-80 font-normal">
+                                                ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}% OFF` : `₹${c.discountValue} OFF`})
+                                              </span>
+                                              {isSelected && <Check className="w-3 h-3 ml-0.5" />}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
 
                               {/* Payment Details */}
                               <div className="grid grid-cols-2 gap-4">
@@ -6738,35 +6747,40 @@ function AdminDashboardContent() {
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Custom Amount (₹)</label>
                                   <input
                                     type="number"
+                                    step="any"
                                     min="0"
                                     value={assignCustomAmount}
                                     onChange={e => {
-                                      let val = e.target.value;
+                                      const val = e.target.value;
+                                      if (val.trim() && assignCouponCode) {
+                                        setAssignCouponCode('');
+                                      }
                                       if (!val || !assignPlanId) {
                                         setAssignCustomAmount(val);
                                         setAssignCustomDays('');
                                         return;
                                       }
+                                      setAssignCustomAmount(val);
                                       const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
                                       if (selectedPlan) {
-                                        const totalDays = selectedPlan.durationMonths * 30;
-                                        const basePrice = selectedPlan.price;
-                                        const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, assignCouponCode);
-
-                                        let numericVal = Number(val);
-                                        if (numericVal > totalAmt) numericVal = totalAmt;
-                                        val = numericVal.toString();
-                                        setAssignCustomAmount(val);
-
-                                        if (totalAmt > 0) {
-                                          const costPerDay = totalAmt / totalDays;
-                                          setAssignCustomDays(Math.round(numericVal / costPerDay).toString());
+                                        const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
+                                        const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planBasePrice = (gstEnabled && !isExclusive)
+                                          ? (selectedPlan.price / 1.18)
+                                          : selectedPlan.price;
+                                        
+                                        const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
+                                        const numericVal = parseFloat(val);
+                                        if (!isNaN(numericVal) && numericVal > 0 && dailyBaseRate > 0) {
+                                          const enteredBase = gstEnabled ? (numericVal / 1.18) : numericVal;
+                                          const calcDays = Math.max(1, Math.round(enteredBase / dailyBaseRate));
+                                          setAssignCustomDays(calcDays.toString());
+                                        } else if (!val) {
+                                          setAssignCustomDays('');
                                         }
-                                      } else {
-                                        setAssignCustomAmount(val);
                                       }
                                     }}
-                                    placeholder="e.g. 500"
+                                    placeholder="e.g. 5900"
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
                                 </div>
@@ -6775,31 +6789,34 @@ function AdminDashboardContent() {
                                   <input
                                     type="number"
                                     min="1"
+                                    step="1"
                                     value={assignCustomDays}
                                     onChange={e => {
-                                      let val = e.target.value;
+                                      const val = e.target.value;
+                                      if (val.trim() && assignCouponCode) {
+                                        setAssignCouponCode('');
+                                      }
                                       if (!val || !assignPlanId) {
                                         setAssignCustomDays(val);
                                         setAssignCustomAmount('');
                                         return;
                                       }
+                                      const numDays = Math.round(Number(val));
+                                      setAssignCustomDays(val);
                                       const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
-                                      if (selectedPlan) {
-                                        const totalDays = selectedPlan.durationMonths * 30;
-                                        const basePrice = selectedPlan.price;
-                                        const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, assignCouponCode);
-
-                                        let numericVal = Number(val);
-                                        if (numericVal > totalDays) numericVal = totalDays;
-                                        val = numericVal.toString();
-                                        setAssignCustomDays(val);
-
-                                        if (totalDays > 0) {
-                                          const costPerDay = totalAmt / totalDays;
-                                          setAssignCustomAmount(Math.round(numericVal * costPerDay).toString());
+                                      if (selectedPlan && !isNaN(numDays) && numDays > 0) {
+                                        const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
+                                        const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planBasePrice = (gstEnabled && !isExclusive)
+                                          ? (selectedPlan.price / 1.18)
+                                          : selectedPlan.price;
+                                        
+                                        const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
+                                        if (dailyBaseRate > 0) {
+                                          const daysBase = numDays * dailyBaseRate;
+                                          const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
+                                          setAssignCustomAmount(Math.round(totalGross).toString());
                                         }
-                                      } else {
-                                        setAssignCustomDays(val);
                                       }
                                     }}
                                     placeholder="e.g. 15"
@@ -6819,6 +6836,85 @@ function AdminDashboardContent() {
                                   className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 resize-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                 />
                               </div>
+
+                              {/* Price Breakdown Card */}
+                              {(() => {
+                                const selPlan = (adminPlans || []).find((p: any) => p.id === assignPlanId);
+                                if (!selPlan) return null;
+                                const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                const hasCustom = Boolean((assignCustomAmount && assignCustomAmount.trim()) || (assignCustomDays && assignCustomDays.trim()));
+                                
+                                let defaultTotal = selPlan.price;
+                                if (!hasCustom && isExclusive) {
+                                  defaultTotal = parseFloat((selPlan.price * 1.18).toFixed(2));
+                                }
+                                const enteredTotal = hasCustom ? Number(assignCustomAmount) : defaultTotal;
+
+                                const preTaxBase = hasCustom
+                                  ? (gstEnabled ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal)
+                                  : ((gstEnabled && !isExclusive) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal);
+
+                                const cleanCode = assignCouponCode.trim().toUpperCase();
+                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE') : null;
+
+                                let discOnBase = 0;
+                                if (matchedCoupon && !hasCustom) {
+                                  if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
+                                    discOnBase = (gstEnabled && !isExclusive)
+                                      ? parseFloat((Number(matchedCoupon.discountValue || 0) / 1.18).toFixed(2))
+                                      : Number(matchedCoupon.discountValue || 0);
+                                  } else if (matchedCoupon.discountType === 'PERCENTAGE') {
+                                    discOnBase = parseFloat(((preTaxBase * Number(matchedCoupon.discountValue || 0)) / 100).toFixed(2));
+                                    if (matchedCoupon.percentageType === 'CAPPED' && matchedCoupon.maxDiscountValue && discOnBase > Number(matchedCoupon.maxDiscountValue)) {
+                                      discOnBase = Number(matchedCoupon.maxDiscountValue);
+                                    }
+                                  }
+                                  if (discOnBase > preTaxBase) discOnBase = preTaxBase;
+                                }
+
+                                const taxableBase = Math.max(0, parseFloat((preTaxBase - discOnBase).toFixed(2)));
+                                const gstAmt = gstEnabled ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
+                                const finalPayable = parseFloat((taxableBase + gstAmt).toFixed(2));
+
+                                return (
+                                  <div className="bg-slate-100 dark:bg-slate-900/80 border border-slate-300 dark:border-white/10 rounded-xl p-3 space-y-1.5 text-xs font-mono">
+                                    <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                      <span>Pre-tax Base Value:</span>
+                                      <span className={discOnBase > 0 ? 'line-through text-slate-500' : 'text-slate-800 dark:text-slate-200'}>
+                                        ₹{preTaxBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                    {discOnBase > 0 && matchedCoupon && (
+                                      <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold">
+                                        <span className="flex items-center gap-1">
+                                          <Tag className="w-3.5 h-3.5" />
+                                          Coupon Discount on Base ({matchedCoupon.code} - {matchedCoupon.discountType === 'PERCENTAGE' ? `${matchedCoupon.discountValue}%` : `₹${matchedCoupon.discountValue}`}):
+                                        </span>
+                                        <span>-₹{discOnBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    )}
+                                    {gstEnabled && (
+                                      <>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-200 dark:border-white/5 pt-1">
+                                          <span>Taxable Value:</span>
+                                          <span>₹{taxableBase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                          <span>GST (18%):</span>
+                                          <span>₹{gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div className="flex justify-between border-t border-slate-300 dark:border-white/10 pt-1.5 font-extrabold text-sm text-violet-600 dark:text-violet-400">
+                                      <span>Total Payable:</span>
+                                      <span>
+                                        ₹{finalPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {gstEnabled ? ' (GST Incl.)' : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               {/* Info note */}
                               <div className="flex items-start gap-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-xl text-[10px] text-amber-700 dark:text-amber-300">

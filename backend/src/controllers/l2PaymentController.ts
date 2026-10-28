@@ -93,12 +93,18 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
 
     const defaultDays = planDoc?.durationMonths ? planDoc.durationMonths * 30 : 30;
     const finalValidityDays = validityDays !== undefined && !isNaN(Number(validityDays))
-      ? Number(validityDays)
-      : Number(payment.planValidityDays || defaultDays);
+      ? Math.round(Number(validityDays))
+      : Math.round(Number(payment.planValidityDays || defaultDays));
 
-    const finalDiscount = discount !== undefined && !isNaN(Number(discount))
-      ? Number(discount)
-      : Number(payment.discountApplied || payment.discount || 0);
+    const isCustomMode = (amount !== undefined && !isNaN(Number(amount)) && Number(amount) !== Number(planDoc?.price)) ||
+      (validityDays !== undefined && !isNaN(Number(validityDays)) && Math.round(Number(validityDays)) !== defaultDays) ||
+      payment.paymentMode === 'CUSTOM_PRO_RATA';
+
+    const finalDiscount = isCustomMode
+      ? 0
+      : (discount !== undefined && !isNaN(Number(discount))
+        ? Number(discount)
+        : Number(payment.discountApplied || payment.discount || 0));
 
     const finalPaymentDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
     const finalServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : finalPaymentDate);
@@ -198,6 +204,10 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     payment.gstCalculationType = tenantObj?.gstCalculationType || 'EXCLUSIVE';
     payment.planValidityDays = finalValidityDays;
     payment.discountApplied = finalDiscount;
+    if (isCustomMode) {
+      payment.couponId = null;
+      payment.couponCode = null;
+    }
     payment.paymentDate = finalPaymentDate;
     payment.serviceStartDate = finalServiceStartDate;
     payment.invoicePolicy = activePolicy as any;
@@ -228,24 +238,26 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     const newClientStatus = (isKycDone && isAgreementSigned) ? 'ACTIVE' : (isKycDone ? 'AGREEMENT_PENDING' : 'KYC_PENDING');
     await clientModel.findByIdAndUpdate(client._id || client.id, { $set: { status: newClientStatus } });
 
-    // 5. Generate and send Invoice if policy conditions met
+    // 5. Generate and send Invoice if policy conditions met (asynchronously in background)
     if (initialInvoiceStatus === 'GENERATED' && client.email) {
-      generateInvoicePdf(String(payment._id || payment.id))
-        .then((pdfBuffer: any) => {
-          return sendTaxInvoiceEmail({
-            tenantId,
-            toEmail: client.email,
-            clientName: client.name || 'Client',
-            companyName: tenantObj?.companyName,
-            planName: planDoc?.name || 'Research Analyst Service',
-            invoiceNumber: `INV/${new Date().getFullYear()}/${String(payment.transactionRef).slice(-6).toUpperCase()}`,
-            amount: finalAmount,
-            pdfBuffer
+      setImmediate(() => {
+        generateInvoicePdf(String(payment._id || payment.id))
+          .then((pdfBuffer: any) => {
+            return sendTaxInvoiceEmail({
+              tenantId,
+              toEmail: client.email,
+              clientName: client.name || 'Client',
+              companyName: tenantObj?.companyName,
+              planName: planDoc?.name || 'Research Analyst Service',
+              invoiceNumber: `INV/${new Date().getFullYear()}/${String(payment.transactionRef).slice(-6).toUpperCase()}`,
+              amount: finalAmount,
+              pdfBuffer
+            });
+          })
+          .catch((pdfErr: any) => {
+            console.warn('L2 Invoice PDF dispatch warning:', pdfErr?.message || pdfErr);
           });
-        })
-        .catch((pdfErr: any) => {
-          console.warn('L2 Invoice PDF dispatch warning:', pdfErr?.message || pdfErr);
-        });
+      });
     }
 
     return res.status(200).json({

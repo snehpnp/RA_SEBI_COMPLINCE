@@ -53,24 +53,24 @@ export default function L2PaymentReviewModal({
   const activeUser = currentUser || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {});
   const approverName = `${activeUser.firstName || ''} ${activeUser.lastName || ''}`.trim() || activeUser.name || activeUser.email || 'L2 Approver';
 
-  // Self-heal: Fetch missing lists if needed
+  // Self-heal: Fetch missing lists once when modal opens if not provided via props
   useEffect(() => {
     if (isOpen) {
-      if (!plans || plans.length === 0) {
+      if ((!plans || plans.length === 0) && internalPlans.length === 0) {
         api.getAdminPlans()
           .then((res: any) => {
             if (res?.success && Array.isArray(res.data)) setInternalPlans(res.data);
           })
           .catch(() => {});
       }
-      if (!categories || categories.length === 0) {
+      if ((!categories || categories.length === 0) && internalCategories.length === 0) {
         api.getAdminCategories()
           .then((res: any) => {
             if (res?.success && Array.isArray(res.data)) setInternalCategories(res.data);
           })
           .catch(() => {});
       }
-      if (!coupons || coupons.length === 0) {
+      if ((!coupons || coupons.length === 0) && internalCoupons.length === 0) {
         api.getCoupons()
           .then((res: any) => {
             if (res?.success && Array.isArray(res.data)) setInternalCoupons(res.data);
@@ -79,7 +79,7 @@ export default function L2PaymentReviewModal({
           .catch(() => {});
       }
     }
-  }, [isOpen, plans, categories, coupons]);
+  }, [isOpen]);
 
   const allPlans = (Array.isArray(plans) && plans.length > 0) ? plans : internalPlans;
   const allCategories = (Array.isArray(categories) && categories.length > 0) ? categories : internalCategories;
@@ -248,9 +248,14 @@ export default function L2PaymentReviewModal({
     setIsSubmitting(true);
     try {
       const selectedPlan = allPlans.find((p: any) => String(p.id || p._id) === String(selectedPlanId));
+      const defaultDays = selectedPlan?.durationMonths ? selectedPlan.durationMonths * 30 : 30;
+      const isCustomMode = (customAmount !== '' && !isNaN(Number(customAmount)) && Number(customAmount) !== Number(selectedPlan?.price)) ||
+        (customDays !== '' && !isNaN(Number(customDays)) && Math.round(Number(customDays)) !== defaultDays) ||
+        Boolean(payment?.paymentMode === 'CUSTOM_PRO_RATA');
+
       const basePrice = selectedPlan ? Number(selectedPlan.price) : Number(customAmount || 0);
-      const discountedBase = selectedPlan ? getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, couponCode) : Number(customAmount || 0);
-      const calculatedDiscount = Math.max(0, parseFloat((basePrice - discountedBase).toFixed(2)));
+      const discountedBase = (!isCustomMode && selectedPlan) ? getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, couponCode) : Number(customAmount || basePrice);
+      const calculatedDiscount = isCustomMode ? 0 : Math.max(0, parseFloat((basePrice - discountedBase).toFixed(2)));
 
       const finalAmountToSubmit = customAmount !== '' && !isNaN(Number(customAmount))
         ? parseFloat(Number(customAmount).toFixed(2))
@@ -267,8 +272,8 @@ export default function L2PaymentReviewModal({
         action: 'APPROVED',
         planId: selectedPlanId,
         amount: finalAmountToSubmit,
-        validityDays: Number(customDays || (selectedPlan?.durationMonths ? selectedPlan.durationMonths * 30 : 30)),
-        discount: calculatedDiscount,
+        validityDays: Math.round(Number(customDays || defaultDays)),
+        discount: isCustomMode ? 0 : calculatedDiscount,
         paymentRefId: paymentRefId.trim(),
         transactionRef: paymentRefId.trim(),
         paymentDate,
@@ -278,8 +283,8 @@ export default function L2PaymentReviewModal({
 
       if (res.data?.success) {
         toast.success(res.data.message || 'Payment approved and plan activated successfully by L2!');
-        notifySuccess();
         onClose();
+        notifySuccess();
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || 'Failed to approve L2 payment.');
@@ -757,54 +762,77 @@ export default function L2PaymentReviewModal({
                 )}
 
                 {/* 3. Coupon Input */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Apply / Edit Coupon (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    list="active-coupons-list"
-                    value={couponCode}
-                    placeholder="TYPE OR SELECT COUPON CODE"
-                    onChange={(e) => {
-                      const newCode = e.target.value.toUpperCase();
-                      setCouponCode(newCode);
+                {(() => {
+                  const selPlanObj = allPlans.find((p) => String(p.id || p._id) === String(selectedPlanId));
+                  const planStandardDays = selPlanObj?.durationMonths ? selPlanObj.durationMonths * 30 : 30;
+                  const isCustomMode = Boolean(
+                    (customAmount !== '' && !isNaN(Number(customAmount)) && selPlanObj && Number(customAmount) !== Number(selPlanObj.price)) ||
+                    (customDays !== '' && !isNaN(Number(customDays)) && Math.round(Number(customDays)) !== planStandardDays) ||
+                    payment?.paymentMode === 'CUSTOM_PRO_RATA'
+                  );
 
-                      if (selectedPlanId) {
-                        const p = allPlans.find((x: any) => String(x.id || x._id) === String(selectedPlanId));
-                        if (p) {
-                          const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, newCode);
-                          const totalDays = p.durationMonths * 30;
-                          if (customAmount) {
-                            let val = parseFloat(customAmount);
-                            if (!isNaN(val)) {
-                              if (val > totalAmt) val = totalAmt;
-                              setCustomAmount(val.toString());
-                              if (totalAmt > 0) {
-                                setCustomDays(Math.max(1, Math.round(val / (totalAmt / totalDays))).toString());
+                  return (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                          Apply / Edit Coupon (Optional)
+                        </label>
+                        {isCustomMode && (
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-300 dark:border-amber-700/50">
+                            Disabled for Custom Amount / Days
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        list="active-coupons-list"
+                        value={isCustomMode ? '' : couponCode}
+                        disabled={isCustomMode}
+                        placeholder={isCustomMode ? "COUPON NOT ALLOWED WITH CUSTOM AMOUNT/DAYS" : "TYPE OR SELECT COUPON CODE"}
+                        onChange={(e) => {
+                          if (isCustomMode) return;
+                          const newCode = e.target.value.toUpperCase();
+                          setCouponCode(newCode);
+
+                          if (selectedPlanId) {
+                            const p = allPlans.find((x: any) => String(x.id || x._id) === String(selectedPlanId));
+                            if (p) {
+                              const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, newCode);
+                              const totalDays = p.durationMonths * 30;
+                              if (customAmount) {
+                                let val = parseFloat(customAmount);
+                                if (!isNaN(val)) {
+                                  if (val > totalAmt) val = totalAmt;
+                                  setCustomAmount(val.toString());
+                                  if (totalAmt > 0) {
+                                    setCustomDays(Math.max(1, Math.round(val / (totalAmt / totalDays))).toString());
+                                  }
+                                }
+                              } else if (customDays) {
+                                let dVal = Number(customDays);
+                                if (dVal > totalDays) dVal = totalDays;
+                                setCustomDays(dVal.toString());
+                                if (totalDays > 0) {
+                                  setCustomAmount(parseFloat((dVal * (totalAmt / totalDays)).toFixed(2)).toString());
+                                }
                               }
                             }
-                          } else if (customDays) {
-                            let dVal = Number(customDays);
-                            if (dVal > totalDays) dVal = totalDays;
-                            setCustomDays(dVal.toString());
-                            if (totalDays > 0) {
-                              setCustomAmount(parseFloat((dVal * (totalAmt / totalDays)).toFixed(2)).toString());
-                            }
                           }
-                        }
-                      }
-                    }}
-                    className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white uppercase focus:border-violet-500 focus:ring-1 focus:ring-violet-500 font-medium transition"
-                  />
-                  <datalist id="active-coupons-list">
-                    {allCoupons.filter((c: any) => c.status === 'ACTIVE' || !c.status).map((c: any) => (
-                      <option key={c.id || c._id} value={c.code}>
-                        {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}%` : `₹${c.discountValue}`})
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
+                        }}
+                        className={`w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white uppercase focus:border-violet-500 focus:ring-1 focus:ring-violet-500 font-medium transition ${
+                          isCustomMode ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-800' : ''
+                        }`}
+                      />
+                      <datalist id="active-coupons-list">
+                        {allCoupons.filter((c: any) => c.status === 'ACTIVE' || !c.status).map((c: any) => (
+                          <option key={c.id || c._id} value={c.code}>
+                            {c.code} ({c.discountType === 'PERCENTAGE' ? `${c.discountValue}%` : `₹${c.discountValue}`})
+                          </option>
+                        ))}
+                      </datalist>
+                    </div>
+                  );
+                })()}
 
                 {/* 4. Payment Ref ID & Payment Date */}
                 <div className="grid grid-cols-2 gap-3">
@@ -894,6 +922,7 @@ export default function L2PaymentReviewModal({
                       value={customAmount}
                       onChange={(e) => {
                         let val = e.target.value;
+                        if (couponCode) setCouponCode('');
                         if (!val || !selectedPlanId) {
                           setCustomAmount(val);
                           setCustomDays('');
@@ -903,7 +932,7 @@ export default function L2PaymentReviewModal({
                         if (selectedPlan) {
                           const totalDays = selectedPlan.durationMonths * 30;
                           const basePrice = selectedPlan.price;
-                          const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, couponCode);
+                          const totalAmt = basePrice;
 
                           let numericVal = parseFloat(val);
                           if (!isNaN(numericVal)) {
@@ -938,6 +967,7 @@ export default function L2PaymentReviewModal({
                       value={customDays}
                       onChange={(e) => {
                         let val = e.target.value;
+                        if (couponCode) setCouponCode('');
                         if (!val || !selectedPlanId) {
                           setCustomDays(val);
                           setCustomAmount('');
@@ -947,7 +977,7 @@ export default function L2PaymentReviewModal({
                         if (selectedPlan) {
                           const totalDays = selectedPlan.durationMonths * 30;
                           const basePrice = selectedPlan.price;
-                          const totalAmt = getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, couponCode);
+                          const totalAmt = basePrice;
 
                           let numericVal = Number(val);
                           if (numericVal > totalDays) numericVal = totalDays;
