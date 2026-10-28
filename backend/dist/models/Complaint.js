@@ -52,7 +52,9 @@ exports.ComplaintSchema = new mongoose_1.Schema({
     deadlineAt: { type: Date, required: true },
     resolvedAt: { type: Date, default: null },
     resolutionNote: { type: String, default: null },
-    atrProofUrl: { type: String, default: null }
+    atrProofUrl: { type: String, default: null },
+    createdByType: { type: String, default: 'ADMIN' },
+    createdById: { type: mongoose_1.Schema.Types.ObjectId, default: null }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Complaint' });
 exports.ComplaintSchema.virtual('tenant', {
     ref: 'Tenant',

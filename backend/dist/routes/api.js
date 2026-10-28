@@ -524,6 +524,7 @@ router.post('/compliance/complaints', auth_1.authenticateJWT, (0, auth_1.require
 router.get('/client/complaints', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, complaintController_1.getComplaints);
 router.post('/client/complaints', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, complaintController_1.createComplaint);
 router.put('/compliance/complaints/:id/resolve', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, upload.single('proof'), complaintController_1.resolveComplaint);
+router.delete('/compliance/complaints/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_COMPLIANCE'), tenant_1.enforceTenantIsolation, complaintController_1.deleteComplaint);
 // ----------------------------------------------------
 // RESOURCES MANAGEMENT
 // ----------------------------------------------------

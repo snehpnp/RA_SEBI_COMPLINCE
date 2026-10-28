@@ -6509,7 +6509,9 @@ export const goLiveTenant = async (req: AuthenticatedRequest, res: Response) => 
     const currentDay = now.getDate();
     let complianceCutoffDate: Date;
 
-    if (currentDay >= 1 && currentDay <= 14) {
+    if (req.body.complianceCutoffDate || req.body.cycleStartDate) {
+      complianceCutoffDate = new Date(req.body.complianceCutoffDate || req.body.cycleStartDate);
+    } else if (currentDay >= 1 && currentDay <= 14) {
       // 1st to 14th: Cut-off is 15th of the current month
       complianceCutoffDate = new Date(now.getFullYear(), now.getMonth(), 15, 0, 0, 0, 0);
     } else {
@@ -6524,7 +6526,7 @@ export const goLiveTenant = async (req: AuthenticatedRequest, res: Response) => 
     await dynamicDb.Penalty.updateMany(
       {
         $or: [{ tenantId: resolvedTenantId }, { tenantId }],
-        status: { $in: ['PENDING', 'NON_COMPLIANT'] }
+        status: { $in: ['PENDING', 'PENDING_PAYMENT', 'NON_COMPLIANT'] }
       },
       {
         $set: {

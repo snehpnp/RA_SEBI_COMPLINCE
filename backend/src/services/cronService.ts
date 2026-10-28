@@ -24,6 +24,11 @@ export const initCronJobs = () => {
       for (const audit of pendingAudits) {
         if (!audit.dueDate) continue;
 
+        // Skip tenants not in live mode or audits prior to compliance cycle cutoff date
+        const tenant = audit.tenant;
+        if (!tenant?.isLive) continue;
+        if (tenant?.complianceCutoffDate && new Date(audit.dueDate) < new Date(tenant.complianceCutoffDate)) continue;
+
         const timeDiff = new Date(audit.dueDate).getTime() - now.getTime();
         const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
 

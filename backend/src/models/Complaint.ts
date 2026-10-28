@@ -20,6 +20,8 @@ export interface IComplaint extends Document {
   resolvedAt?: Date | null;
   resolutionNote?: string | null;
   atrProofUrl?: string | null;
+  createdByType?: string | null;
+  createdById?: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,7 +43,9 @@ export const ComplaintSchema = new Schema<IComplaint>(
     deadlineAt: { type: Date, required: true },
     resolvedAt: { type: Date, default: null },
     resolutionNote: { type: String, default: null },
-    atrProofUrl: { type: String, default: null }
+    atrProofUrl: { type: String, default: null },
+    createdByType: { type: String, default: 'ADMIN' },
+    createdById: { type: Schema.Types.ObjectId, default: null }
   },
   { ...baseSchemaOptions, collection: 'Complaint' }
 );

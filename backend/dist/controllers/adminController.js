@@ -3631,12 +3631,30 @@ const assignPlanByAdmin = async (req, res) => {
         const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
         const isAdmin = assigner?.roleId?.name === 'SUPER_ADMIN' || assigner?.roleId?.name === 'ADMIN';
         const assignerName = `${assigner?.firstName || ''} ${assigner?.lastName || ''}`.trim();
-        const effectiveBase = (customAmount !== undefined && customAmount !== null)
-            ? Number(customAmount)
-            : Number(plan.price);
+        const isGstActive = tenantObj?.gstEnabled !== false;
+        const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
+        const hasCustomAmount = customAmount !== undefined && customAmount !== null && customAmount !== '' && !isNaN(Number(customAmount)) && Number(customAmount) > 0;
+        const hasCustomDays = customDays !== undefined && customDays !== null && customDays !== '' && !isNaN(Number(customDays)) && Number(customDays) > 0;
+        const isCustomActive = hasCustomAmount || hasCustomDays;
+        const enteredAmount = hasCustomAmount ? Number(customAmount) : Number(plan.price);
+        // If custom amount was entered by admin, it represents the Total Gross Amount received from the client.
+        // If no custom amount was entered:
+        // - In EXCLUSIVE mode, plan.price is the Base Price, so preTaxBase = plan.price.
+        // - In INCLUSIVE mode, plan.price is the Gross Price, so preTaxBase = plan.price / 1.18.
+        // - In DISABLED mode, preTaxBase = plan.price.
+        let preTaxBase = 0;
+        if (hasCustomAmount) {
+            preTaxBase = isGstActive ? parseFloat((enteredAmount / 1.18).toFixed(2)) : enteredAmount;
+        }
+        else {
+            preTaxBase = (isGstActive && !isExclusive)
+                ? parseFloat((enteredAmount / 1.18).toFixed(2))
+                : enteredAmount;
+        }
         let discountAmount = 0;
         let appliedCouponId = null;
-        if (couponCode) {
+        // Strict Rule: If custom amount or custom days is entered, coupons CANNOT be applied (neither discount nor recording)
+        if (couponCode && !isCustomActive) {
             const coupon = await db_1.default.Coupon.findOne({
                 code: String(couponCode).trim().toUpperCase(),
                 tenantId,
@@ -3681,47 +3699,23 @@ const assignPlanByAdmin = async (req, res) => {
                     return res.status(400).json({ success: false, message: 'Coupon is not applicable to this category.' });
                 }
             }
-            if (coupon.minPurchaseValue && effectiveBase < coupon.minPurchaseValue) {
+            if (coupon.minPurchaseValue && preTaxBase < coupon.minPurchaseValue) {
                 return res.status(400).json({ success: false, message: `Minimum purchase of ₹${coupon.minPurchaseValue} required.` });
             }
             if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
-                discountAmount = coupon.discountValue;
+                discountAmount = (isGstActive && !isExclusive)
+                    ? parseFloat((Number(coupon.discountValue || 0) / 1.18).toFixed(2))
+                    : Number(coupon.discountValue || 0);
             }
             else if (coupon.discountType === 'PERCENTAGE') {
-                discountAmount = (effectiveBase * coupon.discountValue) / 100;
-                if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
-                    discountAmount = coupon.maxDiscountValue;
+                discountAmount = parseFloat(((preTaxBase * Number(coupon.discountValue || 0)) / 100).toFixed(2));
+                if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > Number(coupon.maxDiscountValue)) {
+                    discountAmount = Number(coupon.maxDiscountValue);
                 }
             }
-            if (discountAmount > effectiveBase)
-                discountAmount = effectiveBase;
+            if (discountAmount > preTaxBase)
+                discountAmount = preTaxBase;
             appliedCouponId = coupon._id || coupon.id;
-        }
-        const isGstActive = tenantObj?.gstEnabled !== false;
-        const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
-        // GST Inclusive vs Exclusive discount handling
-        // When GST is inclusive, effectiveBase has 18% GST included, so pre-tax main value is effectiveBase / 1.18
-        const preTaxBase = (isGstActive && !isExclusive)
-            ? parseFloat((effectiveBase / 1.18).toFixed(2))
-            : effectiveBase;
-        // Recalculate discount strictly on pre-tax base value
-        if (couponCode && appliedCouponId) {
-            const coupon = await db_1.default.Coupon.findById(appliedCouponId).lean();
-            if (coupon) {
-                if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
-                    discountAmount = (isGstActive && !isExclusive)
-                        ? parseFloat((Number(coupon.discountValue || 0) / 1.18).toFixed(2))
-                        : Number(coupon.discountValue || 0);
-                }
-                else if (coupon.discountType === 'PERCENTAGE') {
-                    discountAmount = parseFloat(((preTaxBase * Number(coupon.discountValue || 0)) / 100).toFixed(2));
-                    if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > Number(coupon.maxDiscountValue)) {
-                        discountAmount = Number(coupon.maxDiscountValue);
-                    }
-                }
-                if (discountAmount > preTaxBase)
-                    discountAmount = preTaxBase;
-            }
         }
         const taxableBase = Math.max(0, parseFloat((preTaxBase - discountAmount).toFixed(2)));
         const gstAmt = isGstActive ? parseFloat((taxableBase * 0.18).toFixed(2)) : 0;
@@ -3779,7 +3773,18 @@ const assignPlanByAdmin = async (req, res) => {
             }
         }
         let startDate = parsedServiceStartDate;
-        const planValidityDays = customDays !== undefined ? customDays : (plan.durationMonths * 30 || 30);
+        const planTotalDays = (plan.durationMonths || 1) * 30 || 30;
+        const planBasePrice = (isGstActive && !isExclusive)
+            ? parseFloat((Number(plan.price) / 1.18).toFixed(2))
+            : Number(plan.price);
+        const planDailyBase = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
+        let planValidityDays = planTotalDays;
+        if (customDays !== undefined && customDays !== null && !isNaN(Number(customDays)) && Number(customDays) > 0) {
+            planValidityDays = Math.round(Number(customDays));
+        }
+        else if (hasCustomAmount && planDailyBase > 0) {
+            planValidityDays = Math.max(1, Math.round(preTaxBase / planDailyBase));
+        }
         // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval
         if (tenantObj?.l2ApprovalEnabled === true) {
             const pendingPayment = await db_1.default.Payment.create({
@@ -3787,6 +3792,9 @@ const assignPlanByAdmin = async (req, res) => {
                 clientId: actualClientId,
                 planId: plan._id || plan.id,
                 amount: parseFloat(finalTotalAmount.toFixed(2)),
+                baseAmount: finalBasePrice,
+                gstAmount: finalGstAmount,
+                gstRate: isGstActive ? 18 : 0,
                 paymentMode,
                 transactionRef: paymentRefId,
                 paymentDate: parsedPaymentDate,
@@ -3802,20 +3810,20 @@ const assignPlanByAdmin = async (req, res) => {
                 tenantState: tenantObj?.state || null,
                 planValidityDays,
                 paymentGatewayId: null,
-                couponId: appliedCouponId,
-                discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null,
-                couponCode: couponCode || null,
+                couponId: isCustomActive ? null : appliedCouponId,
+                discountApplied: (!isCustomActive && discountAmount > 0) ? parseFloat(discountAmount.toFixed(2)) : null,
+                couponCode: isCustomActive ? null : (couponCode || null),
                 l1Details: {
                     submittedBy: req.user.id,
                     submittedByName: assignerName,
                     planId: plan._id || plan.id,
                     planName: plan.name,
                     categoryId: plan.categoryId,
-                    couponCode: couponCode || null,
+                    couponCode: isCustomActive ? null : (couponCode || null),
                     transactionRef: paymentRefId,
                     amount: parseFloat(finalTotalAmount.toFixed(2)),
                     validityDays: planValidityDays,
-                    discount: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : 0,
+                    discount: (!isCustomActive && discountAmount > 0) ? parseFloat(discountAmount.toFixed(2)) : 0,
                     paymentDate: parsedPaymentDate,
                     serviceStartDate: parsedServiceStartDate,
                     remarks: finalRemark,
@@ -3853,6 +3861,9 @@ const assignPlanByAdmin = async (req, res) => {
             planId: plan._id || plan.id,
             subscriptionId: subscription._id,
             amount: parseFloat(finalTotalAmount.toFixed(2)),
+            baseAmount: finalBasePrice,
+            gstAmount: finalGstAmount,
+            gstRate: isGstActive ? 18 : 0,
             paymentMode,
             transactionRef: paymentRefId,
             paymentDate: new Date(paymentDate),
@@ -3868,8 +3879,8 @@ const assignPlanByAdmin = async (req, res) => {
             tenantState: tenantObj?.state || null,
             planValidityDays,
             paymentGatewayId: null,
-            couponId: appliedCouponId,
-            discountApplied: discountAmount > 0 ? parseFloat(discountAmount.toFixed(2)) : null
+            couponId: isCustomActive ? null : appliedCouponId,
+            discountApplied: (!isCustomActive && discountAmount > 0) ? parseFloat(discountAmount.toFixed(2)) : null
         });
         if (initialInvoiceStatus === 'GENERATED' && activePolicy === 'IMMEDIATE_ON_PAYMENT' && client.email) {
             (0, invoiceGenerator_1.generateInvoicePdf)(String(payment._id || payment.id))
@@ -6064,7 +6075,10 @@ const goLiveTenant = async (req, res) => {
         const now = new Date();
         const currentDay = now.getDate();
         let complianceCutoffDate;
-        if (currentDay >= 1 && currentDay <= 14) {
+        if (req.body.complianceCutoffDate || req.body.cycleStartDate) {
+            complianceCutoffDate = new Date(req.body.complianceCutoffDate || req.body.cycleStartDate);
+        }
+        else if (currentDay >= 1 && currentDay <= 14) {
             // 1st to 14th: Cut-off is 15th of the current month
             complianceCutoffDate = new Date(now.getFullYear(), now.getMonth(), 15, 0, 0, 0, 0);
         }
@@ -6077,7 +6091,7 @@ const goLiveTenant = async (req, res) => {
         // A. Waive all existing pending / non-compliant penalties created prior to cutoff
         await db_1.default.Penalty.updateMany({
             $or: [{ tenantId: resolvedTenantId }, { tenantId }],
-            status: { $in: ['PENDING', 'NON_COMPLIANT'] }
+            status: { $in: ['PENDING', 'PENDING_PAYMENT', 'NON_COMPLIANT'] }
         }, {
             $set: {
                 status: 'WAIVED',

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import dynamicDb from '../config/db';
 import { getCompliancePeriod } from '../utils/complianceDateHelper';
 import { AuthenticatedRequest } from '../middlewares/auth';
@@ -84,7 +85,9 @@ export const createComplaint = async (req: AuthenticatedRequest, res: Response) 
       description,
       receivedAt: receivedDate,
       deadlineAt: deadlineDate,
-      status: 'OPEN'
+      status: 'OPEN',
+      createdByType: req.user?.role === 'CLIENT' ? 'CLIENT' : 'ADMIN',
+      createdById: req.user?.id ? new mongoose.Types.ObjectId(req.user.id) : null
     });
 
     let actualUserId = userId;
@@ -192,7 +195,8 @@ export const resolveComplaint = async (req: Request, res: Response) => {
     // Check if all complaints for this tenant are resolved
     const openComplaintsCount = await dynamicDb.Complaint.countDocuments({
       tenantId,
-      status: 'OPEN'
+      status: 'OPEN',
+
     });
 
     if (openComplaintsCount === 0) {
@@ -286,5 +290,118 @@ export const resolveComplaint = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, error: 'Failed to resolve complaint' });
+  }
+};
+
+// Delete a complaint (Admin only, Client-submitted complaints cannot be deleted)
+export const deleteComplaint = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const tenantId = (req.headers['x-tenant-id'] as string) || req.user?.tenantId;
+    const userId = (req.headers['x-user-id'] as string) || req.user?.id || 'system';
+
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'Tenant ID is required' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid complaint ID' });
+    }
+
+    const complaint = await dynamicDb.Complaint.findOne({ _id: id, tenantId });
+    if (!complaint) {
+      return res.status(404).json({ success: false, error: 'Complaint not found.' });
+    }
+
+    // Client-submitted complaints CANNOT be deleted
+    if (complaint.source === 'CLIENT_PORTAL' || (complaint as any).createdByType === 'CLIENT') {
+      return res.status(403).json({
+        success: false,
+        error: 'Client-submitted complaints cannot be deleted to comply with SEBI regulatory grievance norms.'
+      });
+    }
+
+    const complaintIdStr = complaint._id.toString();
+
+    // 1. Find linked ComplianceAudits (e.g. SR.28 timeline breach audits)
+    const linkedAudits = await dynamicDb.ComplianceAudit.find({
+      tenantId,
+      officerRemarks: { $regex: complaintIdStr, $options: 'i' }
+    }).lean();
+
+    const linkedAuditIds = linkedAudits.map((a: any) => a._id);
+
+    // 2. Delete linked Penalties (matching either linked auditIds or reason containing complaintIdStr)
+    const penaltyFilter: any = {
+      tenantId,
+      $or: [
+        { reason: { $regex: complaintIdStr, $options: 'i' } }
+      ]
+    };
+    if (linkedAuditIds.length > 0) {
+      penaltyFilter.$or.push({ auditId: { $in: linkedAuditIds } });
+    }
+    await dynamicDb.Penalty.deleteMany(penaltyFilter);
+
+    // 3. Delete linked ComplianceAudits
+    if (linkedAuditIds.length > 0) {
+      await dynamicDb.ComplianceAudit.deleteMany({ _id: { $in: linkedAuditIds } });
+    }
+
+    // 4. Delete linked ComplianceAlerts (e.g. COMPLAINT_OVERDUE matching complaintIdStr)
+    await dynamicDb.ComplianceAlert.deleteMany({
+      tenantId,
+      alertType: 'COMPLAINT_OVERDUE',
+      description: { $regex: complaintIdStr, $options: 'i' }
+    });
+
+    // 5. Delete linked ComplianceAuditHistory records referencing this complaint
+    await dynamicDb.ComplianceAuditHistory.deleteMany({
+      tenantId,
+      $or: [
+        { officerRemarks: { $regex: complaintIdStr, $options: 'i' } },
+        ...(linkedAuditIds.length > 0 ? [{ auditId: { $in: linkedAuditIds } }] : [])
+      ]
+    });
+
+    // 6. Delete the Complaint itself
+    await dynamicDb.Complaint.deleteOne({ _id: id });
+
+    // 7. Check if any overdue complaints remain. If none, close any remaining general COMPLAINT_OVERDUE alerts
+    const remainingOverdueCount = await dynamicDb.Complaint.countDocuments({
+      tenantId,
+      status: 'OPEN',
+      receivedAt: { $lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
+    });
+    if (remainingOverdueCount === 0) {
+      await dynamicDb.ComplianceAlert.updateMany(
+        { tenantId, alertType: 'COMPLAINT_OVERDUE', status: 'OPEN' },
+        { $set: { status: 'CLOSED', remarks: 'Auto-resolved: All complaints resolved or within timeline.', closedAt: new Date() } }
+      );
+    }
+
+    // 8. Create AuditLog for deletion
+    let actualUserId = userId;
+    if (userId === 'system' || !userId) {
+      const adminUser = await dynamicDb.User.findOne({ tenantId }).lean();
+      if (adminUser) actualUserId = adminUser._id.toString();
+    }
+    if (actualUserId && actualUserId !== 'system') {
+      await dynamicDb.AuditLog.create({
+        tenantId,
+        userId: actualUserId,
+        action: 'DELETE',
+        module: 'COMPLIANCE',
+        oldValue: JSON.stringify(complaint.toObject ? complaint.toObject() : complaint)
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Complaint and all associated penalties, alerts, and audit records deleted successfully.'
+    });
+  } catch (error) {
+    console.error('Error deleting complaint:', error);
+    return res.status(500).json({ success: false, error: 'Failed to delete complaint' });
   }
 };

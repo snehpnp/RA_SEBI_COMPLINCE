@@ -3706,6 +3706,35 @@ function AdminDashboardContent() {
     finally { setComplaintResolveLoading(false); }
   };
 
+  const handleDeleteComplaint = (complaint: any) => {
+    if (!complaint) return;
+    const isClientSubmitted = complaint.source === 'CLIENT_PORTAL' || complaint.createdByType === 'CLIENT';
+    if (isClientSubmitted) {
+      toast.error('Client-submitted complaints cannot be deleted to comply with SEBI regulatory grievance norms.');
+      return;
+    }
+
+    triggerConfirm({
+      title: 'Delete Complaint',
+      message: `Are you sure you want to delete the complaint "${complaint.subject || complaint.id}"? All associated penalties, compliance audit records, and overdue alerts linked specifically to this complaint will also be permanently deleted.`,
+      variant: 'danger',
+      confirmLabel: 'Yes, Delete',
+      onConfirm: async () => {
+        try {
+          const res = await api.deleteComplaint(complaint.id || complaint._id);
+          if (res.success) {
+            toast.success(res.message || 'Complaint and all associated records deleted successfully.');
+            loadData();
+          } else {
+            toast.error(res.message || res.error || 'Failed to delete complaint.');
+          }
+        } catch (err: any) {
+          toast.error(err.message || 'Failed to delete complaint.');
+        }
+      }
+    });
+  };
+
   // Resolve Alert Close
   const handleCloseAlert = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -5355,10 +5384,11 @@ function AdminDashboardContent() {
     },
     {
       name: 'Action',
-      width: '130px',
+      width: '160px',
       right: true,
       cell: (row: any) => {
         const isResolvedOrClosed = row.status === 'CLOSED' || row.status === 'RESOLVED';
+        const isClientSubmitted = row.source === 'CLIENT_PORTAL' || row.createdByType === 'CLIENT';
         if (!isResolvedOrClosed) {
           return (
             <div className="flex items-center justify-end gap-2">
@@ -5377,20 +5407,40 @@ function AdminDashboardContent() {
               >
                 <Eye className="h-3 w-3 mr-0.5" /> Details
               </button>
+              {!isClientSubmitted && (
+                <button
+                  onClick={() => handleDeleteComplaint(row)}
+                  className="p-1 text-rose-500 hover:text-rose-700 dark:hover:text-rose-400 hover:bg-rose-500/10 rounded transition"
+                  title="Delete Complaint & Cascading Records"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           );
         }
         return (
-          <button
-            onClick={() => setViewingComplaint(row)}
-            className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-bold text-xs inline-flex items-center px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition"
-          >
-            <Eye className="h-3.5 w-3.5 mr-1" /> View Details
-          </button>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => setViewingComplaint(row)}
+              className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-bold text-xs inline-flex items-center px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition"
+            >
+              <Eye className="h-3.5 w-3.5 mr-1" /> View Details
+            </button>
+            {!isClientSubmitted && (
+              <button
+                onClick={() => handleDeleteComplaint(row)}
+                className="p-1.5 text-rose-500 hover:text-rose-700 dark:hover:text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 rounded-lg transition"
+                title="Delete Complaint & Cascading Records"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         );
       },
     }
-  ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks, setViewingComplaint]);
+  ], [setComplaintResolveId, setComplaintAtrProof, setComplaintAtrRemarks, setViewingComplaint, handleDeleteComplaint]);
 
   const clientColumns = useMemo(() => [
     {

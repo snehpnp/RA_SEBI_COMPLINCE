@@ -17,7 +17,7 @@ import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditSta
 import { createTicket, listTickets, getTicket, replyTicket, listAdminTickets, getAdminTicket, replyAdminTicket, closeAdminTicket } from '../controllers/ticketController';
 import { getSubscriptions, getPaymentHistory, updateProfile, getNotifications, markNotificationsAsRead } from '../controllers/clientPortalController';
 import { getStocks, createSignal, listSignals, closeSignal, uploadReport, addSignalMessage } from '../controllers/signalController';
-import { getComplaints, createComplaint, resolveComplaint } from '../controllers/complaintController';
+import { getComplaints, createComplaint, resolveComplaint, deleteComplaint } from '../controllers/complaintController';
 import { getRoles, createRole, updateRolePermissions, updateRole, deleteRole } from '../controllers/roleController';
 import { getActiveClientSummary, getActiveClientsByDate, getActiveClientsByMonthExport } from '../controllers/activeClientController';
 import { getCoupons, createCoupon, updateCoupon, toggleCouponStatus, toggleCouponVisibility, applyCoupon, getClientCoupons } from '../controllers/couponController';
@@ -1830,6 +1830,13 @@ router.put(
   enforceTenantIsolation,
   upload.single('proof'),
   resolveComplaint
+);
+router.delete(
+  '/compliance/complaints/:id',
+  authenticateJWT,
+  requirePermission('ACCESS_COMPLIANCE'),
+  enforceTenantIsolation,
+  deleteComplaint
 );
 
 // ----------------------------------------------------

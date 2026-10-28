@@ -209,7 +209,7 @@ export const getVaultPenalties = async (req: AuthenticatedRequest, res: Response
 
   try {
     const penaltyModel = dynamicDb?.Penalty || Penalty;
-    const penalties = await penaltyModel.find({ tenantId })
+    const penalties = await penaltyModel.find({ tenantId, status: { $ne: 'WAIVED' } })
       .populate({
         path: 'auditId',
         populate: { path: 'requirementId' }

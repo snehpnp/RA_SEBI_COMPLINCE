@@ -21,7 +21,7 @@ import cron from 'node-cron';
 import router from './routes/api';
 import { centralConnection, Tenant, Client, ComplianceAlert } from './config/db';
 import { initCronJobs } from './services/cronService';
-import { checkComplianceForTenant } from './controllers/complianceController';
+import { checkComplianceForTenant, purgePreOperationalComplianceNoise } from './controllers/complianceController';
 import { thirdPartyRoutes, getThirdPartyClients } from './third-party-api';
 import { initVideoKycSocket } from './services/videoKycSocket';
 import { initTelegramPoller } from './services/telegramPoller';
@@ -215,6 +215,7 @@ initVideoKycSocket(httpServer);
 // Start Server
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`RAGCP Express Server (with Video KYC WebSockets) is running on http://0.0.0.0:${PORT}`);
+  purgePreOperationalComplianceNoise().catch((err: any) => console.error('Error during initial pre-operational compliance purge:', err?.message));
   initCronJobs(); // Initialize penalty engine
   initTelegramPoller(); // Initialize Telegram auto-poller for 1-click client connects
   initDscBridgeServer(); // Automatically start Hardware DSC Bridge service on port 1620

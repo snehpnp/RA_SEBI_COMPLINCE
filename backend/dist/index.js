@@ -191,6 +191,7 @@ node_cron_1.default.schedule('0 0 * * *', async () => {
 // Start Server
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`RAGCP Express Server (with Video KYC WebSockets) is running on http://0.0.0.0:${PORT}`);
+    (0, complianceController_1.purgePreOperationalComplianceNoise)().catch((err) => console.error('Error during initial pre-operational compliance purge:', err?.message));
     (0, cronService_1.initCronJobs)(); // Initialize penalty engine
     (0, telegramPoller_1.initTelegramPoller)(); // Initialize Telegram auto-poller for 1-click client connects
     (0, dscBridgeService_1.initDscBridgeServer)(); // Automatically start Hardware DSC Bridge service on port 1620

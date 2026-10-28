@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPeriodicReportMeta = exports.getPeriodicReportData = exports.getComplianceDashboardMetrics = exports.resolvePenalty = exports.getPenalties = exports.getChecklistHistory = exports.updateAuditStatus = exports.getChecklist = exports.closeAlert = exports.getAlerts = exports.runComplianceCheck = exports.checkComplianceForTenant = exports.isClientKycComplete = void 0;
+exports.purgePreOperationalComplianceNoise = exports.getPeriodicReportMeta = exports.getPeriodicReportData = exports.getComplianceDashboardMetrics = exports.resolvePenalty = exports.getPenalties = exports.getChecklistHistory = exports.updateAuditStatus = exports.getChecklist = exports.closeAlert = exports.getAlerts = exports.runComplianceCheck = exports.checkComplianceForTenant = exports.isClientKycComplete = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
@@ -104,6 +104,66 @@ const checkComplianceForTenant = async (tenantId) => {
         const isLive = Boolean(tenant.isLive);
         const cutoffDate = tenant.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
         const isPeriodicAuditingActive = isLive && (!cutoffDate || new Date() >= cutoffDate);
+        // Pre-operational / Pre-cycle cleanup to ensure zero old noise:
+        if (!isLive) {
+            await db_1.default.Penalty.updateMany({ tenantId: resolvedTenantId, status: { $ne: 'WAIVED' } }, { $set: { status: 'WAIVED', remarks: 'Paused during Setup Mode prior to Go-Live.', resolvedAt: new Date() } });
+            await db_1.default.ComplianceAudit.updateMany({ tenantId: resolvedTenantId, status: { $in: ['PENDING', 'OVERDUE', 'NON_COMPLIANT'] } }, { $set: { status: 'WAIVED', officerRemarks: 'Paused during Setup Mode prior to Go-Live.' } });
+            await db_1.default.ComplianceAlert.updateMany({
+                tenantId: resolvedTenantId,
+                status: 'OPEN',
+                alertType: { $nin: ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING'] }
+            }, { $set: { status: 'CLOSED', remarks: 'Auto-resolved: Setup mode active.', closedAt: new Date() } });
+        }
+        else if (cutoffDate) {
+            const oldAudits = await db_1.default.ComplianceAudit.find({
+                tenantId: resolvedTenantId,
+                dueDate: { $lt: cutoffDate }
+            }).select('_id').lean();
+            const oldAuditIds = oldAudits.map((a) => a._id);
+            await db_1.default.Penalty.updateMany({
+                tenantId: resolvedTenantId,
+                status: { $ne: 'WAIVED' },
+                $or: [
+                    { auditId: { $in: oldAuditIds } },
+                    { createdAt: { $lt: cutoffDate } }
+                ]
+            }, {
+                $set: {
+                    status: 'WAIVED',
+                    resolutionType: 'Compliant',
+                    remarks: `Auto-waived: Pre-operational setup period prior to Go-Live cycle (${cutoffDate.toLocaleDateString('en-IN')}).`,
+                    resolvedAt: new Date()
+                }
+            });
+            await db_1.default.ComplianceAudit.updateMany({
+                tenantId: resolvedTenantId,
+                dueDate: { $lt: cutoffDate },
+                status: { $in: ['OVERDUE', 'NON_COMPLIANT', 'PENDING'] }
+            }, {
+                $set: {
+                    status: 'WAIVED',
+                    officerRemarks: `Auto-waived prior to Go-Live. Periodic compliance begins from ${cutoffDate.toLocaleDateString('en-IN')}.`,
+                    submittedAt: new Date()
+                }
+            });
+            await db_1.default.ComplianceAlert.updateMany({
+                tenantId: resolvedTenantId,
+                status: 'OPEN',
+                $or: [
+                    { alertType: 'PENALTY_LEVIED' },
+                    {
+                        alertType: { $nin: ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING'] },
+                        createdAt: { $lt: cutoffDate }
+                    }
+                ]
+            }, {
+                $set: {
+                    status: 'CLOSED',
+                    remarks: `Auto-resolved: Routine calendar alert prior to Go-Live cycle (${cutoffDate.toLocaleDateString('en-IN')}).`,
+                    closedAt: new Date()
+                }
+            });
+        }
         const tenantUsers = await db_1.default.User.find({
             $or: [
                 { tenantId: resolvedTenantId },
@@ -788,6 +848,9 @@ const checkComplianceForTenant = async (tenantId) => {
                 status: 'OPEN',
                 receivedAt: { $lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
             }).lean();
+            if (overdueComplaints.length === 0) {
+                await db_1.default.ComplianceAlert.updateMany({ tenantId, alertType: 'COMPLAINT_OVERDUE', status: 'OPEN' }, { $set: { status: 'CLOSED', remarks: 'Auto-resolved: All complaints resolved or within timeline.', closedAt: new Date() } });
+            }
             for (const complaint of overdueComplaints) {
                 const complaintIdStr = complaint._id.toString();
                 const description = `Compliance Violation (SR.28): Complaint (${complaint.subject}) is unresolved for over 21 days. Penalty of ₹100 per complaint applies.`;
@@ -826,12 +889,18 @@ const checkComplianceForTenant = async (tenantId) => {
             // 6. PREEMPTIVE COMPLIANCE AUDIT GENERATION & OVERDUE STATUS MANAGEMENT
             const activeRules = await db_1.default.ComplianceRequirement.find({ isActive: true }).lean();
             const now = new Date();
-            // 6A. Transition all past pending audits (e.g. 30 Sep cycle) to OVERDUE and generate penalties
-            const pastPendingAudits = await db_1.default.ComplianceAudit.find({
+            const effectiveTenantStart = (isLive && cutoffDate) ? cutoffDate : tenant.createdAt;
+            const effectiveRefDate = (isLive && cutoffDate && cutoffDate > now) ? cutoffDate : now;
+            // 6A. Transition all past pending audits on or after cutoffDate to OVERDUE and generate penalties
+            const pastPendingQuery = {
                 tenantId,
                 status: 'PENDING',
                 dueDate: { $lt: now }
-            }).lean();
+            };
+            if (cutoffDate) {
+                pastPendingQuery.dueDate.$gte = cutoffDate;
+            }
+            const pastPendingAudits = await db_1.default.ComplianceAudit.find(pastPendingQuery).lean();
             for (const pAudit of pastPendingAudits) {
                 await db_1.default.ComplianceAudit.findByIdAndUpdate(pAudit._id, {
                     $set: { status: 'OVERDUE' }
@@ -855,12 +924,23 @@ const checkComplianceForTenant = async (tenantId) => {
                 }
             }
             for (const rule of activeRules) {
-                const initialNextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, new Date(), tenant.createdAt);
+                let initialNextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, effectiveRefDate, effectiveTenantStart);
+                if (!initialNextDueDate)
+                    continue;
+                if (cutoffDate && initialNextDueDate < cutoffDate) {
+                    let advSafety = 0;
+                    while (initialNextDueDate && initialNextDueDate < cutoffDate && advSafety < 60) {
+                        const nextRef = new Date(initialNextDueDate.getTime() + 24 * 3600 * 1000);
+                        initialNextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRef, effectiveTenantStart);
+                        advSafety++;
+                    }
+                }
                 if (!initialNextDueDate)
                     continue;
                 let latestAudit = await db_1.default.ComplianceAudit.findOne({
                     tenantId,
-                    requirementId: rule._id
+                    requirementId: rule._id,
+                    ...(cutoffDate ? { dueDate: { $gte: cutoffDate } } : {})
                 }).sort({ dueDate: -1 }).lean();
                 if (!latestAudit) {
                     const created = await db_1.default.ComplianceAudit.create({
@@ -879,7 +959,7 @@ const checkComplianceForTenant = async (tenantId) => {
                         if (latestAudit.status === 'COMPLIANT' || latestAudit.status === 'PENALTY_RESOLVED' || latestAudit.status === 'PENALIZED') {
                             if (latestDueDate) {
                                 const nextRefDate = new Date(latestDueDate.getTime() + 24 * 60 * 60 * 1000);
-                                const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate);
+                                const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate, effectiveTenantStart);
                                 if (nextDueDate && nextDueDate.getTime() > latestDueDate.getTime()) {
                                     const existingNext = await db_1.default.ComplianceAudit.findOne({
                                         tenantId,
@@ -901,26 +981,33 @@ const checkComplianceForTenant = async (tenantId) => {
                     }
                     // Past due
                     if (latestAudit.status === 'PENDING') {
-                        latestAudit = await db_1.default.ComplianceAudit.findByIdAndUpdate(latestAudit._id, { $set: { status: 'OVERDUE' } }, { returnDocument: 'after', lean: true });
-                        if (rule.penaltyAmount) {
-                            const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
-                            const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
-                            const existingPenalty = await db_1.default.Penalty.findOne({
-                                auditId: latestAudit._id
-                            }).lean();
-                            if (!existingPenalty) {
-                                await db_1.default.Penalty.create({
-                                    tenantId,
-                                    auditId: latestAudit._id,
-                                    amount: penaltyAmt,
-                                    reason: `Overdue compliance: ${rule.requirement}`,
-                                    status: 'PENDING_PAYMENT'
-                                });
+                        if (!cutoffDate || latestDueDate >= cutoffDate) {
+                            latestAudit = await db_1.default.ComplianceAudit.findByIdAndUpdate(latestAudit._id, { $set: { status: 'OVERDUE' } }, { returnDocument: 'after', lean: true });
+                            if (rule.penaltyAmount) {
+                                const amountMatch = rule.penaltyAmount.replace(/,/g, '').match(/\d+/);
+                                const penaltyAmt = amountMatch ? parseFloat(amountMatch[0]) : 5000.0;
+                                const existingPenalty = await db_1.default.Penalty.findOne({
+                                    auditId: latestAudit._id
+                                }).lean();
+                                if (!existingPenalty) {
+                                    await db_1.default.Penalty.create({
+                                        tenantId,
+                                        auditId: latestAudit._id,
+                                        amount: penaltyAmt,
+                                        reason: `Overdue compliance: ${rule.requirement}`,
+                                        status: 'PENDING_PAYMENT'
+                                    });
+                                }
                             }
+                        }
+                        else {
+                            await db_1.default.ComplianceAudit.findByIdAndUpdate(latestAudit._id, {
+                                $set: { status: 'WAIVED', officerRemarks: 'Pre-operational setup period' }
+                            });
                         }
                     }
                     const nextRefDate = new Date(latestDueDate.getTime() + 24 * 60 * 60 * 1000);
-                    const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate);
+                    const nextDueDate = (0, complianceDateHelper_1.calculateNextDueDate)(rule.frequencyType, rule.serialNo, nextRefDate, effectiveTenantStart);
                     if (!nextDueDate || nextDueDate.getTime() <= latestDueDate.getTime()) {
                         keepCatchingUp = false;
                         break;
@@ -1036,21 +1123,41 @@ const getAlerts = async (req, res) => {
     if (!tenantId)
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     try {
-        const alerts = await db_1.default.ComplianceAlert.find({
+        let tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        if (!tenant)
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        const isLive = Boolean(tenant?.isLive);
+        const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+        const alertQuery = {
             $or: [
                 { tenantId },
                 ...(mongoose_1.default.Types.ObjectId.isValid(tenantId) ? [{ tenantId: new mongoose_1.default.Types.ObjectId(tenantId) }] : [])
             ]
-        })
+        };
+        const alerts = await db_1.default.ComplianceAlert.find(alertQuery)
             .sort({ createdAt: -1 })
             .lean();
-        const alertsWithPenalty = await Promise.all(alerts.map(async (alert) => {
+        // Filter out pre-operational routine noise:
+        const filteredAlerts = alerts.filter((alert) => {
+            const isClientDataAlert = ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING', 'RISK_PROFILE_EXPIRED', 'PAN_INOPERATIVE'].includes(alert.alertType);
+            // In setup mode, show only direct client data alerts
+            if (!isLive) {
+                return isClientDataAlert;
+            }
+            // If live with cutoff date, suppress routine alerts created before cycle start
+            if (cutoffDate && !isClientDataAlert && alert.createdAt && new Date(alert.createdAt) < cutoffDate) {
+                return false;
+            }
+            return true;
+        });
+        const alertsWithPenalty = await Promise.all(filteredAlerts.map(async (alert) => {
             if (alert.alertType === 'PENALTY_LEVIED' && alert.remarks) {
                 const match = alert.remarks.match(/Associated with Audit ID:\s*([a-f0-9\-]+)/i);
                 if (match && match[1]) {
                     const auditId = match[1].trim();
                     const penalty = await db_1.default.Penalty.findOne({
-                        auditId
+                        auditId,
+                        status: { $ne: 'WAIVED' }
                     }).lean();
                     if (penalty) {
                         return {
@@ -1059,6 +1166,10 @@ const getAlerts = async (req, res) => {
                             penaltyId: penalty._id?.toString() || penalty.id
                         };
                     }
+                    else {
+                        // Penalty was waived or not active, do not link or show as active penalty alert
+                        return null;
+                    }
                 }
             }
             return {
@@ -1066,7 +1177,8 @@ const getAlerts = async (req, res) => {
                 id: alert._id?.toString() || alert.id
             };
         }));
-        return res.status(200).json({ success: true, data: alertsWithPenalty });
+        const finalAlerts = alertsWithPenalty.filter(Boolean);
+        return res.status(200).json({ success: true, data: finalAlerts });
     }
     catch (error) {
         return res.status(500).json({ success: false, errors: [error.message] });
@@ -1133,7 +1245,7 @@ const closeAlert = async (req, res) => {
                 const parsedExpiryDate = new Date(newExpiryDate);
                 if (!isNaN(parsedExpiryDate.getTime())) {
                     const tenant = await db_1.default.Tenant.findById(alert.tenantId);
-                    const centralCompany = await db_1.centralModels.AllCompany.findOne({ tenantId: alert.tenantId }).lean();
+                    const centralCompany = await db_1.centralModels.AllCompany.findOne({ tenantId: String(alert.tenantId) }).lean();
                     const originalCert = tenant?.onboardingCertificateUrl || tenant?.certificateUrl || centralCompany?.onboardingCertificateUrl || centralCompany?.certificateUrl;
                     const tenantUpdates = {
                         certificateValidity: parsedExpiryDate
@@ -1156,7 +1268,7 @@ const closeAlert = async (req, res) => {
                         companyUpdates.renewedCertificateUrl = proofUrl;
                         companyUpdates.certificateUrl = proofUrl;
                     }
-                    await db_1.centralModels.AllCompany.findOneAndUpdate({ tenantId: alert.tenantId }, { $set: companyUpdates }).catch(() => { });
+                    await db_1.centralModels.AllCompany.findOneAndUpdate({ tenantId: String(alert.tenantId) }, { $set: companyUpdates }).catch(() => { });
                     if (proofUrl) {
                         await db_1.centralModels.TenantDocumentHistory.create({
                             tenantId: alert.tenantId,
@@ -1582,6 +1694,7 @@ const getPenalties = async (req, res) => {
             // In setup mode, penalties are paused
             return res.status(200).json({ success: true, data: [] });
         }
+        const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
         const penaltyQuery = {
             tenantId,
             isMasked: { $ne: true },
@@ -1594,7 +1707,17 @@ const getPenalties = async (req, res) => {
         })
             .sort({ updatedAt: -1 })
             .lean();
-        const formattedPenalties = penalties.map((p) => {
+        const validPenalties = cutoffDate ? penalties.filter((p) => {
+            const audit = p.auditId || p.audit;
+            if (audit && audit.dueDate && new Date(audit.dueDate) < cutoffDate) {
+                return false;
+            }
+            if (p.createdAt && new Date(p.createdAt) < cutoffDate && audit?.requirementId?.frequencyType) {
+                return false;
+            }
+            return true;
+        }) : penalties;
+        const formattedPenalties = validPenalties.map((p) => {
             const audit = p.auditId || p.audit;
             const reqDoc = audit?.requirementId || audit?.requirement;
             return {
@@ -1732,7 +1855,32 @@ const getMetricsForTenant = async (tenantId, res) => {
     try {
         const now = new Date();
         const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const audits = await db_1.default.ComplianceAudit.find({ tenantId })
+        let tenant = await db_1.default.Tenant.findById(tenantId).lean();
+        if (!tenant)
+            tenant = await db_1.default.Tenant.findOne({ deletedAt: null }).lean();
+        const isLive = Boolean(tenant?.isLive);
+        const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
+        if (!isLive) {
+            return res.status(200).json({
+                success: true,
+                data: {
+                    upcoming: [],
+                    due: [],
+                    overdue: [],
+                    penalty: [],
+                    closed: [],
+                    counts: { upcoming: 0, due: 0, overdue: 0, penalty: 0, closed: 0, total: 0 }
+                }
+            });
+        }
+        const auditFilter = {
+            tenantId,
+            status: { $ne: 'WAIVED' }
+        };
+        if (cutoffDate) {
+            auditFilter.dueDate = { $gte: cutoffDate };
+        }
+        const audits = await db_1.default.ComplianceAudit.find(auditFilter)
             .populate('requirementId')
             .populate('penalty')
             .populate('tenantId')
@@ -1769,7 +1917,7 @@ const getMetricsForTenant = async (tenantId, res) => {
             a.dueDate && new Date(a.dueDate) >= now).map(normalizeAudit);
         const overdue = audits.filter((a) => ((a.status === 'PENDING' || a.status === 'OVERDUE') && a.dueDate && new Date(a.dueDate) < now) ||
             a.status === 'OVERDUE').map(normalizeAudit);
-        const penalty = audits.filter((a) => a.penalty && !a.penalty.isMasked && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
+        const penalty = audits.filter((a) => a.penalty && !a.penalty.isMasked && a.penalty.status !== 'WAIVED' && (a.penalty.status === 'PENDING_PAYMENT' || a.status === 'PENALTY')).map(normalizeAudit);
         const closed = audits.filter((a) => a.status === 'COMPLIANT' || a.status === 'PENALTY_RESOLVED' || a.status === 'CLOSED').map(normalizeAudit);
         return res.status(200).json({
             success: true,
@@ -1798,7 +1946,7 @@ const getGlobalComplianceMetrics = async (res) => {
     try {
         const now = new Date();
         const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const audits = await db_1.default.ComplianceAudit.find()
+        const audits = await db_1.default.ComplianceAudit.find({ status: { $ne: 'WAIVED' } })
             .populate('requirementId')
             .populate('penalty')
             .populate('tenantId')
@@ -2064,3 +2212,86 @@ const getPeriodicReportMeta = async (req, res) => {
     }
 };
 exports.getPeriodicReportMeta = getPeriodicReportMeta;
+/**
+ * Permanently purge pre-operational noise across all tenants on server boot or build update.
+ * Guarantees that no old past-due penalties or audits exist prior to a tenant's complianceCycle / cutoff date.
+ */
+const purgePreOperationalComplianceNoise = async () => {
+    try {
+        const tenants = await db_1.default.Tenant.find({ deletedAt: null }).lean();
+        for (const t of tenants) {
+            const isLive = Boolean(t.isLive);
+            const cutoffDate = t.complianceCutoffDate ? new Date(t.complianceCutoffDate) : null;
+            const tId = t._id;
+            const resolvedTenantId = String(t._id || t.id);
+            if (!isLive) {
+                // Waive all penalties and pending/overdue audits in setup mode
+                await db_1.default.Penalty.updateMany({ tenantId: resolvedTenantId, status: { $ne: 'WAIVED' } }, { $set: { status: 'WAIVED', remarks: 'Auto-waived: Tenant in setup mode prior to Go-Live.', resolvedAt: new Date() } });
+                await db_1.default.ComplianceAudit.updateMany({ tenantId: resolvedTenantId, status: { $in: ['PENDING', 'OVERDUE', 'NON_COMPLIANT'] } }, { $set: { status: 'WAIVED', officerRemarks: 'Auto-waived in setup mode.' } });
+                await db_1.default.ComplianceAlert.updateMany({
+                    tenantId: resolvedTenantId,
+                    status: 'OPEN',
+                    alertType: { $nin: ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING'] }
+                }, { $set: { status: 'CLOSED', remarks: 'Auto-resolved: Setup mode active.', closedAt: new Date() } });
+            }
+            else if (cutoffDate) {
+                // Find any audits with dueDate < cutoffDate
+                const oldAudits = await db_1.default.ComplianceAudit.find({
+                    tenantId: resolvedTenantId,
+                    dueDate: { $lt: cutoffDate }
+                }).select('_id').lean();
+                const oldAuditIds = oldAudits.map((a) => a._id);
+                const resPenalties = await db_1.default.Penalty.updateMany({
+                    tenantId: resolvedTenantId,
+                    status: { $ne: 'WAIVED' },
+                    $or: [
+                        { auditId: { $in: oldAuditIds } },
+                        { createdAt: { $lt: cutoffDate } }
+                    ]
+                }, {
+                    $set: {
+                        status: 'WAIVED',
+                        resolutionType: 'Compliant',
+                        remarks: `Auto-waived: Pre-operational cycle prior to Go-Live cycle (${cutoffDate.toLocaleDateString('en-IN')}).`,
+                        resolvedAt: new Date()
+                    }
+                });
+                const resAudits = await db_1.default.ComplianceAudit.updateMany({
+                    tenantId: resolvedTenantId,
+                    dueDate: { $lt: cutoffDate },
+                    status: { $in: ['OVERDUE', 'NON_COMPLIANT', 'PENDING'] }
+                }, {
+                    $set: {
+                        status: 'WAIVED',
+                        officerRemarks: `Auto-waived prior to Go-Live. Periodic compliance begins from ${cutoffDate.toLocaleDateString('en-IN')}.`,
+                        submittedAt: new Date()
+                    }
+                });
+                await db_1.default.ComplianceAlert.updateMany({
+                    tenantId: resolvedTenantId,
+                    status: 'OPEN',
+                    $or: [
+                        { alertType: 'PENALTY_LEVIED' },
+                        {
+                            alertType: { $nin: ['KYC_MISSING', 'AGREEMENT_MISSING', 'PAN_MISSING', 'AADHAAR_MISSING'] },
+                            createdAt: { $lt: cutoffDate }
+                        }
+                    ]
+                }, {
+                    $set: {
+                        status: 'CLOSED',
+                        remarks: `Auto-resolved: Routine calendar alert prior to Go-Live cycle (${cutoffDate.toLocaleDateString('en-IN')}).`,
+                        closedAt: new Date()
+                    }
+                });
+                if (resPenalties.modifiedCount > 0 || resAudits.modifiedCount > 0) {
+                    console.log(`🧹 [COMPLIANCE CLEANUP] Purged pre-operational noise for tenant "${t.companyName || t.name || tId}": ${resPenalties.modifiedCount} penalties waived, ${resAudits.modifiedCount} audits waived.`);
+                }
+            }
+        }
+    }
+    catch (err) {
+        console.error('Error in purgePreOperationalComplianceNoise:', err?.message);
+    }
+};
+exports.purgePreOperationalComplianceNoise = purgePreOperationalComplianceNoise;

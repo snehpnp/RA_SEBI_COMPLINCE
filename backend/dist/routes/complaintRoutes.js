@@ -6,4 +6,5 @@ const router = (0, express_1.Router)();
 router.get('/', complaintController_1.getComplaints);
 router.post('/', complaintController_1.createComplaint);
 router.put('/:id/resolve', complaintController_1.resolveComplaint);
+router.delete('/:id', complaintController_1.deleteComplaint);
 exports.default = router;

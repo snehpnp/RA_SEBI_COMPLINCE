@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveComplaint = exports.createComplaint = exports.getComplaints = void 0;
+exports.deleteComplaint = exports.resolveComplaint = exports.createComplaint = exports.getComplaints = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importDefault(require("../config/db"));
 const complianceDateHelper_1 = require("../utils/complianceDateHelper");
 const emailService_1 = require("../services/emailService");
@@ -79,7 +80,9 @@ const createComplaint = async (req, res) => {
             description,
             receivedAt: receivedDate,
             deadlineAt: deadlineDate,
-            status: 'OPEN'
+            status: 'OPEN',
+            createdByType: req.user?.role === 'CLIENT' ? 'CLIENT' : 'ADMIN',
+            createdById: req.user?.id ? new mongoose_1.default.Types.ObjectId(req.user.id) : null
         });
         let actualUserId = userId;
         let adminEmail = null;
@@ -172,7 +175,7 @@ const resolveComplaint = async (req, res) => {
         // Check if all complaints for this tenant are resolved
         const openComplaintsCount = await db_1.default.Complaint.countDocuments({
             tenantId,
-            status: 'OPEN'
+            status: 'OPEN',
         });
         if (openComplaintsCount === 0) {
             const scoresRequirement = await db_1.default.ComplianceRequirement.findOne({
@@ -259,3 +262,100 @@ const resolveComplaint = async (req, res) => {
     }
 };
 exports.resolveComplaint = resolveComplaint;
+// Delete a complaint (Admin only, Client-submitted complaints cannot be deleted)
+const deleteComplaint = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const tenantId = req.headers['x-tenant-id'] || req.user?.tenantId;
+        const userId = req.headers['x-user-id'] || req.user?.id || 'system';
+        if (!tenantId) {
+            return res.status(400).json({ success: false, error: 'Tenant ID is required' });
+        }
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, error: 'Invalid complaint ID' });
+        }
+        const complaint = await db_1.default.Complaint.findOne({ _id: id, tenantId });
+        if (!complaint) {
+            return res.status(404).json({ success: false, error: 'Complaint not found.' });
+        }
+        // Client-submitted complaints CANNOT be deleted
+        if (complaint.source === 'CLIENT_PORTAL' || complaint.createdByType === 'CLIENT') {
+            return res.status(403).json({
+                success: false,
+                error: 'Client-submitted complaints cannot be deleted to comply with SEBI regulatory grievance norms.'
+            });
+        }
+        const complaintIdStr = complaint._id.toString();
+        // 1. Find linked ComplianceAudits (e.g. SR.28 timeline breach audits)
+        const linkedAudits = await db_1.default.ComplianceAudit.find({
+            tenantId,
+            officerRemarks: { $regex: complaintIdStr, $options: 'i' }
+        }).lean();
+        const linkedAuditIds = linkedAudits.map((a) => a._id);
+        // 2. Delete linked Penalties (matching either linked auditIds or reason containing complaintIdStr)
+        const penaltyFilter = {
+            tenantId,
+            $or: [
+                { reason: { $regex: complaintIdStr, $options: 'i' } }
+            ]
+        };
+        if (linkedAuditIds.length > 0) {
+            penaltyFilter.$or.push({ auditId: { $in: linkedAuditIds } });
+        }
+        await db_1.default.Penalty.deleteMany(penaltyFilter);
+        // 3. Delete linked ComplianceAudits
+        if (linkedAuditIds.length > 0) {
+            await db_1.default.ComplianceAudit.deleteMany({ _id: { $in: linkedAuditIds } });
+        }
+        // 4. Delete linked ComplianceAlerts (e.g. COMPLAINT_OVERDUE matching complaintIdStr)
+        await db_1.default.ComplianceAlert.deleteMany({
+            tenantId,
+            alertType: 'COMPLAINT_OVERDUE',
+            description: { $regex: complaintIdStr, $options: 'i' }
+        });
+        // 5. Delete linked ComplianceAuditHistory records referencing this complaint
+        await db_1.default.ComplianceAuditHistory.deleteMany({
+            tenantId,
+            $or: [
+                { officerRemarks: { $regex: complaintIdStr, $options: 'i' } },
+                ...(linkedAuditIds.length > 0 ? [{ auditId: { $in: linkedAuditIds } }] : [])
+            ]
+        });
+        // 6. Delete the Complaint itself
+        await db_1.default.Complaint.deleteOne({ _id: id });
+        // 7. Check if any overdue complaints remain. If none, close any remaining general COMPLAINT_OVERDUE alerts
+        const remainingOverdueCount = await db_1.default.Complaint.countDocuments({
+            tenantId,
+            status: 'OPEN',
+            receivedAt: { $lte: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) }
+        });
+        if (remainingOverdueCount === 0) {
+            await db_1.default.ComplianceAlert.updateMany({ tenantId, alertType: 'COMPLAINT_OVERDUE', status: 'OPEN' }, { $set: { status: 'CLOSED', remarks: 'Auto-resolved: All complaints resolved or within timeline.', closedAt: new Date() } });
+        }
+        // 8. Create AuditLog for deletion
+        let actualUserId = userId;
+        if (userId === 'system' || !userId) {
+            const adminUser = await db_1.default.User.findOne({ tenantId }).lean();
+            if (adminUser)
+                actualUserId = adminUser._id.toString();
+        }
+        if (actualUserId && actualUserId !== 'system') {
+            await db_1.default.AuditLog.create({
+                tenantId,
+                userId: actualUserId,
+                action: 'DELETE',
+                module: 'COMPLIANCE',
+                oldValue: JSON.stringify(complaint.toObject ? complaint.toObject() : complaint)
+            });
+        }
+        return res.json({
+            success: true,
+            message: 'Complaint and all associated penalties, alerts, and audit records deleted successfully.'
+        });
+    }
+    catch (error) {
+        console.error('Error deleting complaint:', error);
+        return res.status(500).json({ success: false, error: 'Failed to delete complaint' });
+    }
+};
+exports.deleteComplaint = deleteComplaint;

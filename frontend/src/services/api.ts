@@ -1183,6 +1183,12 @@ class ApiClient {
     });
   }
 
+  async deleteComplaint(id: string) {
+    return this.request(`/compliance/complaints/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
   async getCurrentUser() {
     return this.request('/auth/me');
   }

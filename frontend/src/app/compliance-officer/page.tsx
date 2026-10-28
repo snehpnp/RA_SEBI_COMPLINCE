@@ -2587,6 +2587,35 @@ function AdminDashboardContent() {
     finally { setComplaintResolveLoading(false); }
   };
 
+  const handleDeleteComplaint = (complaint: any) => {
+    if (!complaint) return;
+    const isClientSubmitted = complaint.source === 'CLIENT_PORTAL' || complaint.createdByType === 'CLIENT';
+    if (isClientSubmitted) {
+      toast.error('Client-submitted complaints cannot be deleted to comply with SEBI regulatory grievance norms.');
+      return;
+    }
+
+    triggerConfirm({
+      title: 'Delete Complaint',
+      message: `Are you sure you want to delete the complaint "${complaint.subject || complaint.id}"? All associated penalties, compliance audit records, and overdue alerts linked specifically to this complaint will also be permanently deleted.`,
+      variant: 'danger',
+      confirmLabel: 'Yes, Delete',
+      onConfirm: async () => {
+        try {
+          const res = await api.deleteComplaint(complaint.id || complaint._id);
+          if (res.success) {
+            toast.success(res.message || 'Complaint and all associated records deleted successfully.');
+            loadData();
+          } else {
+            toast.error(res.message || res.error || 'Failed to delete complaint.');
+          }
+        } catch (err: any) {
+          toast.error(err.message || 'Failed to delete complaint.');
+        }
+      }
+    });
+  };
+
   // Resolve Alert Close
   const handleCloseAlert = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -5731,21 +5760,32 @@ function AdminDashboardContent() {
                                               <span className={`px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap ${(c.status === 'CLOSED' || c.status === 'RESOLVED') ? (((c.resolvedAt || c.updatedAt) && c.deadlineAt && new Date(c.resolvedAt || c.updatedAt).getTime() > new Date(c.deadlineAt).getTime()) ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/20' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20') : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20'}`}>{c.status}</span>
                                             </td>
                                             <td className="px-6 py-4">
-                                              {c.status !== 'CLOSED' ? (
-                                                <button
-                                                  onClick={() => {
-                                                    setComplaintResolveId(c.id);
-                                                    setComplaintAtrProof(null);
-                                                    setComplaintAtrRemarks('');
-                                                  }}
-                                                  className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
-                                                >Resolve</button>
-                                              ) : (
-                                                c.atrProofUrl && (
-                                                  <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
-                                                )
-                                              )}
-                                            </td>
+                                               <div className="flex items-center gap-2">
+                                                 {c.status !== 'CLOSED' ? (
+                                                   <button
+                                                     onClick={() => {
+                                                       setComplaintResolveId(c.id);
+                                                       setComplaintAtrProof(null);
+                                                       setComplaintAtrRemarks('');
+                                                     }}
+                                                     className="text-primary-600 dark:text-primary-400 hover:text-slate-900 dark:text-white font-medium text-xs underline"
+                                                   >Resolve</button>
+                                                 ) : (
+                                                   c.atrProofUrl && (
+                                                     <button onClick={() => window.open(api.getBaseUrl() + '' + c.atrProofUrl, '_blank')} className="text-emerald-600 dark:text-emerald-400 hover:text-slate-900 dark:text-white font-medium text-xs inline-flex items-center"><Eye className="h-3 w-3 mr-1" /> View ATR</button>
+                                                   )
+                                                 )}
+                                                 {c.source !== 'CLIENT_PORTAL' && c.createdByType !== 'CLIENT' && (
+                                                   <button
+                                                     onClick={() => handleDeleteComplaint(c)}
+                                                     className="p-1 text-rose-500 hover:text-rose-700 dark:hover:text-rose-400 hover:bg-rose-500/10 rounded transition ml-auto"
+                                                     title="Delete Complaint & Cascading Records"
+                                                   >
+                                                     <Trash2 className="h-3.5 w-3.5" />
+                                                   </button>
+                                                 )}
+                                               </div>
+                                             </td>
                                           </tr>
                                         );
                                       })}
