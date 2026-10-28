@@ -1,0 +1,275 @@
+import { getClientFyFeeSummary } from '../utils/feeCapHelper';
+import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import { AuthenticatedRequest } from '../middlewares/auth';
+import { dynamicDb, centralModels, Payment, Subscription, Client, Plan, Tenant, ComplianceAlert } from '../config/db';
+import { generateInvoicePdf } from '../services/invoiceGenerator';
+import { sendTaxInvoiceEmail } from '../services/emailService';
+
+/**
+ * Reviews and approves or rejects an L2 payment / plan assignment request.
+ */
+export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const {
+    action, // 'APPROVED' | 'REJECTED'
+    planId,
+    amount,
+    validityDays,
+    discount,
+    paymentDate,
+    serviceStartDate,
+    paymentRefId,
+    transactionRef,
+    remarks,
+    rejectionReason
+  } = req.body;
+
+  const tenantId = req.user?.tenantId;
+  if (!tenantId) {
+    return res.status(400).json({ success: false, message: 'Tenant context missing.' });
+  }
+
+  if (!['APPROVED', 'REJECTED'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'Invalid action. Must be APPROVED or REJECTED.' });
+  }
+
+  try {
+    const paymentModel = dynamicDb?.Payment || Payment;
+    const payment: any = await paymentModel.findOne({ _id: id, tenantId });
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment record not found.' });
+    }
+
+    if (payment.approvalStatus !== 'L2_PENDING' && payment.status === 'SUCCESS') {
+      return res.status(400).json({ success: false, message: 'This payment has already been approved and activated.' });
+    }
+
+    const tenantModel = dynamicDb?.Tenant || Tenant;
+    const tenantObj: any = await tenantModel.findById(tenantId).lean();
+
+    const clientModel = dynamicDb?.Client || Client;
+    const client: any = await clientModel.findById(payment.clientId).lean();
+    if (!client) {
+      return res.status(404).json({ success: false, message: 'Client not found.' });
+    }
+
+    const userModel = dynamicDb?.User;
+    const reviewer: any = userModel ? await userModel.findById(req.user?.id).lean() : null;
+    const reviewerName = reviewer ? `${reviewer.firstName || ''} ${reviewer.lastName || ''}`.trim() || reviewer.name || reviewer.email : (req.user?.email || 'L2 Approver');
+
+    // ─────────────────────────────────────────────────────────────
+    // CASE A: REJECT ACTION
+    // ─────────────────────────────────────────────────────────────
+    if (action === 'REJECTED') {
+      payment.status = 'REJECTED';
+      payment.approvalStatus = 'REJECTED';
+      payment.l2Details = {
+        reviewedBy: req.user?.id,
+        reviewedByName: reviewerName,
+        action: 'REJECTED',
+        rejectionReason: rejectionReason || remarks || 'Rejected by L2 Authority',
+        reviewedAt: new Date()
+      };
+      await payment.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment request has been rejected by L2 Approver.',
+        data: payment
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // CASE B: APPROVE ACTION (Full modification capability)
+    // ─────────────────────────────────────────────────────────────
+    const selectedPlanId = planId || payment.planId;
+    const planModel = dynamicDb?.Plan || Plan;
+    const planDoc: any = selectedPlanId ? await planModel.findById(selectedPlanId).lean() : null;
+
+    const finalAmount = amount !== undefined && !isNaN(Number(amount))
+      ? Number(amount)
+      : Number(payment.amount || planDoc?.price || 0);
+
+    const defaultDays = planDoc?.durationMonths ? planDoc.durationMonths * 30 : 30;
+    const finalValidityDays = validityDays !== undefined && !isNaN(Number(validityDays))
+      ? Math.round(Number(validityDays))
+      : Math.round(Number(payment.planValidityDays || defaultDays));
+
+    const isCustomMode = (amount !== undefined && !isNaN(Number(amount)) && Number(amount) !== Number(planDoc?.price)) ||
+      (validityDays !== undefined && !isNaN(Number(validityDays)) && Math.round(Number(validityDays)) !== defaultDays) ||
+      payment.paymentMode === 'CUSTOM_PRO_RATA';
+
+    const finalDiscount = isCustomMode
+      ? 0
+      : (discount !== undefined && !isNaN(Number(discount))
+        ? Number(discount)
+        : Number(payment.discountApplied || payment.discount || 0));
+
+    const finalPaymentDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
+    const finalServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : finalPaymentDate);
+
+    // Strict Date Validation Rule: serviceStartDate >= paymentDate
+    const pDateOnly = new Date(finalPaymentDate.getFullYear(), finalPaymentDate.getMonth(), finalPaymentDate.getDate()).getTime();
+    const sDateOnly = new Date(finalServiceStartDate.getFullYear(), finalServiceStartDate.getMonth(), finalServiceStartDate.getDate()).getTime();
+
+    if (sDateOnly < pDateOnly) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation Error: Service start date cannot be earlier than the payment date.'
+      });
+    }
+
+    // Check if there is an existing active subscription for the same category or plan (sequential queueing)
+    const subscriptionModel = dynamicDb?.Subscription || Subscription;
+    let matchingPlanIds = [selectedPlanId];
+    if (planDoc?.categoryId) {
+      const categoryPlans = await planModel.find({ categoryId: planDoc.categoryId }).select('_id').lean();
+      if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+    }
+    const existingSub: any = await subscriptionModel.findOne({
+      $or: [{ clientId: client._id }, { clientId: client.userId }],
+      planId: { $in: matchingPlanIds },
+      status: 'ACTIVE',
+      endDate: { $gt: finalPaymentDate }
+    }).sort({ endDate: -1 }).lean();
+
+    if (existingSub) {
+      const expDate = new Date(existingSub.endDate);
+      const minAllowedStartDate = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate() + 1);
+      const minDateOnly = minAllowedStartDate.getTime();
+      if (sDateOnly < minDateOnly) {
+        return res.status(400).json({
+          success: false,
+          message: `Validation Error: Client already has an active subscription for this plan expiring on ${expDate.toLocaleDateString('en-IN')}. The new service start date must be on or after ${minAllowedStartDate.toLocaleDateString('en-IN')}.`
+        });
+      }
+    }
+
+    // Calculate subscription end date
+    const endDate = new Date(finalServiceStartDate.getTime() + finalValidityDays * 24 * 60 * 60 * 1000);
+
+    const tenantGstStr = (tenantObj?.gst || tenantObj?.gstNumber || tenantObj?.gstin || '').trim();
+    const isGstActive = tenantObj?.gstEnabled !== false && tenantGstStr.length >= 15;
+    const amountTotal = finalAmount;
+    const amountBase = isGstActive ? parseFloat((amountTotal / 1.18).toFixed(2)) : amountTotal;
+    const amountGst = isGstActive ? parseFloat((amountTotal - amountBase).toFixed(2)) : 0;
+
+    // SEBI Annual Fee Cap Validation
+    if (amountBase > 0) {
+      const feeSummary = await getClientFyFeeSummary(client._id || client.id, tenantId, dynamicDb, payment._id || id);
+      if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + amountBase > feeSummary.maxBaseFeeCap)) {
+        return res.status(400).json({
+          success: false,
+          code: 'SEBI_FEE_CAP_EXCEEDED',
+          message: `SEBI Annual Fee Limit Exceeded: Approving this payment of ₹${finalAmount} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Total already paid: ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')}, Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`
+        });
+      }
+    }
+
+    // 1. Create or Activate Subscription
+    const subscription = await subscriptionModel.create({
+      clientId: client._id || client.id,
+      planId: planDoc ? (planDoc._id || planDoc.id) : selectedPlanId,
+      startDate: finalServiceStartDate,
+      endDate,
+      status: 'ACTIVE',
+      amountBase: parseFloat(amountBase.toFixed(2)),
+      amountGst: parseFloat(amountGst.toFixed(2)),
+      amountTotal: parseFloat(amountTotal.toFixed(2)),
+      isGstInclusive: isGstActive && tenantObj?.gstCalculationType === 'INCLUSIVE'
+    });
+    payment.subscriptionId = subscription._id;
+
+    // 2. Invoice Dispatch Policy Check
+    const activePolicy = tenantObj?.invoiceDispatchPolicy || 'AFTER_KYC_AGREEMENT';
+    const isAgreementSigned = Boolean(client.agreementSigned);
+    const isKycDone = Boolean(client.kraVerified === true || client.kycStatus === 'VERIFIED' || client.status === 'VERIFIED');
+
+    let initialInvoiceStatus: 'GENERATED' | 'PENDING_AGREEMENT' = 'GENERATED';
+    if (activePolicy === 'AFTER_KYC_AGREEMENT') {
+      initialInvoiceStatus = isAgreementSigned && isKycDone ? 'GENERATED' : 'PENDING_AGREEMENT';
+    }
+
+    // 3. Update Payment record to SUCCESS & APPROVED
+    payment.status = 'SUCCESS';
+    payment.approvalStatus = 'APPROVED';
+    payment.planId = planDoc ? (planDoc._id || planDoc.id) : selectedPlanId;
+    if (paymentRefId || transactionRef) { payment.transactionRef = paymentRefId || transactionRef; }
+    payment.amount = amountTotal;
+    payment.baseAmount = amountBase;
+    payment.gstAmount = amountGst;
+    payment.gstRate = isGstActive ? 18 : 0;
+    payment.gstEnabled = isGstActive;
+    payment.gstCalculationType = tenantObj?.gstCalculationType || 'EXCLUSIVE';
+    payment.planValidityDays = finalValidityDays;
+    payment.discountApplied = finalDiscount;
+    if (isCustomMode) {
+      payment.couponId = null;
+      payment.couponCode = null;
+    }
+    payment.paymentDate = finalPaymentDate;
+    payment.serviceStartDate = finalServiceStartDate;
+    payment.invoicePolicy = activePolicy as any;
+    payment.invoiceStatus = initialInvoiceStatus as any;
+    payment.remarks = remarks || payment.remarks || 'Approved by L2 Authority';
+
+    payment.l2Details = {
+      reviewedBy: req.user?.id,
+      reviewedByName: reviewerName,
+      action: 'APPROVED',
+      finalPlanId: planDoc ? (planDoc._id || planDoc.id) : selectedPlanId,
+      finalPlanName: planDoc?.name || payment.plan?.name || 'Approved Plan',
+      finalAmount: amountTotal,
+      finalBaseAmount: amountBase,
+      finalGstAmount: amountGst,
+      finalValidityDays,
+      finalDiscount,
+      finalPaymentDate,
+      finalServiceStartDate,
+      finalTransactionRef: payment.transactionRef,
+      remarks: remarks || 'Approved by L2 Authority',
+      reviewedAt: new Date()
+    };
+
+    await payment.save();
+
+    // 4. Update Client status if needed
+    const newClientStatus = (isKycDone && isAgreementSigned) ? 'ACTIVE' : (isKycDone ? 'AGREEMENT_PENDING' : 'KYC_PENDING');
+    await clientModel.findByIdAndUpdate(client._id || client.id, { $set: { status: newClientStatus } });
+
+    // 5. Generate and send Invoice if policy conditions met (asynchronously in background)
+    if (initialInvoiceStatus === 'GENERATED' && client.email) {
+      setImmediate(() => {
+        generateInvoicePdf(String(payment._id || payment.id))
+          .then((pdfBuffer: any) => {
+            return sendTaxInvoiceEmail({
+              tenantId,
+              toEmail: client.email,
+              clientName: client.name || 'Client',
+              companyName: tenantObj?.companyName,
+              planName: planDoc?.name || 'Research Analyst Service',
+              invoiceNumber: `INV/${new Date().getFullYear()}/${String(payment.transactionRef).slice(-6).toUpperCase()}`,
+              amount: finalAmount,
+              pdfBuffer
+            });
+          })
+          .catch((pdfErr: any) => {
+            console.warn('L2 Invoice PDF dispatch warning:', pdfErr?.message || pdfErr);
+          });
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Payment successfully approved by L2 and plan activated starting ${finalServiceStartDate.toLocaleDateString('en-IN')}.`,
+      invoiceDispatched: initialInvoiceStatus === 'GENERATED',
+      data: {
+        payment,
+        subscription
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error?.message || 'Failed to process L2 action.' });
+  }
+};
