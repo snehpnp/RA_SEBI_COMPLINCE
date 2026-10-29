@@ -798,6 +798,18 @@ function AdminDashboardContent() {
     if (!selectedPlan) return;
 
     const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+    const planMaxAmount = isExclusiveGst ? parseFloat((selectedPlan.price * 1.18).toFixed(2)) : selectedPlan.price;
+    const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
+
+    if (assignCustomAmount.trim() && Number(assignCustomAmount) > planMaxAmount) {
+      toast.error(`Custom Amount cannot exceed plan total price (Max ₹${planMaxAmount.toLocaleString('en-IN')}).`);
+      return;
+    }
+    if (assignCustomDays.trim() && Math.round(Number(assignCustomDays)) > planTotalDays) {
+      toast.error(`Custom Days cannot exceed plan duration (Max ${planTotalDays} days).`);
+      return;
+    }
+
     const isCustomActive = Boolean((assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount))) || (assignCustomDays && assignCustomDays.trim() && !isNaN(Number(assignCustomDays))));
     const hasCustomAmount = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
     
@@ -6789,9 +6801,14 @@ function AdminDashboardContent() {
                                     type="number"
                                     step="any"
                                     min="0"
+                                    max={(() => {
+                                      const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                      if (!sp) return undefined;
+                                      return (gstEnabled && gstCalculationType === 'EXCLUSIVE') ? parseFloat((sp.price * 1.18).toFixed(2)) : sp.price;
+                                    })()}
                                     value={assignCustomAmount}
                                     onChange={e => {
-                                      const val = e.target.value;
+                                      let val = e.target.value;
                                       if (val.trim() && assignCouponCode) {
                                         setAssignCouponCode('');
                                       }
@@ -6800,39 +6817,68 @@ function AdminDashboardContent() {
                                         setAssignCustomDays('');
                                         return;
                                       }
-                                      setAssignCustomAmount(val);
-                                      const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
+                                      const selectedPlan = adminPlans.find((p: any) => p.id === assignPlanId);
                                       if (selectedPlan) {
                                         const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
                                         const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planMaxAmount = isExclusive ? parseFloat((selectedPlan.price * 1.18).toFixed(2)) : selectedPlan.price;
                                         const planBasePrice = (gstEnabled && !isExclusive)
                                           ? (selectedPlan.price / 1.18)
                                           : selectedPlan.price;
                                         
                                         const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
-                                        const numericVal = parseFloat(val);
+                                        let numericVal = parseFloat(val);
                                         if (!isNaN(numericVal) && numericVal > 0 && dailyBaseRate > 0) {
+                                          if (numericVal > planMaxAmount) {
+                                            numericVal = planMaxAmount;
+                                            val = numericVal.toString();
+                                          }
+                                          setAssignCustomAmount(val);
                                           const enteredBase = gstEnabled ? (numericVal / 1.18) : numericVal;
-                                          const calcDays = Math.max(1, Math.round(enteredBase / dailyBaseRate));
+                                          const rawDays = Math.round(enteredBase / dailyBaseRate);
+                                          const calcDays = Math.max(1, Math.min(planTotalDays, rawDays));
                                           setAssignCustomDays(calcDays.toString());
                                         } else if (!val) {
+                                          setAssignCustomAmount('');
                                           setAssignCustomDays('');
+                                        } else {
+                                          setAssignCustomAmount(val);
                                         }
+                                      } else {
+                                        setAssignCustomAmount(val);
                                       }
                                     }}
                                     placeholder="e.g. 5900"
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
+                                  {(() => {
+                                    const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                    if (!sp || !assignCustomAmount.trim() || isNaN(Number(assignCustomAmount))) return null;
+                                    const pMax = (gstEnabled && gstCalculationType === 'EXCLUSIVE') ? parseFloat((sp.price * 1.18).toFixed(2)) : sp.price;
+                                    if (Number(assignCustomAmount) > pMax) {
+                                      return (
+                                        <p className="text-rose-500 font-semibold text-[11px] mt-1 flex items-center gap-1">
+                                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                          Amount cannot exceed plan total (Max ₹{pMax.toLocaleString('en-IN')})
+                                        </p>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
                                 <div>
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Custom Days</label>
                                   <input
                                     type="number"
                                     min="1"
+                                    max={(() => {
+                                      const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                      return sp ? ((sp.durationMonths || 1) * 30) : undefined;
+                                    })()}
                                     step="1"
                                     value={assignCustomDays}
                                     onChange={e => {
-                                      const val = e.target.value;
+                                      let val = e.target.value;
                                       if (val.trim() && assignCouponCode) {
                                         setAssignCouponCode('');
                                       }
@@ -6841,27 +6887,56 @@ function AdminDashboardContent() {
                                         setAssignCustomAmount('');
                                         return;
                                       }
-                                      const numDays = Math.round(Number(val));
-                                      setAssignCustomDays(val);
-                                      const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
-                                      if (selectedPlan && !isNaN(numDays) && numDays > 0) {
+                                      const selectedPlan = adminPlans.find((p: any) => p.id === assignPlanId);
+                                      if (selectedPlan) {
                                         const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
                                         const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planMaxAmount = isExclusive ? parseFloat((selectedPlan.price * 1.18).toFixed(2)) : selectedPlan.price;
                                         const planBasePrice = (gstEnabled && !isExclusive)
                                           ? (selectedPlan.price / 1.18)
                                           : selectedPlan.price;
                                         
-                                        const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
-                                        if (dailyBaseRate > 0) {
-                                          const daysBase = numDays * dailyBaseRate;
-                                          const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
-                                          setAssignCustomAmount(Math.round(totalGross).toString());
+                                        let numDays = Math.round(Number(val));
+                                        if (!isNaN(numDays) && numDays > 0) {
+                                          if (numDays > planTotalDays) {
+                                            numDays = planTotalDays;
+                                            val = numDays.toString();
+                                          }
+                                          setAssignCustomDays(val);
+                                          const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
+                                          if (dailyBaseRate > 0) {
+                                            const daysBase = numDays * dailyBaseRate;
+                                            const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
+                                            const finalAmt = Math.min(planMaxAmount, Math.round(totalGross));
+                                            setAssignCustomAmount(finalAmt.toString());
+                                          }
+                                        } else if (!val) {
+                                          setAssignCustomDays('');
+                                          setAssignCustomAmount('');
+                                        } else {
+                                          setAssignCustomDays(val);
                                         }
+                                      } else {
+                                        setAssignCustomDays(val);
                                       }
                                     }}
                                     placeholder="e.g. 15"
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
+                                  {(() => {
+                                    const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                    if (!sp || !assignCustomDays.trim() || isNaN(Number(assignCustomDays))) return null;
+                                    const pDays = (sp.durationMonths || 1) * 30;
+                                    if (Math.round(Number(assignCustomDays)) > pDays) {
+                                      return (
+                                        <p className="text-rose-500 font-semibold text-[11px] mt-1 flex items-center gap-1">
+                                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                          Days cannot exceed plan duration (Max {pDays} days)
+                                        </p>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
                               </div>
 
@@ -6971,17 +7046,37 @@ function AdminDashboardContent() {
                                 >
                                   Cancel
                                 </button>
-                                <button
-                                  type="submit"
-                                  disabled={assignPlanLoading || !assignPlanId}
-                                  className="px-5 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-900 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 dark:text-white rounded-xl text-xs font-bold transition flex items-center gap-2"
-                                >
-                                  {assignPlanLoading ? (
-                                    <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Assigning...</>
-                                  ) : (
-                                    <><CreditCard className="h-3.5 w-3.5" /> Assign Plan Now</>
-                                  )}
-                                </button>
+                                {(() => {
+                                  const selPlan = adminPlans.find((p: any) => p.id === assignPlanId);
+                                  const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                  const planMaxAmount = selPlan ? (isExclusiveGst ? parseFloat((selPlan.price * 1.18).toFixed(2)) : selPlan.price) : 0;
+                                  const planTotalDays = selPlan ? ((selPlan.durationMonths || 1) * 30) : 0;
+                                  const isCustomAmtExceeded = Boolean(selPlan && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)) && Number(assignCustomAmount) > planMaxAmount);
+                                  const isCustomDaysExceeded = Boolean(selPlan && assignCustomDays.trim() && !isNaN(Number(assignCustomDays)) && Math.round(Number(assignCustomDays)) > planTotalDays);
+                                  const isBlockSubmit = Boolean(isCustomAmtExceeded || isCustomDaysExceeded);
+
+                                  return (
+                                    <button
+                                      type="submit"
+                                      disabled={assignPlanLoading || !assignPlanId || isBlockSubmit}
+                                      className={`px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                                        isBlockSubmit
+                                          ? 'bg-rose-800 text-rose-200 cursor-not-allowed opacity-60'
+                                          : 'bg-violet-600 hover:bg-violet-500 disabled:bg-violet-900 disabled:opacity-50 disabled:cursor-not-allowed text-white'
+                                      }`}
+                                    >
+                                      {assignPlanLoading ? (
+                                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Assigning...</>
+                                      ) : isCustomAmtExceeded ? (
+                                        <>⚠️ Custom Amount Exceeds Plan Price (Max ₹{planMaxAmount.toLocaleString('en-IN')})</>
+                                      ) : isCustomDaysExceeded ? (
+                                        <>⚠️ Custom Days Exceeds Plan Duration (Max {planTotalDays} Days)</>
+                                      ) : (
+                                        <><CreditCard className="h-3.5 w-3.5" /> Assign Plan Now</>
+                                      )}
+                                    </button>
+                                  );
+                                })()}
                               </div>
                             </form>
                           </div>

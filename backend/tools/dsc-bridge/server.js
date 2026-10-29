@@ -5,7 +5,7 @@ const { exec } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || process.env.DSC_BRIDGE_PORT || 1620;
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST ;
 
 // Support Chrome Private Network Access (PNA) from public HTTPS sites to local DSC bridge
 app.use((req, res, next) => {
