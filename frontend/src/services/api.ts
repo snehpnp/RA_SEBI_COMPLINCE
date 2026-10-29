@@ -1346,48 +1346,41 @@ class ApiClient {
   }
 
   async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 3500) {
-    const isLive = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-    // Candidate URLs: priority is the built-in 24/7 live server bridge, then local USB bridge
     const candidateUrls: string[] = [];
     if (customBridgeUrl) {
       candidateUrls.push(customBridgeUrl);
     } else {
+      // 1. Default configured / backend integrated bridge
       const defaultUrl = getDscBridgeUrl();
       if (defaultUrl && !candidateUrls.includes(defaultUrl)) {
         candidateUrls.push(defaultUrl);
       }
-<<<<<<< HEAD
 
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
-      if (saved && saved.trim() && !candidateUrls.includes(saved.trim())) {
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
-      if (saved && saved.trim() && !saved.includes('127.0.0.1:1620') && !candidateUrls.includes(saved.trim())) {
-        candidateUrls.push(saved.trim());
-      }
-      // Also fallback to local hardware bridge (127.0.0.1:1620) where physical USB token is inserted
+      // 2. Local USB bridge on researcher's PC
       if (!candidateUrls.includes('http://127.0.0.1:1620')) {
         candidateUrls.push('http://127.0.0.1:1620');
       }
       if (!candidateUrls.includes('http://localhost:1620')) {
         candidateUrls.push('http://localhost:1620');
       }
->>>>>>> f2da2f2b7bff83be6ad091a50dbc225692ff058c
-    }
-    
 
+      // 3. Saved custom bridge URL if any
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
+      if (saved && saved.trim() && !candidateUrls.includes(saved.trim())) {
+        candidateUrls.push(saved.trim());
+      }
+    }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
     const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null;
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (tenantId) headers['x-tenant-id'] = tenantId;
 
-    let lastOkData: any = null;
-    let lastError: any = null;
-
-    for (const bridgeUrl of candidateUrls) {
+    // Probe candidate bridges in parallel for instant response
+    const probePromises = candidateUrls.map(async (bridgeUrl) => {
       const controller = new AbortController();
-      const perUrlTimeout = candidateUrls.length > 1 ? Math.min(timeoutMs, 1800) : timeoutMs;
-      const timeoutId = setTimeout(() => controller.abort(), perUrlTimeout);
-
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch(`${bridgeUrl}/token-status`, {
           method: 'GET',
@@ -1397,30 +1390,34 @@ class ApiClient {
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
-          // If this bridge actually detected a physical hardware token, return it immediately!
-          if (data && data.detected && (data.detectedSignerName || (Array.isArray(data.certificates) && data.certificates.length > 0))) {
+          if (data) {
             data.bridgeUrlUsed = bridgeUrl;
             return data;
           }
-          // Otherwise store as fallback
-          if (data && (data.success || data.detected)) {
-            data.bridgeUrlUsed = bridgeUrl;
-            if (!lastOkData) {
-              lastOkData = data;
-            }
-          }
         }
-      } catch (err: any) {
+      } catch (e) {
         clearTimeout(timeoutId);
-        lastError = err;
       }
+      return null;
+    });
+
+    const results = await Promise.all(probePromises);
+    const validResults = results.filter(Boolean);
+
+    // 1. Highest priority: Any bridge that actively detected a physical USB hardware token
+    const detectedBridge = validResults.find(
+      (d) => d && d.detected && (d.detectedSignerName || (Array.isArray(d.certificates) && d.certificates.length > 0))
+    );
+    if (detectedBridge) {
+      return detectedBridge;
     }
 
-    if (lastOkData) {
-      return lastOkData;
+    // 2. Second priority: Any bridge that responded online (even if token is not inserted yet)
+    if (validResults.length > 0) {
+      return validResults[0];
     }
 
-    throw lastError || new Error('Could not connect to any DSC hardware bridge');
+    throw new Error('Could not connect to any DSC hardware bridge');
   }
 
   async signPdfWithDscBridge(payload: {

@@ -99,10 +99,17 @@ app.post('/sign-pdf', async (req, res) => {
         .trim();
     };
 
+    const detected = await getDetectedCertNames();
     let resolvedSigner = signerName && String(signerName).trim();
+    if (!resolvedSigner && detected && detected.length > 0) {
+      resolvedSigner = detected[0];
+    }
+
     if (!resolvedSigner) {
-      const detected = await getDetectedCertNames();
-      resolvedSigner = detected[0] || 'SEBI Research Analyst';
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot sign: No valid Hardware DSC Token detected in Windows Keystore. Please insert your USB Token into your computer.'
+      });
     }
 
     const cleanSigner = sanitizeForWinAnsi(resolvedSigner);

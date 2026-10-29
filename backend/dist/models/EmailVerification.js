@@ -46,6 +46,10 @@ exports.EmailVerificationSchema = new mongoose_1.Schema({
     expiresAt: { type: Date, required: true },
     createdAt: { type: Date, default: Date.now }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'EmailVerification' });
+// Automatic TTL Purge of Expired Verification Records & Fast Lookup Indexes
+exports.EmailVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+exports.EmailVerificationSchema.index({ mobile: 1, createdAt: -1 });
+exports.EmailVerificationSchema.index({ email: 1, createdAt: -1 });
 exports.EmailVerification = mongoose_1.default.models.EmailVerification ||
     mongoose_1.default.model('EmailVerification', exports.EmailVerificationSchema, 'EmailVerification');
 exports.default = exports.EmailVerification;

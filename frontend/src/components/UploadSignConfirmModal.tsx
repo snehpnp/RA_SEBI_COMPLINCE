@@ -321,7 +321,8 @@ export default function UploadSignConfirmModal({
       setDscPinError('');
       const certList: string[] = Array.isArray(data.certificates) ? data.certificates : [];
       setDetectedCertificates(certList);
-      const autoName = data.detectedSignerName || certList[0] || '';
+      const isActuallyDetected = !!(data && data.detected && (data.detectedSignerName || (certList && certList.length > 0)));
+      const autoName = isActuallyDetected ? (data.detectedSignerName || certList[0] || '') : '';
       setDscSignerName(autoName);
       setShowDscModal(true);
       if (autoName) {

@@ -925,92 +925,21 @@ export const dscBridgeTokenStatus = async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Resolve authorized DSC signer names from database (Cloud/Live server or Windows fallback)
-    const resolvedCertificates: string[] = [];
-    let loggedInName = '';
-
-    if (user?.id || user?._id) {
-      const userId = user.id || user._id;
-      const staff: any = await dynamicDb.Staff.findOne({ userId }).lean();
-      const u: any = await dynamicDb.User.findById(userId).lean();
-
-      if (staff?.name) {
-        loggedInName = staff.name.trim();
-        resolvedCertificates.push(loggedInName);
-      }
-      const userFullName = `${u?.firstName || ''} ${u?.lastName || ''}`.trim();
-      if (userFullName && !resolvedCertificates.includes(userFullName)) {
-        if (!loggedInName) loggedInName = userFullName;
-        resolvedCertificates.push(userFullName);
-      }
-      if (u?.username && !resolvedCertificates.includes(u.username)) {
-        resolvedCertificates.push(u.username);
-      }
-      if (!tenantId && u?.tenantId) {
-        tenantId = u.tenantId;
-      }
-    }
-
-    if (tenantId) {
-      const tenant: any = await dynamicDb.Tenant.findById(tenantId).lean();
-      if (tenant) {
-        if (tenant.dscSignerName && !resolvedCertificates.includes(tenant.dscSignerName.trim())) {
-          resolvedCertificates.push(tenant.dscSignerName.trim());
-        }
-        if (tenant.ownerName && !resolvedCertificates.includes(tenant.ownerName.trim())) {
-          resolvedCertificates.push(tenant.ownerName.trim());
-        }
-        if (tenant.complianceName && !resolvedCertificates.includes(tenant.complianceName.trim())) {
-          resolvedCertificates.push(tenant.complianceName.trim());
-        }
-        if (tenant.companyName && !resolvedCertificates.includes(tenant.companyName.trim())) {
-          resolvedCertificates.push(tenant.companyName.trim());
-        }
-      }
-
-      // Also include all researchers authorized with DSC scope in this tenant
-      try {
-        const staffResearchers: any[] = await dynamicDb.Staff.find({
-          status: 'ACTIVE',
-          dscSigningScope: { $in: ['SELF', 'ALL'] }
-        }).lean();
-        for (const sr of staffResearchers) {
-          if (sr.name && !resolvedCertificates.includes(sr.name.trim())) {
-            resolvedCertificates.push(sr.name.trim());
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (resolvedCertificates.length === 0) {
-      try {
-        const defaultTenant: any = await dynamicDb.Tenant.findOne({ deletedAt: null, status: 'ACTIVE' }).lean();
-        if (defaultTenant) {
-          if (defaultTenant.dscSignerName) resolvedCertificates.push(defaultTenant.dscSignerName.trim());
-          if (defaultTenant.ownerName) resolvedCertificates.push(defaultTenant.ownerName.trim());
-          if (defaultTenant.name) resolvedCertificates.push(defaultTenant.name.trim());
-        }
-      } catch (e) {}
-    }
-
-    const detectedSignerName = loggedInName || resolvedCertificates[0] || '';
-
+    // 2. Strict Hardware Enforcement: If no physical certificate is present, return detected: false
     return res.json({
       success: true,
-      detected: !!detectedSignerName,
-      certificates: resolvedCertificates.length > 0 ? resolvedCertificates : (detectedSignerName ? [detectedSignerName] : []),
-      detectedSignerName,
+      detected: false,
+      certificates: [],
+      detectedSignerName: null,
       smartCardServiceActive: true,
-      details: detectedSignerName
-        ? `Hardware DSC Token verified for ${detectedSignerName}.`
-        : 'No USB Hardware DSC Token detected. Please insert your USB token.'
+      details: 'No physical Hardware DSC Token detected in Windows Keystore. Please insert your USB Token into your computer.'
     });
   } catch (err: any) {
     return res.json({
       success: false,
       detected: false,
       certificates: [],
-      detectedSignerName: '',
+      detectedSignerName: null,
       smartCardServiceActive: false,
       details: err?.message || 'Error checking DSC token status'
     });
@@ -1054,18 +983,31 @@ export const dscBridgeSignPdf = async (req: Request, res: Response) => {
       } catch (e) {}
     }
 
+    const winCerts = await getDetectedCertNames();
     let resolvedSigner = signerName && String(signerName).trim();
-    if (!resolvedSigner && (user?.id || user?._id)) {
-      const staff: any = await dynamicDb.Staff.findOne({ userId: user.id || user._id }).lean();
-      const u: any = await dynamicDb.User.findById(user.id || user._id).lean();
-      resolvedSigner = staff?.name || `${u?.firstName || ''} ${u?.lastName || ''}`.trim() || u?.username;
+    if (!resolvedSigner && winCerts && winCerts.length > 0) {
+      resolvedSigner = winCerts[0];
     }
-    if (!resolvedSigner && (user?.tenantId || req.headers['x-tenant-id'])) {
-      const tenant: any = await dynamicDb.Tenant.findById(user?.tenantId || req.headers['x-tenant-id']).lean();
-      resolvedSigner = tenant?.dscSignerName || tenant?.ownerName || tenant?.complianceName || tenant?.name;
-    }
+
     if (!resolvedSigner) {
-      resolvedSigner = 'SEBI Research Analyst';
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot sign: No valid Hardware DSC Token detected. Please insert your physical USB Token into your computer.'
+      });
+    }
+
+    // Strict Domain & Tenant Authorization Verification:
+    let tenantId = user?.tenantId || req.headers['x-tenant-id'];
+    const loggedInUserId = user?.id || user?._id;
+    const loggedInUserName = user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || '';
+    if (tenantId) {
+      const authResult = await checkDscSignerPermission(tenantId, loggedInUserId, loggedInUserName, resolvedSigner);
+      if (!authResult.valid) {
+        return res.status(403).json({
+          success: false,
+          message: authResult.message || `DSC Token "${resolvedSigner}" is not authorized for this company/tenant.`
+        });
+      }
     }
 
     const cleanSigner = sanitizeForWinAnsi(resolvedSigner);

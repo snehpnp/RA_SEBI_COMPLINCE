@@ -881,7 +881,20 @@ const requestOtp = async (req, res) => {
             }
             const otp = Math.floor(100000 + Math.random() * 900000).toString();
             const cleanEmail = email ? String(email).toLowerCase().trim() : null;
-            await db_1.EmailVerification.findOneAndUpdate({ $or: [{ mobile: mobile10 }, ...(cleanEmail ? [{ email: cleanEmail }] : [])] }, {
+            // Clean up stale or conflicting records for this mobile
+            if (cleanEmail) {
+                await db_1.EmailVerification.deleteMany({
+                    mobile: mobile10,
+                    email: { $ne: cleanEmail }
+                }).catch(() => { });
+            }
+            else {
+                await db_1.EmailVerification.deleteMany({
+                    mobile: mobile10
+                }).catch(() => { });
+            }
+            const recordQuery = cleanEmail ? { email: cleanEmail } : { mobile: mobile10 };
+            await db_1.EmailVerification.findOneAndUpdate(recordQuery, {
                 ...(cleanEmail ? { email: cleanEmail } : {}),
                 mobile: mobile10,
                 smsOtp: otp,
@@ -925,35 +938,55 @@ const verifyOtp = async (req, res) => {
         const reqType = (type || (mobile && !email ? 'MOBILE' : 'EMAIL')).toUpperCase();
         const cleanEmail = email ? String(email).toLowerCase().trim() : '';
         const mobileDigits = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : '';
-        const query = {};
-        if (reqType === 'EMAIL' && cleanEmail) {
-            query.email = cleanEmail;
+        let record = null;
+        if (reqType === 'MOBILE' && mobileDigits) {
+            if (cleanEmail) {
+                record = await db_1.EmailVerification.findOne({
+                    $or: [
+                        { mobile: mobileDigits, email: cleanEmail },
+                        { mobile: mobileDigits },
+                        { email: cleanEmail }
+                    ]
+                }).sort({ updatedAt: -1, createdAt: -1 });
+            }
+            else {
+                record = await db_1.EmailVerification.findOne({ mobile: mobileDigits }).sort({ updatedAt: -1, createdAt: -1 });
+            }
         }
-        else if (reqType === 'MOBILE' && mobileDigits) {
-            query.mobile = mobileDigits;
+        else if (cleanEmail) {
+            record = await db_1.EmailVerification.findOne({ email: cleanEmail }).sort({ updatedAt: -1, createdAt: -1 });
         }
         else {
-            query.$or = [
-                ...(cleanEmail ? [{ email: cleanEmail }] : []),
-                ...(mobileDigits ? [{ mobile: mobileDigits }] : [])
-            ];
+            record = await db_1.EmailVerification.findOne({
+                $or: [
+                    ...(cleanEmail ? [{ email: cleanEmail }] : []),
+                    ...(mobileDigits ? [{ mobile: mobileDigits }] : [])
+                ]
+            }).sort({ updatedAt: -1, createdAt: -1 });
         }
-        const record = await db_1.EmailVerification.findOne(query);
         if (!record)
             return res.status(400).json({ success: false, message: 'No OTP requested or session expired' });
-        const enteredOtp = String(otp).trim();
-        const validOtp = enteredOtp === String(record.otp).trim() || enteredOtp === String(record.smsOtp).trim();
+        const enteredOtp = String(otp).replace(/\D/g, '').trim();
+        const recordOtp = String(record.otp || '').replace(/\D/g, '').trim();
+        const recordSmsOtp = String(record.smsOtp || '').replace(/\D/g, '').trim();
+        const validOtp = enteredOtp === recordOtp || enteredOtp === recordSmsOtp;
         if (!validOtp)
             return res.status(400).json({ success: false, message: 'Invalid OTP. Please check and try again.' });
         if (new Date(record.expiresAt) < new Date())
             return res.status(400).json({ success: false, message: 'OTP has expired' });
         if (reqType === 'EMAIL') {
             record.emailVerified = true;
+            if (cleanEmail && !record.email)
+                record.email = cleanEmail;
             await record.save();
             return res.json({ success: true, type: 'EMAIL', message: 'Email verified successfully.' });
         }
         else {
             record.smsVerified = true;
+            if (mobileDigits && !record.mobile)
+                record.mobile = mobileDigits;
+            if (cleanEmail && !record.email)
+                record.email = cleanEmail;
             await record.save();
             return res.json({ success: true, type: 'MOBILE', message: 'Mobile number verified successfully.' });
         }
@@ -978,7 +1011,7 @@ const verify2FALogin = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid or expired 2FA session. Please request a new passcode.' });
         }
         const cleanEmail = String(decoded.email || '').toLowerCase().trim();
-        const verificationRecord = await db_1.EmailVerification.findOne({ email: cleanEmail });
+        const verificationRecord = await db_1.EmailVerification.findOne({ email: cleanEmail }).sort({ updatedAt: -1, createdAt: -1 });
         if (!verificationRecord) {
             return res.status(400).json({ success: false, message: 'No verification code found or session expired. Please request a new code.' });
         }
@@ -1428,7 +1461,7 @@ const loginWithOtp = async (req, res) => {
                 { email: cleanEmail },
                 ...(cleanMobile ? [{ mobile: cleanMobile }] : [])
             ]
-        }).lean();
+        }).sort({ updatedAt: -1, createdAt: -1 }).lean();
         if (!verificationRecord) {
             return res.status(400).json({ success: false, message: 'No OTP requested or session expired. Please request a new OTP.' });
         }

@@ -76,24 +76,26 @@ export const createDscBridgeApp = () => {
   bridgeApp.get('/token-status', async (req: Request, res: Response) => {
     try {
       const winCerts = await getDetectedCertNames();
-      let defaultName = winCerts[0] || 'SEBI Registered Research Analyst';
+      const detected = winCerts && winCerts.length > 0;
 
       res.json({
         success: true,
-        detected: true,
-        certificates: winCerts.length > 0 ? winCerts : [defaultName],
-        detectedSignerName: defaultName,
+        detected,
+        certificates: detected ? winCerts : [],
+        detectedSignerName: detected ? winCerts[0] : null,
         smartCardServiceActive: true,
-        details: 'Hardware DSC Token Bridge active and connected with backend server.'
+        details: detected
+          ? 'Hardware DSC Token Bridge active and connected with USB Token.'
+          : 'No physical Hardware DSC Token detected in Windows Keystore. Please insert your USB Token into your computer.'
       });
     } catch (err: any) {
       res.json({
-        success: true,
-        detected: true,
-        certificates: ['SEBI Registered Research Analyst'],
-        detectedSignerName: 'SEBI Registered Research Analyst',
-        smartCardServiceActive: true,
-        details: 'Hardware DSC Token Bridge active and connected.'
+        success: false,
+        detected: false,
+        certificates: [],
+        detectedSignerName: null,
+        smartCardServiceActive: false,
+        details: err?.message || 'Error checking DSC token status'
       });
     }
   });
@@ -111,10 +113,17 @@ export const createDscBridgeApp = () => {
         return res.status(400).json({ success: false, message: 'Valid DSC Token PIN is required (minimum 4 digits)' });
       }
 
+      const certs = await getDetectedCertNames();
       let resolvedSigner = signerName && String(signerName).trim();
+      if (!resolvedSigner && certs && certs.length > 0) {
+        resolvedSigner = certs[0];
+      }
+
       if (!resolvedSigner) {
-        const certs = await getDetectedCertNames();
-        resolvedSigner = certs[0] || 'SEBI Research Analyst';
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot sign: No valid Hardware DSC Token detected. Please insert your physical USB Token into your computer.'
+        });
       }
 
       const cleanSigner = sanitizeForWinAnsi(resolvedSigner);
