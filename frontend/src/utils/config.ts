@@ -7,39 +7,25 @@ export const base_ra_url = typeof window !== 'undefined'
 export const base_api_url = `${base_ra_url}/api/v1`;
 
 // Default DSC bridge URL:
-// - On localhost: use backend's integrated dsc-bridge (/api/v1/dsc-bridge) or port 1620
-// - On live public domain: hardware USB token is in client's PC, so use local bridge (http://127.0.0.1:1620)
+// Both on localhost and live domain, the backend provides the built-in 24/7 DSC Bridge service!
 export const getDefaultDscBridgeUrl = (): string => {
-  if (typeof window !== 'undefined') {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return `${base_api_url}/dsc-bridge`;
-    }
-    return 'http://127.0.0.1:1620';
-  }
-  return 'http://127.0.0.1:1620';
+  return `${base_api_url}/dsc-bridge`;
 };
 
-export const DSC_BRIDGE_DEFAULT_URL = typeof window !== 'undefined'
-  ? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? `${base_api_url}/dsc-bridge`
-      : 'http://127.0.0.1:1620')
-  : 'http://127.0.0.1:1620';
+export const DSC_BRIDGE_DEFAULT_URL = `${base_api_url}/dsc-bridge`;
 
 export const getDscBridgeUrl = (): string => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('dsc_bridge_url');
-    if (saved && saved.trim()) {
+    if (saved && saved.trim() && !saved.includes('127.0.0.1:1620') && !saved.includes('localhost:1620')) {
       return saved.trim().replace(/\/+$/, '');
     }
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return `${base_api_url}/dsc-bridge`;
-    }
-    return 'http://127.0.0.1:1620';
+    return `${base_api_url}/dsc-bridge`;
   }
   if (process.env.NEXT_PUBLIC_DSC_BRIDGE_URL) {
     return process.env.NEXT_PUBLIC_DSC_BRIDGE_URL.trim().replace(/\/+$/, '');
   }
-  return 'http://127.0.0.1:1620';
+  return `${base_api_url}/dsc-bridge`;
 };
 
 export const setDscBridgeUrl = (url: string): void => {
