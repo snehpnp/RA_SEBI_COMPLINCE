@@ -1346,7 +1346,8 @@ class ApiClient {
   }
 
   async checkDscBridgeStatus(customBridgeUrl?: string, timeoutMs = 3500) {
-    // Candidate URLs: fully dynamic based on active environment (localhost / live domain)
+    const isLive = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    // Candidate URLs: priority is the built-in 24/7 live server bridge, then local USB bridge
     const candidateUrls: string[] = [];
     if (customBridgeUrl) {
       candidateUrls.push(customBridgeUrl);
@@ -1355,14 +1356,25 @@ class ApiClient {
       if (defaultUrl && !candidateUrls.includes(defaultUrl)) {
         candidateUrls.push(defaultUrl);
       }
+<<<<<<< HEAD
 
       const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
       if (saved && saved.trim() && !candidateUrls.includes(saved.trim())) {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
+      if (saved && saved.trim() && !saved.includes('127.0.0.1:1620') && !candidateUrls.includes(saved.trim())) {
         candidateUrls.push(saved.trim());
       }
+      // Also fallback to local hardware bridge (127.0.0.1:1620) where physical USB token is inserted
+      if (!candidateUrls.includes('http://127.0.0.1:1620')) {
+        candidateUrls.push('http://127.0.0.1:1620');
+      }
+      if (!candidateUrls.includes('http://localhost:1620')) {
+        candidateUrls.push('http://localhost:1620');
+      }
+>>>>>>> f2da2f2b7bff83be6ad091a50dbc225692ff058c
     }
+    
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
     const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : null;
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
