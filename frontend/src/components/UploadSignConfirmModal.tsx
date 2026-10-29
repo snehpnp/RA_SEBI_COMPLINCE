@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   Lock,
   ShieldCheck,
-  Settings
+  Settings,
+  Download
 } from 'lucide-react';
 import api from '../services/api';
 import { getDscBridgeUrl, setDscBridgeUrl, getDefaultDscBridgeUrl } from '../utils/config';
@@ -319,12 +320,12 @@ export default function UploadSignConfirmModal({
       setDscBridgeConnected(true);
       setDscPin('');
       setDscPinError('');
-      const certList: string[] = Array.isArray(data.certificates) ? data.certificates : [];
+      const certList: string[] = (data?.detected && Array.isArray(data.certificates)) ? data.certificates : [];
       setDetectedCertificates(certList);
-      const autoName = data.detectedSignerName || certList[0] || '';
+      const autoName = data?.detected ? (data.detectedSignerName || certList[0] || '') : '';
       setDscSignerName(autoName);
       setShowDscModal(true);
-      if (autoName) {
+      if (autoName && data?.detected) {
         verifyTokenName(autoName);
       } else {
         setDscVerifyStatus({
@@ -550,6 +551,26 @@ export default function UploadSignConfirmModal({
                       ? 'Digitally signs via USB Hardware DSC Token'
                       : 'Applies official researcher signature image stamp'}
                   </p>
+                </div>
+
+                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800/60 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                      <Download className="w-4 h-4 text-amber-600 shrink-0" /> Setup DSC Bridge on this PC
+                    </span>
+                    <a
+                      href="/downloads/sebi-dsc-bridge.zip"
+                      download="sebi-dsc-bridge.zip"
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow-sm transition"
+                    >
+                      <Download className="w-3 h-3" /> Download Bridge ZIP
+                    </a>
+                  </div>
+                  <ol className="text-[11px] text-amber-800 dark:text-amber-300 list-decimal pl-4 space-y-1">
+                    <li>Download &amp; Extract <code className="font-mono bg-white/70 dark:bg-slate-900 px-1 rounded">sebi-dsc-bridge.zip</code> on this computer.</li>
+                    <li>Double-click <code className="font-mono bg-white/70 dark:bg-slate-900 px-1 rounded">install-auto-start.bat</code> (Runs in background automatically on startup).</li>
+                    <li>Insert physical USB DSC Token &amp; click <b>Retry Bridge Check</b> below.</li>
+                  </ol>
                 </div>
               </div>
               <CheckCircle2 className="w-5 h-5 text-white/90 group-hover:scale-110 transition-transform shrink-0" />

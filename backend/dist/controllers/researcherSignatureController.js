@@ -815,84 +815,14 @@ const dscBridgeTokenStatus = async (req, res) => {
                 details: 'Hardware DSC Token Bridge active and connected with USB Token.'
             });
         }
-        // 2. Resolve authorized DSC signer names from database (Cloud/Live server or Windows fallback)
-        const resolvedCertificates = [];
-        let loggedInName = '';
-        if (user?.id || user?._id) {
-            const userId = user.id || user._id;
-            const staff = await db_1.default.Staff.findOne({ userId }).lean();
-            const u = await db_1.default.User.findById(userId).lean();
-            if (staff?.name) {
-                loggedInName = staff.name.trim();
-                resolvedCertificates.push(loggedInName);
-            }
-            const userFullName = `${u?.firstName || ''} ${u?.lastName || ''}`.trim();
-            if (userFullName && !resolvedCertificates.includes(userFullName)) {
-                if (!loggedInName)
-                    loggedInName = userFullName;
-                resolvedCertificates.push(userFullName);
-            }
-            if (u?.username && !resolvedCertificates.includes(u.username)) {
-                resolvedCertificates.push(u.username);
-            }
-            if (!tenantId && u?.tenantId) {
-                tenantId = u.tenantId;
-            }
-        }
-        if (tenantId) {
-            const tenant = await db_1.default.Tenant.findById(tenantId).lean();
-            if (tenant) {
-                if (tenant.dscSignerName && !resolvedCertificates.includes(tenant.dscSignerName.trim())) {
-                    resolvedCertificates.push(tenant.dscSignerName.trim());
-                }
-                if (tenant.ownerName && !resolvedCertificates.includes(tenant.ownerName.trim())) {
-                    resolvedCertificates.push(tenant.ownerName.trim());
-                }
-                if (tenant.complianceName && !resolvedCertificates.includes(tenant.complianceName.trim())) {
-                    resolvedCertificates.push(tenant.complianceName.trim());
-                }
-                if (tenant.companyName && !resolvedCertificates.includes(tenant.companyName.trim())) {
-                    resolvedCertificates.push(tenant.companyName.trim());
-                }
-            }
-            // Also include all researchers authorized with DSC scope in this tenant
-            try {
-                const staffResearchers = await db_1.default.Staff.find({
-                    status: 'ACTIVE',
-                    dscSigningScope: { $in: ['SELF', 'ALL'] }
-                }).lean();
-                for (const sr of staffResearchers) {
-                    if (sr.name && !resolvedCertificates.includes(sr.name.trim())) {
-                        resolvedCertificates.push(sr.name.trim());
-                    }
-                }
-            }
-            catch (e) { }
-        }
-        if (resolvedCertificates.length === 0) {
-            try {
-                const defaultTenant = await db_1.default.Tenant.findOne({ deletedAt: null, status: 'ACTIVE' }).lean();
-                if (defaultTenant) {
-                    if (defaultTenant.dscSignerName)
-                        resolvedCertificates.push(defaultTenant.dscSignerName.trim());
-                    if (defaultTenant.ownerName)
-                        resolvedCertificates.push(defaultTenant.ownerName.trim());
-                    if (defaultTenant.name)
-                        resolvedCertificates.push(defaultTenant.name.trim());
-                }
-            }
-            catch (e) { }
-        }
-        const detectedSignerName = loggedInName || resolvedCertificates[0] || '';
+        // When no physical USB token is detected, do NOT fallback to database!
         return res.json({
             success: true,
-            detected: !!detectedSignerName,
-            certificates: resolvedCertificates.length > 0 ? resolvedCertificates : (detectedSignerName ? [detectedSignerName] : []),
-            detectedSignerName,
+            detected: false,
+            certificates: [],
+            detectedSignerName: null,
             smartCardServiceActive: true,
-            details: detectedSignerName
-                ? `Hardware DSC Token verified for ${detectedSignerName}.`
-                : 'No USB Hardware DSC Token detected. Please insert your USB token.'
+            details: 'No physical USB Hardware DSC Token detected. Please insert your USB token.'
         });
     }
     catch (err) {
@@ -900,7 +830,7 @@ const dscBridgeTokenStatus = async (req, res) => {
             success: false,
             detected: false,
             certificates: [],
-            detectedSignerName: '',
+            detectedSignerName: null,
             smartCardServiceActive: false,
             details: err?.message || 'Error checking DSC token status'
         });
@@ -944,17 +874,8 @@ const dscBridgeSignPdf = async (req, res) => {
             catch (e) { }
         }
         let resolvedSigner = signerName && String(signerName).trim();
-        if (!resolvedSigner && (user?.id || user?._id)) {
-            const staff = await db_1.default.Staff.findOne({ userId: user.id || user._id }).lean();
-            const u = await db_1.default.User.findById(user.id || user._id).lean();
-            resolvedSigner = staff?.name || `${u?.firstName || ''} ${u?.lastName || ''}`.trim() || u?.username;
-        }
-        if (!resolvedSigner && (user?.tenantId || req.headers['x-tenant-id'])) {
-            const tenant = await db_1.default.Tenant.findById(user?.tenantId || req.headers['x-tenant-id']).lean();
-            resolvedSigner = tenant?.dscSignerName || tenant?.ownerName || tenant?.complianceName || tenant?.name;
-        }
         if (!resolvedSigner) {
-            resolvedSigner = 'SEBI Research Analyst';
+            return res.status(400).json({ success: false, message: 'Valid physical USB DSC Token signer name is required.' });
         }
         const cleanSigner = sanitizeForWinAnsi(resolvedSigner);
         const cleanPlacement = placement || 'BOTTOM_RIGHT';

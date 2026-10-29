@@ -76,29 +76,37 @@ export const createDscBridgeApp = () => {
   bridgeApp.get('/token-status', async (req: Request, res: Response) => {
     try {
       const winCerts = await getDetectedCertNames();
-      let defaultName = winCerts[0] || 'SEBI Registered Research Analyst';
+      if (winCerts && winCerts.length > 0) {
+        return res.json({
+          success: true,
+          detected: true,
+          certificates: winCerts,
+          detectedSignerName: winCerts[0],
+          smartCardServiceActive: true,
+          details: 'Hardware DSC Token Bridge active and listening for USB dongles.'
+        });
+      }
 
-      res.json({
+      return res.json({
         success: true,
-        detected: true,
-        certificates: winCerts.length > 0 ? winCerts : [defaultName],
-        detectedSignerName: defaultName,
+        detected: false,
+        certificates: [],
+        detectedSignerName: null,
         smartCardServiceActive: true,
-        details: 'Hardware DSC Token Bridge active and connected with backend server.'
+        details: 'No physical USB token detected. Please insert your USB token.'
       });
     } catch (err: any) {
-      res.json({
-        success: true,
-        detected: true,
-        certificates: ['SEBI Registered Research Analyst'],
-        detectedSignerName: 'SEBI Registered Research Analyst',
-        smartCardServiceActive: true,
-        details: 'Hardware DSC Token Bridge active and connected.'
+      return res.json({
+        success: false,
+        detected: false,
+        certificates: [],
+        detectedSignerName: null,
+        smartCardServiceActive: false,
+        details: err?.message || 'Error checking token status'
       });
     }
   });
 
-  // 3. Digitally sign PDF
   bridgeApp.post('/sign-pdf', async (req: Request, res: Response) => {
     try {
       const { pdfBase64, pin, placement, signScope, signerName, location, reason } = req.body;
