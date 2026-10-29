@@ -9,7 +9,7 @@ export const getDetectedCertNames = (): Promise<string[]> => {
     if (process.platform !== 'win32') return resolve([]);
     const psScript = `
       $now = Get-Date
-      $certs = Get-ChildItem Cert:\\CurrentUser\\My -ErrorAction SilentlyContinue | Where-Object { 
+      $certs = Get-ChildItem Cert:\\CurrentUser\\My, Cert:\\LocalMachine\\My -ErrorAction SilentlyContinue | Where-Object { 
         $_.NotAfter -gt $now -and 
         $_.Subject -notmatch 'trust_' -and 
         $_.Subject -notmatch 'CN=[0-9a-fA-F-]{36}' 
