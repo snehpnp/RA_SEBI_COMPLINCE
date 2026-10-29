@@ -13,6 +13,7 @@ const backendDscDir = path.join(rootDir, 'backend/tools/dsc-bridge');
 const activeDir = fs.existsSync(dscDir) ? dscDir : backendDscDir;
 
 const files = [
+  path.join(activeDir, 'bridge.ps1'),
   path.join(activeDir, 'server.js'),
   path.join(activeDir, 'package.json'),
   path.join(activeDir, 'start-bridge.bat'),

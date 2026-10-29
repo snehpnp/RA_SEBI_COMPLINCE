@@ -4,18 +4,22 @@ echo ==============================================================
 echo   SEBI Research Analyst Hardware DSC Token Local Bridge
 echo ==============================================================
 echo.
-if not "%1"=="" set PORT=%1
-if "%PORT%"=="" set PORT=1620
-echo Starting bridge service on http://127.0.0.1:%PORT% ...
-echo Make sure your USB DSC Token (ePass2003, mToken, ProxKey) is plugged in.
-echo.
-
 cd /d "%~dp0"
 
-if not exist node_modules (
-  echo Installing dependencies (first-time only)...
-  npm install --no-audit
+:: 1. If Node.js and express are installed, use Node.js
+where node >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+  if exist node_modules\express (
+    echo Starting bridge via Node.js on http://127.0.0.1:1620 ...
+    node server.js
+    pause
+    exit /b 0
+  )
 )
 
-node server.js
+:: 2. Otherwise run pure native Windows PowerShell (Zero install, works out of the box)
+echo Starting bridge via Native Windows PowerShell on http://127.0.0.1:1620 ...
+echo (No Node.js or software installation required)
+echo.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0bridge.ps1" -Port 1620
 pause
