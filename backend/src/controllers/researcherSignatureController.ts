@@ -877,6 +877,22 @@ export const verifyDscToken = async (req: Request, res: Response) => {
 // 9. DYNAMIC DSC BRIDGE ENDPOINTS (Live Cloud & Dynamic Domain Compatible)
 // ----------------------------------------------------
 
+export const dscBridgeDownloadZip = async (req: Request, res: Response) => {
+  const candidatePaths = [
+    path.resolve(process.cwd(), 'public/downloads/sebi-dsc-bridge.zip'),
+    path.resolve(process.cwd(), '../frontend/public/downloads/sebi-dsc-bridge.zip'),
+    path.resolve(__dirname, '../../public/downloads/sebi-dsc-bridge.zip'),
+    path.resolve(__dirname, '../../../frontend/public/downloads/sebi-dsc-bridge.zip'),
+    path.resolve(__dirname, '../../tools/dsc-bridge/sebi-dsc-bridge.zip')
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      return res.download(p, 'sebi-dsc-bridge.zip');
+    }
+  }
+  return res.status(404).json({ success: false, message: 'sebi-dsc-bridge.zip not found on server' });
+};
+
 export const dscBridgePing = async (req: Request, res: Response) => {
   return res.json({
     status: 'ok',

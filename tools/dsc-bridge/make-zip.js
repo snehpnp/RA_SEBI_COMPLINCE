@@ -2,20 +2,40 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const destDir = path.resolve('frontend/public/downloads');
-if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+// Determine root directory
+let rootDir = process.cwd();
+if (!fs.existsSync(path.join(rootDir, 'frontend')) && fs.existsSync(path.join(rootDir, '../frontend'))) {
+  rootDir = path.resolve(rootDir, '..');
+}
 
-const zipPath = path.join(destDir, 'sebi-dsc-bridge.zip');
+const dscDir = path.join(rootDir, 'tools/dsc-bridge');
+const backendDscDir = path.join(rootDir, 'backend/tools/dsc-bridge');
+const activeDir = fs.existsSync(dscDir) ? dscDir : backendDscDir;
+
 const files = [
-  path.resolve('tools/dsc-bridge/server.js'),
-  path.resolve('tools/dsc-bridge/package.json'),
-  path.resolve('tools/dsc-bridge/start-bridge.bat'),
-  path.resolve('tools/dsc-bridge/install-auto-start.bat'),
-  path.resolve('tools/dsc-bridge/uninstall-auto-start.bat'),
-  path.resolve('tools/dsc-bridge/run-silent.vbs'),
-  path.resolve('tools/dsc-bridge/setup-startup.js')
-].join("','");
+  path.join(activeDir, 'server.js'),
+  path.join(activeDir, 'package.json'),
+  path.join(activeDir, 'start-bridge.bat'),
+  path.join(activeDir, 'install-auto-start.bat'),
+  path.join(activeDir, 'uninstall-auto-start.bat'),
+  path.join(activeDir, 'run-silent.vbs'),
+  path.join(activeDir, 'setup-startup.js')
+].filter(f => fs.existsSync(f));
 
-const psCmd = `powershell -NoProfile -Command "Compress-Archive -Path '${files}' -DestinationPath '${zipPath}' -Force"`;
-execSync(psCmd, { stdio: 'inherit' });
-console.log('Zip file created:', fs.existsSync(zipPath), fs.statSync(zipPath).size, 'bytes');
+const outDirs = [
+  path.join(rootDir, 'frontend/public/downloads'),
+  path.join(rootDir, 'backend/public/downloads')
+];
+
+for (const outDir of outDirs) {
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const zipPath = path.join(outDir, 'sebi-dsc-bridge.zip');
+  const filesList = files.join("','");
+  const psCmd = `powershell -NoProfile -Command "Compress-Archive -Path '${filesList}' -DestinationPath '${zipPath}' -Force"`;
+  try {
+    execSync(psCmd, { stdio: 'inherit' });
+    console.log(`Zip created at ${zipPath} (${fs.statSync(zipPath).size} bytes)`);
+  } catch (e) {
+    console.error(`Failed to create zip at ${zipPath}:`, e.message);
+  }
+}

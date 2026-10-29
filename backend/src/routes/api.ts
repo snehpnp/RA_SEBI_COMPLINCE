@@ -71,6 +71,7 @@ import {
   saveDscSignedReport,
   verifyDscToken,
   dscBridgePing,
+  dscBridgeDownloadZip,
   dscBridgeTokenStatus,
   dscBridgeSignPdf
 } from '../controllers/researcherSignatureController';
@@ -1784,6 +1785,8 @@ router.post(
 );
 
 // Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
+router.get('/dsc-bridge/download', dscBridgeDownloadZip);
+router.get('/researcher/dsc/bridge/download', dscBridgeDownloadZip);
 router.get('/dsc-bridge/ping', dscBridgePing);
 router.get('/dsc-bridge/token-status', optionalAuthenticateJWT, dscBridgeTokenStatus);
 router.post('/dsc-bridge/sign-pdf', optionalAuthenticateJWT, dscBridgeSignPdf);
