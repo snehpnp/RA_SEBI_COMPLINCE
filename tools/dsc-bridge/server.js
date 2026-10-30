@@ -5,7 +5,6 @@ const { exec } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || process.env.DSC_BRIDGE_PORT || 1620;
-const HOST = process.env.HOST || '127.0.0.1';
 
 // Support Chrome Private Network Access (PNA) from public HTTPS sites to local DSC bridge
 app.use((req, res, next) => {
@@ -29,7 +28,7 @@ app.use(express.json({ limit: '50mb' }));
 app.get('/ping', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'SEBI Hardware DSC Bridge',
+    service: 'SEBI Hardware DSC Bridge (Node.js)',
     version: '1.0.0',
     port: PORT,
     timestamp: new Date().toISOString()
@@ -45,11 +44,15 @@ const getDetectedCertNames = () => {
       $certs = Get-ChildItem Cert:\\CurrentUser\\My, Cert:\\LocalMachine\\My -ErrorAction SilentlyContinue | Where-Object { 
         $_.NotAfter -gt $now -and 
         $_.Subject -notmatch 'trust_' -and 
+        $_.Subject -notmatch 'localhost' -and
+        $_.Subject -notmatch 'IIS' -and
+        $_.Subject -notmatch 'ASP.NET' -and
         $_.Subject -notmatch 'CN=[0-9a-fA-F-]{36}' 
       }
       foreach ($c in $certs) {
         if ($c.Subject -match 'CN=([^,]+)') {
-          Write-Output $Matches[1].Trim()
+          $name = $Matches[1].Trim().Trim('"')
+          Write-Output $name
         }
       }
     `;
@@ -57,7 +60,10 @@ const getDetectedCertNames = () => {
     const cmd = `powershell -NoProfile -EncodedCommand ${encoded}`;
     exec(cmd, { timeout: 4000 }, (err, stdout) => {
       if (err || !stdout) return resolve([]);
-      const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      const lines = stdout
+        .split(/\\r?\\n/)
+        .map(l => l.trim().replace(/^"+|"+$/g, ''))
+        .filter(l => l && !l.startsWith('#<') && !l.includes('CLIXML'));
       resolve([...new Set(lines)]);
     });
   });
@@ -65,17 +71,28 @@ const getDetectedCertNames = () => {
 
 // 2. Token Detection status
 app.get('/token-status', async (req, res) => {
-  const certs = await getDetectedCertNames();
-  res.json({
-    success: true,
-    detected: certs.length > 0,
-    certificates: certs,
-    detectedSignerName: certs[0] || null,
-    smartCardServiceActive: true,
-    details: certs.length > 0 
-      ? 'Hardware DSC Token Bridge active and listening for USB dongles.' 
-      : 'Hardware DSC Token Bridge active. No hardware token detected in CurrentUser store.'
-  });
+  try {
+    const certs = await getDetectedCertNames();
+    res.json({
+      success: true,
+      detected: certs.length > 0,
+      certificates: certs,
+      detectedSignerName: certs[0] || null,
+      smartCardServiceActive: true,
+      details: certs.length > 0 
+        ? 'Hardware DSC Token detected and verified.' 
+        : 'Hardware DSC Token Bridge active. No hardware token detected in Windows Personal store.'
+    });
+  } catch (err) {
+    res.json({
+      success: true,
+      detected: false,
+      certificates: [],
+      detectedSignerName: null,
+      smartCardServiceActive: true,
+      details: 'Error detecting certificates: ' + (err.message || err)
+    });
+  }
 });
 
 // 3. Digitally sign PDF with Hardware Token PIN
@@ -94,8 +111,8 @@ app.post('/sign-pdf', async (req, res) => {
     const sanitizeForWinAnsi = (text) => {
       if (!text) return '';
       return String(text)
-        .replace(/[^\x20-\x7E]/g, ' ')
-        .replace(/\s+/g, ' ')
+        .replace(/[^\\x20-\\x7E]/g, ' ')
+        .replace(/\\s+/g, ' ')
         .trim();
     };
 

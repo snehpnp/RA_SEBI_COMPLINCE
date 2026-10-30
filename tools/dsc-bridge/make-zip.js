@@ -2,18 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// Determine root directory
 let rootDir = process.cwd();
 if (!fs.existsSync(path.join(rootDir, 'frontend')) && fs.existsSync(path.join(rootDir, '../frontend'))) {
   rootDir = path.resolve(rootDir, '..');
 }
 
-const dscDir = path.join(rootDir, 'tools/dsc-bridge');
-const backendDscDir = path.join(rootDir, 'backend/tools/dsc-bridge');
-const activeDir = fs.existsSync(dscDir) ? dscDir : backendDscDir;
+const activeDir = path.join(rootDir, 'tools/dsc-bridge');
 
 const files = [
-  path.join(activeDir, 'bridge.ps1'),
+  path.join(activeDir, 'node_modules'),
   path.join(activeDir, 'server.js'),
   path.join(activeDir, 'package.json'),
   path.join(activeDir, 'start-bridge.bat'),
@@ -31,11 +28,12 @@ const outDirs = [
 for (const outDir of outDirs) {
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const zipPath = path.join(outDir, 'sebi-dsc-bridge.zip');
-  const filesList = files.join("','");
-  const psCmd = `powershell -NoProfile -Command "Compress-Archive -Path '${filesList}' -DestinationPath '${zipPath}' -Force"`;
+  const filesList = files.map(f => `'${f.replace(/\\/g, '/')}'`).join(',');
+  const psCmd = `powershell -NoProfile -Command "Compress-Archive -Path ${filesList} -DestinationPath '${zipPath.replace(/\\/g, '/')}' -Force"`;
   try {
+    console.log(`Creating zip at: ${zipPath} ...`);
     execSync(psCmd, { stdio: 'inherit' });
-    console.log(`Zip created at ${zipPath} (${fs.statSync(zipPath).size} bytes)`);
+    console.log(`Zip successfully created: ${zipPath} (${(fs.statSync(zipPath).size / (1024 * 1024)).toFixed(2)} MB)`);
   } catch (e) {
     console.error(`Failed to create zip at ${zipPath}:`, e.message);
   }

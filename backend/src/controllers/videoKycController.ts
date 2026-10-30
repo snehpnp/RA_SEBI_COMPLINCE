@@ -583,6 +583,9 @@ export async function resendVideoKycOtp(req: Request, res: Response) {
       { scheduleType: session.scheduleType, scheduledAt: session.scheduledAt }
     );
 
+
+
+
     return res.status(200).json({
       success: true,
       message: `A fresh 4-digit OTP has been dispatched to ${maskEmail(client.email)}.`

@@ -6,20 +6,30 @@ echo ==============================================================
 echo.
 cd /d "%~dp0"
 
-:: 1. If Node.js and express are installed, use Node.js
+set PORT=1620
+if not "%1"=="" set PORT=%1
+
 where node >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-  if exist node_modules\express (
-    echo Starting bridge via Node.js on http://127.0.0.1:1620 ...
-    node server.js
+if %ERRORLEVEL% NEQ 0 (
+  echo [!] Node.js is not installed or not in PATH.
+  echo Checking Windows winget to install Node.js automatically...
+  where winget >nul 2>nul
+  if %ERRORLEVEL% EQU 0 (
+    echo Installing Node.js LTS via winget...
+    winget install OpenJS.NodeJS.LTS -e --silent --accept-source-agreements --accept-package-agreements
+    set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
+  ) else (
+    echo.
+    echo [ERROR] Node.js is required to run the local DSC Bridge.
+    echo Please install Node.js from https://nodejs.org
+    start https://nodejs.org/
     pause
-    exit /b 0
+    exit /b 1
   )
 )
 
-:: 2. Otherwise run pure native Windows PowerShell (Zero install, works out of the box)
-echo Starting bridge via Native Windows PowerShell on http://127.0.0.1:1620 ...
-echo (No Node.js or software installation required)
+echo Starting Node.js Hardware DSC Bridge on http://127.0.0.1:%PORT% ...
+echo Make sure your physical USB DSC Token is inserted.
 echo.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0bridge.ps1" -Port 1620
+node server.js
 pause
