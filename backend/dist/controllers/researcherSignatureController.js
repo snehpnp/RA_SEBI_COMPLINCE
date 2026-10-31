@@ -831,7 +831,6 @@ const dscBridgeTokenStatus = async (req, res) => {
                 details: 'Hardware DSC Token Bridge active and connected with USB Token.'
             });
         }
-        // When no physical USB token is detected, do NOT fallback to database!
         return res.json({
             success: true,
             detected: false,
@@ -889,6 +888,7 @@ const dscBridgeSignPdf = async (req, res) => {
             }
             catch (e) { }
         }
+        const winCerts = await (0, dscBridgeService_1.getDetectedCertNames)();
         let resolvedSigner = signerName && String(signerName).trim();
         if (!resolvedSigner) {
             return res.status(400).json({ success: false, message: 'Valid physical USB DSC Token signer name is required.' });
