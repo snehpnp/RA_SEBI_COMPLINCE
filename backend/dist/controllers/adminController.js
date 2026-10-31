@@ -3633,8 +3633,22 @@ const assignPlanByAdmin = async (req, res) => {
         const assignerName = `${assigner?.firstName || ''} ${assigner?.lastName || ''}`.trim();
         const isGstActive = tenantObj?.gstEnabled !== false;
         const isExclusive = isGstActive && tenantObj?.gstCalculationType === 'EXCLUSIVE';
+        const planMaxAmount = isExclusive ? parseFloat((Number(plan.price) * 1.18).toFixed(2)) : Number(plan.price);
+        const planTotalDays = (Number(plan.durationMonths) || 1) * 30;
         const hasCustomAmount = customAmount !== undefined && customAmount !== null && customAmount !== '' && !isNaN(Number(customAmount)) && Number(customAmount) > 0;
         const hasCustomDays = customDays !== undefined && customDays !== null && customDays !== '' && !isNaN(Number(customDays)) && Number(customDays) > 0;
+        if (hasCustomAmount && Number(customAmount) > planMaxAmount) {
+            return res.status(400).json({
+                success: false,
+                message: `Custom amount cannot exceed plan total price (Max ₹${planMaxAmount.toLocaleString('en-IN')}).`
+            });
+        }
+        if (hasCustomDays && Number(customDays) > planTotalDays) {
+            return res.status(400).json({
+                success: false,
+                message: `Custom days cannot exceed plan total duration (Max ${planTotalDays} days).`
+            });
+        }
         const isCustomActive = hasCustomAmount || hasCustomDays;
         const enteredAmount = hasCustomAmount ? Number(customAmount) : Number(plan.price);
         // If custom amount was entered by admin, it represents the Total Gross Amount received from the client.
@@ -3773,17 +3787,16 @@ const assignPlanByAdmin = async (req, res) => {
             }
         }
         let startDate = parsedServiceStartDate;
-        const planTotalDays = (plan.durationMonths || 1) * 30 || 30;
         const planBasePrice = (isGstActive && !isExclusive)
             ? parseFloat((Number(plan.price) / 1.18).toFixed(2))
             : Number(plan.price);
         const planDailyBase = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
         let planValidityDays = planTotalDays;
         if (customDays !== undefined && customDays !== null && !isNaN(Number(customDays)) && Number(customDays) > 0) {
-            planValidityDays = Math.round(Number(customDays));
+            planValidityDays = Math.min(planTotalDays, Math.round(Number(customDays)));
         }
         else if (hasCustomAmount && planDailyBase > 0) {
-            planValidityDays = Math.max(1, Math.round(preTaxBase / planDailyBase));
+            planValidityDays = Math.max(1, Math.min(planTotalDays, Math.round(preTaxBase / planDailyBase)));
         }
         // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval
         if (tenantObj?.l2ApprovalEnabled === true) {

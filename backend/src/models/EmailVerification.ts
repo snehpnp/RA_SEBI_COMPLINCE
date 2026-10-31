@@ -28,6 +28,11 @@ export const EmailVerificationSchema = new Schema<IEmailVerification>(
   { ...baseSchemaOptions, collection: 'EmailVerification' }
 );
 
+// Automatic TTL Purge of Expired Verification Records & Fast Lookup Indexes
+EmailVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+EmailVerificationSchema.index({ mobile: 1, createdAt: -1 });
+EmailVerificationSchema.index({ email: 1, createdAt: -1 });
+
 export const EmailVerification =
   mongoose.models.EmailVerification ||
   mongoose.model<IEmailVerification>('EmailVerification', EmailVerificationSchema, 'EmailVerification');

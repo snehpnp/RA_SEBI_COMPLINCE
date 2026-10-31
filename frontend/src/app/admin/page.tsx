@@ -964,6 +964,7 @@ function AdminDashboardContent() {
   const [viewingComplaint, setViewingComplaint] = useState<any | null>(null);
   const [viewingAuditDetail, setViewingAuditDetail] = useState<any | null>(null);
   const [allPayments, setAllPayments] = useState<any[]>([]);
+  const [paymentDateMode, setPaymentDateMode] = useState<'PAYMENT_DATE' | 'CREATED_DATE'>('PAYMENT_DATE');
   const pendingQrCount = useMemo(() => {
     return allPayments.filter((p: any) =>
       (p.paymentMode === 'UPI_QR' || p.screenshotUrl || p.paymentMode === 'MANUAL_UPI' || p.receiptUrl) &&
@@ -1160,6 +1161,18 @@ function AdminDashboardContent() {
     if (!selectedPlan) return;
 
     const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+    const planMaxAmount = isExclusiveGst ? parseFloat((selectedPlan.price * 1.18).toFixed(2)) : selectedPlan.price;
+    const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
+
+    if (assignCustomAmount.trim() && Number(assignCustomAmount) > planMaxAmount) {
+      toast.error(`Custom Amount cannot exceed plan total price (Max ₹${planMaxAmount.toLocaleString('en-IN')}).`);
+      return;
+    }
+    if (assignCustomDays.trim() && Math.round(Number(assignCustomDays)) > planTotalDays) {
+      toast.error(`Custom Days cannot exceed plan duration (Max ${planTotalDays} days).`);
+      return;
+    }
+
     const isCustomActive = Boolean((assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount))) || (assignCustomDays && assignCustomDays.trim() && !isNaN(Number(assignCustomDays))));
     const hasCustomAmount = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
     
@@ -4512,14 +4525,39 @@ function AdminDashboardContent() {
 
   const paymentColumns = useMemo(() => [
     {
-      name: 'Payment Date',
-      width: '130px',
-      selector: (row: any) => row.paymentDate || row.createdAt,
-      cell: (row: any) => (
-        <div className="text-slate-700 dark:text-slate-300 font-mono text-xs">
-          {row.paymentDate ? new Date(row.paymentDate).toLocaleDateString() : new Date(row.createdAt).toLocaleDateString()}
-        </div>
-      ),
+      name: paymentDateMode === 'PAYMENT_DATE' ? 'Payment Date' : 'Created Date',
+      width: '155px',
+      selector: (row: any) => paymentDateMode === 'PAYMENT_DATE' ? (row.paymentDate || row.createdAt) : row.createdAt,
+      cell: (row: any) => {
+        const payDateStr = row.paymentDate ? new Date(row.paymentDate).toLocaleDateString('en-IN') : null;
+        const createdDateStr = row.createdAt ? new Date(row.createdAt).toLocaleDateString('en-IN') : 'N/A';
+        const createdTimeStr = row.createdAt ? new Date(row.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
+
+        return (
+          <div className="flex flex-col py-1 font-mono text-xs">
+            <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+              {paymentDateMode === 'PAYMENT_DATE' ? (
+                <>
+                  <span className="text-[10px] uppercase font-bold text-primary-600 dark:text-primary-400">Pay:</span>
+                  {payDateStr || createdDateStr}
+                </>
+              ) : (
+                <>
+                  <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">Created:</span>
+                  {createdDateStr}
+                </>
+              )}
+            </span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+              {paymentDateMode === 'PAYMENT_DATE' ? (
+                <>Created: {createdDateStr} {createdTimeStr}</>
+              ) : (
+                <>Time: {createdTimeStr} | Paid: {payDateStr || 'N/A'}</>
+              )}
+            </span>
+          </div>
+        );
+      },
     },
     {
       name: 'Client Details',
@@ -4756,7 +4794,21 @@ function AdminDashboardContent() {
         return <span className="px-2.5 py-1 bg-rose-500/10 text-rose-600 dark:text-rose-400 rounded-lg text-[10px] font-bold uppercase">{s}</span>;
       },
     }
-  ], []);
+  ], [paymentDateMode, sendingInvoiceId]);
+
+  const sortedAllPayments = useMemo(() => {
+    return [...allPayments].sort((a, b) => {
+      if (paymentDateMode === 'CREATED_DATE') {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      } else {
+        const timeA = (a.paymentDate ? new Date(a.paymentDate).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0));
+        const timeB = (b.paymentDate ? new Date(b.paymentDate).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0));
+        return timeB - timeA;
+      }
+    });
+  }, [allPayments, paymentDateMode]);
 
   const qrVerificationColumns = useMemo(() => [
     {
@@ -8411,7 +8463,8 @@ function AdminDashboardContent() {
                                 const exportData = allPayments.map(p => ({
                                   Payment_ID: p.id,
                                   Client: p.client?.name || 'Unknown',
-                                  Date: new Date(p.createdAt).toLocaleDateString(),
+                                  Payment_Date: p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('en-IN') : 'N/A',
+                                  Created_Date: p.createdAt ? new Date(p.createdAt).toLocaleString('en-IN') : 'N/A',
                                   Amount: p.amount,
                                   Plan: p.plan?.name || 'Unknown',
                                   Transaction_Ref: p.transactionRef,
@@ -8491,19 +8544,54 @@ function AdminDashboardContent() {
 
                         {/* View: All Transactions */}
                         {paymentSubTab === 'all' && (
-                          <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
-                            <div className="overflow-x-auto">
-                              <DataTable
-                                columns={paymentColumns}
-                                data={allPayments}
-                                pagination
-                                paginationPerPage={10}
-                                highlightOnHover
-                                responsive
-                                customStyles={tableCustomStyles}
-                                theme={isDarkMode ? 'dark' : 'default'}
-                                noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No payment history available.</div>}
-                              />
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-slate-900/60 p-3 rounded-2xl border border-slate-300 dark:border-white/10">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Date View Mode:</span>
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                                  {paymentDateMode === 'PAYMENT_DATE' ? 'Payment Date View' : 'Record Creation Date & Time View'}
+                                </span>
+                              </div>
+                              <div className="flex items-center bg-slate-200/80 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() => setPaymentDateMode('PAYMENT_DATE')}
+                                  className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                                    paymentDateMode === 'PAYMENT_DATE'
+                                      ? 'bg-primary-600 text-white shadow-sm'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                  }`}
+                                >
+                                  Payment Date
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPaymentDateMode('CREATED_DATE')}
+                                  className={`px-3.5 py-1.5 rounded-lg transition-all ${
+                                    paymentDateMode === 'CREATED_DATE'
+                                      ? 'bg-primary-600 text-white shadow-sm'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                  }`}
+                                >
+                                  Created Date
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
+                              <div className="overflow-x-auto">
+                                <DataTable
+                                  columns={paymentColumns}
+                                  data={sortedAllPayments}
+                                  pagination
+                                  paginationPerPage={10}
+                                  highlightOnHover
+                                  responsive
+                                  customStyles={tableCustomStyles}
+                                  theme={isDarkMode ? 'dark' : 'default'}
+                                  noDataComponent={<div className="p-8 text-center text-slate-500 font-medium">No payment history available.</div>}
+                                />
+                              </div>
                             </div>
                           </div>
                         )}
@@ -10229,8 +10317,8 @@ function AdminDashboardContent() {
                                 // Apply active filters
                                 if (statusFilter !== 'ALL') {
                                   rawList = rawList.filter((cl: any) => {
-                                    if (statusFilter === 'INACTIVE') return !['ACTIVE', 'PENDING_APPROVAL', 'PAYMENT_PENDING'].includes(cl.user?.status);
-                                    return cl.user?.status === statusFilter;
+                                    const { planStatus } = getClientPlanAndSegmentStatus(cl);
+                                    return planStatus === statusFilter;
                                   });
                                 }
                                 if (kraFilter !== 'ALL') {
@@ -10415,11 +10503,10 @@ function AdminDashboardContent() {
                           onChange={(e) => setStatusFilter(e.target.value)}
                           className="bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-primary-500 text-slate-800 dark:text-slate-900 dark:text-white"
                         >
-                          <option value="ALL">All Status</option>
+                          <option value="ALL">All Plan Status</option>
                           <option value="ACTIVE">Active</option>
-                          <option value="PENDING_APPROVAL">Pending Approval</option>
-                          <option value="PAYMENT_PENDING">Payment Pending</option>
-                          <option value="INACTIVE">Inactive/Other</option>
+                          <option value="EXPIRED">Expired</option>
+                          <option value="NO_PLAN">No Plan</option>
                         </select>
 
                         <select
@@ -10507,11 +10594,11 @@ function AdminDashboardContent() {
                           ? clients.filter((cl: any) => !cl.user?.deletedAt)
                           : deletedClients;
 
-                        // Filter by Status
+                        // Filter by Plan Status
                         if (statusFilter !== 'ALL') {
                           displayClients = displayClients.filter((cl: any) => {
-                            if (statusFilter === 'INACTIVE') return !['ACTIVE', 'PENDING_APPROVAL', 'PAYMENT_PENDING'].includes(cl.user?.status);
-                            return cl.user?.status === statusFilter;
+                            const { planStatus } = getClientPlanAndSegmentStatus(cl);
+                            return planStatus === statusFilter;
                           });
                         }
 
@@ -11069,9 +11156,14 @@ function AdminDashboardContent() {
                                     type="number"
                                     step="any"
                                     min="0"
+                                    max={(() => {
+                                      const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                      if (!sp) return undefined;
+                                      return (gstEnabled && gstCalculationType === 'EXCLUSIVE') ? parseFloat((sp.price * 1.18).toFixed(2)) : sp.price;
+                                    })()}
                                     value={assignCustomAmount}
                                     onChange={e => {
-                                      const val = e.target.value;
+                                      let val = e.target.value;
                                       if (val.trim() && assignCouponCode) {
                                         setAssignCouponCode('');
                                       }
@@ -11080,39 +11172,68 @@ function AdminDashboardContent() {
                                         setAssignCustomDays('');
                                         return;
                                       }
-                                      setAssignCustomAmount(val);
-                                      const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
+                                      const selectedPlan = adminPlans.find((p: any) => p.id === assignPlanId);
                                       if (selectedPlan) {
                                         const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
                                         const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planMaxAmount = isExclusive ? parseFloat((selectedPlan.price * 1.18).toFixed(2)) : selectedPlan.price;
                                         const planBasePrice = (gstEnabled && !isExclusive)
                                           ? (selectedPlan.price / 1.18)
                                           : selectedPlan.price;
                                         
                                         const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
-                                        const numericVal = parseFloat(val);
+                                        let numericVal = parseFloat(val);
                                         if (!isNaN(numericVal) && numericVal > 0 && dailyBaseRate > 0) {
+                                          if (numericVal > planMaxAmount) {
+                                            numericVal = planMaxAmount;
+                                            val = numericVal.toString();
+                                          }
+                                          setAssignCustomAmount(val);
                                           const enteredBase = gstEnabled ? (numericVal / 1.18) : numericVal;
-                                          const calcDays = Math.max(1, Math.round(enteredBase / dailyBaseRate));
+                                          const rawDays = Math.round(enteredBase / dailyBaseRate);
+                                          const calcDays = Math.max(1, Math.min(planTotalDays, rawDays));
                                           setAssignCustomDays(calcDays.toString());
                                         } else if (!val) {
+                                          setAssignCustomAmount('');
                                           setAssignCustomDays('');
+                                        } else {
+                                          setAssignCustomAmount(val);
                                         }
+                                      } else {
+                                        setAssignCustomAmount(val);
                                       }
                                     }}
                                     placeholder="e.g. 5900"
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
+                                  {(() => {
+                                    const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                    if (!sp || !assignCustomAmount.trim() || isNaN(Number(assignCustomAmount))) return null;
+                                    const pMax = (gstEnabled && gstCalculationType === 'EXCLUSIVE') ? parseFloat((sp.price * 1.18).toFixed(2)) : sp.price;
+                                    if (Number(assignCustomAmount) > pMax) {
+                                      return (
+                                        <p className="text-rose-500 font-semibold text-[11px] mt-1 flex items-center gap-1">
+                                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                          Amount cannot exceed plan total (Max ₹{pMax.toLocaleString('en-IN')})
+                                        </p>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
                                 <div>
                                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Custom Days</label>
                                   <input
                                     type="number"
                                     min="1"
+                                    max={(() => {
+                                      const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                      return sp ? ((sp.durationMonths || 1) * 30) : undefined;
+                                    })()}
                                     step="1"
                                     value={assignCustomDays}
                                     onChange={e => {
-                                      const val = e.target.value;
+                                      let val = e.target.value;
                                       if (val.trim() && assignCouponCode) {
                                         setAssignCouponCode('');
                                       }
@@ -11121,27 +11242,56 @@ function AdminDashboardContent() {
                                         setAssignCustomAmount('');
                                         return;
                                       }
-                                      const numDays = Math.round(Number(val));
-                                      setAssignCustomDays(val);
-                                      const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
-                                      if (selectedPlan && !isNaN(numDays) && numDays > 0) {
+                                      const selectedPlan = adminPlans.find((p: any) => p.id === assignPlanId);
+                                      if (selectedPlan) {
                                         const planTotalDays = (selectedPlan.durationMonths || 1) * 30;
                                         const isExclusive = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                        const planMaxAmount = isExclusive ? parseFloat((selectedPlan.price * 1.18).toFixed(2)) : selectedPlan.price;
                                         const planBasePrice = (gstEnabled && !isExclusive)
                                           ? (selectedPlan.price / 1.18)
                                           : selectedPlan.price;
                                         
-                                        const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
-                                        if (dailyBaseRate > 0) {
-                                          const daysBase = numDays * dailyBaseRate;
-                                          const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
-                                          setAssignCustomAmount(Math.round(totalGross).toString());
+                                        let numDays = Math.round(Number(val));
+                                        if (!isNaN(numDays) && numDays > 0) {
+                                          if (numDays > planTotalDays) {
+                                            numDays = planTotalDays;
+                                            val = numDays.toString();
+                                          }
+                                          setAssignCustomDays(val);
+                                          const dailyBaseRate = planTotalDays > 0 ? (planBasePrice / planTotalDays) : 0;
+                                          if (dailyBaseRate > 0) {
+                                            const daysBase = numDays * dailyBaseRate;
+                                            const totalGross = gstEnabled ? (daysBase * 1.18) : daysBase;
+                                            const finalAmt = Math.min(planMaxAmount, Math.round(totalGross));
+                                            setAssignCustomAmount(finalAmt.toString());
+                                          }
+                                        } else if (!val) {
+                                          setAssignCustomDays('');
+                                          setAssignCustomAmount('');
+                                        } else {
+                                          setAssignCustomDays(val);
                                         }
+                                      } else {
+                                        setAssignCustomDays(val);
                                       }
                                     }}
                                     placeholder="e.g. 15"
                                     className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
                                   />
+                                  {(() => {
+                                    const sp = adminPlans.find((p: any) => p.id === assignPlanId);
+                                    if (!sp || !assignCustomDays.trim() || isNaN(Number(assignCustomDays))) return null;
+                                    const pDays = (sp.durationMonths || 1) * 30;
+                                    if (Math.round(Number(assignCustomDays)) > pDays) {
+                                      return (
+                                        <p className="text-rose-500 font-semibold text-[11px] mt-1 flex items-center gap-1">
+                                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                                          Days cannot exceed plan duration (Max {pDays} days)
+                                        </p>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
                                 </div>
                               </div>
 
@@ -11258,8 +11408,13 @@ function AdminDashboardContent() {
                                 </button>
                                 {(() => {
                                   const selPlan = adminPlans.find(p => p.id === assignPlanId);
-                                  const hasCustom = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
                                   const isExclusiveGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                  const planMaxAmount = selPlan ? (isExclusiveGst ? parseFloat((selPlan.price * 1.18).toFixed(2)) : selPlan.price) : 0;
+                                  const planTotalDays = selPlan ? ((selPlan.durationMonths || 1) * 30) : 0;
+                                  const hasCustom = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
+                                  const isCustomAmtExceeded = Boolean(selPlan && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)) && Number(assignCustomAmount) > planMaxAmount);
+                                  const isCustomDaysExceeded = Boolean(selPlan && assignCustomDays.trim() && !isNaN(Number(assignCustomDays)) && Math.round(Number(assignCustomDays)) > planTotalDays);
+
                                   let defaultTotal = selPlan ? selPlan.price : 0;
                                   if (!hasCustom && isExclusiveGst && selPlan) {
                                     defaultTotal = parseFloat((selPlan.price * 1.18).toFixed(2));
@@ -11284,13 +11439,14 @@ function AdminDashboardContent() {
                                     (finalBase > assignPlanFeeSummary.remainingBaseQuota)
                                   );
                                   const isFreePromo = finalBase === 0 && Boolean(assignPlanId);
+                                  const isBlockSubmit = Boolean(isFeeExceeded || isCustomAmtExceeded || isCustomDaysExceeded);
 
                                   return (
                                     <button
                                       type="submit"
-                                      disabled={assignPlanLoading || !assignPlanId || isFeeExceeded}
+                                      disabled={assignPlanLoading || !assignPlanId || isBlockSubmit}
                                       className={`px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-                                        isFeeExceeded
+                                        isBlockSubmit
                                           ? 'bg-rose-800 text-rose-200 cursor-not-allowed opacity-60'
                                           : isFreePromo
                                           ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
@@ -11299,6 +11455,10 @@ function AdminDashboardContent() {
                                     >
                                       {assignPlanLoading ? (
                                         <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Assigning...</>
+                                      ) : isCustomAmtExceeded ? (
+                                        <>⚠️ Custom Amount Exceeds Plan Price (Max ₹{planMaxAmount.toLocaleString('en-IN')})</>
+                                      ) : isCustomDaysExceeded ? (
+                                        <>⚠️ Custom Days Exceeds Plan Duration (Max {planTotalDays} Days)</>
                                       ) : isFeeExceeded ? (
                                         <>{assignPlanFeeSummary?.isQuotaFull ? '⚠️ Annual Quota Full (Limit ₹1,51,000)' : `⚠️ Exceeds Remaining Limit (Max ₹${assignPlanFeeSummary?.remainingBaseQuota.toLocaleString('en-IN')})`}</>
                                       ) : isFreePromo ? (

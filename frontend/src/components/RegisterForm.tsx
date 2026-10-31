@@ -121,7 +121,14 @@ export default function RegisterForm({ onFlip }: { onFlip?: () => void }) {
     if (!mobileOtp || mobileOtp.length !== 6) return toast.error('Please enter the 6-digit Mobile OTP.');
     setVerifyingMobileOtp(true);
     try {
-      const res = await api.verifyOtp({ mobile: mobile.replace(/\D/g, ''), otp: mobileOtp, type: 'MOBILE' });
+      const cleanMobile = mobile.replace(/\D/g, '');
+      const cleanEmail = email ? email.trim().toLowerCase() : undefined;
+      const res = await api.verifyOtp({
+        mobile: cleanMobile,
+        email: cleanEmail,
+        otp: mobileOtp.replace(/\D/g, ''),
+        type: 'MOBILE'
+      });
       if (res.success) {
         setMobileVerified(true);
         toast.success(res.message || 'Mobile number verified successfully!');

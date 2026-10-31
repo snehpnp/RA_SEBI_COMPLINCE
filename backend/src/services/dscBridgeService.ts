@@ -119,10 +119,17 @@ export const createDscBridgeApp = () => {
         return res.status(400).json({ success: false, message: 'Valid DSC Token PIN is required (minimum 4 digits)' });
       }
 
+      const certs = await getDetectedCertNames();
       let resolvedSigner = signerName && String(signerName).trim();
+      if (!resolvedSigner && certs && certs.length > 0) {
+        resolvedSigner = certs[0];
+      }
+
       if (!resolvedSigner) {
-        const certs = await getDetectedCertNames();
-        resolvedSigner = certs[0] || 'SEBI Research Analyst';
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot sign: No valid Hardware DSC Token detected. Please insert your physical USB Token into your computer.'
+        });
       }
 
       const cleanSigner = sanitizeForWinAnsi(resolvedSigner);

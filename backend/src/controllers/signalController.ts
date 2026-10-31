@@ -643,20 +643,19 @@ export const closeSignal = async (req: Request, res: Response) => {
       { returnDocument: 'after', lean: true }
     );
 
-    // Determine specific target achieved (e.g. Target 1, Target 2, Target 3)
+    // Determine specific target achieved (e.g. Target 1, Target 2, Target 3 or combinations)
     const targetList = typeof closeTargets === 'string' ? closeTargets.split(',').map((s: string) => s.trim().toUpperCase()) : [];
-    let targetLabel = '';
+    const labels: string[] = [];
+    if (targetList.includes('TARGET1')) labels.push('Target 1');
+    if (targetList.includes('TARGET2')) labels.push('Target 2');
+    if (targetList.includes('TARGET3')) labels.push('Target 3');
+    const targetLabel = labels.join(' & ');
     let specificTargetPrice = exitPrice ? parseFloat(exitPrice) : null;
 
-    if (targetList.includes('TARGET3')) {
-      targetLabel = 'Target 3';
-      if (!specificTargetPrice && signal.target3) specificTargetPrice = signal.target3;
-    } else if (targetList.includes('TARGET2')) {
-      targetLabel = 'Target 2';
-      if (!specificTargetPrice && signal.target2) specificTargetPrice = signal.target2;
-    } else if (targetList.includes('TARGET1')) {
-      targetLabel = 'Target 1';
-      if (!specificTargetPrice && signal.target1) specificTargetPrice = signal.target1;
+    if (!specificTargetPrice) {
+      if (targetList.includes('TARGET3') && signal.target3) specificTargetPrice = signal.target3;
+      else if (targetList.includes('TARGET2') && signal.target2) specificTargetPrice = signal.target2;
+      else if (targetList.includes('TARGET1') && signal.target1) specificTargetPrice = signal.target1;
     }
 
     const targetPlanId = signal.planId ? (signal.planId._id?.toString() || signal.planId.toString()) : null;
@@ -681,21 +680,26 @@ export const closeSignal = async (req: Request, res: Response) => {
 
       if (closeStatus === 'Partially Closed') {
         if (targetLabel) {
-          notifTitle = `🎯 ${targetLabel} Achieved: ${stockSymbol}`;
-          notifMessage = `${stockSymbol} hit ${targetLabel} at ₹${specificTargetPrice || exitPrice}! Book partial profit. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+          if (isFinalClose) {
+            notifTitle = `🎯 ${targetLabel} Achieved & Trade Closed: ${stockSymbol}`;
+            notifMessage = `${stockSymbol} hit ${targetLabel} at ₹${specificTargetPrice || exitPrice}! Position fully closed.${closeRemark ? ` Remark: ${closeRemark}` : ''}`;
+          } else {
+            notifTitle = `🎯 ${targetLabel} Achieved: ${stockSymbol}`;
+            notifMessage = `${stockSymbol} hit ${targetLabel} at ₹${specificTargetPrice || exitPrice}! Book partial profit.${closeRemark ? ` Remark: ${closeRemark}` : ''}`;
+          }
         } else {
-          notifTitle = `🎯 Partially Closed: ${stockSymbol}`;
-          notifMessage = `${stockSymbol} partially closed at ₹${exitPrice}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+          notifTitle = isFinalClose ? `🎯 Trade Closed: ${stockSymbol}` : `🎯 Partially Closed: ${stockSymbol}`;
+          notifMessage = `${stockSymbol} ${isFinalClose ? 'fully closed' : 'partially closed'} at ₹${exitPrice}.${closeRemark ? ` Remark: ${closeRemark}` : ''}`;
         }
       } else if (closeStatus === 'Fully Closed') {
         notifTitle = `🎯 Trade Closed: ${stockSymbol}`;
-        notifMessage = `${stockSymbol} trade fully closed at ₹${exitPrice}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+        notifMessage = `${stockSymbol} trade fully closed at ₹${exitPrice || specificTargetPrice}.${closeRemark ? ` Remark: ${closeRemark}` : ''}`;
       } else if (closeStatus === 'SL Hit') {
         notifTitle = `🛑 Stoploss Hit: ${stockSymbol}`;
-        notifMessage = `Stoploss triggered for ${stockSymbol} at ₹${exitPrice || signal.stoploss}. Exit position immediately. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+        notifMessage = `Stoploss triggered for ${stockSymbol} at ₹${exitPrice || signal.stoploss}. Exit position immediately.${closeRemark ? ` Remark: ${closeRemark}` : ''}`;
       } else if (closeStatus === 'Avoid Signal') {
         notifTitle = `⚠️ Trade Avoided: ${stockSymbol}`;
-        notifMessage = `Recommendation to avoid ${stockSymbol}. ${closeRemark ? `Remark: ${closeRemark}` : ''}`;
+        notifMessage = `Recommendation to avoid ${stockSymbol}.${closeRemark ? ` Remark: ${closeRemark}` : ''}`;
       }
 
       // Fire-and-forget in background

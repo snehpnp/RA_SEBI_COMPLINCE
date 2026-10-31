@@ -173,6 +173,7 @@ export default function SignalManagement({
   const [closeExitPrice, setCloseExitPrice] = useState('');
   const [closeRemark, setCloseRemark] = useState('');
   const [closeTargets, setCloseTargets] = useState({ t1: false, t2: false, t3: false, close: false });
+  const [closeCustomPrices, setCloseCustomPrices] = useState<{ t1: string; t2: string; t3: string }>({ t1: '', t2: '', t3: '' });
   const [avoidRemarkModal, setAvoidRemarkModal] = useState<string | null>(null);
 
   // Report Preview State
@@ -619,9 +620,9 @@ export default function SignalManagement({
     formData.append('callType', callType);
     formData.append('tradeDuration', tradeDuration);
     formData.append('stockId', stockId);
-    if (expiryDate) formData.append('expiryDate', expiryDate);
-    if (strikePrice) formData.append('strikePrice', strikePrice);
-    if (optionType) formData.append('optionType', optionType);
+    if ((segment === 'OPTION' || segment === 'FUTURE') && expiryDate) formData.append('expiryDate', expiryDate);
+    if (segment === 'OPTION' && strikePrice) formData.append('strikePrice', strikePrice);
+    if (segment === 'OPTION' && optionType) formData.append('optionType', optionType);
     formData.append('entryPrice', entryPrice);
     formData.append('entryType', entryType);
     formData.append('target1', target1);
@@ -667,10 +668,11 @@ export default function SignalManagement({
       if (closeSignalModal.target3 && (closeTargets.t3 || isFullyClosed)) targetArr.push('TARGET3');
 
       let finalExitPrice = closeExitPrice;
-      if (closeStatus === 'Fully Closed' || closeStatus === 'Partially Closed') {
-        if (closeTargets.t3 || (isFullyClosed && closeSignalModal.target3)) finalExitPrice = closeSignalModal.target3;
-        else if (closeTargets.t2 || (isFullyClosed && closeSignalModal.target2)) finalExitPrice = closeSignalModal.target2;
-        else if (closeTargets.t1 || (isFullyClosed && closeSignalModal.target1)) finalExitPrice = closeSignalModal.target1;
+      if (closeStatus === 'Partially Closed' || closeStatus === 'Fully Closed') {
+        if (closeTargets.t3) finalExitPrice = closeCustomPrices.t3 || closeSignalModal.target3;
+        else if (closeTargets.t2) finalExitPrice = closeCustomPrices.t2 || closeSignalModal.target2;
+        else if (closeTargets.t1) finalExitPrice = closeCustomPrices.t1 || closeSignalModal.target1;
+        else if (isFullyClosed) finalExitPrice = closeSignalModal.target3 || closeSignalModal.target2 || closeSignalModal.target1;
       }
 
       let isFinalClose = true;
@@ -693,6 +695,7 @@ export default function SignalManagement({
         setCloseExitPrice('');
         setCloseRemark('');
         setCloseTargets({ t1: false, t2: false, t3: false, close: false });
+        setCloseCustomPrices({ t1: '', t2: '', t3: '' });
       } else {
         toast(res.message);
       }
@@ -746,25 +749,43 @@ export default function SignalManagement({
       },
       {
         name: 'Symbol / Stock',
-        minWidth: '200px',
+        minWidth: '220px',
         selector: (row: any) => row.stock?.symbol || row.symbol || row.stockName || '',
-        cell: (row: any) => (
-          <div className="flex flex-col py-1.5 pr-2">
-            <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap flex items-center gap-1.5">
-              {row.stock?.symbol || row.symbol || 'N/A'}
-              {row.strikePrice && <span className="text-xs font-semibold text-slate-500">({row.strikePrice} {row.optionType || ''})</span>}
-            </span>
-            {(row.stock?.name || row.stockName) && (
-              <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[190px]" title={row.stock?.name || row.stockName}>
-                {row.stock?.name || row.stockName}
-              </span>
-            )}
-          </div>
-        ),
+        cell: (row: any) => {
+          const isOption = row.segment === 'OPTION';
+          const isFuture = row.segment === 'FUTURE';
+          const hasExpiry = (isOption || isFuture) && row.expiryDate;
+          const expiryStr = hasExpiry ? new Date(row.expiryDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : null;
+
+          return (
+            <div className="flex flex-col py-1.5 pr-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="font-bold text-slate-900 dark:text-white tracking-wide whitespace-nowrap">
+                  {row.stock?.symbol || row.symbol || 'N/A'}
+                </span>
+                {isOption && row.strikePrice && (
+                  <span className="text-xs font-semibold text-slate-500">
+                    ({row.strikePrice} {row.optionType || ''})
+                  </span>
+                )}
+                {expiryStr && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 whitespace-nowrap">
+                    Exp: {expiryStr}
+                  </span>
+                )}
+              </div>
+              {(row.stock?.name || row.stockName) && (
+                <span className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-[200px]" title={row.stock?.name || row.stockName}>
+                  {row.stock?.name || row.stockName}
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         name: 'Plan',
-        minWidth: '220px',
+        minWidth: '200px',
         selector: (row: any) => row.planName,
         cell: (row: any) => (
           <div className="py-1.5 pr-3">
@@ -775,15 +796,30 @@ export default function SignalManagement({
         )
       },
       {
+        name: 'Duration',
+        minWidth: '110px',
+        selector: (row: any) => row.tradeDuration,
+        cell: (row: any) => (
+          <span className="text-xs font-semibold text-slate-700 dark:text-gray-300 whitespace-nowrap">
+            {row.tradeDuration || 'N/A'}
+          </span>
+        )
+      },
+      {
         name: 'Entry Type',
         minWidth: '110px',
         center: true,
         selector: (row: any) => row.callType,
         cell: (row: any) => (
-          <div className="py-1 flex items-center justify-center">
-            <span className={`px-2.5 py-1 rounded-md text-[11px] font-extrabold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
+          <div className="py-1 flex flex-col items-center">
+            <span className={`px-2.5 py-0.5 rounded-md text-[11px] font-extrabold whitespace-nowrap ${row.callType === 'BUY' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20'}`}>
               {row.callType}
             </span>
+            {row.entryType && (
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase mt-0.5">
+                {row.entryType}
+              </span>
+            )}
           </div>
         )
       },
@@ -900,10 +936,15 @@ export default function SignalManagement({
           {row.status === 'OPEN' && !isViewOnly && (
             <button onClick={() => {
               setCloseSignalModal(row);
-              setCloseStatus('Fully Closed');
+              setCloseStatus('Partially Closed');
               setCloseExitPrice('');
               setCloseRemark('');
               setCloseTargets({ t1: false, t2: false, t3: false, close: false });
+              setCloseCustomPrices({
+                t1: row.target1 ? String(row.target1) : '',
+                t2: row.target2 ? String(row.target2) : '',
+                t3: row.target3 ? String(row.target3) : ''
+              });
             }} className="p-1.5 bg-red-500/10 hover:bg-red-500/30 hover:shadow-[0_0_10px_rgba(239,68,68,0.4)] text-red-600 dark:text-red-400 rounded-lg transition-all duration-300" title="Close Signal">
               <X className="w-4 h-4" />
             </button>
@@ -954,9 +995,7 @@ export default function SignalManagement({
                 <button onClick={() => setView('TABLE')} className="px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] rounded flex items-center space-x-2 font-semibold hover:bg-[#d4f23b] hover:text-black hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] transition-all duration-300">
                   <ArrowLeft className="h-4 w-4" /> <span>Back</span>
                 </button>
-                <button className="px-4 py-2 bg-[#d4f23b] text-black rounded flex items-center space-x-2 font-bold hover:bg-[#c3e031] hover:shadow-[0_0_15px_rgba(212,242,59,0.4)] hover:-translate-y-0.5 transition-all duration-300">
-                  <Bell className="h-4 w-4" /> <span>Alert</span>
-                </button>
+                
               </div>
             </div>
           </div>
@@ -1274,23 +1313,25 @@ export default function SignalManagement({
                     </div>
                   </div>
                   {(segment === 'FUTURE' || segment === 'OPTION') && (
-                    <div className={`grid ${segment === 'OPTION' ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-bold mb-1">Expiry Date</label>
                         <input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b]" />
                       </div>
-                      <div>
-                        <label className="block text-sm font-bold mb-1">Strike Price</label>
-                        <input type="number" step="0.01" value={strikePrice} onChange={e => setStrikePrice(e.target.value)} placeholder="e.g. 15000" className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b]" />
-                      </div>
                       {segment === 'OPTION' && (
-                        <div>
-                          <label className="block text-sm font-bold mb-1">Option Type</label>
-                          <select value={optionType} onChange={e => setOptionType(e.target.value)} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b]">
-                            <option value="">select</option>
-                            <option value="CE">CE</option>
-                            <option value="PE">PE</option>
-                          </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-sm font-bold mb-1">Strike Price</label>
+                            <input type="number" step="0.01" value={strikePrice} onChange={e => setStrikePrice(e.target.value)} placeholder="e.g. 15000" className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b]" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold mb-1">Option Type</label>
+                            <select value={optionType} onChange={e => setOptionType(e.target.value)} className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b]">
+                              <option value="">select</option>
+                              <option value="CE">CE</option>
+                              <option value="PE">PE</option>
+                            </select>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1338,36 +1379,6 @@ export default function SignalManagement({
                     <label className="block text-sm font-bold mb-1">Stoploss<span className="text-red-600 dark:text-red-500">*</span></label>
                     <input type="number" step="0.01" value={stoploss} onChange={e => { setStoploss(e.target.value); setErrors((prev: any) => ({ ...prev, stoploss: '' })); }} placeholder="Enter Stoploss" className="w-full bg-white dark:bg-[#0B101E] border border-slate-400 dark:border-white/10 rounded px-3 py-3 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-[#d4f23b]" />
                     {errors.stoploss && <p className="text-red-600 dark:text-red-500 text-xs mt-1">{errors.stoploss}</p>}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold mb-1">Report</label>
-                  <div className="flex border border-slate-400 dark:border-white/10 rounded bg-white dark:bg-[#0B101E]">
-                    <input
-                      type="file"
-                      accept=".pdf"
-                      onChange={e => {
-                        if (e.target.files && e.target.files.length > 0) {
-                          const file = e.target.files[0];
-                          if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-                            setReportFile(file);
-                          } else {
-                            toast('Only PDF files are allowed for the report.');
-                            e.target.value = '';
-                            setReportFile(null);
-                          }
-                        }
-                      }}
-                      className="hidden"
-                      id="reportFile"
-                    />
-                    <label htmlFor="reportFile" className="bg-white text-black px-4 py-3 font-semibold cursor-pointer rounded-l text-sm">
-                      Choose File
-                    </label>
-                    <div className="px-4 py-3 text-sm text-slate-600 dark:text-gray-400">
-                      {reportFile ? reportFile.name : "No file chosen"}
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1601,27 +1612,98 @@ export default function SignalManagement({
                   {(closeStatus === 'Fully Closed' || closeStatus === 'Partially Closed') && (
                     <div className="space-y-4">
                       <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
-                        <input type="checkbox" checked={closeStatus === 'Fully Closed' || closeTargets.t1} disabled={closeStatus === 'Fully Closed'} onChange={(e) => setCloseTargets({ ...closeTargets, t1: e.target.checked })} className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+                        <input
+                          type="checkbox"
+                          checked={closeTargets.t1}
+                          onChange={(e) => setCloseTargets({ ...closeTargets, t1: e.target.checked })}
+                          className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer"
+                        />
                         <span className="w-20 font-bold text-sm text-slate-800 dark:text-gray-200">Target 1</span>
-                        <input type="text" readOnly value={`₹ ${closeSignalModal.target1 || ''}`} className="bg-white dark:bg-[#0B101E] border border-slate-300 dark:border-white/5 rounded-md px-4 py-2 text-sm text-slate-700 dark:text-gray-300 flex-1 font-semibold cursor-not-allowed" />
+                        <div className="relative flex-1">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
+                          <input
+                            type="number"
+                            step="any"
+                            disabled={!closeTargets.t1}
+                            value={closeCustomPrices.t1}
+                            onChange={(e) => setCloseCustomPrices({ ...closeCustomPrices, t1: e.target.value })}
+                            placeholder={String(closeSignalModal.target1 || '')}
+                            className={`w-full pl-8 pr-4 py-2 rounded-md text-sm font-semibold border transition-all ${
+                              closeTargets.t1
+                                ? 'bg-white dark:bg-[#0B101E] border-[#d4f23b] text-slate-900 dark:text-white ring-1 ring-[#d4f23b]/50 shadow-sm'
+                                : 'bg-slate-200/50 dark:bg-[#0B101E]/40 border-slate-300 dark:border-white/5 text-slate-400 dark:text-gray-500 cursor-not-allowed'
+                            }`}
+                          />
+                        </div>
                       </label>
                       {closeSignalModal.target2 && (
                         <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
-                          <input type="checkbox" checked={closeStatus === 'Fully Closed' || closeTargets.t2} disabled={closeStatus === 'Fully Closed'} onChange={(e) => setCloseTargets({ ...closeTargets, t2: e.target.checked })} className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+                          <input
+                            type="checkbox"
+                            checked={closeTargets.t2}
+                            onChange={(e) => setCloseTargets({ ...closeTargets, t2: e.target.checked })}
+                            className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer"
+                          />
                           <span className="w-20 font-bold text-sm text-slate-800 dark:text-gray-200">Target 2</span>
-                          <input type="text" readOnly value={`₹ ${closeSignalModal.target2 || ''}`} className="bg-white dark:bg-[#0B101E] border border-slate-300 dark:border-white/5 rounded-md px-4 py-2 text-sm text-slate-700 dark:text-gray-300 flex-1 font-semibold cursor-not-allowed" />
+                          <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
+                            <input
+                              type="number"
+                              step="any"
+                              disabled={!closeTargets.t2}
+                              value={closeCustomPrices.t2}
+                              onChange={(e) => setCloseCustomPrices({ ...closeCustomPrices, t2: e.target.value })}
+                              placeholder={String(closeSignalModal.target2 || '')}
+                              className={`w-full pl-8 pr-4 py-2 rounded-md text-sm font-semibold border transition-all ${
+                                closeTargets.t2
+                                  ? 'bg-white dark:bg-[#0B101E] border-[#d4f23b] text-slate-900 dark:text-white ring-1 ring-[#d4f23b]/50 shadow-sm'
+                                  : 'bg-slate-200/50 dark:bg-[#0B101E]/40 border-slate-300 dark:border-white/5 text-slate-400 dark:text-gray-500 cursor-not-allowed'
+                              }`}
+                            />
+                          </div>
                         </label>
                       )}
                       {closeSignalModal.target3 && (
                         <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
-                          <input type="checkbox" checked={closeStatus === 'Fully Closed' || closeTargets.t3} disabled={closeStatus === 'Fully Closed'} onChange={(e) => setCloseTargets({ ...closeTargets, t3: e.target.checked })} className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+                          <input
+                            type="checkbox"
+                            checked={closeTargets.t3}
+                            onChange={(e) => setCloseTargets({ ...closeTargets, t3: e.target.checked })}
+                            className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer"
+                          />
                           <span className="w-20 font-bold text-sm text-slate-800 dark:text-gray-200">Target 3</span>
-                          <input type="text" readOnly value={`₹ ${closeSignalModal.target3 || ''}`} className="bg-white dark:bg-[#0B101E] border border-slate-300 dark:border-white/5 rounded-md px-4 py-2 text-sm text-slate-700 dark:text-gray-300 flex-1 font-semibold cursor-not-allowed" />
+                          <div className="relative flex-1">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
+                            <input
+                              type="number"
+                              step="any"
+                              disabled={!closeTargets.t3}
+                              value={closeCustomPrices.t3}
+                              onChange={(e) => setCloseCustomPrices({ ...closeCustomPrices, t3: e.target.value })}
+                              placeholder={String(closeSignalModal.target3 || '')}
+                              className={`w-full pl-8 pr-4 py-2 rounded-md text-sm font-semibold border transition-all ${
+                                closeTargets.t3
+                                  ? 'bg-white dark:bg-[#0B101E] border-[#d4f23b] text-slate-900 dark:text-white ring-1 ring-[#d4f23b]/50 shadow-sm'
+                                  : 'bg-slate-200/50 dark:bg-[#0B101E]/40 border-slate-300 dark:border-white/5 text-slate-400 dark:text-gray-500 cursor-not-allowed'
+                              }`}
+                            />
+                          </div>
                         </label>
                       )}
                       <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
-                        <input type="checkbox" checked={closeStatus === 'Fully Closed' || closeTargets.close} disabled={closeStatus === 'Fully Closed'} onChange={(e) => setCloseTargets({ ...closeTargets, close: e.target.checked })} className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
-                        <span className="font-bold text-sm text-slate-800 dark:text-gray-200">Close</span>
+                        <input
+                          type="checkbox"
+                          checked={closeStatus === 'Fully Closed' || closeTargets.close}
+                          disabled={closeStatus === 'Fully Closed'}
+                          onChange={(e) => setCloseTargets({ ...closeTargets, close: e.target.checked })}
+                          className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-50"
+                        />
+                        <div className="flex flex-col">
+                          <span className="font-bold text-sm text-slate-800 dark:text-gray-200">Close Position</span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {closeTargets.close ? 'Checked: Position will be permanently closed & moved to Closed Signals' : 'Unchecked: Signal remains Active for next targets (Partial profit booking)'}
+                          </span>
+                        </div>
                       </label>
                     </div>
                   )}
@@ -1810,10 +1892,12 @@ export default function SignalManagement({
                       <p className="text-xs text-slate-500 dark:text-gray-400 mt-0.5">{viewSignalDetails.stock?.name || viewSignalDetails.stockName}</p>
                     )}
                   </div>
-                  <div>
-                    <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Strike Price</p>
-                    <p className="font-semibold">{viewSignalDetails.strikePrice ? `${viewSignalDetails.strikePrice} ${viewSignalDetails.optionType || ''}` : 'N/A'}</p>
-                  </div>
+                  {viewSignalDetails.segment === 'OPTION' && (
+                    <div>
+                      <p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Strike Price</p>
+                      <p className="font-semibold">{viewSignalDetails.strikePrice ? `${viewSignalDetails.strikePrice} ${viewSignalDetails.optionType || ''}` : 'N/A'}</p>
+                    </div>
+                  )}
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Plan</p><p className="font-semibold">{viewSignalDetails.planName || 'N/A'}</p></div>
 
                   <div><p className="text-slate-600 dark:text-gray-500 text-xs uppercase mb-1">Call Type</p><p className={`font-semibold ${viewSignalDetails.callType === 'BUY' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{viewSignalDetails.callType || 'N/A'}</p></div>
