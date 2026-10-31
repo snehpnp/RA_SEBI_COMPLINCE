@@ -509,6 +509,8 @@ router.post('/researcher/esign/use-daily-stamp', auth_1.authenticateJWT, (0, aut
 router.post('/researcher/dsc/save-signed-report', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, upload.single('report'), researcherSignatureController_1.saveDscSignedReport);
 router.post('/researcher/dsc/verify-token', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_RESEARCH'), tenant_1.enforceTenantIsolation, researcherSignatureController_1.verifyDscToken);
 // Dynamic DSC Bridge endpoints (Dynamic domain & cloud compatible)
+router.get('/dsc-bridge/download', researcherSignatureController_1.dscBridgeDownloadZip);
+router.get('/researcher/dsc/bridge/download', researcherSignatureController_1.dscBridgeDownloadZip);
 router.get('/dsc-bridge/ping', researcherSignatureController_1.dscBridgePing);
 router.get('/dsc-bridge/token-status', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeTokenStatus);
 router.post('/dsc-bridge/sign-pdf', auth_1.optionalAuthenticateJWT, researcherSignatureController_1.dscBridgeSignPdf);
