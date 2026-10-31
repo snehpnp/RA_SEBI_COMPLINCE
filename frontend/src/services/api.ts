@@ -1366,12 +1366,6 @@ class ApiClient {
       if (!candidateUrls.includes('http://localhost:1620')) {
         candidateUrls.push('http://localhost:1620');
       }
-
-      // 3. Saved custom bridge URL if any
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('dsc_bridge_url') : null;
-      if (saved && saved.trim() && !candidateUrls.includes(saved.trim())) {
-        candidateUrls.push(saved.trim());
-      }
     }
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
