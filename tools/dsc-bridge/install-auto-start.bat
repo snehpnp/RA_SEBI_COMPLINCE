@@ -37,6 +37,12 @@ set TARGET_PATH=%~dp0run-silent.vbs
 echo Creating Startup shortcut in: %STARTUP_DIR%
 powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT_PATH%'); $s.TargetPath = 'wscript.exe'; $s.Arguments = '\"%TARGET_PATH%\"'; $s.WorkingDirectory = '%~dp0'; $s.Description = 'SEBI Hardware DSC Bridge Background Service'; $s.Save()"
 
+:: 2.5 Register Protocol Handler for One-Click Browser Launch (sebidsc://)
+echo Registering One-Click Browser Launch Protocol (sebidsc://)...
+reg add "HKCU\Software\Classes\sebidsc" /ve /t REG_SZ /d "URL:SEBI Hardware DSC Bridge" /f >nul 2>nul
+reg add "HKCU\Software\Classes\sebidsc" /v "URL Protocol" /t REG_SZ /d "" /f >nul 2>nul
+reg add "HKCU\Software\Classes\sebidsc\shell\open\command" /ve /t REG_SZ /d "wscript.exe \"%TARGET_PATH%\" \"%%1\"" /f >nul 2>nul
+
 :: 3. Start the bridge right now in background
 echo.
 echo Starting Node.js DSC Bridge in background right now...

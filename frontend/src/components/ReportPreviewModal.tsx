@@ -19,7 +19,8 @@ import {
   Trash2,
   Lock,
   Settings,
-  Download
+  Download,
+  Zap
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -624,6 +625,52 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
   };
 
   // ── 3. FLOW FOR HARDWARE DSC TOKEN (USB Dongle + PIN) ──
+
+  const handleOneClickStartBridge = () => {
+    setCheckingDscBridge(true);
+    toast('Starting local DSC Bridge...', { icon: '⚡' });
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = 'sebidsc://start';
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try { document.body.removeChild(iframe); } catch (e) {}
+    }, 3000);
+
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      try {
+        const data = await api.checkDscBridgeStatus(dscBridgeUrl, 1200);
+        if (data) {
+          clearInterval(pollInterval);
+          setCheckingDscBridge(false);
+          setDscBridgeConnected(true);
+          const certList: string[] = (data?.detected && Array.isArray(data.certificates)) ? data.certificates : [];
+          setDetectedCertificates(certList);
+          const autoName = data?.detected ? (data.detectedSignerName || certList[0] || '') : '';
+          setDscSignerName(autoName);
+          if (autoName && data?.detected) {
+            verifyTokenName(autoName);
+          } else {
+            setDscVerifyStatus({
+              loading: false,
+              valid: false,
+              message: 'No digital certificate detected on the USB token. Please ensure your physical DSC token is inserted into your computer.'
+            });
+          }
+          toast.success('DSC Bridge is now Online!');
+        }
+      } catch (err) {
+        if (attempts >= 10) {
+          clearInterval(pollInterval);
+          setCheckingDscBridge(false);
+          toast.error('Could not auto-start bridge. Please run install-auto-start.bat once.');
+        }
+      }
+    }, 800);
+  };
+
   const checkAndOpenDscModal = async (customUrl?: string) => {
     setCheckingDscBridge(true);
     const activeUrl = customUrl || dscBridgeUrl || getDscBridgeUrl();
@@ -1092,9 +1139,21 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     <span>USB DSC Bridge Online ({dscBridgeUrl.replace(/^https?:\/\//, '')})</span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 font-bold">
-                    Connected
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleOneClickStartBridge}
+                      disabled={checkingDscBridge}
+                      title="Click to restart or re-launch local bridge"
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1 transition shadow-xs"
+                    >
+                      <Zap className={`w-3 h-3 text-emerald-100 ${checkingDscBridge ? 'animate-bounce' : ''}`} />
+                      <span>{checkingDscBridge ? 'Starting...' : '⚡ 1-Click Launch Bridge'}</span>
+                    </button>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 font-bold">
+                      Connected
+                    </span>
+                  </div>
                 </div>
 
                 {/* Signer Name Field - Locked & Verified */}
@@ -1174,7 +1233,18 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                         <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 flex items-start gap-2.5 text-xs text-rose-800 dark:text-rose-200 animate-in fade-in">
                           <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                           <div className="space-y-0.5">
-                            <span className="font-bold block">DSC Signing Blocked</span>
+                            <div className="flex items-center justify-between w-full">
+                              <span className="font-bold block">DSC Signing Blocked</span>
+                              <button
+                                type="button"
+                                onClick={() => checkAndOpenDscModal(dscBridgeUrl)}
+                                disabled={checkingDscBridge}
+                                className="px-2 py-0.5 bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 rounded text-[10px] font-bold hover:bg-rose-300 transition flex items-center gap-1"
+                              >
+                                <RefreshCw className={`w-3 h-3 ${checkingDscBridge ? 'animate-spin' : ''}`} />
+                                Re-scan Dongle
+                              </button>
+                            </div>
                             <p className="text-[11px] text-rose-700 dark:text-rose-300 leading-relaxed">
                               {dscVerifyStatus.message}
                             </p>
@@ -1294,6 +1364,28 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                   />
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     If your DSC bridge is running on another port (e.g. 1621), another host, or HTTPS, you can edit it above.
+                  </p>
+                </div>
+
+                
+                {/* 1-Click Launch Button */}
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-300 dark:border-emerald-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-emerald-600" /> One-Click Bridge Launcher
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOneClickStartBridge}
+                    disabled={checkingDscBridge}
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/25 disabled:opacity-50"
+                  >
+                    {checkingDscBridge ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 text-emerald-200" />}
+                    <span>{checkingDscBridge ? 'Starting DSC Bridge on PC...' : '⚡ 1-Click Start DSC Bridge on PC'}</span>
+                  </button>
+                  <p className="text-[10px] text-emerald-700 dark:text-emerald-300">
+                    If you ran setup once, clicking this will launch port 1620 in background immediately.
                   </p>
                 </div>
 

@@ -31,6 +31,16 @@ try {
   console.error('Registry add warning:', e.message);
 }
 
+// 3. Browser One-Click Launch Protocol (sebidsc://)
+try {
+  execSync(`reg add "HKCU\\Software\\Classes\\sebidsc" /ve /t REG_SZ /d "URL:SEBI Hardware DSC Bridge" /f`);
+  execSync(`reg add "HKCU\\Software\\Classes\\sebidsc" /v "URL Protocol" /t REG_SZ /d "" /f`);
+  execSync(`reg add "HKCU\\Software\\Classes\\sebidsc\\shell\\open\\command" /ve /t REG_SZ /d "wscript.exe \\"${vbsTarget}\\" \\"%1\\"" /f`);
+} catch (e) {
+  console.error('Protocol add warning:', e.message);
+}
+
 console.log('✅ Auto-Start Successfully Configured:');
 console.log('1. Startup Folder Shortcut:', fs.existsSync(shortcutPath));
 console.log('2. Registry Key set: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run');
+console.log('3. Browser 1-Click Protocol registered: sebidsc://');

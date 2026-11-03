@@ -22,4 +22,4 @@ echo.
 echo DSC Bridge auto-start service uninstalled and stopped.
 echo.
 pause
-
+reg delete "HKCU\Software\Classes\sebidsc" /f >nul 2>nul

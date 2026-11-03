@@ -15,7 +15,8 @@ import {
   Lock,
   ShieldCheck,
   Settings,
-  Download
+  Download,
+  Zap
 } from 'lucide-react';
 import api from '../services/api';
 import { getDscBridgeUrl, setDscBridgeUrl, getDefaultDscBridgeUrl } from '../utils/config';
@@ -310,6 +311,52 @@ export default function UploadSignConfirmModal({
   };
 
   // ── 2D. HARDWARE DSC TOKEN FLOW ──
+
+  const handleOneClickStartBridge = () => {
+    setIsProcessing(true);
+    toast('Starting local DSC Bridge...', { icon: '⚡' });
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = 'sebidsc://start';
+    document.body.appendChild(iframe);
+    setTimeout(() => {
+      try { document.body.removeChild(iframe); } catch (e) {}
+    }, 3000);
+
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      try {
+        const data = await api.checkDscBridgeStatus(dscBridgeUrl, 1200);
+        if (data) {
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          setDscBridgeConnected(true);
+          const certList: string[] = (data?.detected && Array.isArray(data.certificates)) ? data.certificates : [];
+          setDetectedCertificates(certList);
+          const autoName = data?.detected ? (data.detectedSignerName || certList[0] || '') : '';
+          setDscSignerName(autoName);
+          if (autoName && data?.detected) {
+            verifyTokenName(autoName);
+          } else {
+            setDscVerifyStatus({
+              loading: false,
+              valid: false,
+              message: 'No digital certificate detected on the USB token. Please ensure your physical DSC token is inserted into your computer.'
+            });
+          }
+          toast.success('DSC Bridge is now Online!');
+        }
+      } catch (err) {
+        if (attempts >= 10) {
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          toast.error('Could not auto-start bridge. Please run install-auto-start.bat once.');
+        }
+      }
+    }, 800);
+  };
+
   const openDscModalFlow = async (overrideUrl?: string) => {
     setIsProcessing(true);
     const activeUrl = overrideUrl || dscBridgeUrl || getDscBridgeUrl();
@@ -743,6 +790,28 @@ export default function UploadSignConfirmModal({
                   />
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">
                     If your DSC bridge is running on another port (e.g. 1621), another host, or HTTPS, you can edit it above.
+                  </p>
+                </div>
+
+
+                {/* 1-Click Launch Button */}
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-300 dark:border-emerald-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-emerald-600" /> One-Click Bridge Launcher
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleOneClickStartBridge}
+                    disabled={isProcessing}
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-md shadow-emerald-600/25 disabled:opacity-50"
+                  >
+                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 text-emerald-200" />}
+                    <span>{isProcessing ? 'Starting DSC Bridge on PC...' : '⚡ 1-Click Start DSC Bridge on PC'}</span>
+                  </button>
+                  <p className="text-[10px] text-emerald-700 dark:text-emerald-300">
+                    If you ran setup once, clicking this will launch port 1620 in background immediately.
                   </p>
                 </div>
 
