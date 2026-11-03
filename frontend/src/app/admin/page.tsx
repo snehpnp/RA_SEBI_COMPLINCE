@@ -12,6 +12,7 @@ import AdminResourcesTab from '@/components/AdminResourcesTab';
 import { useStates } from '@/hooks/useStates';
 import { useCities } from '@/hooks/useCities';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import UserProfileDropdown from '@/components/UserProfileDropdown';
 import { toast } from 'react-hot-toast';
@@ -4724,7 +4725,7 @@ function AdminDashboardContent() {
                   </span>
                 </div>
               )}
-              {(row.approvalStatus === 'REJECTED' || row.l2Details || row.l1Details) && (
+              {(row.approvalStatus === 'REJECTED' || row.l2Details || row.l1Details || row.approvalStatus === 'DIRECT_APPROVED' || row.status === 'SUCCESS') && (
                 <div className="pt-0.5">
                   <button
                     type="button"
@@ -4732,19 +4733,32 @@ function AdminDashboardContent() {
                     className={`text-[10px] px-2 py-0.5 rounded font-bold transition inline-flex items-center gap-1 border shadow-sm ${
                       row.approvalStatus === 'REJECTED'
                         ? 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-800'
-                        : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700/50'
+                        : (row.approvalStatus === 'APPROVED' && Boolean(row.l2Details?.action || row.l2Details?.reviewedByName))
+                        ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700/50'
+                        : 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
                     }`}
-                    title="View L1 Submission vs L2 Approval Details"
+                    title={
+                      row.approvalStatus === 'REJECTED'
+                        ? 'View Rejection Details'
+                        : (row.approvalStatus === 'APPROVED' && Boolean(row.l2Details?.action || row.l2Details?.reviewedByName))
+                        ? 'View L1 Submission vs L2 Approval Details'
+                        : 'View Payment & Plan Details'
+                    }
                   >
                     {row.approvalStatus === 'REJECTED' ? (
                       <>
                         <Eye className="w-3 h-3 text-rose-600 dark:text-rose-400" />
                         <span>Rejection Details</span>
                       </>
-                    ) : (
+                    ) : (row.approvalStatus === 'APPROVED' && Boolean(row.l2Details?.action || row.l2Details?.reviewedByName)) ? (
                       <>
                         <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                         <span>L1/L2 Audit</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>View Details</span>
                       </>
                     )}
                   </button>
@@ -5046,13 +5060,18 @@ function AdminDashboardContent() {
             <span className="text-[11px] text-slate-400 font-medium">
               {s === 'SUCCESS' ? 'Plan Assigned' : (row.remarks || 'Closed')}
             </span>
-            {(row.l1Details || row.l2Details) && (
+            {(row.l1Details || row.l2Details || row.approvalStatus) && (
               <button
                 type="button"
                 onClick={() => setSelectedL1L2Diff(row)}
-                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded text-[10px] font-bold border border-amber-300 dark:border-amber-700/50"
+                className={`px-2 py-1 rounded text-[10px] font-bold border transition ${
+                  (row.approvalStatus === 'APPROVED' && Boolean(row.l2Details?.action || row.l2Details?.reviewedByName))
+                    ? 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-700/50'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10'
+                }`}
+                title="View Payment Details"
               >
-                L1/L2
+                {(row.approvalStatus === 'APPROVED' && Boolean(row.l2Details?.action || row.l2Details?.reviewedByName)) ? 'L1/L2' : 'Details'}
               </button>
             )}
           </div>
@@ -6353,6 +6372,17 @@ function AdminDashboardContent() {
                   )}
                 </div>
               )}
+
+              {/* Product Flyer / Brochure Button */}
+              <Link
+                href="/brochure"
+                target="_blank"
+                className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm"
+                title="View & Export Software Feature Brochure (PDF)"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Brochure</span>
+              </Link>
 
               {/* Theme Toggle */}
               <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">

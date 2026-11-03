@@ -509,7 +509,7 @@ const checkComplianceForTenant = async (tenantId) => {
             }
         }
         if (isPeriodicAuditingActive) {
-            // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 incl. GST per client per financial year
+            // 5. SEBI FEE FRAMEWORK CHECK (SR.17) — Max ₹1,51,000 Base Advisory Fee (excl. GST) per client per financial year
             const today = new Date();
             const fyStart = today.getMonth() >= 3
                 ? new Date(today.getFullYear(), 3, 1)
@@ -527,17 +527,30 @@ const checkComplianceForTenant = async (tenantId) => {
                     clientId,
                     status: 'SUCCESS',
                     createdAt: { $gte: fyStart, $lte: fyEnd }
-                }).select('amount').lean();
-                const totalPaidFY = clientPayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+                }).select('amount baseAmount gstAmount subscriptionId').lean();
+                // Calculate total base advisory fee excluding statutory GST taxes
+                const totalBasePaidFY = clientPayments.reduce((sum, p) => {
+                    let base = 0;
+                    if (p.baseAmount != null && !isNaN(Number(p.baseAmount)) && Number(p.baseAmount) > 0) {
+                        base = Number(p.baseAmount);
+                    }
+                    else if (p.gstAmount != null && !isNaN(Number(p.gstAmount))) {
+                        base = Number(p.amount) - Number(p.gstAmount);
+                    }
+                    else if (p.amount != null) {
+                        base = Number(p.amount) / 1.18;
+                    }
+                    return sum + base;
+                }, 0);
                 const existingFeeAlert = await db_1.default.ComplianceAlert.findOne({
                     tenantId,
                     alertType: 'SEBI_FEE_EXCEEDED',
                     status: 'OPEN',
                     clientId
                 }).lean();
-                if (totalPaidFY > SEBI_FEE_CAP) {
-                    const excessAmount = totalPaidFY - SEBI_FEE_CAP;
-                    const description = `SEBI Fee Cap Violation (SR.17): Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has been charged ₹${totalPaidFY.toLocaleString('en-IN')} (incl. GST) in FY ${fyStart.getFullYear()}-${fyEnd.getFullYear()} — exceeds the SEBI limit of ₹1,51,000 by ₹${excessAmount.toLocaleString('en-IN')}. Refund or rectify immediately.`;
+                if (totalBasePaidFY > SEBI_FEE_CAP) {
+                    const excessAmount = totalBasePaidFY - SEBI_FEE_CAP;
+                    const description = `SEBI Fee Cap Violation (SR.17): Client "${client.name}" (PAN: ${client.pan || 'N/A'}) has been charged ₹${Math.round(totalBasePaidFY).toLocaleString('en-IN')} Base Advisory Fee in FY ${fyStart.getFullYear()}-${fyEnd.getFullYear()} — exceeds the SEBI limit of ₹1,51,000 by ₹${Math.round(excessAmount).toLocaleString('en-IN')}. Refund or rectify immediately.`;
                     if (!existingFeeAlert) {
                         const newAlert = await db_1.default.ComplianceAlert.create({
                             tenantId,
@@ -556,13 +569,13 @@ const checkComplianceForTenant = async (tenantId) => {
                                 tenantId,
                                 requirementId: feeRequirement._id,
                                 status: 'NON_COMPLIANT',
-                                officerRemarks: `System auto-generated: SEBI fee cap exceeded for client "${client.name}". Total charged: ₹${totalPaidFY.toLocaleString('en-IN')}`
+                                officerRemarks: `System auto-generated: SEBI fee cap exceeded for client "${client.name}". Total Base Fee: ₹${Math.round(totalBasePaidFY).toLocaleString('en-IN')}`
                             });
                             await db_1.default.Penalty.create({
                                 tenantId,
                                 auditId: feeAudit._id,
                                 amount: 10000,
-                                reason: `SEBI Fee Framework Violation (SR.17): Client "${client.name}" charged ₹${totalPaidFY.toLocaleString('en-IN')} incl. GST — exceeds ₹1,51,000 annual cap.`,
+                                reason: `SEBI Fee Framework Violation (SR.17): Client "${client.name}" charged ₹${Math.round(totalBasePaidFY).toLocaleString('en-IN')} Base Fee — exceeds ₹1,51,000 annual cap.`,
                                 status: 'PENDING_PAYMENT'
                             });
                         }
@@ -580,14 +593,52 @@ const checkComplianceForTenant = async (tenantId) => {
                         await db_1.default.ComplianceAlert.findByIdAndUpdate(existingFeeAlert._id, {
                             $set: {
                                 status: 'CLOSED',
-                                remarks: `Auto-resolved: Client "${client.name}" total FY payment ₹${totalPaidFY.toLocaleString('en-IN')} is now within ₹1,51,000 cap.`,
+                                remarks: `Auto-resolved: Client "${client.name}" total FY base fee ₹${Math.round(totalBasePaidFY).toLocaleString('en-IN')} is within ₹1,51,000 cap.`,
                                 closedAt: new Date()
                             }
                         });
                     }
+                    // Automatically clean up any false SR.17 audits & penalties for this compliant client
+                    const feeRequirement = await db_1.default.ComplianceRequirement.findOne({
+                        serialNo: 17
+                    }).lean();
+                    if (feeRequirement) {
+                        const escapedName = client.name ? client.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+                        if (escapedName) {
+                            const falseAudits = await db_1.default.ComplianceAudit.find({
+                                tenantId,
+                                requirementId: feeRequirement._id,
+                                officerRemarks: { $regex: new RegExp(escapedName, 'i') }
+                            }).lean();
+                            for (const fa of falseAudits) {
+                                await db_1.default.Penalty.deleteMany({ auditId: fa._id, status: 'PENDING_PAYMENT' });
+                                await db_1.default.ComplianceAudit.findByIdAndDelete(fa._id);
+                            }
+                        }
+                    }
                 }
             }
-            // 5B. PAN COLLECTION FOR SEGREGATION CHECK (SR.48)
+            // Cleanup legacy erroneous PAN penalties that were accidentally linked to SR.48 (ATR submission)
+            const atrReq = await db_1.default.ComplianceRequirement.findOne({ serialNo: 48 }).lean();
+            if (atrReq) {
+                const wrongAtrAudits = await db_1.default.ComplianceAudit.find({
+                    tenantId,
+                    requirementId: atrReq._id,
+                    $or: [
+                        { officerRemarks: { $regex: /PAN missing/i } },
+                        { officerRemarks: { $regex: /PAN Collection/i } }
+                    ]
+                }).lean();
+                for (const wa of wrongAtrAudits) {
+                    await db_1.default.Penalty.deleteMany({ auditId: wa._id, status: 'PENDING_PAYMENT' });
+                    await db_1.default.ComplianceAudit.findByIdAndDelete(wa._id);
+                }
+            }
+            await db_1.default.Penalty.deleteMany({
+                tenantId,
+                reason: { $regex: /PAN Collection Violation \(SR\.48\)/i }
+            });
+            // 5B. PAN COLLECTION FOR SEGREGATION CHECK (SR.54) — 15-Day Grace Period
             const KYC_COMPLETE_STATUSES = ['AGREEMENT_PENDING', 'PAYMENT_PENDING', 'ACTIVE', 'INACTIVE'];
             const rawClientsWithActivePlans = await db_1.default.Client.find({
                 userId: { $in: tenantUserIds },
@@ -610,31 +661,66 @@ const checkComplianceForTenant = async (tenantId) => {
                     clientId
                 }).lean();
                 if (isPanMissing) {
-                    const description = `PAN Collection Violation (SR.48): Client "${client.name}" has an active subscription and completed KYC, but PAN details are missing. PAN is mandatory for family/dependent segregation compliance under SEBI regulations.`;
+                    // Calculate active subscription duration to provide a 15-day grace period
+                    const activeSubs = (client.subscriptions || []).filter((s) => s.status === 'ACTIVE');
+                    const firstActiveDate = activeSubs.reduce((earliest, s) => {
+                        const d = new Date(s.startDate || s.createdAt || client.createdAt || Date.now());
+                        return d < earliest ? d : earliest;
+                    }, new Date());
+                    const ageInDays = Math.max(0, Math.floor((Date.now() - firstActiveDate.getTime()) / (1000 * 3600 * 24)));
+                    const GRACE_PERIOD_DAYS = 15;
+                    const isGracePeriodActive = ageInDays < GRACE_PERIOD_DAYS;
+                    const daysRemaining = Math.max(0, GRACE_PERIOD_DAYS - ageInDays);
+                    const description = isGracePeriodActive
+                        ? `PAN Collection Pending (SR.54): Client "${client.name}" has an active subscription, but PAN details are missing. Grace period active: ${daysRemaining} day(s) remaining to collect PAN before penalty applies.`
+                        : `PAN Collection Violation (SR.54): Client "${client.name}" has an active subscription for ${ageInDays} days, and PAN details were not collected within the 15-day grace period. Mandatory under SEBI regulations.`;
+                    const severity = isGracePeriodActive ? (ageInDays >= 10 ? 'HIGH' : 'MEDIUM') : 'HIGH';
                     if (!existingPanAlert) {
                         const newPanAlert = await db_1.default.ComplianceAlert.create({
                             tenantId,
                             alertType: 'PAN_MISSING',
-                            severity: 'HIGH',
+                            severity,
                             description,
                             clientId
                         });
                         alertsCreated.push(newPanAlert.toObject());
-                        const panRequirement = await db_1.default.ComplianceRequirement.findOne({ serialNo: 48 }).lean();
+                    }
+                    else {
+                        await db_1.default.ComplianceAlert.findByIdAndUpdate(existingPanAlert._id, {
+                            $set: { severity, description }
+                        });
+                    }
+                    // ONLY generate audit and penalty if grace period (15 days) has expired!
+                    if (!isGracePeriodActive) {
+                        const panRequirement = await db_1.default.ComplianceRequirement.findOne({ serialNo: 54 }).lean();
                         if (panRequirement) {
-                            const panAudit = await db_1.default.ComplianceAudit.create({
+                            const escapedName = client.name ? client.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+                            let panAudit = await db_1.default.ComplianceAudit.findOne({
                                 tenantId,
                                 requirementId: panRequirement._id,
-                                status: 'NON_COMPLIANT',
-                                officerRemarks: `System auto-generated: PAN missing for client "${client.name}" with active subscription and completed KYC.`
+                                officerRemarks: { $regex: new RegExp(escapedName, 'i') }
                             });
-                            await db_1.default.Penalty.create({
+                            if (!panAudit) {
+                                panAudit = await db_1.default.ComplianceAudit.create({
+                                    tenantId,
+                                    requirementId: panRequirement._id,
+                                    status: 'NON_COMPLIANT',
+                                    officerRemarks: `System auto-generated: PAN missing for client "${client.name}" after 15-day grace period (Active for ${ageInDays} days).`
+                                });
+                            }
+                            const existingPenalty = await db_1.default.Penalty.findOne({
                                 tenantId,
-                                auditId: panAudit._id,
-                                amount: 5000,
-                                reason: `PAN Collection Violation (SR.48): Client "${client.name}" — active subscription + KYC complete but PAN missing.`,
-                                status: 'PENDING_PAYMENT'
-                            });
+                                auditId: panAudit._id
+                            }).lean();
+                            if (!existingPenalty) {
+                                await db_1.default.Penalty.create({
+                                    tenantId,
+                                    auditId: panAudit._id,
+                                    amount: 5000,
+                                    reason: `PAN Collection Violation (SR.54): Client "${client.name}" — active subscription for ${ageInDays} days without PAN (15-day grace period expired).`,
+                                    status: 'PENDING_PAYMENT'
+                                });
+                            }
                         }
                     }
                 }
@@ -647,6 +733,28 @@ const checkComplianceForTenant = async (tenantId) => {
                                 closedAt: new Date()
                             }
                         });
+                    }
+                    // Auto-resolve any audit/penalty if PAN has been provided
+                    const panRequirement = await db_1.default.ComplianceRequirement.findOne({ serialNo: 54 }).lean();
+                    if (panRequirement) {
+                        const escapedName = client.name ? client.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+                        if (escapedName) {
+                            const panAudit = await db_1.default.ComplianceAudit.findOne({
+                                tenantId,
+                                requirementId: panRequirement._id,
+                                officerRemarks: { $regex: new RegExp(escapedName, 'i') }
+                            });
+                            if (panAudit) {
+                                await db_1.default.ComplianceAudit.findByIdAndUpdate(panAudit._id, {
+                                    $set: {
+                                        status: 'COMPLIANT',
+                                        officerRemarks: `Auto-resolved: PAN "${client.pan}" provided.`,
+                                        resolvedAt: new Date()
+                                    }
+                                });
+                                await db_1.default.Penalty.deleteMany({ auditId: panAudit._id, status: 'PENDING_PAYMENT' });
+                            }
+                        }
                     }
                 }
             }
@@ -1694,6 +1802,14 @@ const getPenalties = async (req, res) => {
             // In setup mode, penalties are paused
             return res.status(200).json({ success: true, data: [] });
         }
+        // Auto-clean any legacy false penalties (false SR.48 ATR / false SR.17 Fee Cap with GST)
+        await db_1.default.Penalty.deleteMany({
+            tenantId,
+            $or: [
+                { reason: { $regex: /PAN Collection Violation \(SR\.48\)/i } },
+                { reason: { $regex: /SEBI Fee Framework Violation \(SR\.17\)/i } }
+            ]
+        });
         const cutoffDate = tenant?.complianceCutoffDate ? new Date(tenant.complianceCutoffDate) : null;
         const penaltyQuery = {
             tenantId,
@@ -2288,6 +2404,33 @@ const purgePreOperationalComplianceNoise = async () => {
                     console.log(`🧹 [COMPLIANCE CLEANUP] Purged pre-operational noise for tenant "${t.companyName || t.name || tId}": ${resPenalties.modifiedCount} penalties waived, ${resAudits.modifiedCount} audits waived.`);
                 }
             }
+            // Automatically purge legacy false penalties:
+            // 1. Delete false SR.48 penalties (created by old bug that confused PAN Collection with ATR submission)
+            const wrongAtrPenalties = await db_1.default.Penalty.find({
+                tenantId: resolvedTenantId,
+                $or: [
+                    { reason: { $regex: /PAN Collection Violation \(SR\.48\)/i } },
+                    { reason: { $regex: /PAN missing/i } }
+                ]
+            }).lean();
+            for (const wp of wrongAtrPenalties) {
+                if (wp.auditId) {
+                    await db_1.default.ComplianceAudit.findByIdAndDelete(wp.auditId);
+                }
+                await db_1.default.Penalty.findByIdAndDelete(wp._id);
+            }
+            // 2. Delete false SR.17 fee penalties where client's base fee was under ₹1,51,000 (falsely flagged due to GST)
+            const wrongFeePenalties = await db_1.default.Penalty.find({
+                tenantId: resolvedTenantId,
+                reason: { $regex: /SEBI Fee Framework Violation \(SR\.17\)/i }
+            }).lean();
+            for (const wfp of wrongFeePenalties) {
+                if (wfp.auditId) {
+                    await db_1.default.ComplianceAudit.findByIdAndDelete(wfp.auditId);
+                }
+                await db_1.default.Penalty.findByIdAndDelete(wfp._id);
+            }
+            await db_1.default.ComplianceAlert.updateMany({ tenantId: resolvedTenantId, alertType: 'SEBI_FEE_EXCEEDED' }, { $set: { status: 'CLOSED', remarks: 'Auto-resolved: Corrected base fee calculation.', closedAt: new Date() } });
         }
     }
     catch (err) {
