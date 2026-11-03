@@ -941,22 +941,14 @@ export const dscBridgeTokenStatus = async (req: Request, res: Response) => {
       });
     }
 
-<<<<<<< HEAD
-    // When no physical USB token is detected, do NOT fallback to database!
-=======
     // 2. Strict Hardware Enforcement: If no physical certificate is present, return detected: false
->>>>>>> 88e3fe86f701a0b5c96829669783a46c4cd904c3
     return res.json({
       success: true,
       detected: false,
       certificates: [],
       detectedSignerName: null,
       smartCardServiceActive: true,
-<<<<<<< HEAD
-      details: 'No physical USB Hardware DSC Token detected. Please insert your USB token.'
-=======
-      details: 'No physical Hardware DSC Token detected in Windows Keystore. Please insert your USB Token into your computer.'
->>>>>>> 88e3fe86f701a0b5c96829669783a46c4cd904c3
+      details: 'No physical Hardware DSC Token detected. Please insert your USB token into your computer.'
     });
   } catch (err: any) {
     return res.json({
@@ -1009,10 +1001,6 @@ export const dscBridgeSignPdf = async (req: Request, res: Response) => {
 
     const winCerts = await getDetectedCertNames();
     let resolvedSigner = signerName && String(signerName).trim();
-<<<<<<< HEAD
-    if (!resolvedSigner) {
-      return res.status(400).json({ success: false, message: 'Valid physical USB DSC Token signer name is required.' });
-=======
     if (!resolvedSigner && winCerts && winCerts.length > 0) {
       resolvedSigner = winCerts[0];
     }
@@ -1036,7 +1024,7 @@ export const dscBridgeSignPdf = async (req: Request, res: Response) => {
           message: authResult.message || `DSC Token "${resolvedSigner}" is not authorized for this company/tenant.`
         });
       }
->>>>>>> 88e3fe86f701a0b5c96829669783a46c4cd904c3
+
     }
 
     const cleanSigner = sanitizeForWinAnsi(resolvedSigner);
