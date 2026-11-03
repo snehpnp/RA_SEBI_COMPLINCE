@@ -831,13 +831,14 @@ const dscBridgeTokenStatus = async (req, res) => {
                 details: 'Hardware DSC Token Bridge active and connected with USB Token.'
             });
         }
+        // 2. Strict Hardware Enforcement: If no physical certificate is present, return detected: false
         return res.json({
             success: true,
             detected: false,
             certificates: [],
             detectedSignerName: null,
             smartCardServiceActive: true,
-            details: 'No physical USB Hardware DSC Token detected. Please insert your USB token.'
+            details: 'No physical Hardware DSC Token detected. Please insert your USB token into your computer.'
         });
     }
     catch (err) {
@@ -890,8 +891,27 @@ const dscBridgeSignPdf = async (req, res) => {
         }
         const winCerts = await (0, dscBridgeService_1.getDetectedCertNames)();
         let resolvedSigner = signerName && String(signerName).trim();
+        if (!resolvedSigner && winCerts && winCerts.length > 0) {
+            resolvedSigner = winCerts[0];
+        }
         if (!resolvedSigner) {
-            return res.status(400).json({ success: false, message: 'Valid physical USB DSC Token signer name is required.' });
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot sign: No valid Hardware DSC Token detected. Please insert your physical USB Token into your computer.'
+            });
+        }
+        // Strict Domain & Tenant Authorization Verification:
+        let tenantId = user?.tenantId || req.headers['x-tenant-id'];
+        const loggedInUserId = user?.id || user?._id;
+        const loggedInUserName = user?.name || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || '';
+        if (tenantId) {
+            const authResult = await (0, exports.checkDscSignerPermission)(tenantId, loggedInUserId, loggedInUserName, resolvedSigner);
+            if (!authResult.valid) {
+                return res.status(403).json({
+                    success: false,
+                    message: authResult.message || `DSC Token "${resolvedSigner}" is not authorized for this company/tenant.`
+                });
+            }
         }
         const cleanSigner = sanitizeForWinAnsi(resolvedSigner);
         const cleanPlacement = placement || 'BOTTOM_RIGHT';
