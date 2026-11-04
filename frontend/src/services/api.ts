@@ -1715,6 +1715,26 @@ class ApiClient {
     });
   }
 
+  async bulkDeleteCallRecordings(clientId: string, recordingIds: string[]) {
+    return this.request(`/admin/vaults/${clientId}/recordings/bulk-delete`, {
+      method: 'POST',
+      body: JSON.stringify({ recordingIds })
+    });
+  }
+
+  async scanCallRecordingTranscript(clientId: string, recordingId: string, transcriptText?: string) {
+    return this.request(`/admin/vaults/${clientId}/recordings/${recordingId}/scan`, {
+      method: 'POST',
+      body: JSON.stringify({ transcriptText })
+    });
+  }
+
+  async autoTranscribeCallRecording(clientId: string, recordingId: string) {
+    return this.request(`/admin/vaults/${clientId}/recordings/${recordingId}/auto-transcribe`, {
+      method: 'POST'
+    });
+  }
+
   async downloadVaultFile(endpoint: string, fallbackFilename: string) {
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : '';
     const tenantId = typeof window !== 'undefined' ? localStorage.getItem('tenantId') : '';

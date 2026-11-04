@@ -48,6 +48,9 @@ import {
   getClientVaultDetails,
   uploadCallRecording,
   deleteCallRecording,
+  bulkDeleteCallRecordings,
+  auditCallRecordingTranscript,
+  autoTranscribeRecording,
   exportClientVaultZip,
   exportSingleFolder,
   downloadSingleInvoice,
@@ -952,6 +955,27 @@ router.delete(
   requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
   enforceTenantIsolation,
   deleteCallRecording
+);
+router.post(
+  '/admin/vaults/:clientId/recordings/bulk-delete',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  bulkDeleteCallRecordings
+);
+router.post(
+  '/admin/vaults/:clientId/recordings/:recordingId/scan',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  auditCallRecordingTranscript
+);
+router.post(
+  '/admin/vaults/:clientId/recordings/:recordingId/auto-transcribe',
+  authenticateJWT,
+  requireAnyPermission(['ACCESS_VAULTS', 'ACCESS_VAULTS_FULL']),
+  enforceTenantIsolation,
+  autoTranscribeRecording
 );
 router.get(
   '/admin/vaults/:clientId/export-zip',

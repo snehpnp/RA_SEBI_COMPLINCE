@@ -1,3 +1,5 @@
+import { scanTextForSebiViolations, buildConversationTurns } from '../utils/sebiKeywordScanner';
+import { transcribeAudioFile } from '../utils/audioTranscriber';
 import { Response } from 'express';
 import mongoose from 'mongoose';
 import path from 'path';
@@ -877,16 +879,25 @@ export const uploadCallRecording = async (req: AuthenticatedRequest, res: Respon
     const fileUrl = `/uploads/recordings/${req.file.filename}`;
     const parsedDuration = parseInt(String(durationSeconds), 10) || 0;
 
-    const validCallTypes = ['INBOUND', 'OUTBOUND', 'ADVISORY', 'ONBOARDING', 'COMPLAINT', 'RISK_PROFILE'];
-    const safeCallType = validCallTypes.includes(String(callType).toUpperCase())
-      ? (String(callType).toUpperCase() as any)
-      : 'ADVISORY';
+    const effectiveTitle = title && String(title).trim() ? String(title).trim() : (callType && String(callType).trim() ? String(callType).trim() : req.file.originalname);
+    const effectiveCallType = callType && String(callType).trim() ? String(callType).trim() : 'Service Call';
 
+    // Fast initial scan on title and summary
+    const initialTextToScan = `${effectiveTitle} ${summary || ''}`.trim();
+    const initialScan = scanTextForSebiViolations(initialTextToScan);
+    const initialTurns = buildConversationTurns(
+      summary || effectiveTitle,
+      [],
+      callerStaffName,
+      client.name || 'Client'
+    );
+
+    // 1. Immediately create recording in DB so upload response is INSTANT (< 200ms)
     const newRecording: any = await dynamicDb.ClientCallRecording.create({
       tenantId: new mongoose.Types.ObjectId(tenantId),
       clientId: new mongoose.Types.ObjectId(clientId),
-      title: title || req.file.originalname,
-      callType: safeCallType,
+      title: effectiveTitle,
+      callType: effectiveCallType,
       callDate: new Date(callDate),
       durationSeconds: parsedDuration,
       fileUrl,
@@ -897,7 +908,13 @@ export const uploadCallRecording = async (req: AuthenticatedRequest, res: Respon
       callerStaffName,
       clientPhone: client.mobile || '',
       summary: summary || `Call recording with client ${client.name}`,
-      isComplianceVerified: String(isComplianceVerified) === 'true' || isComplianceVerified === true
+      isComplianceVerified: String(isComplianceVerified) === 'true' || isComplianceVerified === true,
+      transcriptText: summary || '',
+      conversationTurns: initialTurns,
+      transcriptionStatus: initialScan.isFlagged ? 'FLAGGED' : 'PROCESSING',
+      detectedKeywords: initialScan.detectedKeywords,
+      sebiComplianceScore: initialScan.complianceScore,
+      flaggedCount: initialScan.flaggedCount
     });
 
     // Write to Activity Log so it is reflected in the audit trail & timeline
@@ -910,23 +927,197 @@ export const uploadCallRecording = async (req: AuthenticatedRequest, res: Respon
       category: 'STAFF_ACTION',
       action: 'CALL_RECORDING_UPLOADED',
       title: 'Call Recording Secured in Vault',
-      description: `Uploaded ${safeCallType} recording: "${req.file.originalname}" (${formatDuration(parsedDuration)}) by ${callerStaffName}`,
+      description: `Uploaded ${effectiveCallType} recording: "${req.file.originalname}" (${formatDuration(parsedDuration)}) by ${callerStaffName}`,
       metadata: {
         recordingId: newRecording._id,
         fileName: req.file.originalname,
-        callType: safeCallType,
+        callType: effectiveCallType,
         durationSeconds: parsedDuration,
         fileUrl
       }
     });
 
+    // 2. Launch AI Speech-to-Text Transcription in BACKGROUND (Non-blocking)
+    if (req.file?.path) {
+      const recordingId = newRecording._id;
+      const uploadedFilePath = req.file.path;
+      const clientName = client.name || 'Client';
+
+      setImmediate(async () => {
+        try {
+          const transcribeRes = await transcribeAudioFile(uploadedFilePath);
+          if (transcribeRes && transcribeRes.success && transcribeRes.text) {
+            const speechText = transcribeRes.text;
+            const segments = transcribeRes.segments || [];
+            const dur = transcribeRes.duration || parsedDuration;
+
+            const fullTextToScan = `${effectiveTitle} ${summary || ''} ${speechText}`.trim();
+            const bgScan = scanTextForSebiViolations(fullTextToScan);
+            const turns = buildConversationTurns(speechText, segments, callerStaffName, clientName);
+
+            await dynamicDb.ClientCallRecording.findByIdAndUpdate(recordingId, {
+              durationSeconds: dur,
+              transcriptText: speechText,
+              conversationTurns: turns,
+              transcriptionStatus: bgScan.isFlagged ? 'FLAGGED' : 'COMPLETED',
+              detectedKeywords: bgScan.detectedKeywords,
+              sebiComplianceScore: bgScan.complianceScore,
+              flaggedCount: bgScan.flaggedCount
+            });
+          } else if (transcribeRes && transcribeRes.duration && (!parsedDuration || parsedDuration === 0)) {
+            await dynamicDb.ClientCallRecording.findByIdAndUpdate(recordingId, {
+              durationSeconds: transcribeRes.duration,
+              transcriptionStatus: 'COMPLETED'
+            });
+          }
+        } catch (bgErr) {
+          console.warn('Background audio transcription error:', bgErr);
+        }
+      });
+    }
+
     return res.status(201).json({
       success: true,
-      message: 'Call recording successfully uploaded and indexed in Client Vault.',
+      message: 'Call recording saved successfully!',
       data: newRecording
     });
   } catch (error: any) {
     console.error('Error in uploadCallRecording:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+// ============================================================================
+// 3B. AUDIT CALL RECORDING TRANSCRIPT FOR SEBI PROHIBITED KEYWORDS
+// ============================================================================
+export const auditCallRecordingTranscript = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const { clientId, recordingId } = req.params;
+    const { transcriptText } = req.body;
+
+    if (!tenantId || !clientId || !recordingId) {
+      return res.status(400).json({ success: false, message: 'Missing parameters' });
+    }
+
+    const recording: any = await dynamicDb.ClientCallRecording.findOne({
+      _id: recordingId,
+      clientId,
+      tenantId
+    });
+
+    if (!recording) {
+      return res.status(404).json({ success: false, message: 'Recording not found' });
+    }
+
+    const textToScan = transcriptText !== undefined ? String(transcriptText) : (recording.transcriptText || recording.summary || recording.title || '');
+    const scan = scanTextForSebiViolations(textToScan);
+
+    const client: any = await dynamicDb.Client.findById(clientId).lean();
+    const turns = buildConversationTurns(
+      textToScan,
+      [],
+      recording.callerStaffName || 'Compliance Staff',
+      client?.name || 'Client'
+    );
+
+    const updated = await dynamicDb.ClientCallRecording.findByIdAndUpdate(
+      recordingId,
+      {
+        transcriptText: textToScan,
+        conversationTurns: turns,
+        detectedKeywords: scan.detectedKeywords,
+        sebiComplianceScore: scan.complianceScore,
+        flaggedCount: scan.flaggedCount,
+        transcriptionStatus: scan.isFlagged ? 'FLAGGED' : 'COMPLETED'
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Call transcript scanned successfully for SEBI compliance',
+      data: {
+        recording: updated,
+        scan,
+        conversationTurns: turns
+      }
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============================================================================
+// 3B. AUTO-TRANSCRIBE AUDIO RECORDING TO TEXT & SCAN (Speech-to-Text)
+// ============================================================================
+export const autoTranscribeRecording = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const { clientId, recordingId } = req.params;
+
+    if (!tenantId || !clientId || !recordingId) {
+      return res.status(400).json({ success: false, message: 'Missing parameters' });
+    }
+
+    const recording: any = await dynamicDb.ClientCallRecording.findOne({
+      _id: recordingId,
+      clientId,
+      tenantId
+    });
+
+    if (!recording) {
+      return res.status(404).json({ success: false, message: 'Recording not found' });
+    }
+
+    const physicalPath = resolveAttachmentFilePath(recording.fileUrl);
+    if (!physicalPath || !fs.existsSync(physicalPath)) {
+      return res.status(400).json({ success: false, message: 'Physical audio recording file not found on disk.' });
+    }
+
+    const transcribeRes = await transcribeAudioFile(physicalPath);
+    const transcribedText = transcribeRes.text || '';
+
+    // Run SEBI keyword scan on transcribed speech
+    const scan = scanTextForSebiViolations(transcribedText);
+
+    const client: any = await dynamicDb.Client.findById(clientId).lean();
+    const turns = buildConversationTurns(
+      transcribedText,
+      transcribeRes.segments || [],
+      recording.callerStaffName || 'Compliance Staff',
+      client?.name || 'Client'
+    );
+
+    const updated = await dynamicDb.ClientCallRecording.findByIdAndUpdate(
+      recordingId,
+      {
+        transcriptText: transcribedText,
+        conversationTurns: turns,
+        durationSeconds: transcribeRes.duration || recording.durationSeconds,
+        detectedKeywords: scan.detectedKeywords,
+        sebiComplianceScore: scan.complianceScore,
+        flaggedCount: scan.flaggedCount,
+        transcriptionStatus: scan.isFlagged ? 'FLAGGED' : 'COMPLETED'
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: scan.isFlagged
+        ? `Speech transcribed: ${scan.flaggedCount} prohibited word(s) detected!`
+        : 'Speech transcribed: No prohibited words detected.',
+      data: {
+        recording: updated,
+        scan,
+        transcribedText,
+        conversationTurns: turns
+      }
+    });
+  } catch (error: any) {
+    console.error('Error in autoTranscribeRecording:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -980,6 +1171,64 @@ export const deleteCallRecording = async (req: AuthenticatedRequest, res: Respon
     });
   } catch (error: any) {
     console.error('Error in deleteCallRecording:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============================================================================
+// 4B. BULK DELETE CALL RECORDINGS
+// ============================================================================
+export const bulkDeleteCallRecordings = async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const { clientId } = req.params;
+    const { recordingIds } = req.body;
+
+    if (!tenantId) return res.status(400).json({ success: false, message: 'Tenant context missing.' });
+    if (!recordingIds || !Array.isArray(recordingIds) || recordingIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'No recording IDs provided.' });
+    }
+
+    const recordings = await dynamicDb.ClientCallRecording.find({
+      _id: { $in: recordingIds },
+      clientId,
+      tenantId
+    });
+
+    for (const rec of recordings) {
+      if (rec.fileUrl) {
+        const physicalPath = resolveAttachmentFilePath(rec.fileUrl);
+        if (physicalPath && fs.existsSync(physicalPath)) {
+          try { fs.unlinkSync(physicalPath); } catch {}
+        }
+      }
+    }
+
+    const deleteResult = await dynamicDb.ClientCallRecording.deleteMany({
+      _id: { $in: recordingIds },
+      clientId,
+      tenantId
+    });
+
+    await logActivity({
+      tenantId,
+      actorId: req.user?.id,
+      actorType: 'STAFF',
+      targetClientId: clientId,
+      category: 'STAFF_ACTION',
+      action: 'CALL_RECORDINGS_BULK_DELETED',
+      title: 'Call Recordings Bulk Removed',
+      description: `Bulk deleted ${deleteResult.deletedCount} recordings`,
+      metadata: { recordingIds, count: deleteResult.deletedCount }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `${deleteResult.deletedCount} recording(s) deleted successfully.`,
+      deletedCount: deleteResult.deletedCount
+    });
+  } catch (error: any) {
+    console.error('Error in bulkDeleteCallRecordings:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };

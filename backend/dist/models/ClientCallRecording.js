@@ -43,7 +43,6 @@ exports.ClientCallRecordingSchema = new mongoose_1.Schema({
     title: { type: String, required: true, trim: true },
     callType: {
         type: String,
-        enum: ['INBOUND', 'OUTBOUND', 'ADVISORY', 'ONBOARDING', 'COMPLAINT', 'RISK_PROFILE'],
         default: 'ADVISORY'
     },
     callDate: { type: Date, default: Date.now, required: true },
@@ -57,7 +56,25 @@ exports.ClientCallRecordingSchema = new mongoose_1.Schema({
     clientPhone: { type: String, default: null },
     summary: { type: String, default: null },
     isComplianceVerified: { type: Boolean, default: true },
-    verifiedByStaffId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Staff', default: null }
+    verifiedByStaffId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Staff', default: null },
+    transcriptText: { type: String, default: null },
+    conversationTurns: {
+        type: [
+            {
+                speaker: { type: String, default: 'EXECUTIVE' },
+                speakerName: { type: String, default: 'Staff' },
+                text: { type: String, default: '' },
+                highlightedText: { type: String, default: '' },
+                detectedKeywords: { type: [mongoose_1.Schema.Types.Mixed], default: [] },
+                timestamp: { type: String, default: '00:00' }
+            }
+        ],
+        default: []
+    },
+    transcriptionStatus: { type: String, default: 'PENDING' },
+    detectedKeywords: { type: [mongoose_1.Schema.Types.Mixed], default: [] },
+    sebiComplianceScore: { type: String, default: 'COMPLIANT' },
+    flaggedCount: { type: Number, default: 0 }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'ClientCallRecording' });
 exports.ClientCallRecordingSchema.index({ clientId: 1, callDate: -1 });
 exports.ClientCallRecording = mongoose_1.default.models.ClientCallRecording ||

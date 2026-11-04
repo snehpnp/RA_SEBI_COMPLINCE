@@ -34,12 +34,91 @@ import {
   Plus,
   Calendar,
   FileDown,
+  FileSearch,
+  AlertTriangle,
   Receipt,
   Sparkles,
-  Copy
+  Copy,
+  Mic,
+  MicOff,
+  MessageSquare
 } from 'lucide-react';
 import api from '@/services/api';
 import { toast } from 'react-hot-toast';
+
+// Helper to resolve media URLs to full backend URLs
+const resolveMediaUrl = (url?: string) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  const baseUrl = (process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() || '').replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${baseUrl}${cleanPath}`;
+};
+
+// Helper to highlight detected keywords inside chat bubble text
+const highlightProhibitedWords = (text: string, detectedKeywords: any[] = []) => {
+  if (!text) return '';
+  if (!detectedKeywords || detectedKeywords.length === 0) return text;
+
+  let res = text;
+  for (const item of detectedKeywords) {
+    const kw = typeof item === 'string' ? item : item.keyword;
+    if (!kw) continue;
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const isDevanagari = /[\u0900-\u097F]/.test(kw);
+    const regex = isDevanagari
+      ? new RegExp(`(${escaped})`, 'gi')
+      : new RegExp(`(\\b${escaped}\\b)`, 'gi');
+    res = res.replace(
+      regex,
+      `<mark class="bg-rose-600 text-white font-black px-1.5 py-0.5 rounded shadow-xs" title="SEBI Prohibited Term">$1</mark>`
+    );
+  }
+  return res;
+};
+
+// Helper to generate role-based conversation turns
+const generateClientTurns = (text: string, staffName?: string, clientName?: string) => {
+  if (!text || !text.trim()) return [];
+  const sName = staffName || 'Advisory Executive';
+  const cName = clientName || 'Client';
+
+  if (/(Executive|Staff|Client|Investor|Advisor):/i.test(text)) {
+    const lines = text.split(/\n+/).filter(l => l.trim().length > 0);
+    return lines.map((line, idx) => {
+      let sp: 'EXECUTIVE' | 'CLIENT' = idx % 2 === 0 ? 'EXECUTIVE' : 'CLIENT';
+      let name = sp === 'EXECUTIVE' ? sName : cName;
+      let cleanText = line.trim();
+      if (/^(Client|Investor):/i.test(cleanText)) {
+        sp = 'CLIENT';
+        name = cName;
+        cleanText = cleanText.replace(/^(Client|Investor):\s*/i, '');
+      } else if (/^(Executive|Staff|Advisor):/i.test(cleanText)) {
+        sp = 'EXECUTIVE';
+        name = sName;
+        cleanText = cleanText.replace(/^(Executive|Staff|Advisor):\s*/i, '');
+      }
+      return {
+        speaker: sp,
+        speakerName: name,
+        text: cleanText,
+        timestamp: `00:${(idx * 8).toString().padStart(2, '0')}`
+      };
+    });
+  }
+
+  // Split into alternating dialogue turns
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  return sentences.map((sent, idx) => {
+    const isExec = idx % 2 === 0;
+    return {
+      speaker: (isExec ? 'EXECUTIVE' : 'CLIENT') as 'EXECUTIVE' | 'CLIENT',
+      speakerName: isExec ? sName : cName,
+      text: sent.trim(),
+      timestamp: `00:${(idx * 6).toString().padStart(2, '0')}`
+    };
+  });
+};
 
 interface ClientVaultItem {
   clientId: string;
@@ -239,7 +318,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
   // Audio recording upload modal
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadCallType, setUploadCallType] = useState('ADVISORY');
+  const [uploadPurpose, setUploadPurpose] = useState('');
   const [uploadStaffName, setUploadStaffName] = useState('');
   const [uploadCallDate, setUploadCallDate] = useState(() => new Date().toISOString().substring(0, 16));
   const [uploadDuration, setUploadDuration] = useState('0');
@@ -249,6 +328,184 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
   // Audio player state
   const [playingAudioUrl, setPlayingAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Recording Review & Words Scanner Modal
+  const [selectedReviewRecording, setSelectedReviewRecording] = useState<any | null>(null);
+  const [reviewTranscriptText, setReviewTranscriptText] = useState<string>('');
+  const [reviewScanResult, setReviewScanResult] = useState<any | null>(null);
+  const [reviewConversationTurns, setReviewConversationTurns] = useState<any[]>([]);
+  const [conversationTab, setConversationTab] = useState<'chat' | 'editor'>('chat');
+  const [isScanningTranscript, setIsScanningTranscript] = useState<boolean>(false);
+  const [isAutoTranscribing, setIsAutoTranscribing] = useState<boolean>(false);
+  const [reviewAudioDuration, setReviewAudioDuration] = useState<number>(0);
+  const [isListeningSpeech, setIsListeningSpeech] = useState<boolean>(false);
+
+  const handleAutoTranscribeFile = async () => {
+    if (!selectedReviewRecording || !selectedClientId) return;
+    try {
+      setIsAutoTranscribing(true);
+      toast.loading('Converting audio file speech to text...', { id: 'transcribe-load' });
+      const res = await api.autoTranscribeCallRecording(selectedClientId, selectedReviewRecording._id);
+      if (res && res.success && res.data) {
+        toast.dismiss('transcribe-load');
+        setReviewScanResult(res.data.scan);
+        setReviewTranscriptText(res.data.transcribedText || '');
+        if (res.data.conversationTurns && res.data.conversationTurns.length > 0) {
+          setReviewConversationTurns(res.data.conversationTurns);
+        } else {
+          setReviewConversationTurns(generateClientTurns(res.data.transcribedText, selectedReviewRecording.callerStaffName, vaultDetails?.client?.name));
+        }
+        if (res.data.recording?.durationSeconds) {
+          setReviewAudioDuration(res.data.recording.durationSeconds);
+        }
+        if (res.data.scan?.isFlagged) {
+          toast.error(`⚠️ ${res.data.scan.flaggedCount} SEBI prohibited word(s) detected in audio!`);
+        } else {
+          toast.success('Speech transcribed! No prohibited words detected.');
+        }
+        openClientVault(selectedClientId);
+      } else {
+        toast.error(res?.message || 'Speech-to-text failed', { id: 'transcribe-load' });
+      }
+    } catch (err: any) {
+      toast.error('Transcription error: ' + (err.message || 'Error'), { id: 'transcribe-load' });
+    } finally {
+      setIsAutoTranscribing(false);
+    }
+  };
+
+  // Automatically detect duration when audio file is chosen
+  const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setUploadFile(file);
+    if (file) {
+      try {
+        const audio = new Audio();
+        const objectUrl = URL.createObjectURL(file);
+        audio.src = objectUrl;
+        audio.onloadedmetadata = () => {
+          if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+            const dur = Math.round(audio.duration);
+            setUploadDuration(String(dur));
+          }
+          URL.revokeObjectURL(objectUrl);
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+        };
+      } catch (err) {
+        console.warn('Could not read audio duration', err);
+      }
+    }
+  };
+
+  // Browser Speech-to-Text handler
+  const handleStartSpeechToText = () => {
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      toast.error('Voice recognition is not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRec();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-IN';
+
+      recognition.onstart = () => {
+        setIsListeningSpeech(true);
+        toast('Listening to speech... You can speak or play the recording now.', { icon: '🎙️' });
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript + ' ';
+        }
+        if (transcript.trim()) {
+          setReviewTranscriptText(transcript.trim());
+        }
+      };
+
+      recognition.onerror = (err: any) => {
+        console.warn('Speech recognition error:', err.error);
+        setIsListeningSpeech(false);
+      };
+
+      recognition.onend = () => {
+        setIsListeningSpeech(false);
+      };
+
+      (window as any)._vaultRecognition = recognition;
+      recognition.start();
+    } catch (e: any) {
+      console.error(e);
+      setIsListeningSpeech(false);
+      toast.error('Could not activate microphone');
+    }
+  };
+
+  const handleStopSpeechToText = () => {
+    if ((window as any)._vaultRecognition) {
+      try {
+        (window as any)._vaultRecognition.stop();
+      } catch (e) {}
+    }
+    setIsListeningSpeech(false);
+    toast.success('Speech capture stopped');
+  };
+
+  const handleScanTranscript = async (customText?: string) => {
+    if (!selectedReviewRecording || !selectedClientId) return;
+    try {
+      setIsScanningTranscript(true);
+      const textToScan = customText !== undefined ? customText : reviewTranscriptText;
+      const res = await api.scanCallRecordingTranscript(selectedClientId, selectedReviewRecording._id, textToScan);
+      if (res && res.success && res.data) {
+        setReviewScanResult(res.data.scan);
+        setReviewTranscriptText(textToScan);
+        if (res.data.conversationTurns && res.data.conversationTurns.length > 0) {
+          setReviewConversationTurns(res.data.conversationTurns);
+        } else {
+          setReviewConversationTurns(generateClientTurns(textToScan, selectedReviewRecording.callerStaffName, vaultDetails?.client?.name));
+        }
+        toast.success(res.data.scan.isFlagged ? `Scan complete: ${res.data.scan.flaggedCount} prohibited word(s) detected!` : 'Scan complete: No prohibited words detected.');
+        openClientVault(selectedClientId);
+      } else {
+        toast.error(res?.message || 'Scan failed');
+      }
+    } catch (err: any) {
+      toast.error('Scan error: ' + (err.message || 'Error'));
+    } finally {
+      setIsScanningTranscript(false);
+    }
+  };
+
+  const openRecordingReview = (rec: any) => {
+    setSelectedReviewRecording(rec);
+    setReviewAudioDuration(rec.durationSeconds || 0);
+    setConversationTab('chat');
+    const initialText = rec.transcriptText || rec.summary || rec.title || '';
+    setReviewTranscriptText(initialText);
+
+    if (rec.conversationTurns && rec.conversationTurns.length > 0) {
+      setReviewConversationTurns(rec.conversationTurns);
+    } else {
+      setReviewConversationTurns(generateClientTurns(initialText, rec.callerStaffName, vaultDetails?.client?.name));
+    }
+
+    if (selectedClientId) {
+      api.scanCallRecordingTranscript(selectedClientId, rec._id, initialText).then((res: any) => {
+        if (res && res.success && res.data) {
+          setReviewScanResult(res.data.scan);
+          if (res.data.conversationTurns && res.data.conversationTurns.length > 0) {
+            setReviewConversationTurns(res.data.conversationTurns);
+          }
+        }
+      }).catch(() => {});
+    }
+  };
 
   // Trade signals filter in subfolder view
   const [tradeFilter, setTradeFilter] = useState<'ALL' | 'ACTIVE' | 'CLOSED' | 'TARGET_HIT' | 'SL_HIT'>('ALL');
@@ -313,6 +570,60 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
       toast.error(err.message || 'Error loading vault');
     } finally {
       setDetailsLoading(false);
+    }
+  };
+
+  // Refresh vault details without kicking user out of current subfolder
+  const refreshVaultKeepFolder = async (clientId: string) => {
+    try {
+      const res = await api.getClientVaultDetails(clientId);
+      if (res && res.success) {
+        setVaultDetails(res.data);
+      }
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
+
+  // Multi-select state for Call Recordings
+  const [selectedRecordingIds, setSelectedRecordingIds] = useState<string[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  const toggleSelectRecording = (id: string) => {
+    setSelectedRecordingIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = (allIds: string[]) => {
+    if (selectedRecordingIds.length === allIds.length) {
+      setSelectedRecordingIds([]);
+    } else {
+      setSelectedRecordingIds(allIds);
+    }
+  };
+
+  const handleBulkDeleteRecordings = async () => {
+    if (!selectedClientId || selectedRecordingIds.length === 0) return;
+    if (!confirm(`Are you sure you want to permanently delete ${selectedRecordingIds.length} selected compliance call recording(s)?`)) return;
+
+    try {
+      setIsBulkDeleting(true);
+      const res = await api.bulkDeleteCallRecordings(selectedClientId, selectedRecordingIds);
+      if (res && res.success) {
+        toast.success(res.message || `${selectedRecordingIds.length} recording(s) deleted`);
+        setSelectedRecordingIds([]);
+        if (playingAudioUrl) {
+          setPlayingAudioUrl(null);
+        }
+        await refreshVaultKeepFolder(selectedClientId);
+      } else {
+        toast.error(res?.message || 'Bulk delete failed');
+      }
+    } catch (err: any) {
+      toast.error('Bulk delete error: ' + err.message);
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -423,12 +734,17 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
     }
     if (!selectedClientId) return;
 
+    if (!uploadPurpose.trim()) {
+      toast.error('Please enter recording title / call purpose');
+      return;
+    }
+
     try {
       setIsUploading(true);
       const formData = new FormData();
       formData.append('file', uploadFile);
-      formData.append('title', uploadFile.name);
-      formData.append('callType', uploadCallType);
+      formData.append('title', uploadPurpose.trim());
+      formData.append('callType', uploadPurpose.trim());
       formData.append('callDate', uploadCallDate);
       formData.append('durationSeconds', uploadDuration);
       formData.append('callerStaffName', uploadStaffName || 'Compliance Staff');
@@ -440,9 +756,10 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
         toast.success('Call recording secured in Client Vault!');
         setIsUploadModalOpen(false);
         setUploadFile(null);
+        setUploadPurpose('');
         setUploadSummary('');
-        // Refresh client details
-        openClientVault(selectedClientId);
+        // Refresh vault details without kicking user out of folder
+        await refreshVaultKeepFolder(selectedClientId);
       } else {
         toast.error(res?.message || 'Upload failed');
       }
@@ -465,7 +782,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
         if (playingAudioUrl) {
           setPlayingAudioUrl(null);
         }
-        openClientVault(selectedClientId);
+        await refreshVaultKeepFolder(selectedClientId);
       } else {
         toast.error(res?.message || 'Delete failed');
       }
@@ -476,6 +793,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
 
   // Audio player toggle
   const togglePlayAudio = (url: string) => {
+    const fullAudioUrl = resolveMediaUrl(url);
     if (playingAudioUrl === url) {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -485,7 +803,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
       setPlayingAudioUrl(url);
       setTimeout(() => {
         if (audioRef.current) {
-          audioRef.current.src = url;
+          audioRef.current.src = fullAudioUrl;
           audioRef.current.play().catch(e => console.error('Play error', e));
         }
       }, 50);
@@ -1196,6 +1514,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                   <button
                     onClick={() => {
                       setUploadStaffName('');
+                      setUploadPurpose('');
                       setIsUploadModalOpen(true);
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md transition"
@@ -1710,7 +2029,7 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
           {selectedSubfolderKey === '07_Call_Recordings' && (
             <div className="space-y-6">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
                   <div>
                     <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">
                       Compliance Audio Call Recordings
@@ -1720,14 +2039,65 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => setIsUploadModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md transition"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Upload Recording</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Bulk Delete Button */}
+                    {selectedRecordingIds.length > 0 && (
+                      <button
+                        onClick={handleBulkDeleteRecordings}
+                        disabled={isBulkDeleting}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md transition disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{isBulkDeleting ? 'Deleting...' : `Delete Selected (${selectedRecordingIds.length})`}</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => { setUploadPurpose(''); setIsUploadModalOpen(true); }}
+                      className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md transition"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Upload Recording</span>
+                    </button>
+                  </div>
                 </div>
+
+                {/* Multi-Select Toolbar Strip */}
+                {(vaultDetails.folders.callRecordings?.data || []).length > 0 && (
+                  <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/40 px-3.5 py-2 rounded-xl mb-3 border border-slate-200/60 dark:border-slate-800 text-xs">
+                    <label className="flex items-center gap-2.5 cursor-pointer font-bold text-slate-700 dark:text-slate-300 select-none">
+                      <input
+                        type="checkbox"
+                        checked={
+                          (vaultDetails.folders.callRecordings?.data || []).length > 0 &&
+                          selectedRecordingIds.length === (vaultDetails.folders.callRecordings?.data || []).length
+                        }
+                        onChange={() =>
+                          handleToggleSelectAll(
+                            (vaultDetails.folders.callRecordings?.data || []).map((r: any) => r._id)
+                          )
+                        }
+                        className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                      />
+                      <span>Select All Recordings ({(vaultDetails.folders.callRecordings?.data || []).length})</span>
+                    </label>
+
+                    {selectedRecordingIds.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400">
+                          {selectedRecordingIds.length} selected
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRecordingIds([])}
+                          className="text-[11px] text-slate-500 hover:underline"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {(vaultDetails.folders.callRecordings?.data || []).length === 0 ? (
                   <div className="py-12 text-center text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
@@ -1739,13 +2109,28 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                   <div className="space-y-3">
                     {(vaultDetails.folders.callRecordings?.data || []).map((rec: any) => {
                       const isPlaying = playingAudioUrl === rec.fileUrl;
+                      const isSelected = selectedRecordingIds.includes(rec._id);
 
                       return (
                         <div
                           key={rec._id}
-                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition"
+                          className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border transition ${
+                            isSelected
+                              ? 'border-rose-400 bg-rose-50/40 dark:bg-rose-950/20 shadow-xs'
+                              : 'border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                          }`}
                         >
                           <div className="flex items-start gap-3.5">
+                            {/* Checkbox for Multi-Select */}
+                            <div className="pt-2.5">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelectRecording(rec._id)}
+                                className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-slate-300 dark:border-slate-700 cursor-pointer"
+                              />
+                            </div>
+
                             <button
                               onClick={() => togglePlayAudio(rec.fileUrl)}
                               className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-transform hover:scale-105 ${isPlaying
@@ -1762,12 +2147,20 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                                 <span className="font-bold text-sm text-slate-800 dark:text-white">
                                   {rec.title || rec.fileName}
                                 </span>
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20">
-                                  {rec.callType}
-                                </span>
-                                {rec.isComplianceVerified && (
-                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500">
-                                    ✓ Verified
+                                {rec.callType && rec.callType !== rec.title && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                                    {rec.callType}
+                                  </span>
+                                )}
+                                {rec.flaggedCount > 0 ? (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 flex items-center gap-1 shadow-xs">
+                                    <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                    <span>⚠️ {rec.flaggedCount} Banned Words</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-300 flex items-center gap-1">
+                                    <Check className="w-3 h-3 text-emerald-600" />
+                                    <span>✓ SEBI Clean</span>
                                   </span>
                                 )}
                               </div>
@@ -1786,15 +2179,25 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 self-end sm:self-center">
+                          <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => openRecordingReview(rec)}
+                              className="px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
+                              title="View full conversation chat & audit prohibited SEBI keywords"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                              <span>👁️ View Conversation</span>
+                            </button>
+
                             {effectiveCanDownload && (
                               <a
-                                href={rec.fileUrl}
+                                href={resolveMediaUrl(rec.fileUrl)}
                                 download={rec.fileName}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition"
-                                title="Download Audio (.mp3)"
+                                title="Download Audio File"
                               >
                                 <Download className="w-4 h-4" />
                               </a>
@@ -2326,6 +2729,317 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
         </div>
       )}
 
+
+      {/* ===================================================================== */}
+      {/* MODAL: SEBI CALL RECORDING WORDS & TRANSCRIPT REVIEW                   */}
+      {/* ===================================================================== */}
+      {selectedReviewRecording && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>SEBI Call Recording Conversation Audit</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Role-wise dialogue between Advisory Executive and Client with prohibited keyword highlights
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedReviewRecording(null)}
+                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              {/* Call Info Strip & Audio Player */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="font-bold text-sm text-slate-900 dark:text-white">
+                    {selectedReviewRecording.title || selectedReviewRecording.fileName}
+                  </div>
+                  <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
+                    <span>Staff: <strong className="text-slate-700 dark:text-slate-300">{selectedReviewRecording.callerStaffName || 'Staff'}</strong></span>
+                    <span>Client: <strong className="text-slate-700 dark:text-slate-300">{vaultDetails?.client?.name || 'Client'}</strong></span>
+                    <span>Date: <strong className="text-slate-700 dark:text-slate-300">{new Date(selectedReviewRecording.callDate).toLocaleString()}</strong></span>
+                    <span>Duration: <strong className="font-mono text-slate-700 dark:text-slate-300">{formatSec(reviewAudioDuration || selectedReviewRecording.durationSeconds || 0)}</strong></span>
+                  </div>
+                </div>
+
+                {selectedReviewRecording.fileUrl && (
+                  <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                    <audio
+                      controls
+                      src={resolveMediaUrl(selectedReviewRecording.fileUrl)}
+                      className="h-9 w-52 sm:w-60 rounded-xl"
+                      onLoadedMetadata={(e) => {
+                        const dur = Math.round(e.currentTarget.duration);
+                        if (dur && !isNaN(dur) && isFinite(dur) && dur > 0) {
+                          setReviewAudioDuration(dur);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={isAutoTranscribing}
+                      onClick={handleAutoTranscribeFile}
+                      className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      title="Convert audio speech to text using speech recognition"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{isAutoTranscribing ? 'Transcribing...' : '🎙️ Auto-Transcribe'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* SEBI Compliance Verdict Banner */}
+              {reviewScanResult?.isFlagged ? (
+                <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border-2 border-rose-300 dark:border-rose-800 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5 text-rose-600" />
+                      <span className="font-black text-sm text-rose-900 dark:text-rose-200">
+                        ⚠️ SEBI Prohibited Keywords Flagged ({reviewScanResult.flaggedCount} instances)
+                      </span>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-200 text-rose-900 dark:bg-rose-900/60 dark:text-rose-200">
+                      CRITICAL / NON-COMPLIANT
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-800 dark:text-rose-300">
+                    Prohibited terms indicating assured return, profit sharing, or unauthorized broker/account handling were detected in this conversation.
+                  </p>
+                  {/* Detected Words Pills */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    {(reviewScanResult.detectedKeywords || []).map((item: any, idx: number) => (
+                      <span
+                        key={idx}
+                        className="px-2.5 py-1 rounded-lg text-xs font-black bg-rose-600 text-white shadow-xs flex items-center gap-1"
+                      >
+                        <span>{item.keyword}</span>
+                        <span className="bg-white/20 px-1 rounded text-[10px]">{item.count}x</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-800 flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span className="font-black text-sm text-emerald-900 dark:text-emerald-200">
+                      ✓ SEBI Compliant Dialogue — No Prohibited Words Detected
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-200 text-emerald-900 dark:bg-emerald-900/60 dark:text-emerald-200">
+                    PASSED
+                  </span>
+                </div>
+              )}
+
+              {/* Tab Switcher: Role-wise Conversation Chat vs Raw Editor */}
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2 flex-wrap gap-2">
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setConversationTab('chat')}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                      conversationTab === 'chat'
+                        ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>💬 Conversation Chat View ({reviewConversationTurns.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConversationTab('editor')}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                      conversationTab === 'editor'
+                        ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-400 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <span>📝 Edit Dialogue &amp; Notes</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* TAB 1: ROLE-BASED CHAT VIEW */}
+              {conversationTab === 'chat' && (
+                <div className="space-y-3">
+                  {reviewConversationTurns.length === 0 ? (
+                    <div className="p-8 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 text-center space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 mx-auto flex items-center justify-center">
+                        <MessageSquare className="w-6 h-6" />
+                      </div>
+                      <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                        No Conversation Dialogue Transcribed Yet
+                      </div>
+                      <p className="text-xs text-slate-400 max-w-md mx-auto">
+                        Click the button below to transcribe audio speech directly from the recording file into role-wise conversation bubbles.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={isAutoTranscribing}
+                        onClick={handleAutoTranscribeFile}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition inline-flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        <span>{isAutoTranscribing ? 'Transcribing Audio...' : '🎙️ Transcribe Audio into Chat'}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[380px] overflow-y-auto">
+                      {reviewConversationTurns.map((turn, tIdx) => {
+                        const isExec = turn.speaker === 'EXECUTIVE';
+                        const highlighted = highlightProhibitedWords(turn.text, reviewScanResult?.detectedKeywords || []);
+
+                        return (
+                          <div
+                            key={tIdx}
+                            className={`flex items-start gap-3 ${isExec ? 'justify-start' : 'justify-end'}`}
+                          >
+                            {/* Executive Avatar on Left */}
+                            {isExec && (
+                              <div className="w-9 h-9 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm text-sm font-bold">
+                                👨‍💼
+                              </div>
+                            )}
+
+                            {/* Dialogue Bubble */}
+                            <div
+                              className={`max-w-[85%] sm:max-w-[78%] rounded-2xl p-4 shadow-xs border ${
+                                isExec
+                                  ? 'bg-white dark:bg-slate-900 border-blue-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-tl-xs'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-slate-800 dark:text-slate-100 rounded-tr-xs'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-3 mb-1.5 border-b border-black/5 dark:border-white/5 pb-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`text-[11px] font-black ${isExec ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                                    {turn.speakerName || (isExec ? selectedReviewRecording.callerStaffName || 'Executive' : vaultDetails?.client?.name || 'Client')}
+                                  </span>
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                    isExec
+                                      ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200'
+                                      : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200'
+                                  }`}>
+                                    {isExec ? 'Advisory Staff' : 'Client'}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-mono">{turn.timestamp || '00:00'}</span>
+                              </div>
+
+                              <div
+                                className="text-xs leading-relaxed"
+                                dangerouslySetInnerHTML={{ __html: highlighted || turn.text }}
+                              />
+                            </div>
+
+                            {/* Client Avatar on Right */}
+                            {!isExec && (
+                              <div className="w-9 h-9 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm text-sm font-bold">
+                                👤
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: RAW EDITOR & MANUAL NOTES */}
+              {conversationTab === 'editor' && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="font-bold">Conversation Editor:</strong> You can edit the spoken dialogue below or format as <code className="bg-amber-100 px-1 py-0.5 rounded text-amber-900">Executive: ... \nClient: ...</code> to organize chat bubbles.
+                    </div>
+                  </div>
+
+                  <textarea
+                    rows={5}
+                    value={reviewTranscriptText}
+                    onChange={(e) => setReviewTranscriptText(e.target.value)}
+                    placeholder="Enter or paste call conversation dialogue..."
+                    className="w-full p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 dark:text-white font-sans leading-relaxed"
+                  />
+
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={isAutoTranscribing}
+                        onClick={handleAutoTranscribeFile}
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                        title="Transcribe speech directly from audio recording"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>{isAutoTranscribing ? 'Transcribing Audio...' : '🎙️ Auto-Transcribe Audio'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={isListeningSpeech ? handleStopSpeechToText : handleStartSpeechToText}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
+                          isListeningSpeech
+                            ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                            : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
+                        }`}
+                        title="Listen from microphone or audio speaker"
+                      >
+                        {isListeningSpeech ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-rose-500" />}
+                        <span>{isListeningSpeech ? '⏹️ Stop Voice' : '🎤 Transcribe from Voice'}</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isScanningTranscript}
+                      onClick={() => handleScanTranscript()}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{isScanningTranscript ? 'Scanning...' : '⚡ Re-Scan Prohibited Words'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Prohibited Words Reference Legend */}
+              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-500 space-y-1">
+                <strong className="text-slate-700 dark:text-slate-300">SEBI Regulatory Scanner Watchlist:</strong>
+                <p>
+                  Scans for prohibited terms like: <code className="text-rose-600 font-bold">profit sharing</code>, <code className="text-rose-600 font-bold">100% profit</code>, <code className="text-rose-600 font-bold">guaranteed return / profit</code>, <code className="text-rose-600 font-bold">100% गारंटी</code>, <code className="text-rose-600 font-bold">broker handling</code>, <code className="text-rose-600 font-bold">account handling</code>, <code className="text-rose-600 font-bold">fake commitment</code>, <code className="text-rose-600 font-bold">loss recovery</code>, <code className="text-rose-600 font-bold">sure shot</code>, etc.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-4 mt-4 border-t border-slate-100 dark:border-slate-800">
+              <button
+                onClick={() => setSelectedReviewRecording(null)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition"
+              >
+                Close Review
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ===================================================================== */}
       {/* MODAL: UPLOAD CALL RECORDING                                          */}
       {/* ===================================================================== */}
@@ -2359,30 +3073,26 @@ export default function ClientVaultExplorer({ canDownload: propCanDownload, isMa
                 <input
                   type="file"
                   accept="audio/*,.mp3,.wav,.m4a,.ogg"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                  onChange={handleAudioFileChange}
                   required
                   className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100 dark:file:bg-slate-800 dark:file:text-slate-200 cursor-pointer"
                 />
               </div>
 
-              {/* Call Type */}
+              {/* Recording Title / Purpose (Mandatory Custom Input) */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Call Purpose / Category
+                    Recording Title / Purpose <span className="text-rose-500">*</span>
                   </label>
-                  <select
-                    value={uploadCallType}
-                    onChange={(e) => setUploadCallType(e.target.value)}
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Risk profiling call, Trade advice, Onboarding discussion"
+                    value={uploadPurpose}
+                    onChange={(e) => setUploadPurpose(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-rose-500 dark:text-white"
-                  >
-                    <option value="ADVISORY">Service Call</option>
-                    <option value="INBOUND">Inbound Inquiry</option>
-                    <option value="OUTBOUND">Outbound Service Call</option>
-                    <option value="ONBOARDING">Client Onboarding</option>
-                    <option value="COMPLAINT">Grievance / Support</option>
-                    <option value="RISK_PROFILE">Risk Profiling</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
