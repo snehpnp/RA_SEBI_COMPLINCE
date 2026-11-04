@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.downloadSingleResearchReport = exports.exportSingleFolder = exports.exportClientVaultZip = exports.downloadAgreementPdf = exports.downloadSingleInvoice = exports.deleteCallRecording = exports.autoTranscribeRecording = exports.auditCallRecordingTranscript = exports.uploadCallRecording = exports.getClientVaultDetails = exports.listClientVaults = exports.maskDocument = exports.maskMobile = exports.maskEmail = void 0;
+exports.downloadSingleResearchReport = exports.exportSingleFolder = exports.exportClientVaultZip = exports.downloadAgreementPdf = exports.downloadSingleInvoice = exports.bulkDeleteCallRecordings = exports.deleteCallRecording = exports.autoTranscribeRecording = exports.auditCallRecordingTranscript = exports.uploadCallRecording = exports.getClientVaultDetails = exports.listClientVaults = exports.maskDocument = exports.maskMobile = exports.maskEmail = void 0;
 exports.checkVaultAccessAndMasking = checkVaultAccessAndMasking;
 const sebiKeywordScanner_1 = require("../utils/sebiKeywordScanner");
 const audioTranscriber_1 = require("../utils/audioTranscriber");
@@ -1068,6 +1068,63 @@ const deleteCallRecording = async (req, res) => {
     }
 };
 exports.deleteCallRecording = deleteCallRecording;
+// ============================================================================
+// 4B. BULK DELETE CALL RECORDINGS
+// ============================================================================
+const bulkDeleteCallRecordings = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const { clientId } = req.params;
+        const { recordingIds } = req.body;
+        if (!tenantId)
+            return res.status(400).json({ success: false, message: 'Tenant context missing.' });
+        if (!recordingIds || !Array.isArray(recordingIds) || recordingIds.length === 0) {
+            return res.status(400).json({ success: false, message: 'No recording IDs provided.' });
+        }
+        const recordings = await db_1.default.ClientCallRecording.find({
+            _id: { $in: recordingIds },
+            clientId,
+            tenantId
+        });
+        for (const rec of recordings) {
+            if (rec.fileUrl) {
+                const physicalPath = (0, pdfService_1.resolveAttachmentFilePath)(rec.fileUrl);
+                if (physicalPath && fs_1.default.existsSync(physicalPath)) {
+                    try {
+                        fs_1.default.unlinkSync(physicalPath);
+                    }
+                    catch { }
+                }
+            }
+        }
+        const deleteResult = await db_1.default.ClientCallRecording.deleteMany({
+            _id: { $in: recordingIds },
+            clientId,
+            tenantId
+        });
+        await (0, activityService_1.logActivity)({
+            tenantId,
+            actorId: req.user?.id,
+            actorType: 'STAFF',
+            targetClientId: clientId,
+            category: 'STAFF_ACTION',
+            action: 'CALL_RECORDINGS_BULK_DELETED',
+            title: 'Call Recordings Bulk Removed',
+            description: `Bulk deleted ${deleteResult.deletedCount} recordings`,
+            metadata: { recordingIds, count: deleteResult.deletedCount }
+        });
+        return res.status(200).json({
+            success: true,
+            message: `${deleteResult.deletedCount} recording(s) deleted successfully.`,
+            deletedCount: deleteResult.deletedCount
+        });
+    }
+    catch (error) {
+        console.error('Error in bulkDeleteCallRecordings:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.bulkDeleteCallRecordings = bulkDeleteCallRecordings;
 // ============================================================================
 // 5. DOWNLOAD SINGLE INVOICE PDF
 // ============================================================================
