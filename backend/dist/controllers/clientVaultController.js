@@ -3,8 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.downloadSingleResearchReport = exports.exportSingleFolder = exports.exportClientVaultZip = exports.downloadAgreementPdf = exports.downloadSingleInvoice = exports.deleteCallRecording = exports.uploadCallRecording = exports.getClientVaultDetails = exports.listClientVaults = exports.maskDocument = exports.maskMobile = exports.maskEmail = void 0;
+exports.downloadSingleResearchReport = exports.exportSingleFolder = exports.exportClientVaultZip = exports.downloadAgreementPdf = exports.downloadSingleInvoice = exports.deleteCallRecording = exports.autoTranscribeRecording = exports.auditCallRecordingTranscript = exports.uploadCallRecording = exports.getClientVaultDetails = exports.listClientVaults = exports.maskDocument = exports.maskMobile = exports.maskEmail = void 0;
 exports.checkVaultAccessAndMasking = checkVaultAccessAndMasking;
+const sebiKeywordScanner_1 = require("../utils/sebiKeywordScanner");
+const audioTranscriber_1 = require("../utils/audioTranscriber");
 const mongoose_1 = __importDefault(require("mongoose"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
@@ -815,15 +817,18 @@ const uploadCallRecording = async (req, res) => {
         const { title = req.file.originalname, callType = 'ADVISORY', callDate = new Date(), durationSeconds = 0, callerStaffName = req.user?.name || req.user?.email || 'Compliance Staff', callerStaffId = req.user?.id, summary = '', isComplianceVerified = true } = req.body;
         const fileUrl = `/uploads/recordings/${req.file.filename}`;
         const parsedDuration = parseInt(String(durationSeconds), 10) || 0;
-        const validCallTypes = ['INBOUND', 'OUTBOUND', 'ADVISORY', 'ONBOARDING', 'COMPLAINT', 'RISK_PROFILE'];
-        const safeCallType = validCallTypes.includes(String(callType).toUpperCase())
-            ? String(callType).toUpperCase()
-            : 'ADVISORY';
+        const effectiveTitle = title && String(title).trim() ? String(title).trim() : (callType && String(callType).trim() ? String(callType).trim() : req.file.originalname);
+        const effectiveCallType = callType && String(callType).trim() ? String(callType).trim() : 'Service Call';
+        // Fast initial scan on title and summary
+        const initialTextToScan = `${effectiveTitle} ${summary || ''}`.trim();
+        const initialScan = (0, sebiKeywordScanner_1.scanTextForSebiViolations)(initialTextToScan);
+        const initialTurns = (0, sebiKeywordScanner_1.buildConversationTurns)(summary || effectiveTitle, [], callerStaffName, client.name || 'Client');
+        // 1. Immediately create recording in DB so upload response is INSTANT (< 200ms)
         const newRecording = await db_1.default.ClientCallRecording.create({
             tenantId: new mongoose_1.default.Types.ObjectId(tenantId),
             clientId: new mongoose_1.default.Types.ObjectId(clientId),
-            title: title || req.file.originalname,
-            callType: safeCallType,
+            title: effectiveTitle,
+            callType: effectiveCallType,
             callDate: new Date(callDate),
             durationSeconds: parsedDuration,
             fileUrl,
@@ -834,7 +839,13 @@ const uploadCallRecording = async (req, res) => {
             callerStaffName,
             clientPhone: client.mobile || '',
             summary: summary || `Call recording with client ${client.name}`,
-            isComplianceVerified: String(isComplianceVerified) === 'true' || isComplianceVerified === true
+            isComplianceVerified: String(isComplianceVerified) === 'true' || isComplianceVerified === true,
+            transcriptText: summary || '',
+            conversationTurns: initialTurns,
+            transcriptionStatus: initialScan.isFlagged ? 'FLAGGED' : 'PROCESSING',
+            detectedKeywords: initialScan.detectedKeywords,
+            sebiComplianceScore: initialScan.complianceScore,
+            flaggedCount: initialScan.flaggedCount
         });
         // Write to Activity Log so it is reflected in the audit trail & timeline
         await (0, activityService_1.logActivity)({
@@ -846,18 +857,55 @@ const uploadCallRecording = async (req, res) => {
             category: 'STAFF_ACTION',
             action: 'CALL_RECORDING_UPLOADED',
             title: 'Call Recording Secured in Vault',
-            description: `Uploaded ${safeCallType} recording: "${req.file.originalname}" (${formatDuration(parsedDuration)}) by ${callerStaffName}`,
+            description: `Uploaded ${effectiveCallType} recording: "${req.file.originalname}" (${formatDuration(parsedDuration)}) by ${callerStaffName}`,
             metadata: {
                 recordingId: newRecording._id,
                 fileName: req.file.originalname,
-                callType: safeCallType,
+                callType: effectiveCallType,
                 durationSeconds: parsedDuration,
                 fileUrl
             }
         });
+        // 2. Launch AI Speech-to-Text Transcription in BACKGROUND (Non-blocking)
+        if (req.file?.path) {
+            const recordingId = newRecording._id;
+            const uploadedFilePath = req.file.path;
+            const clientName = client.name || 'Client';
+            setImmediate(async () => {
+                try {
+                    const transcribeRes = await (0, audioTranscriber_1.transcribeAudioFile)(uploadedFilePath);
+                    if (transcribeRes && transcribeRes.success && transcribeRes.text) {
+                        const speechText = transcribeRes.text;
+                        const segments = transcribeRes.segments || [];
+                        const dur = transcribeRes.duration || parsedDuration;
+                        const fullTextToScan = `${effectiveTitle} ${summary || ''} ${speechText}`.trim();
+                        const bgScan = (0, sebiKeywordScanner_1.scanTextForSebiViolations)(fullTextToScan);
+                        const turns = (0, sebiKeywordScanner_1.buildConversationTurns)(speechText, segments, callerStaffName, clientName);
+                        await db_1.default.ClientCallRecording.findByIdAndUpdate(recordingId, {
+                            durationSeconds: dur,
+                            transcriptText: speechText,
+                            conversationTurns: turns,
+                            transcriptionStatus: bgScan.isFlagged ? 'FLAGGED' : 'COMPLETED',
+                            detectedKeywords: bgScan.detectedKeywords,
+                            sebiComplianceScore: bgScan.complianceScore,
+                            flaggedCount: bgScan.flaggedCount
+                        });
+                    }
+                    else if (transcribeRes && transcribeRes.duration && (!parsedDuration || parsedDuration === 0)) {
+                        await db_1.default.ClientCallRecording.findByIdAndUpdate(recordingId, {
+                            durationSeconds: transcribeRes.duration,
+                            transcriptionStatus: 'COMPLETED'
+                        });
+                    }
+                }
+                catch (bgErr) {
+                    console.warn('Background audio transcription error:', bgErr);
+                }
+            });
+        }
         return res.status(201).json({
             success: true,
-            message: 'Call recording successfully uploaded and indexed in Client Vault.',
+            message: 'Call recording saved successfully!',
             data: newRecording
         });
     }
@@ -867,6 +915,108 @@ const uploadCallRecording = async (req, res) => {
     }
 };
 exports.uploadCallRecording = uploadCallRecording;
+// ============================================================================
+// 3B. AUDIT CALL RECORDING TRANSCRIPT FOR SEBI PROHIBITED KEYWORDS
+// ============================================================================
+const auditCallRecordingTranscript = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const { clientId, recordingId } = req.params;
+        const { transcriptText } = req.body;
+        if (!tenantId || !clientId || !recordingId) {
+            return res.status(400).json({ success: false, message: 'Missing parameters' });
+        }
+        const recording = await db_1.default.ClientCallRecording.findOne({
+            _id: recordingId,
+            clientId,
+            tenantId
+        });
+        if (!recording) {
+            return res.status(404).json({ success: false, message: 'Recording not found' });
+        }
+        const textToScan = transcriptText !== undefined ? String(transcriptText) : (recording.transcriptText || recording.summary || recording.title || '');
+        const scan = (0, sebiKeywordScanner_1.scanTextForSebiViolations)(textToScan);
+        const client = await db_1.default.Client.findById(clientId).lean();
+        const turns = (0, sebiKeywordScanner_1.buildConversationTurns)(textToScan, [], recording.callerStaffName || 'Compliance Staff', client?.name || 'Client');
+        const updated = await db_1.default.ClientCallRecording.findByIdAndUpdate(recordingId, {
+            transcriptText: textToScan,
+            conversationTurns: turns,
+            detectedKeywords: scan.detectedKeywords,
+            sebiComplianceScore: scan.complianceScore,
+            flaggedCount: scan.flaggedCount,
+            transcriptionStatus: scan.isFlagged ? 'FLAGGED' : 'COMPLETED'
+        }, { new: true });
+        return res.status(200).json({
+            success: true,
+            message: 'Call transcript scanned successfully for SEBI compliance',
+            data: {
+                recording: updated,
+                scan,
+                conversationTurns: turns
+            }
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.auditCallRecordingTranscript = auditCallRecordingTranscript;
+// ============================================================================
+// 3B. AUTO-TRANSCRIBE AUDIO RECORDING TO TEXT & SCAN (Speech-to-Text)
+// ============================================================================
+const autoTranscribeRecording = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const { clientId, recordingId } = req.params;
+        if (!tenantId || !clientId || !recordingId) {
+            return res.status(400).json({ success: false, message: 'Missing parameters' });
+        }
+        const recording = await db_1.default.ClientCallRecording.findOne({
+            _id: recordingId,
+            clientId,
+            tenantId
+        });
+        if (!recording) {
+            return res.status(404).json({ success: false, message: 'Recording not found' });
+        }
+        const physicalPath = (0, pdfService_1.resolveAttachmentFilePath)(recording.fileUrl);
+        if (!physicalPath || !fs_1.default.existsSync(physicalPath)) {
+            return res.status(400).json({ success: false, message: 'Physical audio recording file not found on disk.' });
+        }
+        const transcribeRes = await (0, audioTranscriber_1.transcribeAudioFile)(physicalPath);
+        const transcribedText = transcribeRes.text || '';
+        // Run SEBI keyword scan on transcribed speech
+        const scan = (0, sebiKeywordScanner_1.scanTextForSebiViolations)(transcribedText);
+        const client = await db_1.default.Client.findById(clientId).lean();
+        const turns = (0, sebiKeywordScanner_1.buildConversationTurns)(transcribedText, transcribeRes.segments || [], recording.callerStaffName || 'Compliance Staff', client?.name || 'Client');
+        const updated = await db_1.default.ClientCallRecording.findByIdAndUpdate(recordingId, {
+            transcriptText: transcribedText,
+            conversationTurns: turns,
+            durationSeconds: transcribeRes.duration || recording.durationSeconds,
+            detectedKeywords: scan.detectedKeywords,
+            sebiComplianceScore: scan.complianceScore,
+            flaggedCount: scan.flaggedCount,
+            transcriptionStatus: scan.isFlagged ? 'FLAGGED' : 'COMPLETED'
+        }, { new: true });
+        return res.status(200).json({
+            success: true,
+            message: scan.isFlagged
+                ? `Speech transcribed: ${scan.flaggedCount} prohibited word(s) detected!`
+                : 'Speech transcribed: No prohibited words detected.',
+            data: {
+                recording: updated,
+                scan,
+                transcribedText,
+                conversationTurns: turns
+            }
+        });
+    }
+    catch (error) {
+        console.error('Error in autoTranscribeRecording:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.autoTranscribeRecording = autoTranscribeRecording;
 // ============================================================================
 // 4. DELETE CALL RECORDING
 // ============================================================================

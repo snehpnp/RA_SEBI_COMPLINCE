@@ -102,11 +102,10 @@ export default function L1L2AuditModal({
   };
 
   const isL2Pending = payment.approvalStatus === 'L2_PENDING';
-  const isL2Approved = payment.approvalStatus === 'APPROVED';
+  const isL2Approved = payment.approvalStatus === 'APPROVED' && Boolean(payment.l2Details?.action || payment.l2Details?.reviewedByName);
   const isL2Rejected = payment.approvalStatus === 'REJECTED';
-  const isDirectApproved = payment.approvalStatus === 'DIRECT_APPROVED';
-
-
+  const hasL2Review = isL2Approved || isL2Rejected;
+  const isDirectApproved = !hasL2Review && !isL2Pending;
 
   const l1ServiceDate = formatComparableDate(l1.serviceStartDate);
   const l2ServiceDate = formatComparableDate(l2.finalServiceStartDate || payment.serviceStartDate);
@@ -127,6 +126,8 @@ export default function L1L2AuditModal({
             ? 'bg-gradient-to-r from-emerald-500 to-teal-500' 
             : isL2Rejected 
             ? 'bg-gradient-to-r from-rose-500 to-red-600' 
+            : isDirectApproved
+            ? 'bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500'
             : 'bg-gradient-to-r from-amber-500 to-orange-500'
         }`} />
 
@@ -139,14 +140,18 @@ export default function L1L2AuditModal({
                   ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20'
                   : isL2Rejected
                   ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-500/20'
+                  : isDirectApproved
+                  ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-500/20'
                   : 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-500/20'
               }`}>
-                <ShieldCheck className="w-6 h-6" />
+                {isDirectApproved ? <FileText className="w-6 h-6" /> : <ShieldCheck className="w-6 h-6" />}
               </div>
               <div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
                   <span>
-                    {isL2Rejected
+                    {isDirectApproved
+                      ? 'Payment & Assignment Details'
+                      : isL2Rejected
                       ? 'L1 Submission vs L2 Rejection Audit'
                       : isL2Approved
                       ? 'L1 vs L2 Approval & Verification Audit'
@@ -154,7 +159,9 @@ export default function L1L2AuditModal({
                   </span>
                 </h3>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                  {isL2Rejected
+                  {isDirectApproved
+                    ? 'Verified payment record and service plan parameters (Direct Approval).'
+                    : isL2Rejected
                     ? 'Complete audit of initial Level 1 staff submission details and Level 2 rejection reasons.'
                     : 'Side-by-side audit of Level 1 staff submission versus Level 2 approver modifications.'}
                 </p>
@@ -168,6 +175,8 @@ export default function L1L2AuditModal({
                 ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-700'
                 : isL2Rejected
                 ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-700 font-black'
+                : isDirectApproved
+                ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700'
                 : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700'
             }`}>
               {isL2Approved ? '✓ L2 APPROVED' : isL2Rejected ? '✗ L2 REJECTED' : isDirectApproved ? '✓ DIRECT APPROVED' : '⏳ AWAITING L2'}
@@ -242,244 +251,363 @@ export default function L1L2AuditModal({
           </div>
         </div>
 
-        {/* Side-by-Side Comparison Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
-          
-          {/* LEVEL 1: Submission Column */}
-          <div className="p-4 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-800/40 space-y-3.5">
-            <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/40 pb-2">
+        {/* Payment Details View: Single Card for Direct Approved vs Two-Column Comparison for L2 Review */}
+        {isDirectApproved ? (
+          /* Single Card Payment Details View - No Level 2 Column */
+          <div className="p-5 my-4 rounded-2xl bg-blue-50/40 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-800/40 space-y-4">
+            <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/40 pb-3">
               <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-mono font-black text-[11px]">
-                  LEVEL 1
+                <span className="px-2.5 py-1 rounded-md text-white font-mono font-bold text-xs bg-blue-600">
+                  PAYMENT DETAILS
                 </span>
-                <span className="font-bold text-slate-900 dark:text-white text-sm">
-                  Initial Submission
+                <span className="font-bold text-slate-900 dark:text-white text-base">
+                  Direct Approved Payment &amp; Service Plan
                 </span>
               </div>
-              <span className="text-[10px] text-blue-700 dark:text-blue-300 font-mono font-medium">
-                Maker Details
+              <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800">
+                ✓ Verified &amp; Activated
               </span>
             </div>
 
-            <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Submitted By:</span>
-                <span className="font-bold text-slate-900 dark:text-white font-mono">
-                  {l1.submittedByName || 'Staff / Maker'}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 text-xs">
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Approved / Assigned By</span>
+                <span className="font-bold text-slate-900 dark:text-white font-mono text-sm">
+                  {payment.assignedByAdminName || payment.assignedByStaffName || l1.submittedByName || 'Alpha Admin'}
                 </span>
-              </div>
-
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Submission Time:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">
+                <span className="text-[10px] text-slate-400 block font-mono mt-0.5">
                   {l1.submittedAt || (payment.createdAt ? new Date(payment.createdAt).toLocaleString('en-IN') : 'N/A')}
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Plan Assigned:</span>
-                <span className="font-bold text-blue-700 dark:text-blue-300 font-mono">
-                  {l1.planName || 'N/A'}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Plan Name</span>
+                <span className="font-bold text-blue-700 dark:text-blue-400 font-mono text-sm">
+                  {payment.plan?.name || l1.planName || payment.planName || 'Assigned Plan'}
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Plan Amount:</span>
-                <span className="font-black text-slate-900 dark:text-white font-mono text-sm">
-                  ₹{Number(l1.amount || 0).toLocaleString('en-IN')}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Amount Paid</span>
+                <span className="font-black text-emerald-600 dark:text-emerald-400 font-mono text-base">
+                  ₹{Number(payment.amount ?? l1.amount ?? 0).toLocaleString('en-IN')}
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Validity Period:</span>
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Validity Period</span>
                 <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
-                  {l1.validityDays} Days
+                  {payment.planValidityDays || l1.validityDays || 30} Days
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Payment Date:</span>
-                <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {formatComparableDate(l1.paymentDate)}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Payment Date</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+                  {formatComparableDate(payment.paymentDate || l1.paymentDate)}
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Service Start Date:</span>
-                <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {l1ServiceDate}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Service Start Date</span>
+                <span className="font-bold text-blue-700 dark:text-blue-400 font-mono">
+                  {formatComparableDate(payment.serviceStartDate || l1.serviceStartDate)}
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
-                <span className="text-slate-500 dark:text-slate-400">Coupon / Discount:</span>
-                <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {l1.couponCode ? `${l1.couponCode} (₹${l1.discount || 0} off)` : (l1.discount ? `₹${l1.discount} off` : 'None')}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Coupon / Discount</span>
+                <span className="font-mono text-slate-800 dark:text-slate-200 font-medium">
+                  {l1.couponCode ? `${l1.couponCode} (₹${l1.discount || 0} off)` : (payment.discountApplied ? `₹${payment.discountApplied} off` : 'None')}
                 </span>
               </div>
 
-              <div className="pt-1">
-                <span className="text-slate-500 dark:text-slate-400 block text-[11px] mb-1">Maker / Staff Remarks:</span>
-                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 text-slate-700 dark:text-slate-300 text-xs italic">
-                  "{l1.remarks || 'No remarks entered'}"
-                </div>
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Payment Mode</span>
+                <span className="font-mono uppercase text-slate-800 dark:text-slate-200 font-bold">
+                  {payment.paymentMode || 'MANUAL_UPI'}
+                </span>
               </div>
 
-              {l1.receiptUrl && (
-                <div className="pt-1 flex items-center justify-between p-2.5 rounded-xl bg-blue-100/60 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40">
-                  <span className="text-[11px] font-bold text-blue-900 dark:text-blue-200">
-                    Payment Screenshot Proof:
-                  </span>
-                  <a
-                    href={l1.receiptUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shadow-sm transition"
-                  >
-                    <Eye className="w-3 h-3" />
-                    <span>View Proof Image</span>
-                  </a>
-                </div>
-              )}
+              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+                <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Txn / Reference UTR</span>
+                <span className="font-mono text-slate-800 dark:text-slate-200 font-semibold truncate block">
+                  {payment.transactionRef || payment.paymentRefId || 'N/A'}
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* LEVEL 2: Review & Approval Column */}
-          <div className={`p-4 rounded-2xl border-2 space-y-3.5 ${
-            isL2Approved
-              ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/40'
-              : isL2Rejected
-              ? 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/40'
-              : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800/40'
-          }`}>
-            <div className="flex items-center justify-between border-b pb-2 border-slate-200 dark:border-white/10">
-              <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded text-white font-mono font-black text-[11px] ${
-                  isL2Approved ? 'bg-emerald-600' : isL2Rejected ? 'bg-rose-600' : 'bg-amber-600'
-                }`}>
-                  LEVEL 2
-                </span>
-                <span className="font-bold text-slate-900 dark:text-white text-sm">
-                  Review &amp; Clearance
-                </span>
-              </div>
-              <span className="text-[10px] font-mono font-medium text-slate-600 dark:text-slate-400">
-                Checker Details
+            {/* Remarks */}
+            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10">
+              <span className="text-slate-500 dark:text-slate-400 block text-[11px] mb-1 font-semibold">
+                Admin / Verification Remarks:
               </span>
+              <p className="text-xs text-slate-700 dark:text-slate-300 italic">
+                "{payment.remarks || l1.remarks || 'Directly approved payment.'}"
+              </p>
             </div>
 
-            <div className="space-y-2.5 text-xs">
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Reviewed By:</span>
-                <span className="font-bold text-slate-900 dark:text-white font-mono">
-                  {l2.reviewedByName || (isL2Pending ? '⏳ Awaiting L2 Approver' : 'Approver')}
+            {/* Screenshot proof if present */}
+            {(payment.receiptUrl || l1.receiptUrl) && (
+              <div className="flex items-center justify-between p-3 rounded-xl bg-blue-100/60 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span className="text-xs font-bold text-blue-950 dark:text-blue-200">
+                    Payment Screenshot Proof Attached
+                  </span>
+                </div>
+                <a
+                  href={payment.receiptUrl || l1.receiptUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-sm transition"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>View Proof Image</span>
+                </a>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Side-by-Side Comparison Grid (When L2 review took place) */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-4">
+            
+            {/* LEVEL 1: Submission Column */}
+            <div className="p-4 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border-2 border-blue-200 dark:border-blue-800/40 space-y-3.5">
+              <div className="flex items-center justify-between border-b border-blue-200 dark:border-blue-800/40 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-mono font-black text-[11px]">
+                    LEVEL 1
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-white text-sm">
+                    Initial Submission
+                  </span>
+                </div>
+                <span className="text-[10px] text-blue-700 dark:text-blue-300 font-mono font-medium">
+                  Maker Details
                 </span>
               </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Review Time:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">
-                  {isL2Pending ? 'Pending' : (l2.reviewedAt || 'N/A')}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Final Plan:</span>
-                <div className="text-right">
+              <div className="space-y-2.5 text-xs">
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Submitted By:</span>
                   <span className="font-bold text-slate-900 dark:text-white font-mono">
-                    {l2.finalPlanName || l1.planName}
+                    {l1.submittedByName || 'Staff / Maker'}
                   </span>
-                  {isPlanModified && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-300">
-                      ✏️ Modified by L2
-                    </span>
-                  )}
                 </div>
-              </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Final Amount:</span>
-                <div className="text-right">
-                  <span className="font-black text-emerald-700 dark:text-emerald-400 font-mono text-sm">
-                    ₹{Number(l2.finalAmount ?? l1.amount ?? 0).toLocaleString('en-IN')}
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Submission Time:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">
+                    {l1.submittedAt || (payment.createdAt ? new Date(payment.createdAt).toLocaleString('en-IN') : 'N/A')}
                   </span>
-                  {isAmountModified && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300">
-                      ✏️ Changed from ₹{l1.amount}
-                    </span>
-                  )}
                 </div>
-              </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Final Validity:</span>
-                <div className="text-right">
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Plan Assigned:</span>
+                  <span className="font-bold text-blue-700 dark:text-blue-300 font-mono">
+                    {l1.planName || 'N/A'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Plan Amount:</span>
+                  <span className="font-black text-slate-900 dark:text-white font-mono text-sm">
+                    ₹{Number(l1.amount || 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Validity Period:</span>
                   <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
-                    {l2.finalValidityDays ?? l1.validityDays} Days
+                    {l1.validityDays} Days
                   </span>
-                  {isValidityModified && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300">
-                      ✏️ Changed from {l1.validityDays}d
-                    </span>
-                  )}
                 </div>
-              </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Payment Date:</span>
-                <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {formatComparableDate(l2.finalPaymentDate || payment.paymentDate)}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Final Service Start Date:</span>
-                <div className="text-right">
-                  <span className="font-mono font-bold text-blue-700 dark:text-blue-300">
-                    {l2ServiceDate}
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Payment Date:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">
+                    {formatComparableDate(l1.paymentDate)}
                   </span>
-                  {isServiceDateModified && (
-                    <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300">
-                      ✏️ Modified by L2
-                    </span>
-                  )}
                 </div>
-              </div>
 
-              <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
-                <span className="text-slate-500 dark:text-slate-400">Final Discount:</span>
-                <span className="font-mono text-slate-800 dark:text-slate-200">
-                  {l2.finalDiscount ? `₹${l2.finalDiscount} off` : 'None'}
-                </span>
-              </div>
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Service Start Date:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">
+                    {l1ServiceDate}
+                  </span>
+                </div>
 
-              {/* L2 Remarks or Rejection Reason */}
-              <div className="pt-1">
-                {isL2Rejected ? (
-                  <div>
-                    <span className="text-rose-600 dark:text-rose-400 font-bold block text-[11px] mb-1 flex items-center gap-1">
-                      <XCircle className="w-3.5 h-3.5" /> Rejection Reason:
-                    </span>
-                    <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs font-semibold">
-                      "{l2.rejectionReason || l2.remarks || 'Payment authorization was rejected by reviewer'}"
-                    </div>
+                <div className="flex justify-between items-center py-1 border-b border-blue-100 dark:border-blue-900/30">
+                  <span className="text-slate-500 dark:text-slate-400">Coupon / Discount:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">
+                    {l1.couponCode ? `${l1.couponCode} (₹${l1.discount || 0} off)` : (l1.discount ? `₹${l1.discount} off` : 'None')}
+                  </span>
+                </div>
+
+                <div className="pt-1">
+                  <span className="text-slate-500 dark:text-slate-400 block text-[11px] mb-1">Maker / Staff Remarks:</span>
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-900 text-slate-700 dark:text-slate-300 text-xs italic">
+                    "{l1.remarks || 'No remarks entered'}"
                   </div>
-                ) : (
-                  <div>
-                    <span className="text-slate-500 dark:text-slate-400 block text-[11px] mb-1">Approver Remarks:</span>
-                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 text-xs italic">
-                      "{l2.remarks || 'No additional remarks entered by L2 approver'}"
-                    </div>
+                </div>
+
+                {l1.receiptUrl && (
+                  <div className="pt-1 flex items-center justify-between p-2.5 rounded-xl bg-blue-100/60 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40">
+                    <span className="text-[11px] font-bold text-blue-900 dark:text-blue-200">
+                      Payment Screenshot Proof:
+                    </span>
+                    <a
+                      href={l1.receiptUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shadow-sm transition"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>View Proof Image</span>
+                    </a>
                   </div>
                 )}
               </div>
             </div>
-          </div>
 
-        </div>
+            {/* LEVEL 2: Review & Approval Column */}
+            <div className={`p-4 rounded-2xl border-2 space-y-3.5 ${
+              isL2Approved
+                ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/40'
+                : isL2Rejected
+                ? 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/40'
+                : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800/40'
+            }`}>
+              <div className="flex items-center justify-between border-b pb-2 border-slate-200 dark:border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-0.5 rounded text-white font-mono font-black text-[11px] ${
+                    isL2Approved ? 'bg-emerald-600' : isL2Rejected ? 'bg-rose-600' : 'bg-amber-600'
+                  }`}>
+                    LEVEL 2
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-white text-sm">
+                    Review &amp; Clearance
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono font-medium text-slate-600 dark:text-slate-400">
+                  Checker Details
+                </span>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Reviewed By:</span>
+                  <span className="font-bold text-slate-900 dark:text-white font-mono">
+                    {l2.reviewedByName || (isL2Pending ? '⏳ Awaiting L2 Approver' : 'Approver')}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Review Time:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">
+                    {isL2Pending ? 'Pending' : (l2.reviewedAt || 'N/A')}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Final Plan:</span>
+                  <div className="text-right">
+                    <span className="font-bold text-slate-900 dark:text-white font-mono">
+                      {l2.finalPlanName || l1.planName}
+                    </span>
+                    {isPlanModified && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-300">
+                        ✏️ Modified by L2
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Final Amount:</span>
+                  <div className="text-right">
+                    <span className="font-black text-emerald-700 dark:text-emerald-400 font-mono text-sm">
+                      ₹{Number(l2.finalAmount ?? l1.amount ?? 0).toLocaleString('en-IN')}
+                    </span>
+                    {isAmountModified && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300">
+                        ✏️ Changed from ₹{l1.amount}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Final Validity:</span>
+                  <div className="text-right">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+                      {l2.finalValidityDays ?? l1.validityDays} Days
+                    </span>
+                    {isValidityModified && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300">
+                        ✏️ Changed from {l1.validityDays}d
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Payment Date:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">
+                    {formatComparableDate(l2.finalPaymentDate || payment.paymentDate)}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Final Service Start Date:</span>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-blue-700 dark:text-blue-300">
+                      {l2ServiceDate}
+                    </span>
+                    {isServiceDateModified && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300">
+                        ✏️ Modified by L2
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center py-1 border-b border-slate-200 dark:border-white/10">
+                  <span className="text-slate-500 dark:text-slate-400">Final Discount:</span>
+                  <span className="font-mono text-slate-800 dark:text-slate-200">
+                    {l2.finalDiscount ? `₹${l2.finalDiscount} off` : 'None'}
+                  </span>
+                </div>
+
+                {/* L2 Remarks or Rejection Reason */}
+                <div className="pt-1">
+                  {isL2Rejected ? (
+                    <div>
+                      <span className="text-rose-600 dark:text-rose-400 font-bold block text-[11px] mb-1 flex items-center gap-1">
+                        <XCircle className="w-3.5 h-3.5" /> Rejection Reason:
+                      </span>
+                      <div className="p-2.5 rounded-xl bg-rose-100 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 text-xs font-semibold">
+                        "{l2.rejectionReason || l2.remarks || 'Payment authorization was rejected by reviewer'}"
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="text-slate-500 dark:text-slate-400 block text-[11px] mb-1">Approver Remarks:</span>
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300 text-xs italic">
+                        "{l2.remarks || 'No additional remarks entered by L2 approver'}"
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        )}
 
         {/* Highlight Summary Notice */}
-        {(isPlanModified || isAmountModified || isValidityModified || isServiceDateModified) && (
+        {!isDirectApproved && (isPlanModified || isAmountModified || isValidityModified || isServiceDateModified) && (
           <div className="p-3 mb-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-300">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
             <div>
@@ -491,7 +619,7 @@ export default function L1L2AuditModal({
         {/* Footer Actions */}
         <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-slate-200 dark:border-white/10">
           <div className="flex items-center gap-2 flex-wrap">
-            {isL2Approved && (
+            {(isL2Approved || isDirectApproved) && (
               <button
                 type="button"
                 onClick={() => {
