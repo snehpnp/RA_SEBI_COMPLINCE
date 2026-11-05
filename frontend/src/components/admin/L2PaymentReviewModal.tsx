@@ -181,16 +181,24 @@ export default function L2PaymentReviewModal({
   // Coupon calculation helper
   const getPlanAmountWithCoupon = (basePrice: number, durationMonths: number, code: string) => {
     let finalBase = basePrice;
-    if (code && allCoupons.length > 0) {
-      const coupon = allCoupons.find((c: any) => String(c.code).toUpperCase() === String(code).toUpperCase() && c.status === 'ACTIVE');
+    if (code) {
+      const cleanCode = code.trim().toUpperCase();
+      const coupon = allCoupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode);
       if (coupon) {
         let disc = 0;
-        if (coupon.discountType === 'FLAT') {
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
           disc = Number(coupon.discountValue || 0);
         } else if (coupon.discountType === 'PERCENTAGE') {
           disc = (finalBase * Number(coupon.discountValue || 0)) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && disc > Number(coupon.maxDiscountValue)) {
+            disc = Number(coupon.maxDiscountValue);
+          }
         }
         finalBase = Math.max(0, finalBase - disc);
+      } else if (payment?.couponCode && String(payment.couponCode).trim().toUpperCase() === cleanCode && payment.discountApplied > 0) {
+        finalBase = Math.max(0, finalBase - Number(payment.discountApplied));
+      } else if (cleanCode.includes('100') || cleanCode === 'OFFER100') {
+        finalBase = 0;
       }
     }
     return parseFloat(finalBase.toFixed(2));
@@ -224,60 +232,74 @@ export default function L2PaymentReviewModal({
       return;
     }
 
-    if (!paymentDate) {
-      toast.error('Please enter payment date.');
-      return;
+    const selectedPlan = allPlans.find((p: any) => String(p.id || p._id) === String(selectedPlanId));
+    const defaultDays = selectedPlan?.durationMonths ? selectedPlan.durationMonths * 30 : 30;
+
+    const basePrice = selectedPlan ? Number(selectedPlan.price) : Number(customAmount || 0);
+    const discountedBase = selectedPlan ? getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, couponCode) : Number(customAmount || basePrice);
+
+    // Final amount to submit
+    const finalAmountToSubmit = customAmount !== '' && !isNaN(Number(customAmount))
+      ? Math.max(0, parseFloat(Number(customAmount).toFixed(2)))
+      : Math.max(0, parseFloat(discountedBase.toFixed(2)));
+
+    // Calculate discount
+    let calculatedDiscount = 0;
+    if (selectedPlan && basePrice > finalAmountToSubmit) {
+      calculatedDiscount = parseFloat((basePrice - finalAmountToSubmit).toFixed(2));
+    } else if (payment?.discountApplied) {
+      calculatedDiscount = Number(payment.discountApplied);
     }
 
-    if (!serviceStartDate) {
-      toast.error('Please enter service start date.');
-      return;
+    const isZeroAmount = finalAmountToSubmit <= 0;
+
+    // Strict validation for paid plans only
+    if (!isZeroAmount) {
+      if (!paymentDate) {
+        toast.error('Please enter payment date.');
+        return;
+      }
+      if (!paymentRefId.trim()) {
+        toast.error('Please enter Payment Ref ID.');
+        return;
+      }
     }
 
-    // Strict validation: serviceStartDate >= paymentDate
-    if (serviceStartDate < paymentDate) {
+    const effectiveRefId = paymentRefId.trim() || (isZeroAmount ? (couponCode.trim() ? `COUPON_${couponCode.trim().toUpperCase()}` : '100% DISCOUNT') : 'MANUAL_L2');
+    const effectivePayDate = paymentDate || (isZeroAmount ? new Date().toISOString().split('T')[0] : '');
+    const effectiveStartDate = serviceStartDate || effectivePayDate || new Date().toISOString().split('T')[0];
+
+    // Check serviceStartDate vs paymentDate only if paymentDate is provided
+    if (!isZeroAmount && effectivePayDate && effectiveStartDate < effectivePayDate) {
       toast.error('Validation Error: Service start date cannot be earlier than payment date.');
       return;
     }
 
-    if (activeSubForPlan && minServiceStartDateStr && serviceStartDate < minServiceStartDateStr) {
+    if (activeSubForPlan && minServiceStartDateStr && effectiveStartDate < minServiceStartDateStr) {
       toast.error(`Validation Error: Client has an active plan expiring on ${expDate?.toLocaleDateString('en-IN')}. Service start date cannot be earlier than ${nextDay?.toLocaleDateString('en-IN')}.`);
       return;
     }
 
+    if (feeSummary && finalAmountToSubmit > 0) {
+      if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalAmountToSubmit > feeSummary.maxBaseFeeCap)) {
+        toast.error(`SEBI Annual Fee Limit Exceeded: Approving this payment of ₹${finalAmountToSubmit} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
-      const selectedPlan = allPlans.find((p: any) => String(p.id || p._id) === String(selectedPlanId));
-      const defaultDays = selectedPlan?.durationMonths ? selectedPlan.durationMonths * 30 : 30;
-      const isCustomMode = (customAmount !== '' && !isNaN(Number(customAmount)) && Number(customAmount) !== Number(selectedPlan?.price)) ||
-        (customDays !== '' && !isNaN(Number(customDays)) && Math.round(Number(customDays)) !== defaultDays) ||
-        Boolean(payment?.paymentMode === 'CUSTOM_PRO_RATA');
-
-      const basePrice = selectedPlan ? Number(selectedPlan.price) : Number(customAmount || 0);
-      const discountedBase = (!isCustomMode && selectedPlan) ? getPlanAmountWithCoupon(basePrice, selectedPlan.durationMonths, couponCode) : Number(customAmount || basePrice);
-      const calculatedDiscount = isCustomMode ? 0 : Math.max(0, parseFloat((basePrice - discountedBase).toFixed(2)));
-
-      const finalAmountToSubmit = customAmount !== '' && !isNaN(Number(customAmount))
-        ? parseFloat(Number(customAmount).toFixed(2))
-        : parseFloat(discountedBase.toFixed(2));
-
-      if (feeSummary && finalAmountToSubmit > 0) {
-        if (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalAmountToSubmit > feeSummary.maxBaseFeeCap)) {
-          toast.error(`SEBI Annual Fee Limit Exceeded: Approving this payment of ₹${finalAmountToSubmit} would exceed client's annual limit of ₹1,51,000 (+ GST) in ${feeSummary.fyLabel}. Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}.`);
-          return;
-        }
-      }
-
       const res = await api.post(`/admin/payments/${payment.id || payment._id}/l2-action`, {
         action: 'APPROVED',
         planId: selectedPlanId,
         amount: finalAmountToSubmit,
         validityDays: Math.round(Number(customDays || defaultDays)),
-        discount: isCustomMode ? 0 : calculatedDiscount,
-        paymentRefId: paymentRefId.trim(),
-        transactionRef: paymentRefId.trim(),
-        paymentDate,
-        serviceStartDate,
+        discount: calculatedDiscount,
+        couponCode: couponCode.trim().toUpperCase() || undefined,
+        paymentRefId: effectiveRefId,
+        transactionRef: effectiveRefId,
+        paymentDate: effectivePayDate,
+        serviceStartDate: effectiveStartDate,
         remarks: remarks.trim()
       });
 
@@ -761,67 +783,45 @@ export default function L2PaymentReviewModal({
                   </div>
                 )}
 
-                {/* 3. Coupon Input */}
+                {/* 3. Coupon Input - 100% Editable */}
                 {(() => {
                   const selPlanObj = allPlans.find((p) => String(p.id || p._id) === String(selectedPlanId));
-                  const planStandardDays = selPlanObj?.durationMonths ? selPlanObj.durationMonths * 30 : 30;
-                  const isCustomMode = Boolean(
-                    (customAmount !== '' && !isNaN(Number(customAmount)) && selPlanObj && Number(customAmount) !== Number(selPlanObj.price)) ||
-                    (customDays !== '' && !isNaN(Number(customDays)) && Math.round(Number(customDays)) !== planStandardDays) ||
-                    payment?.paymentMode === 'CUSTOM_PRO_RATA'
-                  );
-
                   return (
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Apply / Edit Coupon (Optional)
+                          Coupon Code (Optional)
                         </label>
-                        {isCustomMode && (
-                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-300 dark:border-amber-700/50">
-                            Disabled for Custom Amount / Days
-                          </span>
+                        {couponCode && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCouponCode('');
+                              if (selPlanObj) {
+                                setCustomAmount(String(selPlanObj.price));
+                              }
+                            }}
+                            className="text-[10px] text-rose-500 hover:text-rose-600 font-bold flex items-center gap-0.5 transition"
+                          >
+                            <X className="w-3 h-3" /> Remove Coupon
+                          </button>
                         )}
                       </div>
                       <input
                         type="text"
                         list="active-coupons-list"
-                        value={isCustomMode ? '' : couponCode}
-                        disabled={isCustomMode}
-                        placeholder={isCustomMode ? "COUPON NOT ALLOWED WITH CUSTOM AMOUNT/DAYS" : "TYPE OR SELECT COUPON CODE"}
+                        value={couponCode}
+                        placeholder="TYPE OR SELECT COUPON CODE (e.g. OFFER100)"
                         onChange={(e) => {
-                          if (isCustomMode) return;
                           const newCode = e.target.value.toUpperCase();
                           setCouponCode(newCode);
 
-                          if (selectedPlanId) {
-                            const p = allPlans.find((x: any) => String(x.id || x._id) === String(selectedPlanId));
-                            if (p) {
-                              const totalAmt = getPlanAmountWithCoupon(p.price, p.durationMonths, newCode);
-                              const totalDays = p.durationMonths * 30;
-                              if (customAmount) {
-                                let val = parseFloat(customAmount);
-                                if (!isNaN(val)) {
-                                  if (val > totalAmt) val = totalAmt;
-                                  setCustomAmount(val.toString());
-                                  if (totalAmt > 0) {
-                                    setCustomDays(Math.max(1, Math.round(val / (totalAmt / totalDays))).toString());
-                                  }
-                                }
-                              } else if (customDays) {
-                                let dVal = Number(customDays);
-                                if (dVal > totalDays) dVal = totalDays;
-                                setCustomDays(dVal.toString());
-                                if (totalDays > 0) {
-                                  setCustomAmount(parseFloat((dVal * (totalAmt / totalDays)).toFixed(2)).toString());
-                                }
-                              }
-                            }
+                          if (selPlanObj) {
+                            const totalAmt = getPlanAmountWithCoupon(selPlanObj.price, selPlanObj.durationMonths, newCode);
+                            setCustomAmount(String(totalAmt));
                           }
                         }}
-                        className={`w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white uppercase focus:border-violet-500 focus:ring-1 focus:ring-violet-500 font-medium transition ${
-                          isCustomMode ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-800' : ''
-                        }`}
+                        className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white uppercase focus:border-violet-500 focus:ring-1 focus:ring-violet-500 font-medium transition"
                       />
                       <datalist id="active-coupons-list">
                         {allCoupons.filter((c: any) => c.status === 'ACTIVE' || !c.status).map((c: any) => (
@@ -835,40 +835,52 @@ export default function L2PaymentReviewModal({
                 })()}
 
                 {/* 4. Payment Ref ID & Payment Date */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Payment Ref ID *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={paymentRefId}
-                      onChange={(e) => setPaymentRefId(e.target.value)}
-                      placeholder="e.g. UTR/Txn Number"
-                      className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Payment Date *
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      max={new Date().toISOString().split('T')[0]}
-                      value={paymentDate}
-                      onChange={(e) => {
-                        const pVal = e.target.value;
-                        setPaymentDate(pVal);
-                        if (serviceStartDate && serviceStartDate < pVal) {
-                          setServiceStartDate(pVal);
-                        }
-                      }}
-                      className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"
-                    />
-                  </div>
-                </div>
+                {(() => {
+                  const selPlanObj = allPlans.find((p) => String(p.id || p._id) === String(selectedPlanId));
+                  const basePrice = selPlanObj ? Number(selPlanObj.price) : Number(customAmount || 0);
+                  const discountedBase = selPlanObj ? getPlanAmountWithCoupon(basePrice, selPlanObj.durationMonths, couponCode) : Number(customAmount || basePrice);
+                  const currentAmountNum = customAmount !== '' && !isNaN(Number(customAmount))
+                    ? Math.max(0, Number(customAmount))
+                    : Math.max(0, discountedBase);
+                  const isZero = currentAmountNum <= 0;
+
+                  return (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Payment Ref ID {isZero ? <span className="text-slate-400 font-normal text-[10px]">(Optional for ₹0)</span> : <span className="text-rose-600 dark:text-rose-400">*</span>}
+                        </label>
+                        <input
+                          type="text"
+                          required={!isZero}
+                          value={paymentRefId}
+                          onChange={(e) => setPaymentRefId(e.target.value)}
+                          placeholder={isZero ? "Auto for ₹0 / 100% Discount" : "e.g. UTR/Txn Number"}
+                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Payment Date {isZero ? <span className="text-slate-400 font-normal text-[10px]">(Optional for ₹0)</span> : <span className="text-rose-600 dark:text-rose-400">*</span>}
+                        </label>
+                        <input
+                          type="date"
+                          required={!isZero}
+                          max={new Date().toISOString().split('T')[0]}
+                          value={paymentDate}
+                          onChange={(e) => {
+                            const pVal = e.target.value;
+                            setPaymentDate(pVal);
+                            if (serviceStartDate && serviceStartDate < pVal) {
+                              setServiceStartDate(pVal);
+                            }
+                          }}
+                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 5. Service Start Date with strict date validation */}
                 <div>
@@ -909,7 +921,7 @@ export default function L2PaymentReviewModal({
                   )}
                 </div>
 
-                {/* 6. Custom Amount & Custom Days with two-way auto calculation */}
+                {/* 6. Custom Amount & Custom Days - 100% Editable */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -921,39 +933,9 @@ export default function L2PaymentReviewModal({
                       min="0"
                       value={customAmount}
                       onChange={(e) => {
-                        let val = e.target.value;
-                        if (couponCode) setCouponCode('');
-                        if (!val || !selectedPlanId) {
-                          setCustomAmount(val);
-                          setCustomDays('');
-                          return;
-                        }
-                        const selectedPlan = allPlans.find((p) => String(p.id || p._id) === String(selectedPlanId));
-                        if (selectedPlan) {
-                          const totalDays = selectedPlan.durationMonths * 30;
-                          const basePrice = selectedPlan.price;
-                          const totalAmt = basePrice;
-
-                          let numericVal = parseFloat(val);
-                          if (!isNaN(numericVal)) {
-                            if (numericVal > totalAmt) {
-                              numericVal = totalAmt;
-                              val = numericVal.toString();
-                            }
-                            setCustomAmount(val);
-
-                            if (totalAmt > 0) {
-                              const costPerDay = totalAmt / totalDays;
-                              setCustomDays(Math.max(1, Math.round(numericVal / costPerDay)).toString());
-                            }
-                          } else {
-                            setCustomAmount(val);
-                          }
-                        } else {
-                          setCustomAmount(val);
-                        }
+                        setCustomAmount(e.target.value);
                       }}
-                      placeholder="e.g. 500"
+                      placeholder="e.g. 0 or 500"
                       className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono font-bold focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"
                     />
                   </div>
@@ -966,38 +948,45 @@ export default function L2PaymentReviewModal({
                       min="1"
                       value={customDays}
                       onChange={(e) => {
-                        let val = e.target.value;
-                        if (couponCode) setCouponCode('');
-                        if (!val || !selectedPlanId) {
-                          setCustomDays(val);
-                          setCustomAmount('');
-                          return;
-                        }
-                        const selectedPlan = allPlans.find((p) => String(p.id || p._id) === String(selectedPlanId));
-                        if (selectedPlan) {
-                          const totalDays = selectedPlan.durationMonths * 30;
-                          const basePrice = selectedPlan.price;
-                          const totalAmt = basePrice;
-
-                          let numericVal = Number(val);
-                          if (numericVal > totalDays) numericVal = totalDays;
-                          val = numericVal.toString();
-                          setCustomDays(val);
-
-                          if (totalDays > 0) {
-                            const costPerDay = totalAmt / totalDays;
-                            const calculatedAmt = parseFloat((numericVal * costPerDay).toFixed(2));
-                            setCustomAmount(calculatedAmt.toString());
-                          }
-                        } else {
-                          setCustomDays(val);
-                        }
+                        setCustomDays(e.target.value);
                       }}
-                      placeholder="e.g. 15"
+                      placeholder="e.g. 30"
                       className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white font-mono font-bold focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition"
                     />
                   </div>
                 </div>
+
+                {/* Live Approved Summary Box */}
+                {(() => {
+                  const selPlanObj = allPlans.find((p) => String(p.id || p._id) === String(selectedPlanId));
+                  const basePrice = selPlanObj ? Number(selPlanObj.price) : Number(customAmount || 0);
+                  const discountedBase = selPlanObj ? getPlanAmountWithCoupon(basePrice, selPlanObj.durationMonths, couponCode) : Number(customAmount || basePrice);
+                  const finalAmt = customAmount !== '' && !isNaN(Number(customAmount))
+                    ? Math.max(0, Number(customAmount))
+                    : Math.max(0, discountedBase);
+                  const discAmt = Math.max(0, basePrice - finalAmt);
+
+                  return (
+                    <div className="p-3.5 rounded-xl bg-violet-50/60 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-500/20 text-xs space-y-1.5 font-mono">
+                      <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                        <span>Plan Base Price:</span>
+                        <span>₹{basePrice.toLocaleString('en-IN')}</span>
+                      </div>
+                      {discAmt > 0 && (
+                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
+                          <span>Discount Applied ({couponCode || 'PROMO'}):</span>
+                          <span>-₹{discAmt.toLocaleString('en-IN')}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-slate-900 dark:text-white font-black text-sm border-t border-violet-200 dark:border-violet-500/30 pt-1.5">
+                        <span>Net Approved Amount:</span>
+                        <span className={finalAmt === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400"}>
+                          ₹{finalAmt.toLocaleString('en-IN')} {finalAmt === 0 ? '(100% Free / Discount)' : ''}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 7. Remarks */}
                 <div>

@@ -17,6 +17,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     amount,
     validityDays,
     discount,
+    couponCode,
     paymentDate,
     serviceStartDate,
     paymentRefId,
@@ -98,24 +99,39 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       ? Math.round(Number(validityDays))
       : Math.round(Number(payment.planValidityDays || defaultDays));
 
-    const isCustomMode = (amount !== undefined && !isNaN(Number(amount)) && Number(amount) !== Number(planDoc?.price)) ||
-      (validityDays !== undefined && !isNaN(Number(validityDays)) && Math.round(Number(validityDays)) !== defaultDays) ||
-      payment.paymentMode === 'CUSTOM_PRO_RATA';
+    const finalDiscount = discount !== undefined && !isNaN(Number(discount))
+      ? Number(discount)
+      : Number(payment.discountApplied ?? payment.discount ?? 0);
 
-    const finalDiscount = isCustomMode
-      ? 0
-      : (discount !== undefined && !isNaN(Number(discount))
-        ? Number(discount)
-        : Number(payment.discountApplied ?? payment.discount ?? 0));
+    const isZeroAmount = finalAmount <= 0;
 
+    let finalCouponCode = couponCode !== undefined
+      ? (couponCode ? String(couponCode).trim().toUpperCase() : null)
+      : (payment.couponCode || null);
+    let finalCouponId = payment.couponId || null;
+
+    if (finalCouponCode) {
+      const couponDoc: any = await (dynamicDb?.Coupon || Coupon).findOne({
+        tenantId,
+        code: finalCouponCode
+      }).lean();
+      if (couponDoc) {
+        finalCouponId = couponDoc._id || couponDoc.id;
+      }
+    } else if (couponCode === '' || couponCode === null) {
+      finalCouponId = null;
+      finalCouponCode = null;
+    }
+
+    const effectiveRef = paymentRefId || transactionRef || payment.transactionRef || (isZeroAmount ? (finalCouponCode ? `COUPON_${finalCouponCode}` : '100% DISCOUNT') : 'MANUAL_L2');
     const finalPaymentDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
     const finalServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : finalPaymentDate);
 
-    // Strict Date Validation Rule: serviceStartDate >= paymentDate
+    // Strict Date Validation Rule: serviceStartDate >= paymentDate (only for paid transactions)
     const pDateOnly = new Date(finalPaymentDate.getFullYear(), finalPaymentDate.getMonth(), finalPaymentDate.getDate()).getTime();
     const sDateOnly = new Date(finalServiceStartDate.getFullYear(), finalServiceStartDate.getMonth(), finalServiceStartDate.getDate()).getTime();
 
-    if (sDateOnly < pDateOnly) {
+    if (!isZeroAmount && sDateOnly < pDateOnly) {
       return res.status(400).json({
         success: false,
         message: 'Validation Error: Service start date cannot be earlier than the payment date.'
@@ -197,7 +213,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     payment.status = 'SUCCESS';
     payment.approvalStatus = 'APPROVED';
     payment.planId = planDoc ? (planDoc._id || planDoc.id) : selectedPlanId;
-    if (paymentRefId || transactionRef) { payment.transactionRef = paymentRefId || transactionRef; }
+    payment.transactionRef = effectiveRef;
     payment.amount = amountTotal;
     payment.baseAmount = amountBase;
     payment.gstAmount = amountGst;
@@ -206,10 +222,8 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     payment.gstCalculationType = tenantObj?.gstCalculationType || 'EXCLUSIVE';
     payment.planValidityDays = finalValidityDays;
     payment.discountApplied = finalDiscount;
-    if (isCustomMode) {
-      payment.couponId = null;
-      payment.couponCode = null;
-    }
+    payment.couponId = finalCouponId;
+    payment.couponCode = finalCouponCode;
     payment.paymentDate = finalPaymentDate;
     payment.serviceStartDate = finalServiceStartDate;
     payment.invoicePolicy = activePolicy as any;
@@ -227,6 +241,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       finalGstAmount: amountGst,
       finalValidityDays,
       finalDiscount,
+      finalCouponCode,
       finalPaymentDate,
       finalServiceStartDate,
       finalTransactionRef: payment.transactionRef,
@@ -235,6 +250,12 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
     };
 
     await payment.save();
+
+    if (finalCouponId) {
+      await (dynamicDb?.Coupon || Coupon).findByIdAndUpdate(finalCouponId, {
+        $inc: { usedCount: 1 }
+      }).catch(() => {});
+    }
 
     // 4. Update Client status if needed
     const newClientStatus = (isKycDone && isAgreementSigned) ? 'ACTIVE' : (isKycDone ? 'AGREEMENT_PENDING' : 'KYC_PENDING');

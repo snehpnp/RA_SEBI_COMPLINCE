@@ -4062,9 +4062,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       planValidityDays = Math.max(1, Math.min(planTotalDays, Math.round(preTaxBase / planDailyBase)));
     }
 
-    // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval (only for paid plans where amount > 0)
-    // If 100% discount / 0 amount is provided, there is no payment to verify, so it directly activates!
-    if (tenantObj?.l2ApprovalEnabled === true && finalTotalAmount > 0) {
+    // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval (including 100% discount / ₹0 plans as per tenant policy)
+    if (tenantObj?.l2ApprovalEnabled === true) {
       const pendingPayment: any = await dynamicDb.Payment.create({
         tenantId: tenantId || client.tenantId,
         clientId: actualClientId,
