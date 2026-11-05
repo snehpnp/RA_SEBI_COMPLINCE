@@ -690,8 +690,6 @@ function AdminDashboardContent() {
   const handleAssignPlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assignPlanId) { toast('Please select a plan.'); return; }
-    if (!assignPaymentRefId.trim()) { toast('Please enter Payment Ref ID.'); return; }
-    if (!assignPaymentDate) { toast('Please select Payment Date.'); return; }
 
     const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
     if (!selectedPlan) return;
@@ -747,6 +745,15 @@ function AdminDashboardContent() {
     let basePrice = taxableBase;
     const gstAmount = gstAmt;
 
+    const isZeroAmount = finalPrice <= 0 || (discOnBase >= preTaxBase && preTaxBase > 0);
+    if (!isZeroAmount) {
+      if (!assignPaymentRefId.trim()) { toast('Please enter Payment Ref ID.'); return; }
+      if (!assignPaymentDate) { toast('Please select Payment Date.'); return; }
+    }
+
+    const effectiveRefId = assignPaymentRefId.trim() || (isZeroAmount ? (assignCouponCode.trim() ? `COUPON_${assignCouponCode.trim().toUpperCase()}` : '100% DISCOUNT') : '');
+    const effectiveDate = assignPaymentDate || (isZeroAmount ? new Date().toISOString().split('T')[0] : '');
+
     const messageNode = (
       <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
         <p>
@@ -762,8 +769,8 @@ function AdminDashboardContent() {
           ) : (
             <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
           )}
-          <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentRefId}</span></div>
-          <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentDate}</span></div>
+          <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{effectiveRefId || 'N/A'}</span></div>
+          <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{effectiveDate || 'N/A'}</span></div>
           {assignCustomDays.trim() && (
             <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Service Validity:</span> <span className="text-emerald-600 dark:text-emerald-400 font-bold">{Math.round(Number(assignCustomDays))} Days</span></div>
           )}
@@ -782,8 +789,8 @@ function AdminDashboardContent() {
           const payload: any = {
             planId: assignPlanId,
             remarks: assignPlanRemarks,
-            paymentRefId: assignPaymentRefId,
-            paymentDate: assignPaymentDate
+            paymentRefId: effectiveRefId,
+            paymentDate: effectiveDate
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
           if (assignCustomDays.trim()) payload.customDays = Math.round(Number(assignCustomDays));
@@ -6788,30 +6795,72 @@ function AdminDashboardContent() {
                               </div>
 
                               {/* Payment Details */}
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Payment Ref ID *</label>
-                                  <input
-                                    type="text"
-                                    required
-                                    value={assignPaymentRefId}
-                                    onChange={e => setAssignPaymentRefId(e.target.value)}
-                                    placeholder="e.g. UTR/Txn Number"
-                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Payment Date *</label>
-                                  <input
-                                    type="date"
-                                    required
-                                    max={new Date().toISOString().split('T')[0]}
-                                    value={assignPaymentDate}
-                                    onChange={e => setAssignPaymentDate(e.target.value)}
-                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
-                                  />
-                                </div>
-                              </div>
+                              {(() => {
+                                const selPlan = (adminPlans || []).find((p: any) => p.id === assignPlanId);
+                                const isCustAct = Boolean((assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount))) || (assignCustomDays && assignCustomDays.trim() && !isNaN(Number(assignCustomDays))));
+                                const hasCustAmt = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
+                                const isExclGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                let defTot = selPlan ? selPlan.price : 0;
+                                if (!hasCustAmt && isExclGst && selPlan) {
+                                  defTot = parseFloat((selPlan.price * 1.18).toFixed(2));
+                                }
+                                const entTot = hasCustAmt ? Number(assignCustomAmount) : defTot;
+                                const pTaxBase = hasCustAmt
+                                  ? (gstEnabled ? parseFloat((entTot / 1.18).toFixed(2)) : entTot)
+                                  : ((gstEnabled && !isExclGst) ? parseFloat((entTot / 1.18).toFixed(2)) : entTot);
+
+                                let dBase = 0;
+                                if (!isCustAct && assignCouponCode.trim()) {
+                                  const clnCode = assignCouponCode.trim().toUpperCase();
+                                  const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clnCode && c.status === 'ACTIVE');
+                                  if (mCoupon) {
+                                    if (mCoupon.discountType === 'FLAT' || mCoupon.discountType === 'FIXED') {
+                                      dBase = (gstEnabled && !isExclGst) ? parseFloat((Number(mCoupon.discountValue || 0) / 1.18).toFixed(2)) : Number(mCoupon.discountValue || 0);
+                                    } else if (mCoupon.discountType === 'PERCENTAGE') {
+                                      dBase = parseFloat(((pTaxBase * Number(mCoupon.discountValue || 0)) / 100).toFixed(2));
+                                      if (mCoupon.percentageType === 'CAPPED' && mCoupon.maxDiscountValue && dBase > Number(mCoupon.maxDiscountValue)) {
+                                        dBase = Number(mCoupon.maxDiscountValue);
+                                      }
+                                    }
+                                    if (dBase > pTaxBase) dBase = pTaxBase;
+                                  }
+                                }
+                                const tBase = Math.max(0, parseFloat((pTaxBase - dBase).toFixed(2)));
+                                const gAmt = gstEnabled ? parseFloat((tBase * 0.18).toFixed(2)) : 0;
+                                const fPrice = parseFloat((tBase + gAmt).toFixed(2));
+                                const isZeroAmountModal = Boolean(assignPlanId) && (fPrice <= 0 || (dBase >= pTaxBase && pTaxBase > 0));
+
+                                return (
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Payment Ref ID {isZeroAmountModal ? <span className="text-emerald-500 font-normal">(Optional - 100% Free)</span> : '*'}
+                                      </label>
+                                      <input
+                                        type="text"
+                                        required={!isZeroAmountModal}
+                                        value={assignPaymentRefId}
+                                        onChange={e => setAssignPaymentRefId(e.target.value)}
+                                        placeholder={isZeroAmountModal ? "Optional for 100% discount" : "e.g. UTR/Txn Number"}
+                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Payment Date {isZeroAmountModal ? <span className="text-emerald-500 font-normal">(Optional)</span> : '*'}
+                                      </label>
+                                      <input
+                                        type="date"
+                                        required={!isZeroAmountModal}
+                                        max={new Date().toISOString().split('T')[0]}
+                                        value={assignPaymentDate}
+                                        onChange={e => setAssignPaymentDate(e.target.value)}
+                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })()}
 
                               {/* Custom Fields */}
                               <div className="grid grid-cols-2 gap-4">

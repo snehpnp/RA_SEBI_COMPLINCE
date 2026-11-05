@@ -1155,8 +1155,6 @@ function AdminDashboardContent() {
   const handleAssignPlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assignPlanId) { toast('Please select a plan.'); return; }
-    if (!assignPaymentRefId.trim()) { toast('Please enter Payment Ref ID.'); return; }
-    if (!assignPaymentDate) { toast('Please select Payment Date.'); return; }
 
     const selectedPlan = adminPlans.find((p) => p.id === assignPlanId);
     if (!selectedPlan) return;
@@ -1212,6 +1210,15 @@ function AdminDashboardContent() {
     let basePrice = taxableBase;
     const gstAmount = gstAmt;
 
+    const isZeroAmount = finalPrice <= 0 || (discOnBase >= preTaxBase && preTaxBase > 0);
+    if (!isZeroAmount) {
+      if (!assignPaymentRefId.trim()) { toast('Please enter Payment Ref ID.'); return; }
+      if (!assignPaymentDate) { toast('Please select Payment Date.'); return; }
+    }
+
+    const effectiveRefId = assignPaymentRefId.trim() || (isZeroAmount ? (assignCouponCode.trim() ? `COUPON_${assignCouponCode.trim().toUpperCase()}` : '100% DISCOUNT') : '');
+    const effectiveDate = assignPaymentDate || (isZeroAmount ? new Date().toISOString().split('T')[0] : '');
+
     const messageNode = (
       <div className="space-y-3 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
         <p>
@@ -1227,8 +1234,8 @@ function AdminDashboardContent() {
           ) : (
             <div className="flex justify-between border-t border-slate-400 dark:border-white/10 pt-1.5 font-extrabold text-violet-400"><span>Total Amount:</span> <span>₹{finalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
           )}
-          <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentRefId}</span></div>
-          <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{assignPaymentDate}</span></div>
+          <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Payment Ref:</span> <span className="text-slate-700 dark:text-slate-300">{effectiveRefId || 'N/A'}</span></div>
+          <div className="flex justify-between text-slate-600 dark:text-slate-400"><span>Payment Date:</span> <span className="text-slate-700 dark:text-slate-300">{effectiveDate || 'N/A'}</span></div>
           {assignCustomDays.trim() && (
             <div className="flex justify-between text-slate-600 dark:text-slate-400 border-t border-slate-400 dark:border-white/10 pt-1.5"><span>Service Validity:</span> <span className="text-emerald-600 dark:text-emerald-400 font-bold">{Math.round(Number(assignCustomDays))} Days</span></div>
           )}
@@ -1247,9 +1254,9 @@ function AdminDashboardContent() {
           const payload: any = {
             planId: assignPlanId,
             remarks: assignPlanRemarks,
-            paymentRefId: assignPaymentRefId,
-            paymentDate: assignPaymentDate,
-            serviceStartDate: assignServiceStartDate || assignPaymentDate
+            paymentRefId: effectiveRefId,
+            paymentDate: effectiveDate,
+            serviceStartDate: assignServiceStartDate || effectiveDate
           };
           if (assignCustomAmount.trim()) payload.customAmount = Number(assignCustomAmount);
           if (assignCustomDays.trim()) payload.customDays = Math.round(Number(assignCustomDays));
@@ -2006,6 +2013,9 @@ function AdminDashboardContent() {
 
       // Tab specific data loading
       if (tab === 'dashboard') {
+        api.getAdminCategories().then(res => {
+          if (res.success) setCategories(res.data);
+        }).catch(() => { });
         api.request('/admin/dashboard-stats').then(res => {
           if (res.success) {
             setDashboardStats(res.data);
@@ -4810,6 +4820,26 @@ function AdminDashboardContent() {
     }
   ], [paymentDateMode, sendingInvoiceId]);
 
+  const l2PendingPaymentColumns = useMemo(() => [
+    ...paymentColumns,
+    {
+      name: 'L2 Action',
+      width: '140px',
+      id: 'l2-action-col',
+      selector: (row: any) => row.approvalStatus,
+      cell: (row: any) => (
+        <button
+          type="button"
+          onClick={() => setSelectedL2Payment(row)}
+          className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 transition-all"
+        >
+          <Edit3 className="w-3.5 h-3.5" />
+          <span>L2 Review</span>
+        </button>
+      )
+    }
+  ], [paymentColumns]);
+
   const sortedAllPayments = useMemo(() => {
     return [...allPayments].sort((a, b) => {
       if (paymentDateMode === 'CREATED_DATE') {
@@ -7048,21 +7078,21 @@ function AdminDashboardContent() {
                       )}
 
                       {/* Category-wise Active Subscribers Section */}
-                      {(!isStaff || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                        <div className="mt-8 bg-white dark:bg-[#0F172A] rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
-                            <div>
-                              <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                                <Layers className="w-5 h-5 text-emerald-600 dark:text-[#d4f23b]" />
-                                Category-wise Active Subscribers
-                              </h3>
-                              <p className="text-xs text-slate-500 mt-1">
-                                Real-time active paid client counts for each category and duration plans.
-                              </p>
-                            </div>
+                      <div className="mt-8 bg-white dark:bg-[#0F172A] rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                              <Layers className="w-5 h-5 text-emerald-600 dark:text-[#d4f23b]" />
+                              Category-wise Active Subscribers
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-1">
+                              Real-time active paid client counts for each category and duration plans.
+                            </p>
+                          </div>
 
-                            <div className="flex flex-wrap items-center gap-3">
-                              {/* Toggle Researcher Visibility */}
+                          <div className="flex flex-wrap items-center gap-3">
+                            {/* Toggle Researcher Visibility (Only for Admins/Settings managers) */}
+                            {(!isStaff || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || hasPermission('ACCESS_SETTINGS')) && (
                               <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
                                 <span className="text-slate-600 dark:text-slate-300 font-medium">Researcher Add-Signal View:</span>
                                 <button
@@ -7092,22 +7122,23 @@ function AdminDashboardContent() {
                                   {showCategoryClientCountToResearcher ? '✓ ON' : '✕ OFF'}
                                 </button>
                               </div>
+                            )}
 
-                              {/* Refresh button */}
-                              <button
-                                onClick={() => {
-                                  api.getAdminCategories().then(res => {
-                                    if (res.success) setCategories(res.data);
-                                    toast.success('Category counts refreshed');
-                                  });
-                                }}
-                                className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                                title="Refresh active subscriber counts"
-                              >
-                                <RefreshCw className="w-4 h-4" />
-                              </button>
-                            </div>
+                            {/* Refresh button */}
+                            <button
+                              onClick={() => {
+                                api.getAdminCategories().then(res => {
+                                  if (res.success) setCategories(res.data);
+                                  toast.success('Category counts refreshed');
+                                });
+                              }}
+                              className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                              title="Refresh active subscriber counts"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                            </button>
                           </div>
+                        </div>
 
                           {/* Categories Cards */}
                           {(() => {
@@ -7199,32 +7230,29 @@ function AdminDashboardContent() {
                             );
                           })()}
                         </div>
-                      )}
 
                       {/* Active Client Summary Button */}
-                      {(hasPermission('ACCESS_ACTIVE_CLIENT_SUMMARY') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                        <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-100 dark:border-blue-800/30 flex items-center justify-between shadow-sm">
-                          <div>
-                            <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                              <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                              Active Client Summary
-                            </h3>
-                            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                              View daily historical active client counts and download detailed reports.
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => setActiveTab('activeClientSummary')}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold shadow-md shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
-                          >
-                            View Summary <ChevronRight className="w-4 h-4" />
-                          </button>
+                      <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-100 dark:border-blue-800/30 flex items-center justify-between shadow-sm">
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                            <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            Active Client Summary
+                          </h3>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                            View daily historical active client counts and download detailed reports.
+                          </p>
                         </div>
-                      )}
+                        <button
+                          onClick={() => setActiveTab('activeClientSummary')}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold shadow-md shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
+                        >
+                          View Summary <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   )}
 
-                  {activeTab === 'activeClientSummary' && (hasPermission('ACCESS_ACTIVE_CLIENT_SUMMARY') || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                  {activeTab === 'activeClientSummary' && (
                     <ActiveClientSummary />
                   )}
 
@@ -8629,34 +8657,19 @@ function AdminDashboardContent() {
                         {/* View: L2 Pending Approvals Queue */}
                         {paymentSubTab === 'l2_pending' && (
                           <div className="space-y-4">
-                            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-xs text-amber-200">
+                            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-xs text-amber-900 dark:text-amber-200">
                               <div className="flex items-center gap-2">
-                                <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+                                <ShieldCheck className="w-5 h-5 text-amber-500 dark:text-amber-400 shrink-0" />
                                 <span>
                                   <strong>L2 Verification Queue:</strong> All payments submitted by staff or assigned directly await second-level authorization. Click <strong>Review &amp; Approve</strong> to modify plan, dates, discount, or reject.
                                 </span>
                               </div>
                             </div>
 
-                            <div className="glassmorphism p-1 rounded-2xl border border-slate-400 dark:border-white/10 overflow-hidden">
+                            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-300 dark:border-white/10 overflow-hidden shadow-sm">
                               <div className="overflow-x-auto">
                                 <DataTable
-                                  columns={[
-                                    ...paymentColumns,
-                                    {
-                                      name: 'L2 Action',
-                                      width: '140px',
-                                      cell: (row: any) => (
-                                        <button
-                                          onClick={() => setSelectedL2Payment(row)}
-                                          className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 text-white font-black text-xs shadow-md flex items-center gap-1.5 transition-all"
-                                        >
-                                          <Edit3 className="w-3.5 h-3.5" />
-                                          <span>L2 Review</span>
-                                        </button>
-                                      )
-                                    }
-                                  ]}
+                                  columns={l2PendingPaymentColumns}
                                   data={allPayments.filter((p: any) => p.approvalStatus === 'L2_PENDING')}
                                   pagination
                                   paginationPerPage={10}
@@ -11105,35 +11118,78 @@ function AdminDashboardContent() {
                               </div>
 
                               {/* Payment Details */}
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Payment Ref ID *</label>
-                                  <input
-                                    type="text"
-                                    required
-                                    value={assignPaymentRefId}
-                                    onChange={e => setAssignPaymentRefId(e.target.value)}
-                                    placeholder="e.g. UTR/Txn Number"
-                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Payment Date *</label>
-                                  <input
-                                    type="date"
-                                    required
-                                    max={new Date().toISOString().split('T')[0]}
-                                    value={assignPaymentDate}
-                                    onChange={e => {
-                                      const pVal = e.target.value;
-                                      setAssignPaymentDate(pVal);
-                                      if (assignServiceStartDate && assignServiceStartDate < pVal) {
-                                        setAssignServiceStartDate(pVal);
+                              {(() => {
+                                const selPlan = (adminPlans || []).find((p: any) => p.id === assignPlanId);
+                                const isCustAct = Boolean((assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount))) || (assignCustomDays && assignCustomDays.trim() && !isNaN(Number(assignCustomDays))));
+                                const hasCustAmt = Boolean(assignCustomAmount && assignCustomAmount.trim() && !isNaN(Number(assignCustomAmount)));
+                                const isExclGst = gstEnabled && gstCalculationType === 'EXCLUSIVE';
+                                let defTot = selPlan ? selPlan.price : 0;
+                                if (!hasCustAmt && isExclGst && selPlan) {
+                                  defTot = parseFloat((selPlan.price * 1.18).toFixed(2));
+                                }
+                                const entTot = hasCustAmt ? Number(assignCustomAmount) : defTot;
+                                const pTaxBase = hasCustAmt
+                                  ? (gstEnabled ? parseFloat((entTot / 1.18).toFixed(2)) : entTot)
+                                  : ((gstEnabled && !isExclGst) ? parseFloat((entTot / 1.18).toFixed(2)) : entTot);
+
+                                let dBase = 0;
+                                if (!isCustAct && assignCouponCode.trim()) {
+                                  const clnCode = assignCouponCode.trim().toUpperCase();
+                                  const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clnCode && c.status === 'ACTIVE');
+                                  if (mCoupon) {
+                                    if (mCoupon.discountType === 'FLAT' || mCoupon.discountType === 'FIXED') {
+                                      dBase = (gstEnabled && !isExclGst) ? parseFloat((Number(mCoupon.discountValue || 0) / 1.18).toFixed(2)) : Number(mCoupon.discountValue || 0);
+                                    } else if (mCoupon.discountType === 'PERCENTAGE') {
+                                      dBase = parseFloat(((pTaxBase * Number(mCoupon.discountValue || 0)) / 100).toFixed(2));
+                                      if (mCoupon.percentageType === 'CAPPED' && mCoupon.maxDiscountValue && dBase > Number(mCoupon.maxDiscountValue)) {
+                                        dBase = Number(mCoupon.maxDiscountValue);
                                       }
-                                    }}
-                                    className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
-                                  />
-                                </div>
+                                    }
+                                    if (dBase > pTaxBase) dBase = pTaxBase;
+                                  }
+                                }
+                                const tBase = Math.max(0, parseFloat((pTaxBase - dBase).toFixed(2)));
+                                const gAmt = gstEnabled ? parseFloat((tBase * 0.18).toFixed(2)) : 0;
+                                const fPrice = parseFloat((tBase + gAmt).toFixed(2));
+                                const isZeroAmountModal = Boolean(assignPlanId) && (fPrice <= 0 || (dBase >= pTaxBase && pTaxBase > 0));
+
+                                return (
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Payment Ref ID {isZeroAmountModal ? <span className="text-emerald-500 font-normal">(Optional - 100% Free)</span> : '*'}
+                                      </label>
+                                      <input
+                                        type="text"
+                                        required={!isZeroAmountModal}
+                                        value={assignPaymentRefId}
+                                        onChange={e => setAssignPaymentRefId(e.target.value)}
+                                        placeholder={isZeroAmountModal ? "Optional for 100% discount" : "e.g. UTR/Txn Number"}
+                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white placeholder-slate-600 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                                        Payment Date {isZeroAmountModal ? <span className="text-emerald-500 font-normal">(Optional)</span> : '*'}
+                                      </label>
+                                      <input
+                                        type="date"
+                                        required={!isZeroAmountModal}
+                                        max={new Date().toISOString().split('T')[0]}
+                                        value={assignPaymentDate}
+                                        onChange={e => {
+                                          const pVal = e.target.value;
+                                          setAssignPaymentDate(pVal);
+                                          if (assignServiceStartDate && assignServiceStartDate < pVal) {
+                                            setAssignServiceStartDate(pVal);
+                                          }
+                                        }}
+                                        className="w-full bg-slate-100 dark:bg-slate-800 border border-slate-400 dark:border-white/10 rounded-xl py-2 px-3 text-xs text-slate-900 dark:text-white focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 transition"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                                 {(() => {
                                   const assignActiveSubForPlan = assignPlanClient?.subscriptions?.find((s: any) => {
                                     const sPId = String(s.planId?._id || s.planId?.id || s.planId || '');
@@ -11176,7 +11232,6 @@ function AdminDashboardContent() {
                                     </div>
                                   );
                                 })()}
-                              </div>
 
                               {/* Custom Fields */}
                               <div className="grid grid-cols-2 gap-4">
