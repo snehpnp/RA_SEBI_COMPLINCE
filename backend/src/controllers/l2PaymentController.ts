@@ -2,7 +2,7 @@ import { getClientFyFeeSummary } from '../utils/feeCapHelper';
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../middlewares/auth';
-import { dynamicDb, centralModels, Payment, Subscription, Client, Plan, Tenant, ComplianceAlert } from '../config/db';
+import { dynamicDb, centralModels, Payment, Subscription, Client, Plan, Tenant, ComplianceAlert, Coupon } from '../config/db';
 import { generateInvoicePdf } from '../services/invoiceGenerator';
 import { sendTaxInvoiceEmail } from '../services/emailService';
 
