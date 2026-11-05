@@ -299,9 +299,9 @@ router.get('/admin/cams-kra/pdf/:clientId', auth_1.authenticateJWT, (0, auth_1.r
 // ==========================================
 router.get('/admin/profile-completeness', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, adminController_1.getProfileCompleteness);
 // Active Client History endpoints
-router.get('/admin/active-clients/summary', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, activeClientController_1.getActiveClientSummary);
-router.get('/admin/active-clients/month-export', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']), tenant_1.enforceTenantIsolation, activeClientController_1.getActiveClientsByMonthExport);
-router.get('/admin/active-clients/date', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, activeClientController_1.getActiveClientsByDate);
+router.get('/admin/active-clients/summary', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD', 'ACCESS_CLIENTS']), tenant_1.enforceTenantIsolation, activeClientController_1.getActiveClientSummary);
+router.get('/admin/active-clients/month-export', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD', 'ACCESS_CLIENTS', 'EXPORT_DATA']), tenant_1.enforceTenantIsolation, activeClientController_1.getActiveClientsByMonthExport);
+router.get('/admin/active-clients/date', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD', 'ACCESS_CLIENTS']), tenant_1.enforceTenantIsolation, activeClientController_1.getActiveClientsByDate);
 router.get('/admin/audit-logs', auth_1.authenticateJWT, tenant_1.enforceTenantIsolation, adminController_1.getTenantAuditLogs);
 router.post('/admin/profile-wizard', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_DASHBOARD'), tenant_1.enforceTenantIsolation, upload.single('nismFile'), adminController_1.saveProfileStep);
 router.post('/admin/staff', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_STAFF'), tenant_1.enforceTenantIsolation, upload.single('nismUpload'), adminController_1.createStaff);
@@ -359,12 +359,12 @@ router.post('/admin/faqs', auth_1.authenticateJWT, (0, auth_1.requireAnyPermissi
 router.put('/admin/faqs/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.updateFaq);
 router.delete('/admin/faqs/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_TICKETS', 'ACCESS_SETTINGS']), tenant_1.enforceTenantIsolation, faqController_1.deleteFaq);
 // Admin Category Management
-router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
+router.get('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_DASHBOARD', 'ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, adminController_1.getAdminCategories);
 router.post('/admin/categories', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createCategory);
 router.put('/admin/categories/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.updateCategory);
 router.post('/admin/categories/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.toggleCategoryStatus);
 // Admin Plan Management
-router.get('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, adminController_1.getAdminPlans);
+router.get('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_DASHBOARD', 'ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, adminController_1.getAdminPlans);
 router.post('/admin/plans', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.createPlan);
 router.put('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.updatePlan);
 router.delete('/admin/plans/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_PLANS'), tenant_1.enforceTenantIsolation, adminController_1.deletePlan);
@@ -379,10 +379,10 @@ router.put('/admin/roles/:id', auth_1.authenticateJWT, (0, auth_1.requirePermiss
 router.delete('/admin/roles/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_ROLES'), roleController_1.deleteRole);
 // Admin Coupon Management
 router.get('/admin/coupons', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']), tenant_1.enforceTenantIsolation, couponController_1.getCoupons);
-router.post('/admin/coupons', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.createCoupon);
-router.put('/admin/coupons/:id', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.updateCoupon);
-router.post('/admin/coupons/:id/visibility', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.toggleCouponVisibility);
-router.post('/admin/coupons/:id/status', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_SETTINGS'), tenant_1.enforceTenantIsolation, couponController_1.toggleCouponStatus);
+router.post('/admin/coupons', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'CREATE_PLANS']), tenant_1.enforceTenantIsolation, couponController_1.createCoupon);
+router.put('/admin/coupons/:id', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'EDIT_PLANS']), tenant_1.enforceTenantIsolation, couponController_1.updateCoupon);
+router.post('/admin/coupons/:id/visibility', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'EDIT_PLANS']), tenant_1.enforceTenantIsolation, couponController_1.toggleCouponVisibility);
+router.post('/admin/coupons/:id/status', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'EDIT_PLANS']), tenant_1.enforceTenantIsolation, couponController_1.toggleCouponStatus);
 // ----------------------------------------------------
 // CLIENT PORTAL (ONBOARDING & MANAGEMENT)
 // ----------------------------------------------------
