@@ -1394,17 +1394,28 @@ export default function ReportPreviewModal({ signal, user, onClose, onSuccess }:
                     <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                       <Download className="w-4 h-4 text-amber-600 shrink-0" /> Setup DSC Bridge on this PC
                     </span>
-                    <a
-                      href="/downloads/sebi-dsc-bridge.zip"
-                      download="sebi-dsc-bridge.zip"
-                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow-sm transition"
-                    >
-                      <Download className="w-3 h-3" /> Download Bridge ZIP
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href="/downloads/sebi-dsc-bridge-setup.exe"
+                        download="sebi-dsc-bridge-setup.exe"
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 shadow-sm transition"
+                        title="Download single-file installer (No ZIP extraction needed)"
+                      >
+                        <Zap className="w-3 h-3" /> 1-Click Setup (.exe)
+                      </a>
+                      <a
+                        href="/downloads/sebi-dsc-bridge.zip"
+                        download="sebi-dsc-bridge.zip"
+                        className="px-2 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-[10px] inline-flex items-center gap-1 transition"
+                        title="Download ZIP for manual setup"
+                      >
+                        ZIP
+                      </a>
+                    </div>
                   </div>
                   <ol className="text-[11px] text-amber-800 dark:text-amber-300 list-decimal pl-4 space-y-1">
-                    <li>Download &amp; Extract <code className="font-mono bg-white/70 dark:bg-slate-900 px-1 rounded">sebi-dsc-bridge.zip</code> on this computer.</li>
-                    <li>Double-click <code className="font-mono bg-white/70 dark:bg-slate-900 px-1 rounded">install-auto-start.bat</code> (Runs in background automatically on startup).</li>
+                    <li>Click <b>1-Click Setup (.exe)</b> to download (Single file, no unzipping!).</li>
+                    <li>Click the downloaded file to run — it configures auto-start &amp; runs port 1620.</li>
                     <li>Insert physical USB DSC Token &amp; click <b>Retry Bridge Check</b> below.</li>
                   </ol>
                 </div>

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.dscBridgeSignPdf = exports.dscBridgeTokenStatus = exports.dscBridgePing = exports.dscBridgeDownloadZip = exports.verifyDscToken = exports.checkDscSignerPermission = exports.saveDscSignedReport = exports.useDailyAadhaarSign = exports.completeReportAadhaarEsign = exports.initiateReportAadhaarEsign = exports.uploadResearcherSignature = exports.updateSignatureSettings = exports.getSignatureSettings = exports.stampAadhaarSealOnPdf = void 0;
+exports.dscBridgeSignPdf = exports.dscBridgeTokenStatus = exports.dscBridgePing = exports.dscBridgeDownloadExe = exports.dscBridgeDownloadZip = exports.verifyDscToken = exports.checkDscSignerPermission = exports.saveDscSignedReport = exports.useDailyAadhaarSign = exports.completeReportAadhaarEsign = exports.initiateReportAadhaarEsign = exports.uploadResearcherSignature = exports.updateSignatureSettings = exports.getSignatureSettings = exports.stampAadhaarSealOnPdf = void 0;
 const dscBridgeService_1 = require("../services/dscBridgeService");
 const jwt = __importStar(require("jsonwebtoken"));
 const fs_1 = __importDefault(require("fs"));
@@ -786,6 +786,22 @@ const dscBridgeDownloadZip = async (req, res) => {
     return res.status(404).json({ success: false, message: 'sebi-dsc-bridge.zip not found on server' });
 };
 exports.dscBridgeDownloadZip = dscBridgeDownloadZip;
+const dscBridgeDownloadExe = async (req, res) => {
+    const candidatePaths = [
+        path_1.default.resolve(process.cwd(), 'public/downloads/sebi-dsc-bridge-setup.exe'),
+        path_1.default.resolve(process.cwd(), '../frontend/public/downloads/sebi-dsc-bridge-setup.exe'),
+        path_1.default.resolve(__dirname, '../../public/downloads/sebi-dsc-bridge-setup.exe'),
+        path_1.default.resolve(__dirname, '../../../frontend/public/downloads/sebi-dsc-bridge-setup.exe'),
+        path_1.default.resolve(__dirname, '../../tools/dsc-bridge/sebi-dsc-bridge-setup.exe')
+    ];
+    for (const p of candidatePaths) {
+        if (fs_1.default.existsSync(p)) {
+            return res.download(p, 'sebi-dsc-bridge-setup.exe');
+        }
+    }
+    return res.status(404).json({ success: false, message: 'sebi-dsc-bridge-setup.exe not found on server' });
+};
+exports.dscBridgeDownloadExe = dscBridgeDownloadExe;
 const dscBridgePing = async (req, res) => {
     return res.json({
         status: 'ok',
