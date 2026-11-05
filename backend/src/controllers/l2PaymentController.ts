@@ -89,7 +89,9 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
 
     const finalAmount = amount !== undefined && !isNaN(Number(amount))
       ? Number(amount)
-      : Number(payment.amount || planDoc?.price || 0);
+      : (payment.amount !== undefined && payment.amount !== null && !isNaN(Number(payment.amount))
+        ? Number(payment.amount)
+        : Number(planDoc?.price || 0));
 
     const defaultDays = planDoc?.durationMonths ? planDoc.durationMonths * 30 : 30;
     const finalValidityDays = validityDays !== undefined && !isNaN(Number(validityDays))
@@ -104,7 +106,7 @@ export const handleL2PaymentAction = async (req: AuthenticatedRequest, res: Resp
       ? 0
       : (discount !== undefined && !isNaN(Number(discount))
         ? Number(discount)
-        : Number(payment.discountApplied || payment.discount || 0));
+        : Number(payment.discountApplied ?? payment.discount ?? 0));
 
     const finalPaymentDate = paymentDate ? new Date(paymentDate) : (payment.paymentDate ? new Date(payment.paymentDate) : new Date());
     const finalServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : (payment.serviceStartDate ? new Date(payment.serviceStartDate) : finalPaymentDate);

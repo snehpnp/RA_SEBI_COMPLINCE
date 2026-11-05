@@ -1378,7 +1378,7 @@ export const verifyManualPayment = async (req: AuthenticatedRequest, res: Respon
       }
     }
 
-    const isL2Required = Boolean(tenantDoc?.l2ApprovalEnabled === true);
+    const isL2Required = Boolean(tenantDoc?.l2ApprovalEnabled === true && finalAmount > 0);
 
     const isGstActive = resolvedGstEnabled;
     const finalAmount = effectiveAmount;

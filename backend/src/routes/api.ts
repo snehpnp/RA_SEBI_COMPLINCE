@@ -678,7 +678,7 @@ router.get(
 router.get(
   '/admin/active-clients/summary',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD', 'ACCESS_CLIENTS']),
   enforceTenantIsolation,
   getActiveClientSummary
 );
@@ -686,7 +686,7 @@ router.get(
 router.get(
   '/admin/active-clients/month-export',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD']),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD', 'ACCESS_CLIENTS', 'EXPORT_DATA']),
   enforceTenantIsolation,
   getActiveClientsByMonthExport
 );
@@ -694,7 +694,7 @@ router.get(
 router.get(
   '/admin/active-clients/date',
   authenticateJWT,
-  requirePermission('ACCESS_DASHBOARD'),
+  requireAnyPermission(['ACCESS_ACTIVE_CLIENT_SUMMARY', 'ACCESS_DASHBOARD', 'ACCESS_CLIENTS']),
   enforceTenantIsolation,
   getActiveClientsByDate
 );
@@ -1056,7 +1056,7 @@ router.delete(
 router.get(
   '/admin/categories',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
+  requireAnyPermission(['ACCESS_DASHBOARD', 'ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getAdminCategories
 );
@@ -1086,7 +1086,7 @@ router.post(
 router.get(
   '/admin/plans',
   authenticateJWT,
-  requireAnyPermission(['ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
+  requireAnyPermission(['ACCESS_DASHBOARD', 'ACCESS_PLANS', 'ACCESS_RESEARCH', 'ACCESS_L2_VERIFICATION', 'APPROVE_L2_PAYMENTS']),
   enforceTenantIsolation,
   getAdminPlans
 );
@@ -1176,28 +1176,28 @@ router.get(
 router.post(
   '/admin/coupons',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'CREATE_PLANS']),
   enforceTenantIsolation,
   createCoupon
 );
 router.put(
   '/admin/coupons/:id',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'EDIT_PLANS']),
   enforceTenantIsolation,
   updateCoupon
 );
 router.post(
   '/admin/coupons/:id/visibility',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'EDIT_PLANS']),
   enforceTenantIsolation,
   toggleCouponVisibility
 );
 router.post(
   '/admin/coupons/:id/status',
   authenticateJWT,
-  requirePermission('ACCESS_SETTINGS'),
+  requireAnyPermission(['ACCESS_SETTINGS', 'ACCESS_PLANS', 'EDIT_PLANS']),
   enforceTenantIsolation,
   toggleCouponStatus
 );

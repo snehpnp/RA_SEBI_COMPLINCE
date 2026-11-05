@@ -3822,8 +3822,6 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
 
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
   if (!planId) return res.status(400).json({ success: false, message: 'planId is required.' });
-  if (!paymentRefId) return res.status(400).json({ success: false, message: 'Payment Ref ID is required.' });
-  if (!paymentDate) return res.status(400).json({ success: false, message: 'Payment Date is required.' });
 
   try {
     let client: any = null;
@@ -3979,6 +3977,21 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const finalBasePrice = taxableBase;
     const finalGstAmount = gstAmt;
 
+    // Payment Ref ID and Payment Date are required only if final amount > 0 (optional for 100% discount / 0 amount)
+    if (finalTotalAmount > 0) {
+      if (!paymentRefId || !String(paymentRefId).trim()) {
+        return res.status(400).json({ success: false, message: 'Payment Ref ID is required.' });
+      }
+      if (!paymentDate) {
+        return res.status(400).json({ success: false, message: 'Payment Date is required.' });
+      }
+    }
+
+    const effectivePaymentRefId = (paymentRefId && String(paymentRefId).trim())
+      ? String(paymentRefId).trim()
+      : (couponCode ? `100%_DISCOUNT_${String(couponCode).trim().toUpperCase()}` : `100%_DISCOUNT_${Date.now().toString().slice(-6)}`);
+    const effectivePaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+
     const adminRemark = remarks?.trim()
       ? `Assigned by Admin - ${remarks.trim()}`
       : 'Assigned by Admin';
@@ -3987,7 +4000,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
     const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
     const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
 
-    const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    const parsedPaymentDate = effectivePaymentDate;
     const parsedServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : parsedPaymentDate;
 
     // Strict validation: serviceStartDate >= paymentDate
@@ -4049,8 +4062,9 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       planValidityDays = Math.max(1, Math.min(planTotalDays, Math.round(preTaxBase / planDailyBase)));
     }
 
-    // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval
-    if (tenantObj?.l2ApprovalEnabled === true) {
+    // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval (only for paid plans where amount > 0)
+    // If 100% discount / 0 amount is provided, there is no payment to verify, so it directly activates!
+    if (tenantObj?.l2ApprovalEnabled === true && finalTotalAmount > 0) {
       const pendingPayment: any = await dynamicDb.Payment.create({
         tenantId: tenantId || client.tenantId,
         clientId: actualClientId,
@@ -4060,7 +4074,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
         gstAmount: finalGstAmount,
         gstRate: isGstActive ? 18 : 0,
         paymentMode,
-        transactionRef: paymentRefId,
+        transactionRef: effectivePaymentRefId,
         paymentDate: parsedPaymentDate,
         serviceStartDate: parsedServiceStartDate,
         status: 'PENDING',
@@ -4084,7 +4098,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
           planName: plan.name,
           categoryId: plan.categoryId,
           couponCode: isCustomActive ? null : (couponCode || null),
-          transactionRef: paymentRefId,
+          transactionRef: effectivePaymentRefId,
           amount: parseFloat(finalTotalAmount.toFixed(2)),
           validityDays: planValidityDays,
           discount: (!isCustomActive && discountAmount > 0) ? parseFloat(discountAmount.toFixed(2)) : 0,
@@ -4133,8 +4147,8 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       gstAmount: finalGstAmount,
       gstRate: isGstActive ? 18 : 0,
       paymentMode,
-      transactionRef: paymentRefId,
-      paymentDate: new Date(paymentDate),
+      transactionRef: effectivePaymentRefId,
+      paymentDate: effectivePaymentDate,
       status: 'SUCCESS',
       invoicePolicy: activePolicy as any,
       invoiceStatus: initialInvoiceStatus as any,
@@ -4160,7 +4174,7 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
             clientName: client.name || 'Client',
             companyName: tenantObj?.companyName,
             planName: plan.name,
-            invoiceNumber: `INV/${new Date().getFullYear()}/${String(paymentRefId).slice(-6).toUpperCase()}`,
+            invoiceNumber: `INV/${new Date().getFullYear()}/${String(effectivePaymentRefId).slice(-6).toUpperCase()}`,
             amount: payment.amount,
             pdfBuffer
           });
@@ -4219,13 +4233,13 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
       category: 'SUBSCRIPTION',
       action: 'PLAN_ASSIGNED',
       title: `Plan Assigned: ${plan.name}`,
-      description: `Plan "${plan.name}" assigned manually by ${assignerName || 'Admin'} (Ref: ${paymentRefId})`,
+      description: `Plan "${plan.name}" assigned manually by ${assignerName || 'Admin'} (Ref: ${effectivePaymentRefId})`,
       status: 'SUCCESS',
       metadata: {
         planId: plan._id || plan.id,
         planName: plan.name,
-        paymentRefId,
-        paymentDate,
+        paymentRefId: effectivePaymentRefId,
+        paymentDate: effectivePaymentDate,
         amount: payment?.amount,
         finalRemark,
         validityDays: planValidityDays

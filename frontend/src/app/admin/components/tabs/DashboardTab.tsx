@@ -520,25 +520,23 @@ export default function DashboardTab({
         )}
 
         {/* Active Client Summary Button */}
-        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-          <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-100 dark:border-blue-800/30 flex items-center justify-between shadow-sm">
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                Active Client Summary
-              </h3>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                View daily historical active client counts and download detailed reports.
-              </p>
-            </div>
-            <button
-              onClick={() => setActiveTab('activeClientSummary')}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold shadow-md shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
-            >
-              View Summary <ChevronRight className="w-4 h-4" />
-            </button>
+        <div className="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-100 dark:border-blue-800/30 flex items-center justify-between shadow-sm">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+              <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              Active Client Summary
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+              View daily historical active client counts and download detailed reports.
+            </p>
           </div>
-        )}
+          <button
+            onClick={() => setActiveTab('activeClientSummary')}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg text-sm font-semibold shadow-md shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
+          >
+            View Summary <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     </>
 

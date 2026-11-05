@@ -162,7 +162,7 @@ export default function L2PaymentReviewModal({
       }
       setServiceStartDate(initialStartDate);
 
-      setCustomAmount(String(payment.amount || pDoc?.price || l1.amount || '0'));
+      setCustomAmount(String(payment.amount !== undefined && payment.amount !== null ? payment.amount : (pDoc?.price ?? l1.amount ?? '0')));
       setCustomDays(String(payment.planValidityDays || (pDoc?.durationMonths ? pDoc.durationMonths * 30 : l1.validityDays || 30)));
       setRemarks(payment.remarks || l1.remarks || '');
 
