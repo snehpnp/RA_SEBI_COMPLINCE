@@ -3593,10 +3593,6 @@ const assignPlanByAdmin = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid tenant context' });
     if (!planId)
         return res.status(400).json({ success: false, message: 'planId is required.' });
-    if (!paymentRefId)
-        return res.status(400).json({ success: false, message: 'Payment Ref ID is required.' });
-    if (!paymentDate)
-        return res.status(400).json({ success: false, message: 'Payment Date is required.' });
     try {
         let client = null;
         if (mongoose_1.default.Types.ObjectId.isValid(clientId)) {
@@ -3736,13 +3732,26 @@ const assignPlanByAdmin = async (req, res) => {
         const finalTotalAmount = parseFloat((taxableBase + gstAmt).toFixed(2));
         const finalBasePrice = taxableBase;
         const finalGstAmount = gstAmt;
+        // Payment Ref ID and Payment Date are required only if final amount > 0 (optional for 100% discount / 0 amount)
+        if (finalTotalAmount > 0) {
+            if (!paymentRefId || !String(paymentRefId).trim()) {
+                return res.status(400).json({ success: false, message: 'Payment Ref ID is required.' });
+            }
+            if (!paymentDate) {
+                return res.status(400).json({ success: false, message: 'Payment Date is required.' });
+            }
+        }
+        const effectivePaymentRefId = (paymentRefId && String(paymentRefId).trim())
+            ? String(paymentRefId).trim()
+            : (couponCode ? `100%_DISCOUNT_${String(couponCode).trim().toUpperCase()}` : `100%_DISCOUNT_${Date.now().toString().slice(-6)}`);
+        const effectivePaymentDate = paymentDate ? new Date(paymentDate) : new Date();
         const adminRemark = remarks?.trim()
             ? `Assigned by Admin - ${remarks.trim()}`
             : 'Assigned by Admin';
         const isCustomAssignment = customAmount !== undefined || customDays !== undefined;
         const finalRemark = isCustomAssignment ? `[PRO-RATA] ${adminRemark}` : adminRemark;
         const paymentMode = isCustomAssignment ? 'CUSTOM_PRO_RATA' : 'ADMIN_ASSIGNED';
-        const parsedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+        const parsedPaymentDate = effectivePaymentDate;
         const parsedServiceStartDate = serviceStartDate ? new Date(serviceStartDate) : parsedPaymentDate;
         // Strict validation: serviceStartDate >= paymentDate
         const pDateOnly = new Date(parsedPaymentDate.getFullYear(), parsedPaymentDate.getMonth(), parsedPaymentDate.getDate()).getTime();
@@ -3798,7 +3807,7 @@ const assignPlanByAdmin = async (req, res) => {
         else if (hasCustomAmount && planDailyBase > 0) {
             planValidityDays = Math.max(1, Math.min(planTotalDays, Math.round(preTaxBase / planDailyBase)));
         }
-        // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval
+        // If L2 Approval is Enabled in Tenant Settings: Queue for L2 Approval (including 100% discount / ₹0 plans as per tenant policy)
         if (tenantObj?.l2ApprovalEnabled === true) {
             const pendingPayment = await db_1.default.Payment.create({
                 tenantId: tenantId || client.tenantId,
@@ -3809,7 +3818,7 @@ const assignPlanByAdmin = async (req, res) => {
                 gstAmount: finalGstAmount,
                 gstRate: isGstActive ? 18 : 0,
                 paymentMode,
-                transactionRef: paymentRefId,
+                transactionRef: effectivePaymentRefId,
                 paymentDate: parsedPaymentDate,
                 serviceStartDate: parsedServiceStartDate,
                 status: 'PENDING',
@@ -3833,7 +3842,7 @@ const assignPlanByAdmin = async (req, res) => {
                     planName: plan.name,
                     categoryId: plan.categoryId,
                     couponCode: isCustomActive ? null : (couponCode || null),
-                    transactionRef: paymentRefId,
+                    transactionRef: effectivePaymentRefId,
                     amount: parseFloat(finalTotalAmount.toFixed(2)),
                     validityDays: planValidityDays,
                     discount: (!isCustomActive && discountAmount > 0) ? parseFloat(discountAmount.toFixed(2)) : 0,
@@ -3878,8 +3887,8 @@ const assignPlanByAdmin = async (req, res) => {
             gstAmount: finalGstAmount,
             gstRate: isGstActive ? 18 : 0,
             paymentMode,
-            transactionRef: paymentRefId,
-            paymentDate: new Date(paymentDate),
+            transactionRef: effectivePaymentRefId,
+            paymentDate: effectivePaymentDate,
             status: 'SUCCESS',
             invoicePolicy: activePolicy,
             invoiceStatus: initialInvoiceStatus,
@@ -3904,7 +3913,7 @@ const assignPlanByAdmin = async (req, res) => {
                     clientName: client.name || 'Client',
                     companyName: tenantObj?.companyName,
                     planName: plan.name,
-                    invoiceNumber: `INV/${new Date().getFullYear()}/${String(paymentRefId).slice(-6).toUpperCase()}`,
+                    invoiceNumber: `INV/${new Date().getFullYear()}/${String(effectivePaymentRefId).slice(-6).toUpperCase()}`,
                     amount: payment.amount,
                     pdfBuffer
                 });
@@ -3958,13 +3967,13 @@ const assignPlanByAdmin = async (req, res) => {
             category: 'SUBSCRIPTION',
             action: 'PLAN_ASSIGNED',
             title: `Plan Assigned: ${plan.name}`,
-            description: `Plan "${plan.name}" assigned manually by ${assignerName || 'Admin'} (Ref: ${paymentRefId})`,
+            description: `Plan "${plan.name}" assigned manually by ${assignerName || 'Admin'} (Ref: ${effectivePaymentRefId})`,
             status: 'SUCCESS',
             metadata: {
                 planId: plan._id || plan.id,
                 planName: plan.name,
-                paymentRefId,
-                paymentDate,
+                paymentRefId: effectivePaymentRefId,
+                paymentDate: effectivePaymentDate,
                 amount: payment?.amount,
                 finalRemark,
                 validityDays: planValidityDays
