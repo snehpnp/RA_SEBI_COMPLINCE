@@ -140,6 +140,25 @@ export default function SubscriptionCenter({
   const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
     if (!c || (c.status && c.status !== 'ACTIVE')) return false;
 
+    // Check expiry (valid until 11:59:59 PM of expiry date)
+    if (c.expiryDate) {
+      const exp = new Date(c.expiryDate);
+      if (!isNaN(exp.getTime())) {
+        if (
+          (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+          (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+        ) {
+          exp.setHours(23, 59, 59, 999);
+        }
+        if (exp.getTime() < Date.now()) return false;
+      }
+    }
+
+    // Check usage limit
+    if (c.usageLimit !== null && c.usageLimit !== undefined && (c.usedCount || 0) >= c.usageLimit) {
+      return false;
+    }
+
     if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
       if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
     }

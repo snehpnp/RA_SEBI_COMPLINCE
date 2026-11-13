@@ -19,6 +19,7 @@ import { getCamsCredentials, getCamsToken } from '../services/camsKraService';
 import { logActivity } from '../services/activityService';
 import { DEFAULT_EMAIL_TEMPLATES } from '../utils/defaultEmailTemplates';
 import { getClientFyFeeSummary } from '../utils/feeCapHelper';
+import { isCouponExpired } from './couponController';
 
 const maskEmail = (email: string | null | undefined) => {
   if (!email) return email;
@@ -3914,11 +3915,11 @@ export const assignPlanByAdmin = async (req: AuthenticatedRequest, res: Response
 
       if (!coupon) return res.status(404).json({ success: false, message: 'Invalid or inactive coupon code.' });
 
-      if (coupon.expiryDate && new Date() > new Date(coupon.expiryDate)) {
+      if (coupon.expiryDate && isCouponExpired(coupon.expiryDate)) {
         return res.status(400).json({ success: false, message: 'Coupon code has expired.' });
       }
 
-      if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
+      if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
         return res.status(400).json({ success: false, message: 'Coupon usage limit reached.' });
       }
 

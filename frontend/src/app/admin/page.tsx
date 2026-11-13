@@ -1092,8 +1092,24 @@ function AdminDashboardContent() {
     let finalBase = basePrice;
     if (couponCode) {
       const cleanCode = couponCode.trim().toUpperCase();
-      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && isCouponValidAndUsable(c));
       if (coupon) {
+        if (coupon.expiryDate) {
+          const exp = new Date(coupon.expiryDate);
+          if (!isNaN(exp.getTime())) {
+            if (
+              (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+              (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+            ) {
+              exp.setHours(23, 59, 59, 999);
+            }
+            if (exp.getTime() < Date.now()) return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+          }
+        }
+        if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
+          return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+        }
+
         if (coupon.minPurchaseValue && basePrice < Number(coupon.minPurchaseValue)) {
           return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
         }
@@ -1188,7 +1204,7 @@ function AdminDashboardContent() {
     let discOnBase = 0;
     if (!isCustomActive && assignCouponCode.trim()) {
       const cleanCode = assignCouponCode.trim().toUpperCase();
-      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && isCouponValidAndUsable(c));
       if (matchedCoupon) {
         if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
           discOnBase = (gstEnabled && !isExclusiveGst)
@@ -1454,9 +1470,29 @@ function AdminDashboardContent() {
   const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications' | 'l2_pending'>('all');
   const [selectedScreenshotModal, setSelectedScreenshotModal] = useState<{ url: string; clientName: string; planName: string; utr: string; amount: number } | null>(null);
 
+  const isCouponValidAndUsable = (c: any): boolean => {
+    if (!c || c.status !== 'ACTIVE') return false;
+    if (c.expiryDate) {
+      const exp = new Date(c.expiryDate);
+      if (!isNaN(exp.getTime())) {
+        if (
+          (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+          (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+        ) {
+          exp.setHours(23, 59, 59, 999);
+        }
+        if (exp.getTime() < Date.now()) return false;
+      }
+    }
+    if (c.usageLimit !== null && c.usageLimit !== undefined && (c.usedCount || 0) >= c.usageLimit) {
+      return false;
+    }
+    return true;
+  };
+
   // Helper to determine if a coupon is applicable for a specific plan and category
   const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
-    if (!c || c.status !== 'ACTIVE') return false;
+    if (!isCouponValidAndUsable(c)) return false;
 
     if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
       if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
@@ -11051,6 +11087,35 @@ function AdminDashboardContent() {
                                     );
                                   }
 
+                                  if (coupon.expiryDate) {
+                                    const exp = new Date(coupon.expiryDate);
+                                    if (!isNaN(exp.getTime())) {
+                                      if (
+                                        (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+                                        (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+                                      ) {
+                                        exp.setHours(23, 59, 59, 999);
+                                      }
+                                      if (exp.getTime() < Date.now()) {
+                                        return (
+                                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                            <span>Coupon "{cleanCode}" has expired.</span>
+                                          </div>
+                                        );
+                                      }
+                                    }
+                                  }
+
+                                  if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
+                                    return (
+                                      <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                        <span>Coupon "{cleanCode}" total usage limit reached.</span>
+                                      </div>
+                                    );
+                                  }
+
                                   let planAllowed = true;
                                   if (coupon.planId && assignPlanId) {
                                     try {
@@ -11135,7 +11200,7 @@ function AdminDashboardContent() {
                                 let dBase = 0;
                                 if (!isCustAct && assignCouponCode.trim()) {
                                   const clnCode = assignCouponCode.trim().toUpperCase();
-                                  const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clnCode && c.status === 'ACTIVE');
+                                  const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clnCode && isCouponValidAndUsable(c));
                                   if (mCoupon) {
                                     if (mCoupon.discountType === 'FLAT' || mCoupon.discountType === 'FIXED') {
                                       dBase = (gstEnabled && !isExclGst) ? parseFloat((Number(mCoupon.discountValue || 0) / 1.18).toFixed(2)) : Number(mCoupon.discountValue || 0);
@@ -11415,7 +11480,7 @@ function AdminDashboardContent() {
                                   : ((gstEnabled && !isExclusive) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal);
 
                                 const cleanCode = assignCouponCode.trim().toUpperCase();
-                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE') : null;
+                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && isCouponValidAndUsable(c)) : null;
 
                                 let discOnBase = 0;
                                 if (matchedCoupon && !hasCustom) {
