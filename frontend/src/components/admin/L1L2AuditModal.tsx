@@ -49,6 +49,14 @@ const formatDateTime = (d: any) => {
   }
 };
 
+const getFullUrl = (url?: string | null) => {
+  if (!url) return '#';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+  const base = (api.getBaseUrl() || '').replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${base}${cleanPath}`;
+};
+
 interface L1L2AuditModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -357,7 +365,7 @@ export default function L1L2AuditModal({
                   </span>
                 </div>
                 <a
-                  href={payment.receiptUrl || l1.receiptUrl}
+                  href={getFullUrl(payment.receiptUrl || l1.receiptUrl)}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-sm transition"
@@ -458,7 +466,7 @@ export default function L1L2AuditModal({
                       Payment Screenshot Proof:
                     </span>
                     <a
-                      href={l1.receiptUrl}
+                      href={getFullUrl(l1.receiptUrl)}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shadow-sm transition"

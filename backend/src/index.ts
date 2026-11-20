@@ -17,6 +17,7 @@ import http from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
+import fs from 'fs';
 import cron from 'node-cron';
 import router from './routes/api';
 import { centralConnection, Tenant, Client, ComplianceAlert } from './config/db';
@@ -73,18 +74,29 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
   next();
 });
 
-// Serve Uploads as Static Folder (multi-root)
-app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
-app.use('/uploads', express.static(path.resolve(process.cwd(), '../uploads')));
-app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
-app.use('/uploads', express.static('A:/RA_SEBI_COMPLINCE/uploads'));
-app.use('/uploads', express.static('A:/RA_SEBI_COMPLINCE/backend/uploads'));
+// Serve Uploads as Static Folder (multi-root & dual-path for live reverse proxies)
+const staticUploadCandidates = [
+  path.resolve(process.cwd(), '../uploads'),
+  path.resolve(process.cwd(), 'uploads'),
+  path.resolve(__dirname, '../../uploads'),
+  path.resolve(__dirname, '../../../uploads'),
+];
+
+staticUploadCandidates.forEach((dirPath) => {
+  if (fs.existsSync(dirPath)) {
+    app.use('/uploads', express.static(dirPath));
+    app.use('/backend/uploads', express.static(dirPath));
+  }
+});
 
 // Fallback for /uploads that are missing statically: forward to the robust /api/v1/download handler
-app.use('/uploads', (req: express.Request, res: express.Response) => {
-  const targetPath = `/uploads${req.path}`;
+const uploadsFallbackHandler = (req: express.Request, res: express.Response) => {
+  const cleanPath = req.path.replace(/^\/backend/, '');
+  const targetPath = `/uploads${cleanPath}`;
   res.redirect(`/api/v1/download?path=${encodeURIComponent(targetPath)}`);
-});
+};
+app.use('/uploads', uploadsFallbackHandler);
+app.use('/backend/uploads', uploadsFallbackHandler);
 
 import tenantResolverMiddleware from './middlewares/tenantResolver';
 

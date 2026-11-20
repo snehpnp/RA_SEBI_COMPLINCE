@@ -126,9 +126,7 @@ const getUploadRoot = () => {
     path.resolve(process.cwd(), '../uploads'),
     path.resolve(process.cwd(), 'uploads'),
     path.resolve(__dirname, '../../uploads'),
-    path.resolve(__dirname, '../../../uploads'),
-    'A:/RA_SEBI_COMPLINCE/uploads',
-    'A:/RA_SEBI_COMPLINCE/backend/uploads'
+    path.resolve(__dirname, '../../../uploads')
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -2019,9 +2017,7 @@ router.get('/download', async (req, res) => {
       path.resolve(process.cwd(), '../uploads'),
       path.resolve(process.cwd(), 'uploads'),
       path.resolve(__dirname, '../../uploads'),
-      path.resolve(__dirname, '../../../uploads'),
-      'A:/RA_SEBI_COMPLINCE/uploads',
-      'A:/RA_SEBI_COMPLINCE/backend/uploads'
+      path.resolve(__dirname, '../../../uploads')
     ];
 
     const subfolders = ['research', 'resources', 'policies', 'branding', 'agreements', 'payments', 'compliance', 'kyc', 'staff', 'tickets'];

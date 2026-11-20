@@ -1031,9 +1031,11 @@ function AdminDashboardContent() {
   const isStaff = user && user.role && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN';
 
   const getFullUrl = (url?: string | null) => {
-    if (!url) return 'N/A';
-    if (url.startsWith('http')) return url;
-    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+    const base = (process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() || '').replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${cleanPath}`;
   };
 
   const AGREEMENT_VARIABLES = [
@@ -5898,7 +5900,7 @@ function AdminDashboardContent() {
                                           <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-2 font-medium">{item.date.toLocaleString('en-IN')}</div>
                                         </div>
                                         {item.proofUrl && (
-                                          <a href={item.proofUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
+                                          <a href={getFullUrl(item.proofUrl)} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
                                             <ExternalLink className="h-3 w-3" />
                                             View Proof (SS)
                                           </a>
