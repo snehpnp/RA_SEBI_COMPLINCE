@@ -63,6 +63,13 @@ export interface IPayment extends Document {
   invoiceStatus?: 'PENDING_AGREEMENT' | 'GENERATED';
   invoiceSentAt?: Date | null;
   lastEmailedTo?: string | null;
+  isRefunded?: boolean | null;
+  refundedAmount?: number | null;
+  refundedBaseAmount?: number | null;
+  refundedGstAmount?: number | null;
+  refundMode?: 'WITH_GST' | 'WITHOUT_GST' | null;
+  refundDate?: Date | null;
+  creditNoteNumber?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -103,7 +110,14 @@ export const PaymentSchema = new Schema<IPayment>(
     invoicePolicy: { type: String, enum: ['IMMEDIATE_ON_PAYMENT', 'AFTER_KYC_AGREEMENT'], default: 'AFTER_KYC_AGREEMENT' },
     invoiceStatus: { type: String, enum: ['PENDING_AGREEMENT', 'GENERATED'], default: 'GENERATED' },
     invoiceSentAt: { type: Date, default: null },
-    lastEmailedTo: { type: String, default: null }
+    lastEmailedTo: { type: String, default: null },
+    isRefunded: { type: Boolean, default: false },
+    refundedAmount: { type: Number, default: 0 },
+    refundedBaseAmount: { type: Number, default: 0 },
+    refundedGstAmount: { type: Number, default: 0 },
+    refundMode: { type: String, enum: ['WITH_GST', 'WITHOUT_GST'], default: null },
+    refundDate: { type: Date, default: null },
+    creditNoteNumber: { type: String, default: null }
   },
   { ...baseSchemaOptions, collection: 'Payment' }
 );

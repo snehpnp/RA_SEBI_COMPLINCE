@@ -6,6 +6,7 @@ import StaffProfilePage from '../admin/staff-profile/page';
 import PAProfilePage from '../admin/pa-profile/page';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from 'react-data-table-component';
+import SebiAuditorInspectionView from '@/components/compliance/SebiAuditorInspectionView';
 
 const tableCustomStyles = {
   table: {
@@ -553,6 +554,7 @@ function AdminDashboardContent() {
   const [historyFilterText, setHistoryFilterText] = useState('');
   const [selectedFinancialYear, setSelectedFinancialYear] = useState<string>('All');
   const [penalties, setPenalties] = useState<any[]>([]);
+  const [isAuditorInspectionMode, setIsAuditorInspectionMode] = useState<boolean>(false);
   const [complianceTab, setComplianceTab] = useState<'overview' | 'alerts' | 'checklist' | 'penalties' | 'complaints' | 'audit_history'>('overview');
   const [alertViewMode, setAlertViewMode] = useState<'card' | 'table'>('card');
 
@@ -5251,27 +5253,66 @@ function AdminDashboardContent() {
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
+                    isAuditorInspectionMode ? (
+                      <SebiAuditorInspectionView
+                        onBack={() => setIsAuditorInspectionMode(false)}
+                        tenantData={null}
+                        clientsData={clients}
+                        alertsData={alerts}
+                        complaintsData={complaints}
+                        penaltiesData={penalties}
+                        isDarkMode={isDarkMode}
+                      />
+                    ) : (
                     <div className={`w-full ${showMobilePreview ? 'lg:flex items-start' : ''}`}>
                       <div className="flex-1 space-y-6 lg:pr-6">
                         {/* Header */}
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                           <div>
                             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
                             <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
                           </div>
-                          <div className="flex space-x-2">
-                            <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 mr-2">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/10">
                               <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
                               <div className="relative">
                                 <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
                                 <div className="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary-600"></div>
                               </div>
                             </label>
-                            <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-4 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
+
+                            {/* SEBI Auditor Analysis & Inspection Dossier Switcher */}
+                            <button
+                              type="button"
+                              onClick={() => setIsAuditorInspectionMode(true)}
+                              className="group relative flex items-center gap-2.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-700 hover:from-blue-600 hover:via-indigo-500 hover:to-violet-600 text-white rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-indigo-500/35 transition-all duration-200 border border-indigo-400/30 active:scale-[0.98]"
+                              title="Switch to SEBI Auditor Analysis Report & Statutory Inspection Dossier"
+                            >
+                              <div className="relative p-1.5 bg-white/20 dark:bg-white/10 rounded-lg backdrop-blur-sm border border-white/20 group-hover:scale-105 transition-transform flex items-center justify-center">
+                                <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                                </span>
+                              </div>
+                              <div className="text-left leading-tight">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold tracking-wide">SEBI Auditor Analysis</span>
+                                  <span className="bg-emerald-500/25 text-emerald-200 text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase border border-emerald-400/30">
+                                    Dossier
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-blue-100/90 block mt-0.5 font-normal">
+                                  Statutory Inspection Mode
+                                </span>
+                              </div>
+                            </button>
+
+                            <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-3.5 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
                               {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                               <span>Download Periodic Report</span>
                             </button>
-                            <button onClick={handleComplianceSweep} disabled={sweepLoading} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
+                            <button onClick={handleComplianceSweep} disabled={sweepLoading} className="px-3.5 py-2 bg-primary-600 hover:bg-primary-500 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
                               {sweepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                               <span>Run Verification Sweep</span>
                             </button>
@@ -5280,7 +5321,7 @@ function AdminDashboardContent() {
 
                         {/* Sub-tabs and Global Filter */}
                         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-                          <div className="flex flex-wrap gap-1 bg-white dark:bg-slate-900/60 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
+                          <div className="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-900/60 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                             {[
                               { id: 'overview', label: 'Compliance Overview' },
                               { id: 'alerts', label: `Automated Alerts (${alerts.filter(a => a.status === 'OPEN').length})` },
@@ -5292,6 +5333,19 @@ function AdminDashboardContent() {
                                 {tab.label}
                               </button>
                             ))}
+                            <div className="h-4 w-px bg-slate-200 dark:bg-white/10 mx-1 hidden sm:block"></div>
+                            <button
+                              type="button"
+                              onClick={() => setIsAuditorInspectionMode(true)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800/50 transition shadow-sm"
+                              title="Switch to SEBI Auditor Analysis & Statutory Inspection Dossier"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                              <span>Auditor Dossier View</span>
+                              <span className="text-[9px] font-extrabold uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">
+                                Inspect
+                              </span>
+                            </button>
                           </div>
                           <div className="flex items-center space-x-3 bg-white dark:bg-slate-900/40 p-1.5 rounded-xl border border-slate-300 dark:border-white/5 w-fit">
                             {(!isStaff || hasPermission('EXPORT_DATA')) && (
@@ -5970,6 +6024,7 @@ function AdminDashboardContent() {
                         </div>
                       )}
                     </div>
+                    )
                   )}
 
                   {/* ====================================================

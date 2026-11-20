@@ -103,5 +103,9 @@ export const SmsTemplate = createDynamicModelProxy('SmsTemplate');
 export const ClientCallRecording = createDynamicModelProxy('ClientCallRecording');
 export const Faq = createDynamicModelProxy('Faq');
 export const VideoKycSession = createDynamicModelProxy('VideoKycSession');
+export const PlatformPlan = createDynamicModelProxy('PlatformPlan');
+export const PlatformBillingConfig = createDynamicModelProxy('PlatformBillingConfig');
+export const TenantSubscription = createDynamicModelProxy('TenantSubscription');
+export const PlatformInvoice = createDynamicModelProxy('PlatformInvoice');
 
 export default dynamicDb;

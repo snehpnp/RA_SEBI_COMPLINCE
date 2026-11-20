@@ -268,6 +268,143 @@ class ApiClient {
     return this.request('/super-admin/tenants');
   }
 
+  // --- SAAS SUBSCRIPTION PLANS & PLATFORM BILLING ---
+  async getPlatformPlans() {
+    return this.request('/super-admin/platform-plans');
+  }
+
+  async createPlatformPlan(payload: any) {
+    return this.request('/super-admin/platform-plans', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async updatePlatformPlan(id: string, payload: any) {
+    return this.request(`/super-admin/platform-plans/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async togglePlatformPlan(id: string) {
+    return this.request(`/super-admin/platform-plans/${id}/toggle`, {
+      method: 'PATCH'
+    });
+  }
+
+  async getPlatformBillingConfig() {
+    return this.request('/super-admin/billing-config');
+  }
+
+  async updatePlatformBillingConfig(payload: any) {
+    return this.request('/super-admin/billing-config', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async assignPlatformPlanToCompany(companyId: string, payload: any) {
+    return this.request(`/super-admin/companies/${companyId}/assign-plan`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async getCompanySubscriptionHistory(companyId: string) {
+    return this.request(`/super-admin/companies/${companyId}/subscription-history`);
+  }
+
+  async resendPlatformInvoiceEmail(invoiceId: string) {
+    return this.request(`/super-admin/invoices/${invoiceId}/resend`, {
+      method: 'POST'
+    });
+  }
+
+  // --- TENANT ADMIN COMPANY SUBSCRIPTION ---
+  async getMyCompanySubscription() {
+    return this.request('/admin/my-company-subscription');
+  }
+
+  async downloadPlatformInvoice(invoiceId: string, invoiceNumber?: string, isSuperAdmin: boolean = false) {
+    const endpoint = isSuperAdmin
+      ? `/super-admin/invoices/${invoiceId}/download`
+      : `/admin/platform-invoices/${invoiceId}/download`;
+    return this.downloadVaultFile(
+      endpoint,
+      `${invoiceNumber || 'Platform_Invoice'}.pdf`
+    );
+  }
+
+  async testPlatformGateway(payload: { razorpayKeyId: string; razorpayKeySecret: string }) {
+    return this.request('/super-admin/billing-config/test-gateway', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async uploadPlatformQrCode(file: File) {
+    const formData = new FormData();
+    formData.append('qrCode', file);
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : '';
+    const res = await fetch(`${API_BASE_URL}/super-admin/billing-config/upload-qr`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      },
+      body: formData
+    });
+    return res.json();
+  }
+
+  async getUnifiedPlatformSubscriptions(companyId?: string) {
+    const q = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
+    return this.request(`/super-admin/unified-subscriptions${q}`);
+  }
+
+  async approveOfflineSubscription(subscriptionId: string) {
+    return this.request(`/super-admin/subscriptions/${subscriptionId}/approve`, {
+      method: 'PATCH'
+    });
+  }
+
+  async getPlatformPaymentOptions() {
+    return this.request('/tenant-subscription/payment-options');
+  }
+
+  async initiateTenantPlatformGatewayOrder(planId: string) {
+    return this.request('/tenant-subscription/gateway/order', {
+      method: 'POST',
+      body: JSON.stringify({ planId })
+    });
+  }
+
+  async verifyTenantPlatformGatewayPayment(payload: {
+    planId: string;
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }) {
+    return this.request('/tenant-subscription/gateway/verify', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async submitTenantPlatformOfflinePayment(payload: {
+    planId: string;
+    paymentMode?: 'QR_UPI' | 'BANK_TRANSFER';
+    offlineTransactionRef: string;
+    offlinePaymentDate?: string;
+    remarks?: string;
+    offlineProofUrl?: string;
+  }) {
+    return this.request('/tenant-subscription/offline-payment', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   async getPublicTenants() {
     return this.request('/public/tenants');
   }
@@ -604,6 +741,28 @@ class ApiClient {
 
   async assignPlanByAdmin(clientId: string, payload: { planId: string; remarks?: string; paymentRefId: string; paymentDate: string; couponCode?: string }) {
     return this.request(`/admin/clients/${clientId}/assign-plan`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async previewSubscriptionCancellation(subscriptionId: string, payload: { cancellationEffectiveDate?: string; refundMode?: string }) {
+    return this.request(`/admin/subscriptions/${subscriptionId}/preview-cancel`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async cancelSubscriptionByAdmin(subscriptionId: string, payload: {
+    cancellationType: 'ONLY_CANCEL' | 'CANCEL_AND_REFUND';
+    cancellationEffectiveDate?: string;
+    refundMode?: 'WITH_GST' | 'WITHOUT_GST';
+    customRefundAmount?: number;
+    sendEmailToClient?: boolean;
+    sendInvoicePdf?: boolean;
+    remarks?: string;
+  }) {
+    return this.request(`/admin/subscriptions/${subscriptionId}/cancel`, {
       method: 'POST',
       body: JSON.stringify(payload)
     });

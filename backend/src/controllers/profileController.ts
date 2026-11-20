@@ -136,7 +136,7 @@ export const getStaffProfile = async (req: AuthenticatedRequest, res: Response) 
 
 export const updateStaffProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { firstName, lastName, mobile, dob, nismNumber, nismValidity, nismUpload, customRole } = req.body;
+    const { firstName, lastName, mobile, dob, customRole } = req.body;
     const userId = req.user!.id;
 
     const user: any = await dynamicDb.User.findById(userId);
@@ -155,9 +155,12 @@ export const updateStaffProfile = async (req: AuthenticatedRequest, res: Respons
       const staffUpdate: any = {};
       if (mobile) staffUpdate.mobile = mobile;
       if (dob) staffUpdate.dob = new Date(dob);
-      if (nismNumber !== undefined) staffUpdate.nismNumber = nismNumber;
-      if (nismValidity) staffUpdate.nismValidity = new Date(nismValidity);
-      if (nismUpload !== undefined) staffUpdate.nismUpload = nismUpload;
+
+      // SECURITY RESTRICTION:
+      // NISM Details (nismNumber, nismValidity, nismUpload) can ONLY be edited by ADMIN.
+      // Staff of any role (RESEARCHER, COMPLIANCE_OFFICER, PRINCIPAL_OFFICER, etc.)
+      // are strictly prohibited from altering their own NISM credentials.
+      // Any nism fields in the request body are purposely ignored.
 
       if (Object.keys(staffUpdate).length > 0) {
         await dynamicDb.Staff.findByIdAndUpdate(staff._id || staff.id, { $set: staffUpdate });

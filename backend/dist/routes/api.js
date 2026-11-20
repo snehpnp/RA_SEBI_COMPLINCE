@@ -13,6 +13,8 @@ const fs_1 = __importDefault(require("fs"));
 const authController_1 = require("../controllers/authController");
 const superAdminController_1 = require("../controllers/superAdminController");
 const third_party_api_1 = require("../third-party-api");
+const saasPlanController_1 = require("../controllers/saasPlanController");
+const tenantCompanySubscriptionController_1 = require("../controllers/tenantCompanySubscriptionController");
 const adminController_1 = require("../controllers/adminController");
 const clientController_1 = require("../controllers/clientController");
 const telegramController_1 = require("../controllers/telegramController");
@@ -97,7 +99,7 @@ const storage = multer_1.default.diskStorage({
             folder = 'kyc';
         else if (req.path.includes('staff'))
             folder = 'staff';
-        else if (req.path.includes('settings') || req.path.includes('signature'))
+        else if (req.path.includes('settings') || req.path.includes('signature') || req.path.includes('billing') || req.path.includes('qr'))
             folder = 'branding';
         else if (req.path.includes('ticket') || req.path.includes('reply'))
             folder = 'tickets';
@@ -221,6 +223,21 @@ router.post('/super-admin/verify-domain', auth_1.authenticateJWT, (0, auth_1.req
 router.put('/super-admin/password', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateSuperAdminPassword);
 router.get('/super-admin/logs', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getAuditLogs);
 router.get('/super-admin/compliance-rules', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getComplianceRules);
+// --- SUPERADMIN SAAS PLAN & PLATFORM BILLING ROUTES ---
+router.get('/super-admin/platform-plans', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.getPlatformPlans);
+router.post('/super-admin/platform-plans', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.createPlatformPlan);
+router.put('/super-admin/platform-plans/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.updatePlatformPlan);
+router.patch('/super-admin/platform-plans/:id/toggle', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.togglePlatformPlanStatus);
+router.get('/super-admin/billing-config', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.getPlatformBillingConfig);
+router.put('/super-admin/billing-config', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.updatePlatformBillingConfig);
+router.post('/super-admin/billing-config/upload-qr', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), upload.single('qrCode'), saasPlanController_1.uploadPlatformQrCode);
+router.post('/super-admin/companies/:companyId/assign-plan', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.assignPlatformPlanToCompany);
+router.get('/super-admin/companies/:companyId/subscription-history', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.getCompanySubscriptionHistory);
+router.post('/super-admin/invoices/:invoiceId/resend', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.resendPlatformInvoiceEmail);
+router.get('/super-admin/invoices/:invoiceId/download', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.downloadPlatformInvoice);
+router.post('/super-admin/billing-config/test-gateway', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.testPlatformGateway);
+router.get('/super-admin/unified-subscriptions', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.getUnifiedPlatformSubscriptions);
+router.patch('/super-admin/subscriptions/:subscriptionId/approve', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), saasPlanController_1.approveOfflineSubscription);
 router.put('/super-admin/compliance-rules/:id', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.updateComplianceRule);
 router.get('/super-admin/telemetry', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
 router.get('/super-admin/dashboard', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['SUPER_ADMIN']), superAdminController_1.getGlobalTelemetry);
@@ -262,6 +279,13 @@ router.get('/admin/exports/deleted-clients', auth_1.authenticateJWT, (0, auth_1.
 router.get('/admin/exports/payments', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), adminController_1.exportPaymentsCSV);
 router.get('/admin/exports/gst-sheet', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA', 'ACCESS_PAYMENTS']), adminController_1.exportGstReadySheetCSV);
 router.get('/admin/exports/research-reports', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), adminController_1.exportResearchReportsZip);
+// --- TENANT ADMIN COMPANY SUBSCRIPTION & UPGRADE ROUTE ---
+router.get('/admin/my-company-subscription', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), tenantCompanySubscriptionController_1.getMyCompanySubscription);
+router.get('/admin/platform-invoices/:invoiceId/download', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), saasPlanController_1.downloadPlatformInvoice);
+router.get('/tenant-subscription/payment-options', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), saasPlanController_1.getPlatformPaymentOptions);
+router.post('/tenant-subscription/gateway/order', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), saasPlanController_1.initiateTenantPlatformGatewayOrder);
+router.post('/tenant-subscription/gateway/verify', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), saasPlanController_1.verifyTenantPlatformGatewayPayment);
+router.post('/tenant-subscription/offline-payment', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), saasPlanController_1.submitTenantPlatformOfflinePayment);
 // Custom Pages (Admin & Read-only for Staff/CO/PO)
 router.get('/admin/pages', auth_1.authenticateJWT, pageController_1.getAdminPages);
 router.post('/admin/pages', auth_1.authenticateJWT, (0, auth_1.requireRoles)(['ADMIN']), pageController_1.savePage);
@@ -335,6 +359,8 @@ router.delete('/admin/clients/:id', auth_1.authenticateJWT, (0, auth_1.requirePe
 router.post('/admin/clients/:id/delete', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.deleteClient);
 router.post('/admin/clients/:id/restore', auth_1.authenticateJWT, (0, auth_1.requirePermission)('DELETE_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.restoreClient);
 router.post('/admin/clients/:id/assign-plan', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.assignPlanByAdmin);
+router.post('/admin/subscriptions/:subscriptionId/preview-cancel', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.previewSubscriptionCancellation);
+router.post('/admin/subscriptions/:subscriptionId/cancel', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.cancelSubscriptionByAdmin);
 router.get('/admin/clients/:id/fee-summary', auth_1.authenticateJWT, (0, auth_1.requirePermission)('ACCESS_CLIENTS'), tenant_1.enforceTenantIsolation, adminController_1.getClientFeeSummaryEndpoint);
 router.get('/admin/clients/:clientId/timeline', auth_1.authenticateJWT, (0, auth_1.requireAnyPermission)(['ACCESS_CLIENTS', 'ACCESS_COMPLIANCE']), tenant_1.enforceTenantIsolation, clientTimelineController_1.getClientTimeline);
 // Admin Client Digital Vaults & File Explorer (Role-Permission controlled)

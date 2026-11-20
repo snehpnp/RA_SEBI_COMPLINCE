@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { User, Mail, Phone, Calendar, Hash, FileCheck, Loader2 } from 'lucide-react';
+import { User, Mail, Phone, Calendar, Hash, FileCheck, Loader2, Lock, ExternalLink } from 'lucide-react';
 import api from '../../../services/api';
 import ChangePasswordBlock from '../../../components/ChangePasswordBlock';
 import { toast } from 'react-hot-toast';
@@ -61,7 +61,14 @@ export default function StaffProfilePage() {
     e.preventDefault();
     try {
       setSaving(true);
-      const res = await api.put('/profile/staff', formData);
+      // NISM details can only be edited by Admin, exclude them from staff self-profile update
+      const payload = {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        mobile: formData.mobile,
+        dob: formData.dob
+      };
+      const res = await api.put('/profile/staff', payload);
       if (res.data.success) {
         toast.success('Profile updated successfully');
       } else {
@@ -144,30 +151,95 @@ export default function StaffProfilePage() {
               </div>
             </div>
 
-            <h3 className="col-span-full text-lg font-medium text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700 pb-2 mt-4">NISM Details</h3>
+            <div className="col-span-full border-b border-gray-200 dark:border-gray-700 pb-2 mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200">NISM Details</h3>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  <Lock className="w-3 h-3" />
+                  Locked (Admin Only)
+                </span>
+              </div>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Only Admin has rights to edit or update NISM credentials
+              </span>
+            </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">NISM Number</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                <span>NISM Number</span>
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-normal">
+                  <Lock className="w-3 h-3" /> Admin Only
+                </span>
+              </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Hash className="h-5 w-5 text-gray-400" /></div>
-                <input type="text" value={formData.nismNumber} onChange={(e) => setFormData({ ...formData, nismNumber: e.target.value })} className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500" />
+                <input
+                  type="text"
+                  value={formData.nismNumber}
+                  readOnly
+                  disabled
+                  placeholder="Not Set (Contact Admin)"
+                  title="Only Admin can modify NISM Number"
+                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 px-4 py-2 text-gray-500 dark:text-gray-400 cursor-not-allowed select-none font-mono"
+                />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">NISM Validity</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                <span>NISM Validity</span>
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-normal">
+                  <Lock className="w-3 h-3" /> Admin Only
+                </span>
+              </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Calendar className="h-5 w-5 text-gray-400" /></div>
-                <input type="date" value={formData.nismValidity} onChange={(e) => setFormData({ ...formData, nismValidity: e.target.value })} className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500" />
+                <input
+                  type="date"
+                  value={formData.nismValidity}
+                  readOnly
+                  disabled
+                  title="Only Admin can modify NISM Validity"
+                  className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 px-4 py-2 text-gray-500 dark:text-gray-400 cursor-not-allowed select-none font-mono"
+                />
               </div>
             </div>
 
             <div className="col-span-full">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">NISM Certificate URL</label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><FileCheck className="h-5 w-5 text-gray-400" /></div>
-                <input type="text" value={formData.nismUpload} onChange={(e) => setFormData({ ...formData, nismUpload: e.target.value })} className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-4 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500" placeholder="https://..." />
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center justify-between">
+                <span>NISM Certificate URL</span>
+                <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-normal">
+                  <Lock className="w-3 h-3" /> Admin Only
+                </span>
+              </label>
+              <div className="relative flex items-center gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><FileCheck className="h-5 w-5 text-gray-400" /></div>
+                  <input
+                    type="text"
+                    value={formData.nismUpload}
+                    readOnly
+                    disabled
+                    placeholder="No document URL linked (Contact Admin)"
+                    title="Only Admin can modify NISM Certificate URL"
+                    className="pl-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 px-4 py-2 text-gray-500 dark:text-gray-400 cursor-not-allowed select-none truncate"
+                  />
+                </div>
+                {formData.nismUpload && (
+                  <a
+                    href={formData.nismUpload}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 transition-colors shrink-0"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>View File</span>
+                  </a>
+                )}
               </div>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">
+                To update your NISM Certificate or Validity, please submit your certificate to the Administrator.
+              </p>
             </div>
 
           </div>

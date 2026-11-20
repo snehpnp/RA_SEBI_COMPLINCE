@@ -8,8 +8,29 @@ import fs from 'fs';
 import { login, refreshToken, forgotPassword, resetPassword, getMe, getPublicTenants, changePassword, logout, requestOtp, verifyOtp, verify2FALogin, resend2FAOtp, getSecurityPolicy, requestLoginOtp, loginWithOtp } from '../controllers/authController';
 import { createTenant, getTenants, toggleTenantStatus, toggleTenantCompliance, getAuditLogs, getGlobalTelemetry, deleteTenant, restoreTenant, permanentDeleteTenant, impersonateTenant, getTenantDetails, updateTenantDetails, updateSuperAdminPassword, parseSebiCertificate, parseNismCertificate, getComplianceRules, updateComplianceRule, getTenantDocumentHistory, provisionTenantDb, syncTenantApi, syncAllTenantsApi, getCompanyClients, getCompanyStaff, getCompanyCompliance, runCompanyComplianceSweep, verifyDomainUrl, testMongoConnection, getCompanyPanelStats } from '../controllers/superAdminController';
 import { thirdPartyRoutes, getThirdPartyClients } from '../third-party-api';
+import {
+  getPlatformPlans,
+  createPlatformPlan,
+  updatePlatformPlan,
+  togglePlatformPlanStatus,
+  getPlatformBillingConfig,
+  updatePlatformBillingConfig,
+  assignPlatformPlanToCompany,
+  getCompanySubscriptionHistory,
+  resendPlatformInvoiceEmail,
+  downloadPlatformInvoice,
+  testPlatformGateway,
+  getUnifiedPlatformSubscriptions,
+  approveOfflineSubscription,
+  getPlatformPaymentOptions,
+  initiateTenantPlatformGatewayOrder,
+  verifyTenantPlatformGatewayPayment,
+  submitTenantPlatformOfflinePayment,
+  uploadPlatformQrCode
+} from '../controllers/saasPlanController';
+import { getMyCompanySubscription } from '../controllers/tenantCompanySubscriptionController';
 
-import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, exportGstReadySheetCSV, getClientFeeSummaryEndpoint, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
+import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, previewSubscriptionCancellation, cancelSubscriptionByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, exportGstReadySheetCSV, getClientFeeSummaryEndpoint, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
 import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing, getClientFeeSummaryForSelf } from '../controllers/clientController';
 import { handleTelegramWebhook, setTelegramWebhookEndpoint, getTelegramWebhookStatus } from '../controllers/telegramController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
@@ -139,7 +160,7 @@ const storage = multer.diskStorage({
     else if (req.path.includes('close') || req.path.includes('resolve') || req.path.includes('compliance') || req.path.includes('checklist')) folder = 'compliance';
     else if (req.path.includes('kyc')) folder = 'kyc';
     else if (req.path.includes('staff')) folder = 'staff';
-    else if (req.path.includes('settings') || req.path.includes('signature')) folder = 'branding';
+    else if (req.path.includes('settings') || req.path.includes('signature') || req.path.includes('billing') || req.path.includes('qr')) folder = 'branding';
     else if (req.path.includes('ticket') || req.path.includes('reply')) folder = 'tickets';
     else if (req.path.includes('signals') || req.path.includes('research')) folder = 'research';
     else if (req.path.includes('resources')) folder = 'resources';
@@ -420,6 +441,25 @@ router.get(
   requireRoles(['SUPER_ADMIN']),
   getComplianceRules
 );
+
+// --- SUPERADMIN SAAS PLAN & PLATFORM BILLING ROUTES ---
+router.get('/super-admin/platform-plans', authenticateJWT, requireRoles(['SUPER_ADMIN']), getPlatformPlans);
+router.post('/super-admin/platform-plans', authenticateJWT, requireRoles(['SUPER_ADMIN']), createPlatformPlan);
+router.put('/super-admin/platform-plans/:id', authenticateJWT, requireRoles(['SUPER_ADMIN']), updatePlatformPlan);
+router.patch('/super-admin/platform-plans/:id/toggle', authenticateJWT, requireRoles(['SUPER_ADMIN']), togglePlatformPlanStatus);
+
+router.get('/super-admin/billing-config', authenticateJWT, requireRoles(['SUPER_ADMIN']), getPlatformBillingConfig);
+router.put('/super-admin/billing-config', authenticateJWT, requireRoles(['SUPER_ADMIN']), updatePlatformBillingConfig);
+router.post('/super-admin/billing-config/upload-qr', authenticateJWT, requireRoles(['SUPER_ADMIN']), upload.single('qrCode'), uploadPlatformQrCode);
+
+router.post('/super-admin/companies/:companyId/assign-plan', authenticateJWT, requireRoles(['SUPER_ADMIN']), assignPlatformPlanToCompany);
+router.get('/super-admin/companies/:companyId/subscription-history', authenticateJWT, requireRoles(['SUPER_ADMIN']), getCompanySubscriptionHistory);
+router.post('/super-admin/invoices/:invoiceId/resend', authenticateJWT, requireRoles(['SUPER_ADMIN']), resendPlatformInvoiceEmail);
+router.get('/super-admin/invoices/:invoiceId/download', authenticateJWT, requireRoles(['SUPER_ADMIN']), downloadPlatformInvoice);
+router.post('/super-admin/billing-config/test-gateway', authenticateJWT, requireRoles(['SUPER_ADMIN']), testPlatformGateway);
+router.get('/super-admin/unified-subscriptions', authenticateJWT, requireRoles(['SUPER_ADMIN']), getUnifiedPlatformSubscriptions);
+router.patch('/super-admin/subscriptions/:subscriptionId/approve', authenticateJWT, requireRoles(['SUPER_ADMIN']), approveOfflineSubscription);
+
 router.put(
   '/super-admin/compliance-rules/:id',
   authenticateJWT,
@@ -510,6 +550,14 @@ router.get('/admin/exports/deleted-clients', authenticateJWT, requireAnyPermissi
 router.get('/admin/exports/payments', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportPaymentsCSV);
 router.get('/admin/exports/gst-sheet', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA', 'ACCESS_PAYMENTS']), exportGstReadySheetCSV);
 router.get('/admin/exports/research-reports', authenticateJWT, requireAnyPermission(['ACCESS_BULK_EXPORTS', 'EXPORT_DATA']), exportResearchReportsZip);
+
+// --- TENANT ADMIN COMPANY SUBSCRIPTION & UPGRADE ROUTE ---
+router.get('/admin/my-company-subscription', authenticateJWT, requireRoles(['ADMIN']), getMyCompanySubscription);
+router.get('/admin/platform-invoices/:invoiceId/download', authenticateJWT, requireRoles(['ADMIN']), downloadPlatformInvoice);
+router.get('/tenant-subscription/payment-options', authenticateJWT, requireRoles(['ADMIN']), getPlatformPaymentOptions);
+router.post('/tenant-subscription/gateway/order', authenticateJWT, requireRoles(['ADMIN']), initiateTenantPlatformGatewayOrder);
+router.post('/tenant-subscription/gateway/verify', authenticateJWT, requireRoles(['ADMIN']), verifyTenantPlatformGatewayPayment);
+router.post('/tenant-subscription/offline-payment', authenticateJWT, requireRoles(['ADMIN']), submitTenantPlatformOfflinePayment);
 
 // Custom Pages (Admin & Read-only for Staff/CO/PO)
 router.get('/admin/pages', authenticateJWT, getAdminPages);
@@ -911,6 +959,20 @@ router.post(
   requirePermission('ACCESS_CLIENTS'),
   enforceTenantIsolation,
   assignPlanByAdmin
+);
+router.post(
+  '/admin/subscriptions/:subscriptionId/preview-cancel',
+  authenticateJWT,
+  requirePermission('ACCESS_CLIENTS'),
+  enforceTenantIsolation,
+  previewSubscriptionCancellation
+);
+router.post(
+  '/admin/subscriptions/:subscriptionId/cancel',
+  authenticateJWT,
+  requirePermission('ACCESS_CLIENTS'),
+  enforceTenantIsolation,
+  cancelSubscriptionByAdmin
 );
 router.get(
   '/admin/clients/:id/fee-summary',
