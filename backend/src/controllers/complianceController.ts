@@ -415,6 +415,9 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
   for (const clientItem of clientsWithSubscriptions) {
     const client: any = clientItem;
     const clientId = client._id;
+    const activeSub = ((client as any).subscriptions || []).find((s: any) => s.status === 'ACTIVE');
+    const clientSubDate = activeSub?.startDate ? new Date(activeSub.startDate) : (client.createdAt ? new Date(client.createdAt) : new Date());
+
     // 4a. KYC Check (considers KRA, Aadhaar/DigiLocker, masked Aadhaar data)
     const isKycComplete = isClientKycComplete(client);
     const isKycPending = !isKycComplete;
@@ -433,9 +436,14 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
           alertType: 'KYC_MISSING',
           severity: 'MEDIUM',
           description: kycDescription,
-          clientId
+          clientId,
+          createdAt: clientSubDate
         });
         alertsCreated.push(newAlert.toObject());
+      } else if (existingKycAlert.createdAt && new Date(existingKycAlert.createdAt).getTime() > clientSubDate.getTime()) {
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingKycAlert._id, {
+          $set: { createdAt: clientSubDate }
+        });
       }
     } else {
       if (existingKycAlert) {
@@ -457,7 +465,7 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
         tenantId,
         alertType: 'AGREEMENT_MISSING',
         status: 'OPEN',
-        description: aggDescription
+        clientId
       }).lean();
 
       if (!existingAggAlert) {
@@ -466,9 +474,14 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
           alertType: 'AGREEMENT_MISSING',
           severity: 'HIGH',
           description: aggDescription,
-          clientId
+          clientId,
+          createdAt: clientSubDate
         });
         alertsCreated.push(newAlert.toObject());
+      } else if (existingAggAlert.createdAt && new Date(existingAggAlert.createdAt).getTime() > clientSubDate.getTime()) {
+        await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingAggAlert._id, {
+          $set: { createdAt: clientSubDate }
+        });
       }
     }
   }
@@ -724,18 +737,28 @@ export const checkComplianceForTenant = async (tenantId?: string) => {
 
       const severity = isGracePeriodActive ? (ageInDays >= 10 ? 'HIGH' : 'MEDIUM') : 'HIGH';
 
+      // Breach date: if within grace period, alert starts when sub started; if grace period expired, breach date is firstActiveDate + 15 days
+      const breachDate = isGracePeriodActive
+        ? firstActiveDate
+        : new Date(firstActiveDate.getTime() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+
       if (!existingPanAlert) {
         const newPanAlert = await dynamicDb.ComplianceAlert.create({
           tenantId,
           alertType: 'PAN_MISSING',
           severity,
           description,
-          clientId
+          clientId,
+          createdAt: breachDate
         });
         alertsCreated.push(newPanAlert.toObject());
       } else {
+        const updates: any = { severity, description };
+        if (existingPanAlert.createdAt && new Date(existingPanAlert.createdAt).getTime() > breachDate.getTime()) {
+          updates.createdAt = breachDate;
+        }
         await dynamicDb.ComplianceAlert.findByIdAndUpdate(existingPanAlert._id, {
-          $set: { severity, description }
+          $set: updates
         });
       }
 

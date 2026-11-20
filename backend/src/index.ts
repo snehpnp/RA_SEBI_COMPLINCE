@@ -126,8 +126,8 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // Background Cron Jobs
-// Run daily automated compliance check at midnight (12:00 AM)
-cron.schedule('0 0 * * *', async () => {
+// Reusable Automated Compliance Sweep Engine
+export const runAutomatedComplianceSweep = async () => {
   const timestamp = new Date().toLocaleTimeString();
   console.log(`\n⏳ [COMPLIANCE CRON - ${timestamp}] Running daily automated compliance sweep...`);
   try {
@@ -203,11 +203,17 @@ cron.schedule('0 0 * * *', async () => {
         console.log(`🚨 [COMPLIANCE CRON] Generated ${autoAlerts.length} new compliance alert(s) for "${tenant.name || tenantIdStr}"`);
       }
     }
-    console.log(`✅ [COMPLIANCE CRON - ${timestamp}] 1-minute compliance sweep finished.\n`);
+    console.log(`✅ [COMPLIANCE CRON - ${timestamp}] Compliance sweep finished successfully.\n`);
   } catch (error: any) {
-    console.error('❌ [COMPLIANCE CRON] Error running automated daily compliance cron:', error?.message);
+    console.error('❌ [COMPLIANCE CRON] Error running automated compliance cron:', error?.message);
   }
-});
+};
+
+// Schedule automated compliance checks:
+// 1. Midnight (12:00 AM)
+cron.schedule('0 0 * * *', runAutomatedComplianceSweep);
+// 2. Every 30 minutes during daytime operations
+cron.schedule('*/30 * * * *', runAutomatedComplianceSweep);
 
 // Initialize Video KYC WebSocket Signaling
 initVideoKycSocket(httpServer);
@@ -219,4 +225,10 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   initCronJobs(); // Initialize penalty engine
   initTelegramPoller(); // Initialize Telegram auto-poller for 1-click client connects
   initDscBridgeServer(); // Automatically start Hardware DSC Bridge service on port 1620
+
+  // Auto-run compliance verification sweep on startup after initial boot (4s delay)
+  setTimeout(() => {
+    console.log('🚀 [STARTUP] Running automatic initial compliance verification sweep...');
+    runAutomatedComplianceSweep().catch((err: any) => console.error('Startup compliance sweep error:', err?.message));
+  }, 4000);
 });
