@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table';
 import { downloadCSV } from '@/utils/exportCsv';
+import api from '@/services/api';
 
 interface ComplianceTabProps {
   selectedCompanyForCompliance: string;
@@ -717,7 +718,7 @@ export default function ComplianceTab({
                       <span className="text-xs font-semibold">Verification Document</span>
                     </div>
                     <a
-                      href={selectedAuditForView.proofDocumentUrl}
+                      href={selectedAuditForView.proofDocumentUrl.startsWith('http') ? selectedAuditForView.proofDocumentUrl : `${api.getBaseUrl()}${selectedAuditForView.proofDocumentUrl.startsWith('/') ? '' : '/'}${selectedAuditForView.proofDocumentUrl}`}
                       target="_blank"
                       rel="noreferrer"
                       className="px-3 py-1 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-semibold flex items-center space-x-1 transition shadow-xs"

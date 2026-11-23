@@ -437,6 +437,8 @@ function AdminDashboardContent() {
           // If current selection is older than start year, adjust it
           setReportYear(prev => prev < res.data.startYear ? res.data.startYear : prev);
         }
+      }).catch(err => {
+        console.warn('Failed to load periodic report metadata:', err?.message || err);
       });
     }
   }, [showReportModal]);
@@ -1029,9 +1031,11 @@ function AdminDashboardContent() {
   const isStaff = user && user.role && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN';
 
   const getFullUrl = (url?: string | null) => {
-    if (!url) return 'N/A';
-    if (url.startsWith('http')) return url;
-    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+    const base = (process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() || '').replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${cleanPath}`;
   };
 
   const AGREEMENT_VARIABLES = [
@@ -4932,13 +4936,13 @@ function AdminDashboardContent() {
                           <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                             <button
                               onClick={() => setChecklistSubTab('active')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                             >
                               Active Checklist ({activeList.length})
                             </button>
                             <button
                               onClick={() => setChecklistSubTab('history')}
-                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                              className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                             >
                               Checklist History ({checklistHistory.length})
                             </button>
@@ -5255,7 +5259,7 @@ function AdminDashboardContent() {
                               { id: 'complaints', label: `Complaints (${complaints.filter(c => c.status === 'OPEN').length} Open)` },
                               { id: 'audit_history', label: 'Audit Log' }
                             ].map(tab => (
-                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}>
+                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                                 {tab.label}
                               </button>
                             ))}
@@ -5472,7 +5476,7 @@ function AdminDashboardContent() {
                                   </button>
                                   <button
                                     onClick={() => setAlertsSubTab('history')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                   >
                                     Resolved History ({alerts.filter((a: any) => a.status === 'CLOSED').length})
                                   </button>
@@ -5896,7 +5900,7 @@ function AdminDashboardContent() {
                                           <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-2 font-medium">{item.date.toLocaleString('en-IN')}</div>
                                         </div>
                                         {item.proofUrl && (
-                                          <a href={item.proofUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
+                                          <a href={getFullUrl(item.proofUrl)} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
                                             <ExternalLink className="h-3 w-3" />
                                             View Proof (SS)
                                           </a>
@@ -7606,7 +7610,7 @@ function AdminDashboardContent() {
                                 <button
                                   key={tab.id}
                                   onClick={() => setClientDetailsTab(tab.id as any)}
-                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                 >
                                   {tab.label}
                                 </button>

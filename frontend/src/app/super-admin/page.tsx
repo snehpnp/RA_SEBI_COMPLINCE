@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, LogOut, Plus, Landmark, Users, BellRing, ClipboardList, RefreshCw, CheckCircle2, XCircle, Search, Loader2, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, AlertTriangle, Key, User, FileText, ChevronLeft, ChevronRight, Download, EyeOff, Menu, X, Copy, Check, Database, Sparkles, Globe, Send, Server } from 'lucide-react';
+import { ShieldCheck, LogOut, Plus, Landmark, Users, BellRing, ClipboardList, RefreshCw, CheckCircle2, XCircle, Search, Loader2, Eye, Edit, Trash2, Power, PowerOff, RotateCcw, AlertTriangle, Key, User, FileText, ChevronLeft, ChevronRight, Download, EyeOff, Menu, X, Copy, Check, Database, Sparkles, Globe, Send, Server, CreditCard } from 'lucide-react';
 import api from '../../services/api';
 import { formatPan } from '../../utils/formatters';
 import SuperAdminResourcesTab from '@/components/SuperAdminResourcesTab';
+import PlatformPlansTab from './PlatformPlansTab';
 import { useGlobalConfirm } from '@/components/GlobalConfirmProvider';
 import { PaginatedList } from '@/components/ui/PaginatedList';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -67,7 +68,7 @@ function SuperAdminDashboardContent() {
   const { appName, logoUrl: appLogo } = useBranding();
   const [user, setUser] = useState<any>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'matrix' | 'audit' | 'resources' | 'profile' | 'compliance'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'companies' | 'plans' | 'matrix' | 'audit' | 'resources' | 'profile' | 'compliance'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('superAdminActiveTab') as any) || 'dashboard';
     }
@@ -1106,6 +1107,7 @@ function SuperAdminDashboardContent() {
           {[
             { id: 'dashboard', label: 'Dashboard', icon: Landmark },
             { id: 'companies', label: 'RA Companies', icon: Users },
+            { id: 'plans', label: 'SaaS Plans & Billing', icon: CreditCard },
             { id: 'matrix', label: 'Compliance Matrix', icon: ShieldCheck },
             { id: 'compliance', label: 'Compliance Center', icon: AlertTriangle },
             { id: 'audit', label: 'Audit Trails', icon: ClipboardList },
@@ -1209,6 +1211,11 @@ function SuperAdminDashboardContent() {
             setFormError={setFormError}
             setNewCreds={setNewCreds}
           />
+        )}
+
+        {/* 2.2 SAAS PLANS & PLATFORM BILLING TAB */}
+        {activeTab === 'plans' && (
+          <PlatformPlansTab companies={companies} />
         )}
 
         {/* 2.5 MATRIX TAB */}

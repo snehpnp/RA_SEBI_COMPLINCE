@@ -47,7 +47,9 @@ const tableCustomStyles = {
     },
   },
 };
-import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send, Users, MessageSquare } from 'lucide-react';
+import { Plus, Search, Calendar, RefreshCcw, Download, ArrowLeft, Bell, Eye, X, FileUp, Clock, Check, ChevronDown, Loader2, UploadCloud, Edit, Upload, FileText, Smartphone, EyeOff, Send, Users, MessageSquare, Zap, Award, AlertTriangle, AlertCircle } from 'lucide-react';
+import QuickTradeModal from './researcher/QuickTradeModal';
+import ResearcherPerformanceReportModal from './researcher/ResearcherPerformanceReportModal';
 import { base_ra_url, base_api_url } from '../utils/config';
 import { PaginatedList } from './ui/PaginatedList';
 import api from '../services/api';
@@ -74,6 +76,8 @@ export default function SignalManagement({
   const [mainTab, setMainTab] = useState<'SIGNALS' | 'REPORTS'>('SIGNALS');
   const [view, setView] = useState<'TABLE' | 'CARD' | 'STRATEGY' | 'ADD'>('TABLE');
   const [signalStatusFilter, setSignalStatusFilter] = useState<'OPEN' | 'CLOSED'>('OPEN');
+  const [showQuickTradeModal, setShowQuickTradeModal] = useState(false);
+  const [showPerformanceModal, setShowPerformanceModal] = useState(false);
 
   const isViewOnly = (user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')
     ? true
@@ -464,8 +468,8 @@ export default function SignalManagement({
     try {
       setLoading(true);
       const res = await api.getSignals();
-      if (res.success) {
-        setSignals(res.data);
+      if (res && res.success) {
+        setSignals(Array.isArray(res.data) ? res.data : []);
       }
     } catch (err) {
       console.error(err);
@@ -655,9 +659,95 @@ export default function SignalManagement({
     }
   };
 
+  // Target Price Logic Validator for BUY vs SELL
+  const validateClosePrices = () => {
+    if (!closeSignalModal) return { isValid: true, error: '' };
+    if (closeStatus !== 'Partially Closed' && closeStatus !== 'Fully Closed') return { isValid: true, error: '' };
+
+    const callType = (closeSignalModal.callType || 'BUY').toUpperCase();
+    const isBuy = callType === 'BUY';
+
+    const pT1 = parseFloat(closeCustomPrices.t1 || closeSignalModal.target1);
+    const pT2 = closeSignalModal.target2 ? parseFloat(closeCustomPrices.t2 || closeSignalModal.target2) : null;
+    const pT3 = closeSignalModal.target3 ? parseFloat(closeCustomPrices.t3 || closeSignalModal.target3) : null;
+
+    if (closeTargets.t1 && isNaN(pT1)) {
+      return { isValid: false, error: 'Target 1 price is required and must be a valid number.' };
+    }
+
+    if (isBuy) {
+      // BUY Logic: Target 1 < Target 2 < Target 3
+      if (closeTargets.t2 && pT2 !== null) {
+        if (isNaN(pT2)) return { isValid: false, error: 'Target 2 price must be a valid number.' };
+        if (pT1 >= pT2) {
+          return {
+            isValid: false,
+            error: `In BUY trade, Target 1 (₹${pT1}) cannot be greater than or equal to Target 2 (₹${pT2}). (Rule: Target 1 < Target 2)`
+          };
+        }
+      }
+      if (closeTargets.t3 && pT3 !== null) {
+        if (isNaN(pT3)) return { isValid: false, error: 'Target 3 price must be a valid number.' };
+        if (pT2 !== null && pT2 >= pT3) {
+          return {
+            isValid: false,
+            error: `In BUY trade, Target 2 (₹${pT2}) cannot be greater than or equal to Target 3 (₹${pT3}). (Rule: Target 2 < Target 3)`
+          };
+        }
+        if (pT1 >= pT3) {
+          return {
+            isValid: false,
+            error: `In BUY trade, Target 1 (₹${pT1}) cannot be greater than or equal to Target 3 (₹${pT3}).`
+          };
+        }
+      }
+    } else {
+      // SELL Logic: Target 1 > Target 2 > Target 3
+      if (closeTargets.t2 && pT2 !== null) {
+        if (isNaN(pT2)) return { isValid: false, error: 'Target 2 price must be a valid number.' };
+        if (pT1 <= pT2) {
+          return {
+            isValid: false,
+            error: `In SELL trade, Target 1 (₹${pT1}) cannot be less than or equal to Target 2 (₹${pT2}). (Rule: Target 1 > Target 2)`
+          };
+        }
+      }
+      if (closeTargets.t3 && pT3 !== null) {
+        if (isNaN(pT3)) return { isValid: false, error: 'Target 3 price must be a valid number.' };
+        if (pT2 !== null && pT2 <= pT3) {
+          return {
+            isValid: false,
+            error: `In SELL trade, Target 2 (₹${pT2}) cannot be less than or equal to Target 3 (₹${pT3}). (Rule: Target 2 > Target 3)`
+          };
+        }
+        if (pT1 <= pT3) {
+          return {
+            isValid: false,
+            error: `In SELL trade, Target 1 (₹${pT1}) cannot be less than or equal to Target 3 (₹${pT3}).`
+          };
+        }
+      }
+    }
+    return { isValid: true, error: '' };
+  };
+
   const handleCloseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!closeSignalModal) return;
+
+    // Strict validation for Partially Closed trades:
+    // 1. Must select at least Target 1
+    if (closeStatus === 'Partially Closed') {
+      if (!closeTargets.t1) {
+        toast.error("Please select at least Target 1 for partial closing.");
+        return;
+      }
+      const priceValidation = validateClosePrices();
+      if (!priceValidation.isValid) {
+        toast.error(priceValidation.error);
+        return;
+      }
+    }
 
     setLoading(true);
     try {
@@ -688,16 +778,17 @@ export default function SignalManagement({
         isFinalClose
       });
 
-      if (res.success) {
+      if (res && res.success) {
+        toast.success(res.message || 'Signal updated successfully');
         setCloseSignalModal(null);
-        fetchSignals();
+        await fetchSignals();
         setCloseStatus('Fully Closed');
         setCloseExitPrice('');
         setCloseRemark('');
         setCloseTargets({ t1: false, t2: false, t3: false, close: false });
         setCloseCustomPrices({ t1: '', t2: '', t3: '' });
       } else {
-        toast(res.message);
+        toast.error(res?.message || 'Failed to close signal');
       }
     } catch (err: any) {
       toast.error("Failed to close signal: " + err.message);
@@ -706,12 +797,13 @@ export default function SignalManagement({
     }
   };
 
-  const filteredSignals = signals.filter(s => {
-    if (searchQuery && !s.stock?.symbol?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+  const filteredSignals = (Array.isArray(signals) ? signals : []).filter(s => {
+    if (!s) return false;
+    if (searchQuery && !s.stock?.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) && !s.symbol?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (selectedService && s.planId !== selectedService) return false;
     if (selectedStockId && s.stockId !== selectedStockId) return false;
-    if (fromDate && new Date(s.createdAt) < new Date(fromDate)) return false;
-    if (toDate && new Date(s.createdAt) > new Date(toDate)) return false;
+    if (fromDate && (!s.createdAt || new Date(s.createdAt) < new Date(fromDate))) return false;
+    if (toDate && (!s.createdAt || new Date(s.createdAt) > new Date(toDate))) return false;
     if (signalStatusFilter === 'OPEN') {
       return s.status === 'OPEN';
     } else {
@@ -735,17 +827,38 @@ export default function SignalManagement({
         name: 'Segment',
         minWidth: '120px',
         selector: (row: any) => row.segment,
-        cell: (row: any) => (
-          <div className="flex items-center space-x-1.5">
-            <span className="bg-slate-100 dark:bg-white/5 px-2.5 py-1 rounded-md text-xs font-semibold border border-slate-300 dark:border-white/10 whitespace-nowrap">{row.segment}</span>
-            {row.closeStatus === 'Avoid Signal' && (
-              <div className="flex items-center space-x-1 whitespace-nowrap">
-                <span className="text-red-600 dark:text-red-500 font-bold text-xs">(Avoid)</span>
-                <Eye className="w-4 h-4 text-yellow-600 dark:text-yellow-500 cursor-pointer hover:text-yellow-600 dark:text-yellow-400" onClick={() => setAvoidRemarkModal(row.closeRemark)} />
+        cell: (row: any) => {
+          const isQuick = Boolean(
+            row.isQuickTrade === true ||
+            row.source === 'QUICK_TRADE' ||
+            (typeof row.description === 'string' && row.description.toLowerCase().startsWith('quick dispatch:'))
+          );
+
+          return (
+            <div className="flex flex-col items-start gap-1 py-1.5">
+              <div className="flex items-center space-x-1.5">
+                <span className="bg-slate-100 dark:bg-white/5 px-2.5 py-1 rounded-md text-xs font-semibold border border-slate-300 dark:border-white/10 whitespace-nowrap">
+                  {row.segment}
+                </span>
+                {row.closeStatus === 'Avoid Signal' && (
+                  <div className="flex items-center space-x-1 whitespace-nowrap">
+                    <span className="text-red-600 dark:text-red-500 font-bold text-xs">(Avoid)</span>
+                    <Eye className="w-4 h-4 text-yellow-600 dark:text-yellow-500 cursor-pointer hover:text-yellow-600 dark:text-yellow-400" onClick={() => setAvoidRemarkModal(row.closeRemark)} />
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ),
+              {isQuick && (
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-black bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-600/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 shadow-xs whitespace-nowrap"
+                  title="⚡ Created via Quick Trade (Voice/Text)"
+                >
+                  <Zap className="w-2.5 h-2.5 fill-current text-amber-500" />
+                  Quick Trade
+                </span>
+              )}
+            </div>
+          );
+        },
       },
       {
         name: 'Symbol / Stock',
@@ -1023,62 +1136,121 @@ export default function SignalManagement({
              
             </div>
 
-            {/* Action Bar */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
-              {showMobilePreview && (
-                <button
-                  onClick={() => setIsMobileVisible(prev => !prev)}
-                  title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all duration-200 ${isMobileVisible
-                    ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-slate-900 dark:border-white'
-                    : 'text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/20 hover:bg-slate-100 dark:hover:bg-white/10'
-                    }`}
-                >
-                  {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
-                  <span className="hidden sm:inline">{isMobileVisible ? 'Hide Preview' : 'Show Preview'}</span>
-                </button>
-              )}
+            {/* Action Bar - Responsive Flexbox to prevent any button or search overlap */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+              {/* Left Group: Show Preview toggle + Search Signal */}
+              <div className="flex items-center gap-2.5 flex-1 min-w-[260px] max-w-md">
+                {showMobilePreview && (
+                  <button
+                    onClick={() => setIsMobileVisible(prev => !prev)}
+                    title={isMobileVisible ? 'Hide Phone Preview' : 'Show Phone Preview'}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all duration-200 shrink-0 ${isMobileVisible
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-black border-slate-900 dark:border-white'
+                      : 'text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/20 hover:bg-slate-100 dark:hover:bg-white/10'
+                      }`}
+                  >
+                    {isMobileVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                    <span className="hidden sm:inline">{isMobileVisible ? 'Hide' : 'Preview'}</span>
+                  </button>
+                )}
 
-              <div className="relative w-full md:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-600 dark:text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search Signal"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-100 dark:bg-[#1A2235] border border-slate-400 dark:border-white/10 rounded px-10 py-2 text-sm focus:outline-none focus:border-primary-500"
-                />
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search Signal..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-[#1A2235] border border-slate-300 dark:border-white/10 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#d4f23b]/40 transition-all"
+                  />
+                </div>
               </div>
 
-              {!isViewOnly && (
-                <div className="flex gap-2 w-full md:w-auto">
+              {/* Right Group: Action Buttons with flex-wrap and no overlap */}
+              <div className="flex flex-wrap items-center gap-2 justify-end">
+                {isViewOnly ? (
+                  /* Admin & Super Admin Controls: View Execution Report & Export */
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowPerformanceModal(true)}
+                      className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl flex items-center space-x-1.5 shadow-md shadow-indigo-500/20 transition-all duration-200 shrink-0 whitespace-nowrap cursor-pointer text-xs sm:text-sm"
+                      title="View & Export Detailed Researcher Execution Performance Report"
+                    >
+                      <Award className="h-4 w-4" />
+                      <span>Execution Report</span>
+                    </button>
 
-                  <button onClick={() => setView('ADD')} className="flex-1 md:flex-none px-4 py-2 bg-[#d4f23b] text-slate-900 font-bold rounded flex items-center justify-center space-x-2 hover:bg-[#c3e031] transition-all duration-300">
-                    <Plus className="h-4 w-4" /> <span>Add Signal</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      const exportData = filteredSignals.map(s => ({
-                        Publish_Date: new Date(s.createdAt).toLocaleString(),
-                        Symbol: s.stock?.symbol || 'N/A',
-                        Segment: s.segment,
-                        Call_Type: s.callType,
-                        Status: s.status,
-                        Entry_Price: s.entryPrice,
-                        T1: s.target1,
-                        T2: s.target2,
-                        T3: s.target3,
-                        Stoploss: s.stoploss,
-                        Plan: s.planName || s.planId
-                      }));
-                      import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Signal_Management'));
-                    }}
-                    className="flex-1 md:flex-none px-4 py-2 bg-transparent border border-[#d4f23b] text-lime-700 dark:text-[#d4f23b] font-bold rounded flex items-center justify-center space-x-2 hover:bg-[#d4f23b] hover:text-black transition-all duration-300"
-                  >
-                    <Download className="h-4 w-4" /> <span>Export-Excel</span>
-                  </button>
-                </div>
-              )}
+                    <button
+                      onClick={() => {
+                        const exportData = filteredSignals.map(s => ({
+                          Publish_Date: new Date(s.createdAt).toLocaleString(),
+                          Symbol: s.stock?.symbol || 'N/A',
+                          Segment: s.segment,
+                          Call_Type: s.callType,
+                          Status: s.status,
+                          Entry_Price: s.entryPrice,
+                          T1: s.target1,
+                          T2: s.target2,
+                          T3: s.target3,
+                          Stoploss: s.stoploss,
+                          Plan: s.planName || s.planId
+                        }));
+                        import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Signal_Management'));
+                      }}
+                      className="px-3.5 py-2 bg-transparent border border-slate-300 dark:border-white/15 text-slate-700 dark:text-slate-300 font-bold rounded-xl flex items-center space-x-1.5 hover:bg-slate-100 dark:hover:bg-white/10 transition-all duration-200 shrink-0 whitespace-nowrap text-xs sm:text-sm"
+                    >
+                      <Download className="h-4 w-4" /> <span>Export-Excel</span>
+                    </button>
+                  </>
+                ) : (
+                  /* Researcher Controls: Quick Trade, Add Signal & Export (No Performance Report) */
+                  <>
+                    {/* Quick Trade Button - Researcher Login Only */}
+                    {((user?.role || '').toUpperCase().includes('RESEARCH') || user?.role === 'RESEARCHER') && (
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickTradeModal(true)}
+                        className="px-3.5 py-2 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all duration-200 shrink-0 whitespace-nowrap active:scale-95 cursor-pointer text-xs sm:text-sm"
+                        title="⚡ Quick Trade Dispatcher (Voice / Text)"
+                      >
+                        <Zap className="h-4 w-4 fill-current text-slate-950 animate-pulse" />
+                        <span>Quick Trade</span>
+                        <span className="bg-black/20 text-[10px] px-1.5 py-0.5 rounded font-black uppercase">Voice/Text</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => setView('ADD')}
+                      className="px-3.5 py-2 bg-[#d4f23b] text-slate-900 font-bold rounded-xl flex items-center space-x-1.5 hover:bg-[#c3e031] transition-all duration-200 shrink-0 whitespace-nowrap text-xs sm:text-sm shadow-sm"
+                    >
+                      <Plus className="h-4 w-4" /> <span>Add Signal</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const exportData = filteredSignals.map(s => ({
+                          Publish_Date: new Date(s.createdAt).toLocaleString(),
+                          Symbol: s.stock?.symbol || 'N/A',
+                          Segment: s.segment,
+                          Call_Type: s.callType,
+                          Status: s.status,
+                          Entry_Price: s.entryPrice,
+                          T1: s.target1,
+                          T2: s.target2,
+                          T3: s.target3,
+                          Stoploss: s.stoploss,
+                          Plan: s.planName || s.planId
+                        }));
+                        import('@/utils/exportCsv').then(m => m.downloadCSV(exportData, 'Signal_Management'));
+                      }}
+                      className="px-3.5 py-2 bg-transparent border border-slate-300 dark:border-white/15 text-slate-700 dark:text-slate-300 font-bold rounded-xl flex items-center space-x-1.5 hover:bg-slate-100 dark:hover:bg-white/10 transition-all duration-200 shrink-0 whitespace-nowrap text-xs sm:text-sm"
+                    >
+                      <Download className="h-4 w-4" /> <span>Export-Excel</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {(() => {
@@ -1611,11 +1783,36 @@ export default function SignalManagement({
                   {/* Dynamic Inputs */}
                   {(closeStatus === 'Fully Closed' || closeStatus === 'Partially Closed') && (
                     <div className="space-y-4">
+                      {/* Guidance banner for sequential target selection */}
+                      {closeStatus === 'Partially Closed' && !closeTargets.t1 && (
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />
+                          <span><strong>Action Required:</strong> Pehle Target 1 check kijiye. Target 2 &amp; 3 tabhi select honge jab Target 1 selected hoga.</span>
+                        </div>
+                      )}
+
+                      {/* Price Logic Validation Alert */}
+                      {!validateClosePrices().isValid && (
+                        <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-700 dark:text-rose-300 text-xs flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                          <span><strong>Validation Error:</strong> {validateClosePrices().error}</span>
+                        </div>
+                      )}
+
+                      {/* Target 1 */}
                       <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
                         <input
                           type="checkbox"
                           checked={closeTargets.t1}
-                          onChange={(e) => setCloseTargets({ ...closeTargets, t1: e.target.checked })}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setCloseTargets(prev => ({
+                              ...prev,
+                              t1: checked,
+                              t2: checked ? prev.t2 : false,
+                              t3: checked ? prev.t3 : false
+                            }));
+                          }}
                           className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer"
                         />
                         <span className="w-20 font-bold text-sm text-slate-800 dark:text-gray-200">Target 1</span>
@@ -1636,15 +1833,34 @@ export default function SignalManagement({
                           />
                         </div>
                       </label>
+
+                      {/* Target 2 - Requires Target 1 */}
                       {closeSignalModal.target2 && (
-                        <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
+                        <label className={`flex items-center space-x-4 p-3 rounded-lg border transition-colors ${
+                          !closeTargets.t1
+                            ? 'bg-slate-100/50 dark:bg-white/[0.02] border-slate-200 dark:border-white/5 opacity-60 cursor-not-allowed'
+                            : 'bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 cursor-pointer'
+                        }`}>
                           <input
                             type="checkbox"
                             checked={closeTargets.t2}
-                            onChange={(e) => setCloseTargets({ ...closeTargets, t2: e.target.checked })}
-                            className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer"
+                            disabled={!closeTargets.t1}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setCloseTargets(prev => ({
+                                ...prev,
+                                t2: checked,
+                                t3: checked ? prev.t3 : false
+                              }));
+                            }}
+                            className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           />
-                          <span className="w-20 font-bold text-sm text-slate-800 dark:text-gray-200">Target 2</span>
+                          <div className="w-20 flex flex-col">
+                            <span className="font-bold text-sm text-slate-800 dark:text-gray-200">Target 2</span>
+                            {!closeTargets.t1 && (
+                              <span className="text-[10px] text-amber-500 font-semibold leading-tight">Need T1 first</span>
+                            )}
+                          </div>
                           <div className="relative flex-1">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
                             <input
@@ -1663,15 +1879,27 @@ export default function SignalManagement({
                           </div>
                         </label>
                       )}
+
+                      {/* Target 3 - Requires Target 1 & Target 2 */}
                       {closeSignalModal.target3 && (
-                        <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
+                        <label className={`flex items-center space-x-4 p-3 rounded-lg border transition-colors ${
+                          (!closeTargets.t1 || !closeTargets.t2)
+                            ? 'bg-slate-100/50 dark:bg-white/[0.02] border-slate-200 dark:border-white/5 opacity-60 cursor-not-allowed'
+                            : 'bg-slate-100 dark:bg-white/5 border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 cursor-pointer'
+                        }`}>
                           <input
                             type="checkbox"
                             checked={closeTargets.t3}
+                            disabled={!closeTargets.t1 || !closeTargets.t2}
                             onChange={(e) => setCloseTargets({ ...closeTargets, t3: e.target.checked })}
-                            className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer"
+                            className="accent-[#d4f23b] w-5 h-5 rounded cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           />
-                          <span className="w-20 font-bold text-sm text-slate-800 dark:text-gray-200">Target 3</span>
+                          <div className="w-20 flex flex-col">
+                            <span className="font-bold text-sm text-slate-800 dark:text-gray-200">Target 3</span>
+                            {(!closeTargets.t1 || !closeTargets.t2) && (
+                              <span className="text-[10px] text-amber-500 font-semibold leading-tight">Need T1 &amp; T2</span>
+                            )}
+                          </div>
                           <div className="relative flex-1">
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">₹</span>
                             <input
@@ -1690,6 +1918,8 @@ export default function SignalManagement({
                           </div>
                         </label>
                       )}
+
+                      {/* Close Position Checkbox */}
                       <label className="flex items-center space-x-4 bg-slate-100 dark:bg-white/5 p-3 rounded-lg border border-slate-300 dark:border-white/5 hover:border-slate-400 dark:border-white/10 transition-colors cursor-pointer">
                         <input
                           type="checkbox"
@@ -1738,7 +1968,11 @@ export default function SignalManagement({
                   <button type="button" onClick={() => setCloseSignalModal(null)} className="px-6 py-2.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 text-slate-900 dark:text-white rounded-xl font-semibold text-sm transition-all duration-300">
                     Cancel
                   </button>
-                  <button type="submit" disabled={loading} className="px-8 py-2.5 bg-[#d4f23b] text-black font-bold rounded-xl shadow-[0_0_15px_rgba(212,242,59,0.3)] hover:bg-[#c3e031] hover:shadow-[0_0_25px_rgba(212,242,59,0.5)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <button
+                    type="submit"
+                    disabled={loading || (closeStatus === 'Partially Closed' && !closeTargets.t1) || !validateClosePrices().isValid}
+                    className="px-8 py-2.5 bg-[#d4f23b] text-black font-bold rounded-xl shadow-[0_0_15px_rgba(212,242,59,0.3)] hover:bg-[#c3e031] hover:shadow-[0_0_25px_rgba(212,242,59,0.5)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
                     {loading ? 'Submitting...' : 'Confirm'}
                   </button>
                 </div>
@@ -1874,10 +2108,18 @@ export default function SignalManagement({
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-hidden">
             <div className="bg-white dark:bg-[#151c2c] border border-slate-400 dark:border-white/10 rounded-2xl shadow-[0_0_30px_rgba(0,0,0,0.5)] w-full max-w-2xl flex flex-col max-h-[90vh] my-auto">
               <div className="flex justify-between items-center p-5 border-b border-slate-300 dark:border-white/5 bg-white dark:bg-[#0B101E] shrink-0 rounded-t-2xl">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Eye className="w-5 h-5 text-lime-700 dark:text-[#d4f23b]" />
-                  Signal Details
-                </h3>
+                <div className="flex items-center gap-2.5">
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Eye className="w-5 h-5 text-lime-700 dark:text-[#d4f23b]" />
+                    Signal Details
+                  </h3>
+                  {Boolean(viewSignalDetails.isQuickTrade || viewSignalDetails.source === 'QUICK_TRADE' || (typeof viewSignalDetails.description === 'string' && viewSignalDetails.description.startsWith('Quick Dispatch:'))) && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-amber-600/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 shadow-sm">
+                      <Zap className="w-3 h-3 fill-current text-amber-500 animate-pulse" />
+                      ⚡ Quick Trade
+                    </span>
+                  )}
+                </div>
                 <button onClick={() => setViewSignalDetails(null)} className="p-2 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 dark:bg-white/10 rounded-lg text-slate-600 dark:text-gray-400 hover:text-slate-900 dark:text-white transition-all">
                   <X className="w-5 h-5" />
                 </button>
@@ -2136,6 +2378,30 @@ export default function SignalManagement({
           </div>
         </div>
       )}
+
+      {/* Quick Trade Voice & Text Modal */}
+      <QuickTradeModal
+        isOpen={showQuickTradeModal}
+        onClose={() => setShowQuickTradeModal(false)}
+        onSuccess={() => {
+          fetchSignals();
+        }}
+        availableCategories={availableCategories}
+        stocks={stocks}
+        onFetchStocks={fetchStocks}
+      />
+
+      {/* Researcher Performance Analytics Report Modal */}
+      <ResearcherPerformanceReportModal
+        isOpen={showPerformanceModal}
+        onClose={() => setShowPerformanceModal(false)}
+        signals={signals}
+        currentResearcher={user}
+        tenantData={user?.tenant || {
+          companyName: user?.companyName || 'Alpha Research Partners',
+          sebiRegistration: user?.sebiRegistration || user?.tenant?.sebiRegistration || 'INH000018592'
+        }}
+      />
     </div>
   );
 }

@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportResearchReportsZip = exports.exportGstReadySheetCSV = exports.getClientFeeSummaryEndpoint = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.updateResearcherDscPermission = exports.getResearcherDscPermissions = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
-exports.goLiveTenant = exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = void 0;
+exports.getClientFeeSummaryEndpoint = exports.exportPaymentsCSV = exports.exportDeletedClientsCSV = exports.exportClientsCSV = exports.exportKRAZip = exports.exportAgreementsZip = exports.exportInvoicesZip = exports.uploadSignature = exports.resetEmailTemplate = exports.updateEmailTemplate = exports.getEmailTemplates = exports.cancelSubscriptionByAdmin = exports.previewSubscriptionCancellation = exports.assignPlanByAdmin = exports.getTenantAuditLogs = exports.getAdminPayments = exports.verifyPaymentGateway = exports.testSmtp = exports.updateTenantSettings = exports.togglePlanStatus = exports.restorePlan = exports.deletePlan = exports.updatePlan = exports.createPlan = exports.getAdminPlans = exports.toggleCategoryStatus = exports.updateCategory = exports.createCategory = exports.getAdminCategories = exports.restoreClient = exports.deleteClient = exports.approveClient = exports.updateClient = exports.toggleClientStatus = exports.getAdminDeletedClients = exports.getAdminClients = exports.updateResearcherDscPermission = exports.getResearcherDscPermissions = exports.resendStaffCredentials = exports.getStaffPassword = exports.restoreStaff = exports.deleteStaff = exports.toggleStaffStatus = exports.updateStaff = exports.getStaff = exports.createStaff = exports.saveProfileStep = exports.getProfileCompleteness = exports.calculateCompleteness = exports.getDashboardStats = void 0;
+exports.goLiveTenant = exports.permanentDeleteClient = exports.markAdminNotificationsAsRead = exports.getAdminNotifications = exports.sendPaymentInvoiceEmail = exports.testCamsKraConfig = exports.testDigioConfig = exports.testSmsGateway = exports.deleteSmsTemplate = exports.toggleSmsTemplateStatus = exports.updateSmsTemplate = exports.createSmsTemplate = exports.getSmsTemplates = exports.resetClientKyc = exports.previewPolicyPdf = exports.getClientCommunications = exports.exportResearchReportsZip = exports.exportGstReadySheetCSV = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const db_1 = __importStar(require("../config/db"));
 const bcrypt = __importStar(require("bcryptjs"));
@@ -57,6 +57,7 @@ const camsKraService_1 = require("../services/camsKraService");
 const activityService_1 = require("../services/activityService");
 const defaultEmailTemplates_1 = require("../utils/defaultEmailTemplates");
 const feeCapHelper_1 = require("../utils/feeCapHelper");
+const couponController_1 = require("./couponController");
 const maskEmail = (email) => {
     if (!email)
         return email;
@@ -814,6 +815,13 @@ const updateStaff = async (req, res) => {
         };
         if (req.file) {
             updateStaffData.nismUpload = `/uploads/staff/${req.file.filename}`;
+        }
+        // SECURITY RESTRICTION: Only Admin or Super Admin can modify NISM details
+        const isAdmin = req.user?.role === 'ADMIN' || req.user?.role === 'SUPER_ADMIN';
+        if (!isAdmin) {
+            delete updateStaffData.nismNumber;
+            delete updateStaffData.nismValidity;
+            delete updateStaffData.nismUpload;
         }
         const updatedStaff = await db_1.default.Staff.findByIdAndUpdate(staffId, { $set: updateStaffData }, { returnDocument: 'after', lean: true });
         await db_1.default.PersonAssociated.deleteMany({ staffId });
@@ -3065,6 +3073,12 @@ const updateTenantSettings = async (req, res) => {
         if (files?.internalPolicyPdf && files.internalPolicyPdf.length > 0) {
             dataToUpdate.internalPolicyUrl = `/uploads/branding/${files.internalPolicyPdf[0].filename}`;
         }
+        else if (req.body.internalPolicyUrl) {
+            dataToUpdate.internalPolicyUrl = String(req.body.internalPolicyUrl).trim();
+        }
+        else if (req.body.policyUrl) {
+            dataToUpdate.internalPolicyUrl = String(req.body.policyUrl).trim();
+        }
         if (files?.upiQrImage && files.upiQrImage.length > 0) {
             dataToUpdate.upiQrImageUrl = `/uploads/branding/${files.upiQrImage[0].filename}`;
         }
@@ -3672,10 +3686,10 @@ const assignPlanByAdmin = async (req, res) => {
             }).lean();
             if (!coupon)
                 return res.status(404).json({ success: false, message: 'Invalid or inactive coupon code.' });
-            if (coupon.expiryDate && new Date() > new Date(coupon.expiryDate)) {
+            if (coupon.expiryDate && (0, couponController_1.isCouponExpired)(coupon.expiryDate)) {
                 return res.status(400).json({ success: false, message: 'Coupon code has expired.' });
             }
-            if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
+            if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
                 return res.status(400).json({ success: false, message: 'Coupon usage limit reached.' });
             }
             if (coupon.clientId && String(coupon.clientId) !== String(actualClientId) && String(coupon.clientId) !== String(clientId)) {
@@ -3997,6 +4011,345 @@ const assignPlanByAdmin = async (req, res) => {
     }
 };
 exports.assignPlanByAdmin = assignPlanByAdmin;
+/**
+ * Preview Subscription Cancellation & Refund Calculation
+ */
+const previewSubscriptionCancellation = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    const { subscriptionId } = req.params;
+    const { cancellationEffectiveDate, refundMode } = req.body;
+    try {
+        const sub = await db_1.default.Subscription.findById(subscriptionId).populate('planId').lean();
+        if (!sub)
+            return res.status(404).json({ success: false, message: 'Subscription record not found.' });
+        if (sub.status === 'CANCELLED') {
+            return res.status(400).json({ success: false, message: 'This subscription is already cancelled.' });
+        }
+        if (sub.status === 'EXPIRED' || new Date(sub.endDate) <= new Date()) {
+            return res.status(400).json({ success: false, message: 'Cannot cancel or refund an expired subscription.' });
+        }
+        const subEndDate = new Date(sub.endDate);
+        const subPlanId = sub.planId?._id || sub.planId;
+        const newerActiveSubs = await db_1.default.Subscription.find({
+            clientId: sub.clientId,
+            planId: subPlanId,
+            _id: { $ne: sub._id },
+            status: 'ACTIVE',
+            endDate: { $gt: subEndDate }
+        }).lean();
+        if (newerActiveSubs.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Sequential Queue Violation: Client has ${newerActiveSubs.length} future queued subscription(s) for this service ending after this plan. To avoid disrupting service continuity, please cancel the latest queued plan first (LIFO order).`
+            });
+        }
+        const client = await db_1.default.Client.findById(sub.clientId).lean();
+        const plan = sub.planId || {};
+        const effectiveDate = cancellationEffectiveDate ? new Date(cancellationEffectiveDate) : new Date();
+        effectiveDate.setHours(23, 59, 59, 999);
+        const sDate = new Date(sub.startDate);
+        const eDate = new Date(sub.endDate);
+        const totalDays = Math.max(1, Math.round((eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60 * 24)));
+        // Calculate days used up to effective date
+        let daysUsed = 0;
+        if (effectiveDate < sDate) {
+            daysUsed = 0; // Future / unstarted queued subscription
+        }
+        else if (effectiveDate >= eDate) {
+            daysUsed = totalDays; // Completely elapsed
+        }
+        else {
+            daysUsed = Math.max(1, Math.round((effectiveDate.getTime() - sDate.getTime()) / (1000 * 60 * 60 * 24)));
+        }
+        const remainingDays = Math.max(0, totalDays - daysUsed);
+        const subTotal = Number(sub.amountTotal ?? plan.price ?? 0);
+        const subBase = Number(sub.amountBase ?? (subTotal / 1.18));
+        const subGst = Number(sub.amountGst ?? (subTotal - subBase));
+        // Daily rates
+        const dailyBase = subBase / totalDays;
+        const dailyGst = subGst / totalDays;
+        const dailyTotal = subTotal / totalDays;
+        const proratedBaseRefund = parseFloat((dailyBase * remainingDays).toFixed(2));
+        const proratedGstRefund = parseFloat((dailyGst * remainingDays).toFixed(2));
+        const proratedTotalRefundWithGst = parseFloat((dailyTotal * remainingDays).toFixed(2));
+        const isWithGst = refundMode !== 'WITHOUT_GST';
+        const finalRefundAmount = isWithGst ? proratedTotalRefundWithGst : proratedBaseRefund;
+        return res.status(200).json({
+            success: true,
+            data: {
+                subscriptionId: sub._id,
+                planName: plan.name || 'Research Plan',
+                startDate: sDate,
+                endDate: eDate,
+                totalDays,
+                daysUsed,
+                remainingDays,
+                originalBaseAmount: subBase,
+                originalGstAmount: subGst,
+                originalTotalAmount: subTotal,
+                proratedBaseRefund,
+                proratedGstRefund: isWithGst ? proratedGstRefund : 0,
+                finalRefundAmount,
+                refundMode: isWithGst ? 'WITH_GST' : 'WITHOUT_GST'
+            }
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.previewSubscriptionCancellation = previewSubscriptionCancellation;
+/**
+ * Process Subscription Cancellation / Refund with strict LIFO Queue Safety
+ */
+const cancelSubscriptionByAdmin = async (req, res) => {
+    const tenantId = req.user.tenantId;
+    const { subscriptionId } = req.params;
+    const { cancellationType, // 'ONLY_CANCEL' | 'CANCEL_AND_REFUND'
+    cancellationEffectiveDate, refundMode, // 'WITH_GST' | 'WITHOUT_GST'
+    customRefundAmount, sendEmailToClient, sendInvoicePdf, remarks } = req.body;
+    try {
+        const sub = await db_1.default.Subscription.findById(subscriptionId).populate('planId');
+        if (!sub)
+            return res.status(404).json({ success: false, message: 'Subscription record not found.' });
+        if (sub.status === 'CANCELLED') {
+            return res.status(400).json({ success: false, message: 'This subscription is already cancelled.' });
+        }
+        if (sub.status === 'EXPIRED' || new Date(sub.endDate) <= new Date()) {
+            return res.status(400).json({ success: false, message: 'Cannot cancel or refund an expired subscription.' });
+        }
+        const actualClientId = sub.clientId;
+        const client = await db_1.default.Client.findById(actualClientId).lean();
+        if (!client)
+            return res.status(404).json({ success: false, message: 'Client record not found.' });
+        const tenantObj = await db_1.default.Tenant.findById(tenantId).lean();
+        const plan = sub.planId || {};
+        // --- LIFO / QUEUE INTEGRITY CHECK ---
+        // If client has stacked future subscriptions in the same plan/segment whose endDate > sub.endDate and status === 'ACTIVE',
+        // middle cancellation is prohibited to prevent timeline gaps!
+        const subEndDate = new Date(sub.endDate);
+        const subPlanId = sub.planId?._id || sub.planId;
+        const newerActiveSubs = await db_1.default.Subscription.find({
+            clientId: actualClientId,
+            planId: subPlanId,
+            _id: { $ne: sub._id },
+            status: 'ACTIVE',
+            endDate: { $gt: subEndDate }
+        }).lean();
+        if (newerActiveSubs.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Sequential Queue Violation: Client has ${newerActiveSubs.length} future queued subscription(s) for this service ending after this plan. To avoid disrupting service continuity, please cancel the latest queued plan first (LIFO order).`
+            });
+        }
+        const effectiveDate = cancellationEffectiveDate ? new Date(cancellationEffectiveDate) : new Date();
+        effectiveDate.setHours(23, 59, 59, 999);
+        const sDate = new Date(sub.startDate);
+        const eDate = new Date(sub.endDate);
+        const totalDays = Math.max(1, Math.round((eDate.getTime() - sDate.getTime()) / (1000 * 60 * 60 * 24)));
+        let daysUsed = 0;
+        if (effectiveDate < sDate) {
+            daysUsed = 0;
+        }
+        else if (effectiveDate >= eDate) {
+            daysUsed = totalDays;
+        }
+        else {
+            daysUsed = Math.max(1, Math.round((effectiveDate.getTime() - sDate.getTime()) / (1000 * 60 * 60 * 24)));
+        }
+        const remainingDays = Math.max(0, totalDays - daysUsed);
+        const subTotal = Number(sub.amountTotal ?? plan.price ?? 0);
+        const subBase = Number(sub.amountBase ?? (subTotal / 1.18));
+        const subGst = Number(sub.amountGst ?? (subTotal - subBase));
+        let finalRefund = 0;
+        let finalBaseRefund = 0;
+        let finalGstRefund = 0;
+        let creditNoteNum = null;
+        if (cancellationType === 'CANCEL_AND_REFUND') {
+            const isWithGst = refundMode !== 'WITHOUT_GST';
+            if (customRefundAmount !== undefined && customRefundAmount !== null && Number(customRefundAmount) >= 0) {
+                finalRefund = Number(customRefundAmount);
+                if (isWithGst) {
+                    finalBaseRefund = parseFloat((finalRefund / 1.18).toFixed(2));
+                    finalGstRefund = parseFloat((finalRefund - finalBaseRefund).toFixed(2));
+                }
+                else {
+                    finalBaseRefund = finalRefund;
+                    finalGstRefund = 0;
+                }
+            }
+            else {
+                const dailyBase = subBase / totalDays;
+                const dailyGst = subGst / totalDays;
+                const dailyTotal = subTotal / totalDays;
+                finalBaseRefund = parseFloat((dailyBase * remainingDays).toFixed(2));
+                if (isWithGst) {
+                    finalGstRefund = parseFloat((dailyGst * remainingDays).toFixed(2));
+                    finalRefund = parseFloat((dailyTotal * remainingDays).toFixed(2));
+                }
+                else {
+                    finalGstRefund = 0;
+                    finalRefund = finalBaseRefund;
+                }
+            }
+            if (finalRefund <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot process cancellation with zero refund amount. Net refund payout must be greater than ₹0.'
+                });
+            }
+            creditNoteNum = `CN-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+        }
+        // Update Subscription Record
+        if (!sub.originalEndDate) {
+            sub.originalEndDate = sub.endDate;
+        }
+        const nowTime = Date.now();
+        const isUnstartedPlan = sDate.getTime() >= effectiveDate.getTime();
+        const isTodayOrPast = effectiveDate.toDateString() === new Date().toDateString() || effectiveDate.getTime() <= nowTime;
+        const isFutureCancellation = !isUnstartedPlan && !isTodayOrPast && effectiveDate.getTime() > nowTime;
+        sub.endDate = isUnstartedPlan ? sDate : effectiveDate;
+        sub.status = isFutureCancellation ? 'ACTIVE' : 'CANCELLED';
+        sub.cancelledAt = new Date();
+        sub.cancellationEffectiveDate = effectiveDate;
+        sub.cancellationType = cancellationType;
+        sub.refundMode = cancellationType === 'CANCEL_AND_REFUND' ? (refundMode === 'WITHOUT_GST' ? 'WITHOUT_GST' : 'WITH_GST') : null;
+        sub.refundAmount = finalRefund;
+        sub.refundBaseAmount = finalBaseRefund;
+        sub.refundGstAmount = finalGstRefund;
+        sub.refundRemarks = remarks || null;
+        sub.creditNoteNumber = creditNoteNum;
+        sub.creditNoteSent = Boolean(sendInvoicePdf);
+        await sub.save();
+        // Link and Update associated Payment Record
+        const payment = await db_1.default.Payment.findOne({
+            $or: [{ subscriptionId: sub._id }, { clientId: actualClientId, planId: plan._id }]
+        }).sort({ createdAt: -1 });
+        if (payment) {
+            if (cancellationType === 'CANCEL_AND_REFUND') {
+                payment.isRefunded = true;
+                payment.refundedAmount = finalRefund;
+                payment.refundedBaseAmount = finalBaseRefund;
+                payment.refundedGstAmount = finalGstRefund;
+                payment.refundMode = refundMode === 'WITHOUT_GST' ? 'WITHOUT_GST' : 'WITH_GST';
+                payment.refundDate = new Date();
+                payment.creditNoteNumber = creditNoteNum;
+            }
+            await payment.save();
+        }
+        // Cancellation Details payload for PDF & Email
+        const cancellationDetailsPayload = {
+            cancellationType,
+            effectiveDate,
+            totalDays,
+            daysUsed,
+            remainingDays,
+            refundAmount: finalRefund,
+            refundBaseAmount: finalBaseRefund,
+            refundGstAmount: finalGstRefund,
+            refundMode: refundMode === 'WITHOUT_GST' ? 'WITHOUT_GST' : 'WITH_GST',
+            creditNoteNumber: creditNoteNum || undefined,
+            remarks: remarks || undefined,
+            originalStartDate: sDate,
+            originalEndDate: eDate,
+            originalAmount: subTotal
+        };
+        // Generate Credit Note PDF if needed
+        let pdfBuffer = null;
+        if (sendInvoicePdf && payment) {
+            try {
+                pdfBuffer = await (0, invoiceGenerator_1.generateInvoicePdf)(String(payment._id || payment.id), {
+                    isCancelledWatermark: true,
+                    creditNoteMode: cancellationType === 'CANCEL_AND_REFUND',
+                    watermarkText: cancellationType === 'CANCEL_AND_REFUND' ? 'CANCELLED / CREDIT NOTE' : 'SUBSCRIPTION CANCELLED',
+                    cancellationDetails: cancellationDetailsPayload
+                });
+            }
+            catch (pdfErr) {
+                console.warn('[Credit Note PDF] Error generating PDF:', pdfErr.message);
+            }
+        }
+        // Email Dispatch (100% Formal Corporate English with Full Tenure & Refund Breakdown)
+        if (sendEmailToClient && client.email) {
+            (0, emailService_1.sendSubscriptionCancellationEmail)({
+                tenantId,
+                toEmail: client.email,
+                clientName: client.name || 'Client',
+                companyName: tenantObj?.companyName,
+                planName: plan.name,
+                effectiveDate,
+                isRefunded: cancellationType === 'CANCEL_AND_REFUND',
+                refundMode: refundMode === 'WITHOUT_GST' ? 'WITHOUT_GST' : 'WITH_GST',
+                refundAmount: finalRefund,
+                refundBaseAmount: finalBaseRefund,
+                refundGstAmount: finalGstRefund,
+                creditNoteNumber: creditNoteNum || undefined,
+                totalDays,
+                daysUsed,
+                remainingDays,
+                originalStartDate: sDate,
+                originalEndDate: eDate,
+                originalAmount: subTotal,
+                pdfBuffer,
+                remarks
+            }).catch(err => console.warn('[Cancellation Email] Failed to send:', err.message));
+        }
+        // Audit Logging
+        await (0, auditService_1.logAudit)({
+            tenantId,
+            userId: req.user.id,
+            action: 'UPDATE',
+            module: 'PAYMENTS',
+            newValue: {
+                action: 'SUBSCRIPTION_CANCELLED',
+                subscriptionId: sub._id,
+                clientId: actualClientId,
+                cancellationType,
+                refundMode,
+                refundAmount: finalRefund,
+                effectiveDate,
+                remarks
+            },
+            ipAddress: req.ip
+        });
+        (0, activityService_1.logActivity)({
+            tenantId,
+            actorType: 'ADMIN',
+            actorId: req.user.id,
+            actorName: req.user?.name || 'Admin',
+            targetClientId: actualClientId,
+            category: 'SUBSCRIPTION',
+            action: 'PLAN_CANCELLED',
+            title: `Plan Cancelled: ${plan.name}`,
+            description: `Subscription cancelled (${cancellationType}). Refund: ₹${finalRefund.toLocaleString('en-IN')}`,
+            status: 'SUCCESS',
+            metadata: {
+                subscriptionId: sub._id,
+                planName: plan.name,
+                cancellationType,
+                refundMode,
+                refundAmount: finalRefund,
+                effectiveDate
+            },
+            req
+        });
+        return res.status(200).json({
+            success: true,
+            message: cancellationType === 'CANCEL_AND_REFUND'
+                ? `Subscription successfully cancelled and refund of ₹${finalRefund.toLocaleString('en-IN')} processed.`
+                : `Subscription successfully cancelled without client notification.`,
+            data: {
+                subscription: sub,
+                refundAmount: finalRefund,
+                creditNoteNumber: creditNoteNum
+            }
+        });
+    }
+    catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+exports.cancelSubscriptionByAdmin = cancelSubscriptionByAdmin;
 const getEmailTemplates = async (req, res) => {
     const tenantId = req.user.tenantId;
     if (!tenantId)
@@ -4578,6 +4931,11 @@ const exportGstReadySheetCSV = async (req, res) => {
                 }
             }
             const invNo = p.invoiceNumber || `INV-${new Date(p.createdAt || Date.now()).getFullYear()}-${String(idx + 1).padStart(4, '0')}`;
+            const isRefunded = Boolean(p.isRefunded || sub?.cancellationType === 'CANCEL_AND_REFUND');
+            const refundAmt = Number(p.refundedAmount || sub?.refundAmount || 0);
+            const refundBase = Number(p.refundedBaseAmount || sub?.refundBaseAmount || 0);
+            const refundGst = Number(p.refundedGstAmount || sub?.refundGstAmount || 0);
+            const refundMode = p.refundMode || sub?.refundMode || 'N/A';
             return {
                 'Invoice No': invNo,
                 'Invoice Date': p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '',
@@ -4599,6 +4957,15 @@ const exportGstReadySheetCSV = async (req, res) => {
                 'IGST (18%)': igst,
                 'Total GST Amount': gst,
                 'Total Invoice Amount': totalGross,
+                'Refund Status': isRefunded ? 'REFUNDED' : 'NONE',
+                'Refund Mode': refundMode,
+                'Refund Base Amount': refundBase,
+                'Refund GST Amount': refundGst,
+                'Net Refund Amount': refundAmt,
+                'Net Taxable Value': Math.max(0, base - refundBase),
+                'Net GST Amount': Math.max(0, gst - refundGst),
+                'Net Invoice Amount': Math.max(0, totalGross - refundAmt),
+                'Credit Note No': p.creditNoteNumber || sub?.creditNoteNumber || 'N/A',
                 'Payment Mode': p.paymentMode || 'ONLINE',
                 'Transaction Ref / UTR': p.transactionRef || 'N/A'
             };

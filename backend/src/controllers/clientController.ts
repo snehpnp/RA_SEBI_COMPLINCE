@@ -20,6 +20,7 @@ import querystring from 'querystring';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { sendTelegramMessage } from '../services/telegramService';
+import TenantSubscription from '../models/TenantSubscription';
 
 export const registerClient = async (req: Request, res: Response) => {
   const {
@@ -76,6 +77,36 @@ export const registerClient = async (req: Request, res: Response) => {
 
     if (!tenant) {
       return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
+    }
+
+    // --- ENFORCE PLATFORM SAAS ACTIVE CLIENT CAPACITY LIMIT ---
+    try {
+      const activeTenantSub: any = await TenantSubscription.findOne({
+        $or: [
+          { tenantId },
+          { tenantId: (tenant._id || tenant.id) }
+        ],
+        status: 'ACTIVE'
+      }).sort({ createdAt: -1 }).lean();
+
+      if (activeTenantSub && activeTenantSub.maxActiveClients > 0) {
+        const currentActiveClients = await dynamicDb.Client.countDocuments({
+          tenantId: tenant._id || tenant.id,
+          status: 'ACTIVE'
+        });
+
+        if (currentActiveClients >= activeTenantSub.maxActiveClients) {
+          return res.status(403).json({
+            success: false,
+            message: `Active client capacity limit reached! Your SaaS plan allows up to ${activeTenantSub.maxActiveClients} active clients (${currentActiveClients} currently registered and active). Please upgrade your platform subscription to onboard new clients.`,
+            limitReached: true,
+            maxActiveClients: activeTenantSub.maxActiveClients,
+            currentActiveClients
+          });
+        }
+      }
+    } catch (quotaCheckErr) {
+      console.error('Active client quota check error:', quotaCheckErr);
     }
 
     // Dynamic Password Policy Enforcement

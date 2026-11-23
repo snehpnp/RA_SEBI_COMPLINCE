@@ -41,11 +41,22 @@ exports.SubscriptionSchema = new mongoose_1.Schema({
     planId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Plan', required: true },
     startDate: { type: Date, default: Date.now },
     endDate: { type: Date, required: true },
+    originalEndDate: { type: Date, default: null },
     status: { type: String, default: 'ACTIVE' },
     amountBase: { type: Number, default: null },
     amountGst: { type: Number, default: null },
     amountTotal: { type: Number, default: null },
-    isGstInclusive: { type: Boolean, default: false }
+    isGstInclusive: { type: Boolean, default: false },
+    cancelledAt: { type: Date, default: null },
+    cancellationEffectiveDate: { type: Date, default: null },
+    cancellationType: { type: String, enum: ['ONLY_CANCEL', 'CANCEL_AND_REFUND'], default: null },
+    refundMode: { type: String, enum: ['WITH_GST', 'WITHOUT_GST'], default: null },
+    refundAmount: { type: Number, default: null },
+    refundBaseAmount: { type: Number, default: null },
+    refundGstAmount: { type: Number, default: null },
+    refundRemarks: { type: String, default: null },
+    creditNoteNumber: { type: String, default: null },
+    creditNoteSent: { type: Boolean, default: false }
 }, { ..._schemaOptions_1.baseSchemaOptions, collection: 'Subscription' });
 exports.SubscriptionSchema.virtual('client', {
     ref: 'Client',

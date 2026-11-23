@@ -21,6 +21,7 @@ import { base_ra_url } from '@/utils/config';
 import { ShieldAlert, Save, Upload, Tag, Sun, Moon, FileText, FileCheck, Database, Download, Edit3, Trash2, Shield, Eye, TrendingUp, Clock, Plus, Filter, Users, X, Check, Search, DownloadCloud, Menu, UploadCloud, File, AlertTriangle, AlertCircle, RotateCcw, Building, Lock, Landmark, User, ClipboardList, CheckCircle, CheckCircle2, RefreshCw, LogOut, ShieldCheck, CheckSquare, Layers, Loader2, ArrowRight, ArrowRightLeft, Edit2, RotateCcw as RotateCcwIcon, Settings, Activity, LifeBuoy, CreditCard, ExternalLink, Smartphone, ChevronRight, ChevronLeft, EyeOff, LayoutGrid, Table as TableIcon, Copy, Briefcase, QrCode, Zap, FolderArchive, Folder, HelpCircle, Mail, Bell, Target, Calendar as CalendarIcon, MapPin, Phone, Video, Send, RefreshCcw, XCircle, Monitor, Usb, Info } from 'lucide-react';
 import api from '../../services/api';
 import ActiveClientSummary from './ActiveClientSummary';
+import CompanySubscriptionView from './components/CompanySubscriptionView';
 import PagesManagement from '../../components/admin/PagesManagement';
 import TicketManagement from '../../components/admin/TicketManagement';
 import FaqManagement from '../../components/admin/FaqManagement';
@@ -42,6 +43,7 @@ import { generatePeriodicReport } from '@/utils/generatePeriodicReport';
 import { executeSmartDownload } from '@/utils/smartDownload';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, Cell, XAxis, YAxis, Tooltip } from 'recharts';
 import CouponsManager from '../../components/CouponsManager';
+import SebiAuditorInspectionView from '@/components/compliance/SebiAuditorInspectionView';
 import SignatureSettingsTab from '../../components/admin/SignatureSettingsTab';
 import OccupationsManager from '../../components/admin/OccupationsManager';
 import SecuritySettingsTab from '../../components/admin/SecuritySettingsTab';
@@ -349,62 +351,186 @@ function getSegmentKey(segStr: string): string | null {
   return null;
 }
 
+export interface SegmentSubscriptionHistory {
+  subId: string;
+  planName: string;
+  startDate: Date;
+  endDate: Date;
+  originalEndDate: Date | null;
+  status: 'ACTIVE' | 'CANCELLED' | 'CANCELLATION SCHEDULED' | 'EXPIRED';
+  isCancelled: boolean;
+  cancellationEffectiveDate: Date | null;
+  cancellationType: string | null;
+  refundAmount: number | null;
+  refundMode: string | null;
+  creditNoteNumber: string | null;
+  refundRemarks: string | null;
+}
+
+export interface SegmentSummary {
+  name: string;
+  key: string;
+  displayStatus: 'ACTIVE' | 'CANCELLATION_SCHEDULED' | 'PLAN_CANCELLED' | 'EXPIRED' | 'NOT_SUBSCRIBED';
+  effectiveExpiry: Date | null;
+  originalExpiry: Date | null;
+  hasCancellations: boolean;
+  history: SegmentSubscriptionHistory[];
+}
+
+function calculateSegmentDetailedSummary(subscriptions: any[]): SegmentSummary[] {
+  const now = new Date();
+  const knownSegments = [
+    { name: 'Cash', key: 'Cash' },
+    { name: 'Commodity', key: 'Commodity' },
+    { name: 'Future', key: 'Future' },
+    { name: 'Option', key: 'Option' }
+  ];
+
+  const allSubs = Array.isArray(subscriptions) ? subscriptions : [];
+
+  return knownSegments.map(({ name, key }) => {
+    // Filter subscriptions matching this segment
+    const segSubs = allSubs.filter((sub: any) => {
+      const researchSegments = sub.plan?.researchSegments || sub.planSegments || '';
+      if (!researchSegments) return false;
+      const segs = Array.isArray(researchSegments) ? researchSegments : String(researchSegments).split(',');
+      return segs.some((s: string) => getSegmentKey(s) === key);
+    }).sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    if (segSubs.length === 0) {
+      return {
+        name,
+        key,
+        displayStatus: 'NOT_SUBSCRIBED',
+        effectiveExpiry: null,
+        originalExpiry: null,
+        hasCancellations: false,
+        history: []
+      };
+    }
+
+    // Build history items
+    const history: SegmentSubscriptionHistory[] = segSubs.map((sub: any) => {
+      const sDate = new Date(sub.startDate);
+      const eDate = new Date(sub.endDate);
+      const effDate = sub.cancellationEffectiveDate ? new Date(sub.cancellationEffectiveDate) : null;
+      const isCancelled = sub.status === 'CANCELLED' || Boolean(effDate);
+
+      let origEnd: Date | null = sub.originalEndDate ? new Date(sub.originalEndDate) : null;
+      if (!origEnd && isCancelled) {
+        if (sub.plan?.durationMonths) {
+          origEnd = new Date(sDate.getTime() + sub.plan.durationMonths * 30 * 24 * 60 * 60 * 1000);
+        } else {
+          origEnd = effDate || eDate;
+        }
+      } else if (!origEnd) {
+        origEnd = eDate;
+      }
+
+      let itemStatus: 'ACTIVE' | 'CANCELLED' | 'CANCELLATION SCHEDULED' | 'EXPIRED' = 'ACTIVE';
+      if (sub.status === 'CANCELLED') {
+        if (effDate && effDate.getTime() > now.getTime()) {
+          itemStatus = 'CANCELLATION SCHEDULED';
+        } else {
+          itemStatus = 'CANCELLED';
+        }
+      } else if (effDate && effDate.getTime() > now.getTime()) {
+        itemStatus = 'CANCELLATION SCHEDULED';
+      } else if (eDate.getTime() <= now.getTime()) {
+        itemStatus = 'EXPIRED';
+      } else {
+        itemStatus = 'ACTIVE';
+      }
+
+      return {
+        subId: String(sub._id || sub.id || ''),
+        planName: sub.plan?.name || sub.planName || 'Plan',
+        startDate: sDate,
+        endDate: eDate,
+        originalEndDate: origEnd,
+        status: itemStatus,
+        isCancelled,
+        cancellationEffectiveDate: effDate,
+        cancellationType: sub.cancellationType || null,
+        refundAmount: sub.refundAmount ?? null,
+        refundMode: sub.refundMode || null,
+        creditNoteNumber: sub.creditNoteNumber || null,
+        refundRemarks: sub.refundRemarks || null
+      };
+    });
+
+    // Determine active vs cancelled
+    const activeSubs = history.filter(h => h.status === 'ACTIVE' || h.status === 'CANCELLATION SCHEDULED');
+    const cancelledSubs = history.filter(h => h.isCancelled);
+
+    if (activeSubs.length > 0) {
+      const maxEffectiveMs = Math.max(...activeSubs.map(h => (h.cancellationEffectiveDate ? h.cancellationEffectiveDate.getTime() : h.endDate.getTime())));
+      const effectiveExpiry = new Date(maxEffectiveMs);
+
+      const maxOrigMs = Math.max(...history.map(h => (h.originalEndDate ? h.originalEndDate.getTime() : h.endDate.getTime())));
+      const maxOrig = new Date(maxOrigMs);
+      const hasCancellations = cancelledSubs.length > 0 && maxOrig.getTime() > effectiveExpiry.getTime();
+
+      const isScheduled = activeSubs.some(h => h.status === 'CANCELLATION SCHEDULED');
+
+      return {
+        name,
+        key,
+        displayStatus: isScheduled ? 'CANCELLATION_SCHEDULED' : 'ACTIVE',
+        effectiveExpiry,
+        originalExpiry: hasCancellations ? maxOrig : null,
+        hasCancellations,
+        history
+      };
+    }
+
+    if (cancelledSubs.length > 0) {
+      const maxOrigMs = Math.max(...history.map(h => (h.originalEndDate ? h.originalEndDate.getTime() : h.endDate.getTime())));
+      return {
+        name,
+        key,
+        displayStatus: 'PLAN_CANCELLED',
+        effectiveExpiry: null,
+        originalExpiry: new Date(maxOrigMs),
+        hasCancellations: true,
+        history
+      };
+    }
+
+    const maxEndMs = Math.max(...history.map(h => h.endDate.getTime()));
+    return {
+      name,
+      key,
+      displayStatus: 'EXPIRED',
+      effectiveExpiry: new Date(maxEndMs),
+      originalExpiry: new Date(maxEndMs),
+      hasCancellations: false,
+      history
+    };
+  });
+}
+
 function calculateSegmentExpiries(subscriptions: any[]): { [key: string]: Date | null } {
-  const expiries: { [key: string]: Date | null } = {
+  const summaries = calculateSegmentDetailedSummary(subscriptions);
+  const result: { [key: string]: Date | null } = {
     'Cash': null,
     'Commodity': null,
     'Future': null,
-    'Option': null,
+    'Option': null
   };
-
-  // Only use non-cancelled subscriptions, sorted by startDate ascending
-  const validSubs = (subscriptions || [])
-    .filter((s: any) => s.status !== 'CANCELLED')
-    .sort((a: any, b: any) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-
-  validSubs.forEach((sub: any) => {
-    const researchSegments = sub.plan?.researchSegments || sub.planSegments || '';
-    if (!researchSegments) return;
-    
-    const segs = Array.isArray(researchSegments) ? researchSegments : researchSegments.split(',');
-    const purchaseDate = new Date(sub.startDate);
-    
-    // Duration in ms: calculate from endDate if available, or durationMonths fallback
-    let durationMs = 0;
-    if (sub.endDate && sub.startDate) {
-      durationMs = Math.max(0, new Date(sub.endDate).getTime() - purchaseDate.getTime());
-    }
-    if (durationMs <= 0 && sub.plan?.durationMonths) {
-      durationMs = sub.plan.durationMonths * 30 * 24 * 60 * 60 * 1000;
-    }
-    if (durationMs <= 0) {
-      durationMs = 30 * 24 * 60 * 60 * 1000; // default 1 month
-    }
-
-    segs.forEach((seg: string) => {
-      const key = getSegmentKey(seg);
-      if (!key) return;
-
-      const currentExpiry = expiries[key];
-      if (!currentExpiry || purchaseDate >= currentExpiry) {
-        // No overlap — starts fresh from purchase date
-        expiries[key] = new Date(purchaseDate.getTime() + durationMs);
-      } else {
-        // Overlap — stack on top of current expiry
-        expiries[key] = new Date(currentExpiry.getTime() + durationMs);
-      }
-    });
+  summaries.forEach(s => {
+    result[s.name] = s.effectiveExpiry;
   });
-
-  return expiries;
+  return result;
 }
 
 // Computes overall plan status and active/expired segment chips for a client
 function getClientPlanAndSegmentStatus(row: any): {
-  planStatus: 'ACTIVE' | 'EXPIRED' | 'NO_PLAN';
+  planStatus: 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'NO_PLAN';
   activePlanName?: string;
   expiryDate?: Date | null;
-  segments: { key: string; label: string; isActive: boolean; expiry: Date | null }[];
+  originalExpiryDate?: Date | null;
+  segments: { key: string; label: string; isActive: boolean; isCancelled?: boolean; expiry: Date | null; originalExpiry?: Date | null }[];
 } {
   const subs = row.subscriptions || [];
   if (!subs || subs.length === 0) {
@@ -415,44 +541,52 @@ function getClientPlanAndSegmentStatus(row: any): {
   }
 
   const now = new Date();
-  const segmentExpiries = calculateSegmentExpiries(subs);
-  
-  // Available segments in this client's history
-  const allKnownKeys = ['Cash', 'Future', 'Option', 'Commodity'];
-  const relevantSegments: { key: string; label: string; isActive: boolean; expiry: Date | null }[] = [];
+  const segmentSummaries = calculateSegmentDetailedSummary(subs);
 
-  allKnownKeys.forEach(key => {
-    const exp = segmentExpiries[key];
-    if (exp) {
-      const isActive = exp >= now;
+  const relevantSegments: { key: string; label: string; isActive: boolean; isCancelled?: boolean; expiry: Date | null; originalExpiry?: Date | null }[] = [];
+
+  segmentSummaries.forEach(seg => {
+    if (seg.displayStatus !== 'NOT_SUBSCRIBED') {
+      const isActive = seg.displayStatus === 'ACTIVE' || seg.displayStatus === 'CANCELLATION_SCHEDULED';
       relevantSegments.push({
-        key,
-        label: key.toUpperCase(),
+        key: seg.key,
+        label: seg.name.toUpperCase(),
         isActive,
-        expiry: exp
+        isCancelled: seg.displayStatus === 'PLAN_CANCELLED',
+        expiry: seg.effectiveExpiry,
+        originalExpiry: seg.originalExpiry
       });
     }
   });
 
-  // Check if any subscription or segment is active right now
   const hasActiveSegment = relevantSegments.some(s => s.isActive);
-  const activeSub = subs.find((s: any) => s.status !== 'CANCELLED' && new Date(s.endDate) >= now);
+  const activeSub = subs.find((s: any) => {
+    if (s.status === 'CANCELLED') return false;
+    const effEnd = s.cancellationEffectiveDate ? new Date(s.cancellationEffectiveDate) : new Date(s.endDate);
+    return effEnd.getTime() > now.getTime();
+  });
 
   if (activeSub || hasActiveSegment) {
+    const effExp = activeSub?.cancellationEffectiveDate ? new Date(activeSub.cancellationEffectiveDate) : (activeSub?.endDate ? new Date(activeSub.endDate) : null);
+    const origExp = activeSub?.originalEndDate ? new Date(activeSub.originalEndDate) : null;
     return {
       planStatus: 'ACTIVE',
       activePlanName: activeSub?.plan?.name || subs[0]?.plan?.name || 'Active Plan',
-      expiryDate: activeSub?.endDate ? new Date(activeSub.endDate) : null,
+      expiryDate: effExp,
+      originalExpiryDate: origExp,
       segments: relevantSegments
     };
   }
 
-  // If client had subscriptions but all are past expiry
-  const latestSub = subs.sort((a: any, b: any) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())[0];
+  // If client had subscriptions but all are inactive
+  const hadCancellation = subs.some((s: any) => s.status === 'CANCELLED' || s.cancellationEffectiveDate);
+  const latestSub = [...subs].sort((a: any, b: any) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())[0];
+
   return {
-    planStatus: 'EXPIRED',
-    activePlanName: latestSub?.plan?.name || 'Expired Plan',
-    expiryDate: latestSub?.endDate ? new Date(latestSub.endDate) : null,
+    planStatus: hadCancellation ? 'CANCELLED' : 'EXPIRED',
+    activePlanName: latestSub?.plan?.name || (hadCancellation ? 'Cancelled Plan' : 'Expired Plan'),
+    expiryDate: latestSub?.cancellationEffectiveDate ? new Date(latestSub.cancellationEffectiveDate) : (latestSub?.endDate ? new Date(latestSub.endDate) : null),
+    originalExpiryDate: latestSub?.originalEndDate ? new Date(latestSub.originalEndDate) : null,
     segments: relevantSegments
   };
 }
@@ -461,6 +595,9 @@ function getClientPlanAndSegmentStatus(row: any): {
 function getDisplayStatus(sub: any): string {
   if (sub.status === 'CANCELLED') return 'CANCELLED';
   if (new Date(sub.endDate) < new Date()) return 'EXPIRED';
+  if (sub.cancellationEffectiveDate && new Date(sub.cancellationEffectiveDate) > new Date()) {
+    return 'CANCELLATION SCHEDULED';
+  }
   return sub.status; // ACTIVE
 }
 
@@ -884,6 +1021,8 @@ function AdminDashboardContent() {
           // If current selection is older than start year, adjust it
           setReportYear(prev => prev < res.data.startYear ? res.data.startYear : prev);
         }
+      }).catch(err => {
+        console.warn('Failed to load periodic report metadata:', err?.message || err);
       });
     }
   }, [showReportModal]);
@@ -922,6 +1061,7 @@ function AdminDashboardContent() {
   const [historyFilterText, setHistoryFilterText] = useState('');
   const [selectedFinancialYear, setSelectedFinancialYear] = useState<string>('All');
   const [penalties, setPenalties] = useState<any[]>([]);
+  const [isAuditorInspectionMode, setIsAuditorInspectionMode] = useState<boolean>(false);
   const [complianceTab, setComplianceTab] = useState<'overview' | 'alerts' | 'checklist' | 'penalties' | 'complaints' | 'audit_history'>('overview');
   const [alertViewMode, setAlertViewMode] = useState<'card' | 'table'>('card');
 
@@ -1015,6 +1155,7 @@ function AdminDashboardContent() {
   const [planSegments, setPlanSegments] = useState<string[]>(['EQUITY']);
   const [planNotifs, setPlanNotifs] = useState<string[]>(['EMAIL', 'INAPP']);
   const [planClientLimit, setPlanClientLimit] = useState('100');
+  const [platformSubscription, setPlatformSubscription] = useState<any>(null);
 
   // Add Client modal state
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
@@ -1059,6 +1200,21 @@ function AdminDashboardContent() {
   const [assignPaymentRefId, setAssignPaymentRefId] = useState('');
   const [assignPaymentDate, setAssignPaymentDate] = useState('');
   const [assignServiceStartDate, setAssignServiceStartDate] = useState('');
+
+  // Cancel & Refund Subscription modal state
+  const [isCancelSubModalOpen, setIsCancelSubModalOpen] = useState(false);
+  const [cancelSubTarget, setCancelSubTarget] = useState<any>(null);
+  const [cancelSubType, setCancelSubType] = useState<'ONLY_CANCEL' | 'CANCEL_AND_REFUND'>('CANCEL_AND_REFUND');
+  const [cancelEffectiveDate, setCancelEffectiveDate] = useState(new Date().toISOString().split('T')[0]);
+  const [cancelRefundMode, setCancelRefundMode] = useState<'WITH_GST' | 'WITHOUT_GST'>('WITH_GST');
+  const [cancelSendEmail, setCancelSendEmail] = useState(true);
+  const [cancelSendPdf, setCancelSendPdf] = useState(true);
+  const [cancelRemarks, setCancelRemarks] = useState('');
+  const [cancelSubPreview, setCancelSubPreview] = useState<any>(null);
+  const [cancelSubLoading, setCancelSubLoading] = useState(false);
+  const [cancelPreviewLoading, setCancelPreviewLoading] = useState(false);
+  const [isSegmentHistoryModalOpen, setIsSegmentHistoryModalOpen] = useState(false);
+  const [selectedSegmentHistory, setSelectedSegmentHistory] = useState<SegmentSummary | null>(null);
   const [selectedL2Payment, setSelectedL2Payment] = useState<any | null>(null);
   const [l2FilterTab, setL2FilterTab] = useState<'PENDING' | 'APPROVED' | 'REJECTED'>('PENDING');
   const [selectedL1L2Diff, setSelectedL1L2Diff] = useState<any | null>(null);
@@ -1083,6 +1239,76 @@ function AdminDashboardContent() {
       setAssignPlanFeeSummary(null);
     }
   }, [isAssignPlanModalOpen, assignPlanClient]);
+  useEffect(() => {
+    if (isCancelSubModalOpen && cancelSubTarget) {
+      setCancelPreviewLoading(true);
+      const subId = cancelSubTarget._id || cancelSubTarget.id;
+      api.previewSubscriptionCancellation(subId, {
+        cancellationEffectiveDate: cancelEffectiveDate,
+        refundMode: cancelRefundMode
+      })
+        .then((res: any) => {
+          if (res.success) setCancelSubPreview(res.data);
+        })
+        .catch(() => setCancelSubPreview(null))
+        .finally(() => setCancelPreviewLoading(false));
+    } else {
+      setCancelSubPreview(null);
+    }
+  }, [isCancelSubModalOpen, cancelSubTarget, cancelEffectiveDate, cancelRefundMode]);
+
+  const handleProcessCancellation = async () => {
+    if (!cancelSubTarget) return;
+    if (cancelSubType === 'CANCEL_AND_REFUND' && (!cancelSubPreview || Number(cancelSubPreview.finalRefundAmount || 0) <= 0)) {
+      toast.error('Zero refund amount (₹0). Plan cannot be cancelled with zero refund payout.');
+      return;
+    }
+    setCancelSubLoading(true);
+    try {
+      const subId = cancelSubTarget._id || cancelSubTarget.id;
+      const res: any = await api.cancelSubscriptionByAdmin(subId, {
+        cancellationType: cancelSubType,
+        cancellationEffectiveDate: cancelEffectiveDate,
+        refundMode: cancelRefundMode,
+        sendEmailToClient: cancelSendEmail,
+        sendInvoicePdf: cancelSendPdf,
+        remarks: cancelRemarks
+      });
+
+      if (res.success) {
+        toast.success(res.message || 'Subscription cancelled successfully.');
+        setIsCancelSubModalOpen(false);
+        setCancelSubTarget(null);
+        // Refresh client data
+        if (selectedClient) {
+          const isFuture = new Date(cancelEffectiveDate).getTime() > Date.now();
+          const updatedSubs = (selectedClient.subscriptions || []).map((s: any) => {
+            if ((s._id || s.id) === subId) {
+              return {
+                ...s,
+                endDate: cancelEffectiveDate,
+                status: isFuture ? 'ACTIVE' : 'CANCELLED',
+                cancellationEffectiveDate: cancelEffectiveDate,
+                cancellationType: cancelSubType,
+                refundAmount: cancelSubPreview?.finalRefundAmount
+              };
+            }
+            return s;
+          });
+          setSelectedClient({ ...selectedClient, subscriptions: updatedSubs });
+        }
+        api.getAdminClients().then((res: any) => {
+          if (res.success && Array.isArray(res.data)) setClients(res.data);
+        }).catch(() => {});
+      } else {
+        toast.error(res.message || 'Failed to cancel subscription.');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Error occurred while processing cancellation.');
+    } finally {
+      setCancelSubLoading(false);
+    }
+  };
   const [assignCustomAmount, setAssignCustomAmount] = useState<string>('');
   const [assignCustomDays, setAssignCustomDays] = useState<string>('');
   const [assignCouponCode, setAssignCouponCode] = useState('');
@@ -1092,8 +1318,24 @@ function AdminDashboardContent() {
     let finalBase = basePrice;
     if (couponCode) {
       const cleanCode = couponCode.trim().toUpperCase();
-      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      const coupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && isCouponValidAndUsable(c));
       if (coupon) {
+        if (coupon.expiryDate) {
+          const exp = new Date(coupon.expiryDate);
+          if (!isNaN(exp.getTime())) {
+            if (
+              (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+              (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+            ) {
+              exp.setHours(23, 59, 59, 999);
+            }
+            if (exp.getTime() < Date.now()) return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+          }
+        }
+        if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
+          return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
+        }
+
         if (coupon.minPurchaseValue && basePrice < Number(coupon.minPurchaseValue)) {
           return (!gstEnabled || gstCalculationType !== 'EXCLUSIVE') ? basePrice : Math.round(basePrice * 1.18);
         }
@@ -1188,7 +1430,7 @@ function AdminDashboardContent() {
     let discOnBase = 0;
     if (!isCustomActive && assignCouponCode.trim()) {
       const cleanCode = assignCouponCode.trim().toUpperCase();
-      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE');
+      const matchedCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && isCouponValidAndUsable(c));
       if (matchedCoupon) {
         if (matchedCoupon.discountType === 'FLAT' || matchedCoupon.discountType === 'FIXED') {
           discOnBase = (gstEnabled && !isExclusiveGst)
@@ -1454,9 +1696,29 @@ function AdminDashboardContent() {
   const [paymentSubTab, setPaymentSubTab] = useState<'all' | 'qr_verifications' | 'l2_pending'>('all');
   const [selectedScreenshotModal, setSelectedScreenshotModal] = useState<{ url: string; clientName: string; planName: string; utr: string; amount: number } | null>(null);
 
+  const isCouponValidAndUsable = (c: any): boolean => {
+    if (!c || c.status !== 'ACTIVE') return false;
+    if (c.expiryDate) {
+      const exp = new Date(c.expiryDate);
+      if (!isNaN(exp.getTime())) {
+        if (
+          (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+          (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+        ) {
+          exp.setHours(23, 59, 59, 999);
+        }
+        if (exp.getTime() < Date.now()) return false;
+      }
+    }
+    if (c.usageLimit !== null && c.usageLimit !== undefined && (c.usedCount || 0) >= c.usageLimit) {
+      return false;
+    }
+    return true;
+  };
+
   // Helper to determine if a coupon is applicable for a specific plan and category
   const isCouponApplicableToPlan = (c: any, targetPlanId?: string | null, targetCategoryId?: string | null, targetPrice?: number | null): boolean => {
-    if (!c || c.status !== 'ACTIVE') return false;
+    if (!isCouponValidAndUsable(c)) return false;
 
     if (c.minPurchaseValue && targetPrice !== undefined && targetPrice !== null && Number(targetPrice) > 0) {
       if (Number(targetPrice) < Number(c.minPurchaseValue)) return false;
@@ -1736,9 +1998,11 @@ function AdminDashboardContent() {
   const isStaff = user && user.role && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN';
 
   const getFullUrl = (url?: string | null) => {
-    if (!url) return 'N/A';
-    if (url.startsWith('http')) return url;
-    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+    const base = (process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() || '').replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${cleanPath}`;
   };
 
   const AGREEMENT_VARIABLES = [
@@ -2056,6 +2320,10 @@ function AdminDashboardContent() {
       if (tab === 'staff' || tab === 'roles') {
         api.getStaff().then(res => { if (res.success) setStaff(res.data); }).catch(() => { });
         fetchResearcherDscPermissions();
+      }
+
+      if (initStep || tab === 'clients' || tab === 'coupons' || tab === 'companySubscription') {
+        api.getMyCompanySubscription().then(res => { if (res?.success) setPlatformSubscription(res.data); }).catch(() => { });
       }
 
       if (tab === 'clients' || tab === 'coupons') {
@@ -2662,7 +2930,11 @@ function AdminDashboardContent() {
       formData.append('welcomeEmailText', welcomeEmailText);
       formData.append('reportDisclaimer', reportDisclaimer);
       if (termsPdf) formData.append('termsPdf', termsPdf);
-      if (internalPolicyPdf) formData.append('internalPolicyPdf', internalPolicyPdf);
+      if (internalPolicyPdf) {
+        formData.append('internalPolicyPdf', internalPolicyPdf);
+      } else if (policyUrl) {
+        formData.append('internalPolicyUrl', policyUrl);
+      }
       if (logoFile) formData.append('logo', logoFile);
       if (privacyPdf) formData.append('privacyPdf', privacyPdf);
       formData.append('smtpHost', (smtpHost || '').trim());
@@ -5614,7 +5886,7 @@ function AdminDashboardContent() {
       name: 'Plan Status',
       width: '135px',
       cell: (row: any) => {
-        const { planStatus, activePlanName, expiryDate } = getClientPlanAndSegmentStatus(row);
+        const { planStatus, activePlanName, expiryDate, originalExpiryDate } = getClientPlanAndSegmentStatus(row);
         const isDeleted = row.user?.deletedAt !== null && row.user?.deletedAt !== undefined;
 
         return (
@@ -5625,9 +5897,15 @@ function AdminDashboardContent() {
                 ACTIVE
               </span>
             )}
-            {planStatus === 'EXPIRED' && (
+            {planStatus === 'CANCELLED' && (
               <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                PLAN CANCELLED
+              </span>
+            )}
+            {planStatus === 'EXPIRED' && (
+              <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
                 EXPIRED
               </span>
             )}
@@ -5642,7 +5920,7 @@ function AdminDashboardContent() {
               </span>
             )}
             {expiryDate && (
-              <span className="text-[9px] text-slate-500 dark:text-slate-500 font-mono">
+              <span className={`text-[9px] font-mono ${planStatus === 'CANCELLED' ? 'text-rose-500 dark:text-rose-400 line-through' : 'text-slate-500 dark:text-slate-500'}`}>
                 Exp: {new Date(expiryDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
               </span>
             )}
@@ -5666,14 +5944,21 @@ function AdminDashboardContent() {
           <div className="flex flex-wrap gap-1.5 items-center">
             {segments.map((seg) => {
               const expStr = seg.expiry ? new Date(seg.expiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+              const origStr = seg.originalExpiry ? new Date(seg.originalExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '';
+              const titleText = seg.isCancelled
+                ? `${seg.label}: Plan Cancelled (Was valid till ${origStr || expStr})`
+                : `${seg.label}: ${seg.isActive ? 'Active until' : 'Expired on'} ${expStr}`;
+
               return (
                 <span
                   key={seg.key}
-                  title={`${seg.label}: ${seg.isActive ? 'Active until' : 'Expired on'} ${expStr}`}
+                  title={titleText}
                   className={`px-2 py-0.5 rounded-md text-[9px] font-bold tracking-wider uppercase border transition-all ${
                     seg.isActive
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 shadow-xs'
-                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                      : seg.isCancelled
+                        ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 line-through'
+                        : 'bg-slate-500/10 text-slate-500 dark:text-slate-400 border-slate-500/20'
                   }`}
                 >
                   {seg.label}
@@ -6403,16 +6688,6 @@ function AdminDashboardContent() {
                 </div>
               )}
 
-              {/* Product Flyer / Brochure Button */}
-              <Link
-                href="/brochure"
-                target="_blank"
-                className="px-3 py-1.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-600 dark:text-blue-400 font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm"
-                title="View & Export Software Feature Brochure (PDF)"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Brochure</span>
-              </Link>
 
               {/* Theme Toggle */}
               <div className="p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
@@ -6429,6 +6704,7 @@ function AdminDashboardContent() {
                 }}
                 badgeColor="rose"
                 onProfileClick={() => setActiveTab('profile')}
+                onSubscriptionClick={() => setActiveTab('companySubscription')}
                 onLogoutClick={() => setIsLogoutModalOpen(true)}
               />
             </div>
@@ -7254,6 +7530,10 @@ function AdminDashboardContent() {
 
                   {activeTab === 'activeClientSummary' && (
                     <ActiveClientSummary />
+                  )}
+
+                  {activeTab === 'companySubscription' && (
+                    <CompanySubscriptionView />
                   )}
 
                   {/* STAFF MANAGEMENT TAB */}
@@ -9469,13 +9749,13 @@ function AdminDashboardContent() {
                             <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                               <button
                                 onClick={() => setChecklistSubTab('active')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                               >
                                 Active Checklist ({activeList.length})
                               </button>
                               <button
                                 onClick={() => setChecklistSubTab('history')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                               >
                                 Checklist History ({checklistHistory.length})
                               </button>
@@ -9663,18 +9943,29 @@ function AdminDashboardContent() {
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
+                    isAuditorInspectionMode ? (
+                      <SebiAuditorInspectionView
+                        onBack={() => setIsAuditorInspectionMode(false)}
+                        tenantData={tenantDetails}
+                        clientsData={clients}
+                        alertsData={alerts}
+                        complaintsData={complaints}
+                        penaltiesData={penalties}
+                        isDarkMode={isDarkMode}
+                      />
+                    ) : (
                     <div className="w-full space-y-6">
                       {/* Header */}
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                         <div>
                           <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
                           <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex flex-wrap items-center gap-2.5">
                           <button
                             type="button"
                             onClick={toggleMobilePreview}
-                            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition shadow-sm mr-2 ${
+                            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition shadow-sm ${
                               showMobilePreview
                                 ? 'bg-blue-600 text-white border-blue-500 shadow-blue-500/20'
                                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-slate-700'
@@ -9684,32 +9975,74 @@ function AdminDashboardContent() {
                             <Smartphone className="w-3.5 h-3.5" />
                             <span>{showMobilePreview ? 'Close Preview' : 'Mobile Preview'}</span>
                           </button>
-                            <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-4 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
-                              {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                              <span>Download Periodic Report</span>
-                            </button>
-                            <button onClick={handleComplianceSweep} disabled={sweepLoading} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
-                              {sweepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                              <span>Run Verification Sweep</span>
-                            </button>
-                          </div>
-                        </div>
 
-                        {/* Sub-tabs and Global Filter */}
-                        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-                          <div className="flex flex-wrap gap-1 bg-white dark:bg-slate-900/60 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
-                            {[
-                              { id: 'overview', label: 'Compliance Overview' },
-                              { id: 'alerts', label: `Automated Alerts (${alerts.filter(a => a.status === 'OPEN').length})` },
-                              { id: 'penalties', label: `Penalties (${penalties.filter(p => p.status === 'PENDING_PAYMENT').length} Pending)` },
-                              { id: 'complaints', label: `Complaints (${complaints.filter(c => c.status === 'OPEN').length} Open)` },
-                              { id: 'audit_history', label: 'Audit Log' }
-                            ].map(tab => (
-                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}>
-                                {tab.label}
-                              </button>
-                            ))}
-                          </div>
+                          {/* SEBI Auditor Analysis & Inspection Dossier Switcher */}
+                          <button
+                            type="button"
+                            onClick={() => setIsAuditorInspectionMode(true)}
+                            className="group relative flex items-center gap-2.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-700 hover:from-blue-600 hover:via-indigo-500 hover:to-violet-600 text-white rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-indigo-500/35 transition-all duration-200 border border-indigo-400/30 active:scale-[0.98]"
+                            title="Switch to SEBI Auditor Analysis Report & Statutory Inspection Dossier"
+                          >
+                            <div className="relative p-1.5 bg-white/20 dark:bg-white/10 rounded-lg backdrop-blur-sm border border-white/20 group-hover:scale-105 transition-transform flex items-center justify-center">
+                              <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                              <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                              </span>
+                            </div>
+                            <div className="text-left leading-tight">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-bold tracking-wide">SEBI Auditor Analysis</span>
+                                <span className="bg-emerald-500/25 text-emerald-200 text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase border border-emerald-400/30">
+                                  Dossier
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-blue-100/90 block mt-0.5 font-normal">
+                                Statutory Inspection Mode
+                              </span>
+                            </div>
+                          </button>
+
+                          <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-3.5 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
+                            {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            <span>Download Periodic Report</span>
+                          </button>
+                          
+                          <button onClick={handleComplianceSweep} disabled={sweepLoading} className="px-3.5 py-2 bg-primary-600 hover:bg-primary-500 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
+                            {sweepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            <span>Run Verification Sweep</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Sub-tabs and Global Filter */}
+                      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-900/60 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
+                          {[
+                            { id: 'overview', label: 'Compliance Overview' },
+                            { id: 'alerts', label: `Automated Alerts (${alerts.filter(a => a.status === 'OPEN').length})` },
+                            { id: 'penalties', label: `Penalties (${penalties.filter(p => p.status === 'PENDING_PAYMENT').length} Pending)` },
+                            { id: 'complaints', label: `Complaints (${complaints.filter(c => c.status === 'OPEN').length} Open)` },
+                            { id: 'audit_history', label: 'Audit Log' }
+                          ].map(tab => (
+                            <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+                              {tab.label}
+                            </button>
+                          ))}
+                          <div className="h-4 w-px bg-slate-200 dark:bg-white/10 mx-1 hidden sm:block"></div>
+                          <button
+                            type="button"
+                            onClick={() => setIsAuditorInspectionMode(true)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800/50 transition shadow-sm"
+                            title="Switch to SEBI Auditor Analysis & Statutory Inspection Dossier"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                            <span>Auditor Dossier View</span>
+                            <span className="text-[9px] font-extrabold uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">
+                              Inspect
+                            </span>
+                          </button>
+                        </div>
                           <div className="flex items-center space-x-3 bg-white dark:bg-slate-900/40 p-1.5 rounded-xl border border-slate-300 dark:border-white/5 w-fit">
                             {(!isStaff || hasPermission('EXPORT_DATA')) && (
                               <button onClick={() => handleDownloadCSV(complianceTab)} className="px-3 py-1.5 bg-white dark:bg-[#151e32] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 hover:text-indigo-700 dark:text-indigo-300 rounded-lg text-xs font-bold transition flex items-center gap-2 border border-indigo-500/20 mr-2">
@@ -9916,13 +10249,13 @@ function AdminDashboardContent() {
                                 <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                                   <button
                                     onClick={() => setAlertsSubTab('active')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'active' ? 'bg-amber-600 text-slate-900 dark:text-white shadow-lg shadow-amber-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'active' ? 'bg-amber-600 text-slate-900 dark:text-white shadow-lg shadow-amber-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                   >
                                     Active Alerts ({alerts.filter((a: any) => a.status === 'OPEN').length})
                                   </button>
                                   <button
                                     onClick={() => setAlertsSubTab('history')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                   >
                                     Resolved History ({alerts.filter((a: any) => a.status === 'CLOSED').length})
                                   </button>
@@ -10236,7 +10569,7 @@ function AdminDashboardContent() {
                                           <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-2 font-medium">{item.date.toLocaleString('en-IN')}</div>
                                         </div>
                                         {item.proofUrl && (
-                                          <a href={item.proofUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
+                                          <a href={getFullUrl(item.proofUrl)} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
                                             <ExternalLink className="h-3 w-3" />
                                             View Proof (SS)
                                           </a>
@@ -10296,6 +10629,7 @@ function AdminDashboardContent() {
                           </div>
                         )}
                       </div>
+                    )
                   )}
 
                   {/* ====================================================
@@ -10351,6 +10685,20 @@ function AdminDashboardContent() {
                             <Users className="h-4 w-4 text-primary-600 dark:text-primary-400" />
                             <span className="text-xs font-bold text-primary-700 dark:text-primary-300">{clients.length} Clients</span>
                           </div>
+
+                          {Boolean(platformSubscription?.maxActiveClients && platformSubscription.maxActiveClients > 0) && (
+                            <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+                              (platformSubscription?.activeClientsCount ?? clients.filter((c: any) => c.status === 'ACTIVE').length) >= platformSubscription.maxActiveClients
+                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                            }`}>
+                              <ShieldCheck className="h-4 w-4" />
+                              <span>
+                                Cap: {platformSubscription?.activeClientsCount ?? clients.filter((c: any) => c.status === 'ACTIVE').length} / {platformSubscription.maxActiveClients} Active
+                                {(platformSubscription?.activeClientsCount ?? clients.filter((c: any) => c.status === 'ACTIVE').length) >= platformSubscription.maxActiveClients && ' (Full)'}
+                              </span>
+                            </div>
+                          )}
 
                           <button
                             onClick={async () => {
@@ -10498,6 +10846,12 @@ function AdminDashboardContent() {
                             <button
                               onClick={() => {
                                 if (!requireSetupPrerequisites('Add New Client')) return;
+                                const clientCap = Number(platformSubscription?.maxActiveClients ?? platformSubscription?.subscription?.maxActiveClients ?? 0);
+                                const activeClientsTotal = Number(platformSubscription?.activeClientsCount ?? clients.filter((c: any) => c.status === 'ACTIVE').length);
+                                if (clientCap > 0 && activeClientsTotal >= clientCap) {
+                                  toast.error(`Active client capacity limit reached! Your current SaaS plan allows up to ${clientCap} active clients (${activeClientsTotal} active). Please upgrade your platform subscription under Company Subscription to onboard new clients.`);
+                                  return;
+                                }
                                 setClientName(''); setClientEmail(''); setClientMobile('');
                                 setClientPassword(''); setClientPan(''); setClientAadhaar('');
                                 setClientCategory('INDIVIDUAL'); setClientOccupation('');
@@ -11051,6 +11405,35 @@ function AdminDashboardContent() {
                                     );
                                   }
 
+                                  if (coupon.expiryDate) {
+                                    const exp = new Date(coupon.expiryDate);
+                                    if (!isNaN(exp.getTime())) {
+                                      if (
+                                        (exp.getUTCHours() === 0 && exp.getUTCMinutes() === 0 && exp.getUTCSeconds() === 0) ||
+                                        (exp.getHours() === 0 && exp.getMinutes() === 0 && exp.getSeconds() === 0)
+                                      ) {
+                                        exp.setHours(23, 59, 59, 999);
+                                      }
+                                      if (exp.getTime() < Date.now()) {
+                                        return (
+                                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                            <span>Coupon "{cleanCode}" has expired.</span>
+                                          </div>
+                                        );
+                                      }
+                                    }
+                                  }
+
+                                  if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
+                                    return (
+                                      <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/30 rounded-lg text-rose-500 text-[11px] flex items-center gap-1.5 font-medium">
+                                        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                                        <span>Coupon "{cleanCode}" total usage limit reached.</span>
+                                      </div>
+                                    );
+                                  }
+
                                   let planAllowed = true;
                                   if (coupon.planId && assignPlanId) {
                                     try {
@@ -11135,7 +11518,7 @@ function AdminDashboardContent() {
                                 let dBase = 0;
                                 if (!isCustAct && assignCouponCode.trim()) {
                                   const clnCode = assignCouponCode.trim().toUpperCase();
-                                  const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clnCode && c.status === 'ACTIVE');
+                                  const mCoupon = coupons.find((c: any) => String(c.code).trim().toUpperCase() === clnCode && isCouponValidAndUsable(c));
                                   if (mCoupon) {
                                     if (mCoupon.discountType === 'FLAT' || mCoupon.discountType === 'FIXED') {
                                       dBase = (gstEnabled && !isExclGst) ? parseFloat((Number(mCoupon.discountValue || 0) / 1.18).toFixed(2)) : Number(mCoupon.discountValue || 0);
@@ -11415,7 +11798,7 @@ function AdminDashboardContent() {
                                   : ((gstEnabled && !isExclusive) ? parseFloat((enteredTotal / 1.18).toFixed(2)) : enteredTotal);
 
                                 const cleanCode = assignCouponCode.trim().toUpperCase();
-                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && c.status === 'ACTIVE') : null;
+                                const matchedCoupon = cleanCode ? coupons.find((c: any) => String(c.code).trim().toUpperCase() === cleanCode && isCouponValidAndUsable(c)) : null;
 
                                 let discOnBase = 0;
                                 if (matchedCoupon && !hasCustom) {
@@ -11556,6 +11939,252 @@ function AdminDashboardContent() {
                                 })()}
                               </div>
                             </form>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* -- CANCEL & REFUND SUBSCRIPTION MODAL -- */}
+                      {isCancelSubModalOpen && cancelSubTarget && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+                          <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-rose-500/30 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+                            {/* Header */}
+                            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-200 dark:border-white/10 bg-rose-500/5">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400">
+                                  <AlertTriangle className="h-5 w-5" />
+                                </div>
+                                <div>
+                                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Cancel & Manage Subscription</h3>
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                    {cancelSubTarget.plan?.name || 'Advisory Plan'} &bull; Client: {selectedClient?.name || 'Client'}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setIsCancelSubModalOpen(false)}
+                                className="text-slate-500 hover:text-slate-700 dark:hover:text-white transition"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            {/* Body */}
+                            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1 custom-scrollbar text-xs">
+                              {/* Cancellation Type Choice */}
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                                  Action Type *
+                                </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setCancelSubType('ONLY_CANCEL')}
+                                    className={`p-3 rounded-xl border text-left transition ${
+                                      cancelSubType === 'ONLY_CANCEL'
+                                        ? 'border-slate-800 dark:border-white bg-slate-100 dark:bg-white/10 font-bold'
+                                        : 'border-slate-200 dark:border-white/5 opacity-70 hover:opacity-100'
+                                    }`}
+                                  >
+                                    <div className="text-slate-900 dark:text-white font-bold">Only Cancel / Reject</div>
+                                    <div className="text-[10px] text-slate-500 mt-1">No refund & zero client email/invoice notifications.</div>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    disabled={Number(cancelSubTarget?.amountTotal ?? cancelSubTarget?.plan?.price ?? 0) <= 0}
+                                    onClick={() => setCancelSubType('CANCEL_AND_REFUND')}
+                                    className={`p-3 rounded-xl border text-left transition ${
+                                      Number(cancelSubTarget?.amountTotal ?? cancelSubTarget?.plan?.price ?? 0) <= 0
+                                        ? 'border-slate-200 dark:border-white/5 opacity-40 cursor-not-allowed'
+                                        : cancelSubType === 'CANCEL_AND_REFUND'
+                                          ? 'border-rose-500 bg-rose-500/10 font-bold text-rose-600 dark:text-rose-400'
+                                          : 'border-slate-200 dark:border-white/5 opacity-70 hover:opacity-100'
+                                    }`}
+                                  >
+                                    <div className="font-bold">Cancel & Refund</div>
+                                    <div className="text-[10px] text-slate-500 mt-1">
+                                      {Number(cancelSubTarget?.amountTotal ?? cancelSubTarget?.plan?.price ?? 0) <= 0
+                                        ? 'Unavailable (Zero Amount / Free Plan)'
+                                        : 'Prorated / full refund with GST breakup options.'}
+                                    </div>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Date Selection */}
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                                  Cancellation Effective Date *
+                                </label>
+                                <input
+                                  type="date"
+                                  max={cancelSubTarget?.endDate ? new Date(cancelSubTarget.endDate).toISOString().split('T')[0] : undefined}
+                                  value={cancelEffectiveDate}
+                                  onChange={e => setCancelEffectiveDate(e.target.value)}
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-white/10 rounded-xl text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-rose-500"
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">Service access will terminate as of this date.</p>
+                              </div>
+
+                              {/* Refund Options if CANCEL_AND_REFUND */}
+                              {cancelSubType === 'CANCEL_AND_REFUND' && (
+                                <div className="space-y-4 pt-2 border-t border-slate-200 dark:border-white/5">
+                                  <div>
+                                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                                      GST Refund Treatment *
+                                    </label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition ${
+                                        cancelRefundMode === 'WITH_GST'
+                                          ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold'
+                                          : 'border-slate-200 dark:border-white/10'
+                                      }`}>
+                                        <input
+                                          type="radio"
+                                          name="refundGstMode"
+                                          checked={cancelRefundMode === 'WITH_GST'}
+                                          onChange={() => setCancelRefundMode('WITH_GST')}
+                                          className="text-emerald-600"
+                                        />
+                                        <span>Refund WITH GST (Reverse GST)</span>
+                                      </label>
+
+                                      <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition ${
+                                        cancelRefundMode === 'WITHOUT_GST'
+                                          ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-300 font-semibold'
+                                          : 'border-slate-200 dark:border-white/10'
+                                      }`}>
+                                        <input
+                                          type="radio"
+                                          name="refundGstMode"
+                                          checked={cancelRefundMode === 'WITHOUT_GST'}
+                                          onChange={() => setCancelRefundMode('WITHOUT_GST')}
+                                          className="text-amber-600"
+                                        />
+                                        <span>Refund WITHOUT GST (Fee Only)</span>
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  {/* Auto Calculated Breakdown Box */}
+                                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-white/10 rounded-xl space-y-2">
+                                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-white/5 pb-1.5">
+                                      <span>Auto-Calculated Refund Breakdown</span>
+                                      {cancelPreviewLoading && <Loader2 className="h-3 w-3 animate-spin text-primary-500" />}
+                                    </div>
+                                    {cancelSubPreview ? (
+                                      <div className="space-y-1 text-[11px]">
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                          <span>Total Duration / Days Used:</span>
+                                          <span className="font-mono font-medium">{cancelSubPreview.totalDays} Days / {cancelSubPreview.daysUsed} Days Used</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                          <span>Remaining Service Days:</span>
+                                          <span className="font-mono font-bold text-slate-900 dark:text-white">{cancelSubPreview.remainingDays} Days</span>
+                                        </div>
+                                        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                          <span>Base Fee Refund:</span>
+                                          <span className="font-mono">₹{cancelSubPreview.proratedBaseRefund?.toLocaleString('en-IN')}</span>
+                                        </div>
+                                        {cancelRefundMode === 'WITH_GST' && (
+                                          <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                                            <span>GST (18%) Adjustment:</span>
+                                            <span className="font-mono">₹{cancelSubPreview.proratedGstRefund?.toLocaleString('en-IN')}</span>
+                                          </div>
+                                        )}
+                                        <div className="flex justify-between text-xs font-extrabold text-slate-900 dark:text-white pt-1.5 border-t border-slate-200 dark:border-white/5">
+                                          <span>Net Payout to Client:</span>
+                                          <span className={`font-mono text-sm ${Number(cancelSubPreview.finalRefundAmount || 0) <= 0 ? 'text-slate-400 dark:text-slate-500 font-bold' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                            ₹{cancelSubPreview.finalRefundAmount?.toLocaleString('en-IN')}
+                                          </span>
+                                        </div>
+                                        {Number(cancelSubPreview.finalRefundAmount || 0) <= 0 && (
+                                          <div className="mt-2.5 p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-2 text-rose-600 dark:text-rose-400 text-[11px] font-semibold">
+                                            <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500" />
+                                            <span>Zero refund amount (₹0). Plan cannot be cancelled with zero refund payout. Action button is disabled.</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <p className="text-slate-400 italic text-[10px]">Calculating refund estimate...</p>
+                                    )}
+                                  </div>
+
+                                  {/* Notification Checkboxes */}
+                                  <div className="space-y-2 pt-1">
+                                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                                      <input
+                                        type="checkbox"
+                                        checked={cancelSendEmail}
+                                        onChange={e => setCancelSendEmail(e.target.checked)}
+                                        className="rounded text-rose-600"
+                                      />
+                                      <span>Send Cancellation & Refund Notice Email to Client</span>
+                                    </label>
+
+                                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                                      <input
+                                        type="checkbox"
+                                        checked={cancelSendPdf}
+                                        onChange={e => setCancelSendPdf(e.target.checked)}
+                                        className="rounded text-rose-600"
+                                      />
+                                      <span>Generate & Attach Cancelled / Credit Note PDF (Watermarked)</span>
+                                    </label>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Remarks */}
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                                  Reason / Cancellation Remarks
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. Client requested discontinuation due to personal reasons..."
+                                  value={cancelRemarks}
+                                  onChange={e => setCancelRemarks(e.target.value)}
+                                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-white/10 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-rose-500"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/50">
+                              <button
+                                type="button"
+                                onClick={() => setIsCancelSubModalOpen(false)}
+                                className="px-4 py-2 border border-slate-300 dark:border-white/10 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 transition"
+                              >
+                                Go Back
+                              </button>
+                              {(() => {
+                                const isZeroRefund = cancelSubType === 'CANCEL_AND_REFUND' && (!cancelSubPreview || Number(cancelSubPreview?.finalRefundAmount || 0) <= 0);
+                                const isBtnDisabled = cancelSubLoading || isZeroRefund;
+                                return (
+                                  <button
+                                    type="button"
+                                    disabled={isBtnDisabled}
+                                    onClick={handleProcessCancellation}
+                                    className={`px-5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 text-white ${
+                                      isZeroRefund
+                                        ? 'bg-slate-400 dark:bg-slate-700 cursor-not-allowed opacity-50 shadow-none'
+                                        : 'bg-rose-600 hover:bg-rose-500 disabled:opacity-50 shadow-lg shadow-rose-600/20'
+                                    }`}
+                                    title={isZeroRefund ? 'Zero amount: Plan cannot be cancelled with ₹0 refund' : undefined}
+                                  >
+                                    {cancelSubLoading ? (
+                                      <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing...</>
+                                    ) : cancelSubType === 'CANCEL_AND_REFUND' ? (
+                                      <><AlertTriangle className="h-3.5 w-3.5" /> Confirm Cancellation & Refund</>
+                                    ) : (
+                                      <><X className="h-3.5 w-3.5" /> Confirm Only Cancel</>
+                                    )}
+                                  </button>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
                       )}
@@ -11749,6 +12378,13 @@ function AdminDashboardContent() {
                                   }
                                   if (!clientPassword || clientPassword.length < 8 || clientPassword.length > 15) {
                                     toast.error('Password must be between 8 and 15 characters.'); return;
+                                  }
+
+                                  const clientCap = Number(platformSubscription?.maxActiveClients ?? platformSubscription?.subscription?.maxActiveClients ?? 0);
+                                  const activeClientsTotal = Number(platformSubscription?.activeClientsCount ?? clients.filter((c: any) => c.status === 'ACTIVE').length);
+                                  if (clientCap > 0 && activeClientsTotal >= clientCap) {
+                                    toast.error(`Active client capacity limit reached (${activeClientsTotal}/${clientCap} active clients). Please upgrade your platform plan to register new clients.`);
+                                    return;
                                   }
 
                                   setClientModalLoading(true);
@@ -13723,86 +14359,188 @@ function AdminDashboardContent() {
                                 <div className="space-y-6">
                                   {/* Segment-wise Expiry Overview */}
                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Segment-wise Expiry Overview</h4>
+                                    <div className="flex items-center justify-between border-b border-slate-300 dark:border-white/5 pb-2">
+                                      <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider">Segment-wise Expiry Overview</h4>
+                                      <span className="text-[10px] text-slate-400">Click "View Details" to see complete date-wise timeline</span>
+                                    </div>
                                     <div className="overflow-x-auto rounded-xl border border-slate-300 dark:border-white/5 bg-slate-100 dark:bg-slate-950/20">
                                       <DataTable
                                         columns={[
                                           {
                                             name: 'Service Name',
                                             selector: (row: any) => row.name,
-                                            cell: (row: any) => <span className="font-bold text-slate-800 dark:text-slate-200">{row.name}</span>
+                                            cell: (row: any) => (
+                                              <div className="flex items-center gap-2.5 py-1.5">
+                                                <span className="font-bold text-slate-800 dark:text-slate-200">{row.name}</span>
+                                                {row.history && row.history.length > 0 && (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      setSelectedSegmentHistory(row);
+                                                      setIsSegmentHistoryModalOpen(true);
+                                                    }}
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 border border-blue-500/20 transition cursor-pointer"
+                                                    title={`View ${row.name} complete date-wise timeline and history`}
+                                                  >
+                                                    <Eye className="w-3 h-3" />
+                                                    <span>View Details</span>
+                                                  </button>
+                                                )}
+                                              </div>
+                                            )
                                           },
                                           {
                                             name: 'Expiry Date',
                                             right: true,
                                             cell: (row: any) => {
-                                              const now = new Date();
-                                              const isActive = row.date && row.date > now;
-                                              const isExpired = row.date && row.date <= now;
+                                              if (row.displayStatus === 'NOT_SUBSCRIBED') {
+                                                return <span className="text-slate-400 dark:text-slate-500 font-mono text-xs">Not Subscribed</span>;
+                                              }
+
+                                              if (row.displayStatus === 'PLAN_CANCELLED') {
+                                                return (
+                                                  <div className="text-right py-1">
+                                                    {row.originalExpiry && (
+                                                      <span className="line-through text-slate-400 dark:text-slate-500 font-mono text-xs block">
+                                                        {new Date(row.originalExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                      </span>
+                                                    )}
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 mt-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                                                      Plan Cancelled
+                                                    </span>
+                                                  </div>
+                                                );
+                                              }
+
+                                              if (row.displayStatus === 'CANCELLATION_SCHEDULED') {
+                                                return (
+                                                  <div className="text-right py-1">
+                                                    {row.originalExpiry && (
+                                                      <span className="line-through text-slate-400 dark:text-slate-500 font-mono text-xs block">
+                                                        {new Date(row.originalExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                      </span>
+                                                    )}
+                                                    <span className="text-amber-600 dark:text-amber-400 font-bold font-mono text-xs block">
+                                                      {row.effectiveExpiry ? new Date(row.effectiveExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                                    </span>
+                                                    <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                                                      (Terminates Early)
+                                                    </span>
+                                                  </div>
+                                                );
+                                              }
+
+                                              if (row.displayStatus === 'ACTIVE') {
+                                                return (
+                                                  <div className="text-right py-1">
+                                                    {row.hasCancellations && row.originalExpiry && (
+                                                      <span className="line-through text-slate-400 dark:text-slate-500 font-mono text-xs block">
+                                                        {new Date(row.originalExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                      </span>
+                                                    )}
+                                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold font-mono text-xs block">
+                                                      {row.effectiveExpiry ? new Date(row.effectiveExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              }
+
                                               return (
-                                                <span className="font-mono">
-                                                  {isActive ? (
-                                                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                                      {row.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                                                    </span>
-                                                  ) : isExpired ? (
-                                                    <span className="text-rose-600 dark:text-rose-400 line-through opacity-60">
-                                                      {row.date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} (Expired)
-                                                    </span>
-                                                  ) : (
-                                                    <span className="text-slate-500 dark:text-slate-500">Not Subscribed</span>
-                                                  )}
-                                                </span>
-                                              )
+                                                <div className="text-right py-1">
+                                                  <span className="text-slate-400 dark:text-slate-500 line-through font-mono text-xs block">
+                                                    {row.effectiveExpiry ? new Date(row.effectiveExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                                                  </span>
+                                                  <span className="text-[10px] text-slate-400 font-medium">Expired</span>
+                                                </div>
+                                              );
                                             }
                                           }
                                         ]}
-                                        data={Object.entries(calculateSegmentExpiries(selectedClient.subscriptions || [])).map(([name, date]) => ({ name, date }))}
+                                        data={calculateSegmentDetailedSummary(selectedClient.subscriptions || [])}
                                         theme={isDarkMode ? 'dark' : 'default'}
                                       />
                                     </div>
                                   </div>
 
                                   {/* Active subscriptions cards */}
-                                  <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
-                                    <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Active Services Overview</h4>
-                                    {selectedClient.subscriptions && selectedClient.subscriptions.filter((s: any) => s.status === 'ACTIVE' && new Date(s.endDate) > new Date()).length > 0 ? (
-                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {selectedClient.subscriptions.filter((s: any) => s.status === 'ACTIVE' && new Date(s.endDate) > new Date()).map((sub: any) => {
-                                          const planStdPrice = !gstEnabled ? (sub.plan?.price || 0) : (gstCalculationType === 'EXCLUSIVE' ? Math.round((sub.plan?.price || 0) * 1.18) : (sub.plan?.price || 0));
-                                          const isCustomAmount = sub.amountTotal != null && Math.abs(sub.amountTotal - planStdPrice) > 2;
-                                          const defaultDays = (sub.plan?.durationMonths || 1) * 30;
-                                          const actualDays = Math.round((new Date(sub.endDate).getTime() - new Date(sub.startDate).getTime()) / (1000 * 60 * 60 * 24));
-                                          const isCustomDays = Math.abs(actualDays - defaultDays) > 4;
-                                          const isCustom = isCustomAmount || isCustomDays;
+                                   <div className="glassmorphism p-5 rounded-xl border border-slate-300 dark:border-white/5 space-y-4">
+                                     <h4 className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider border-b border-slate-300 dark:border-white/5 pb-2">Active Services Overview</h4>
+                                     {(() => {
+                                       const now = new Date();
+                                       const activeSubs = (selectedClient.subscriptions || []).filter((s: any) => {
+                                         if (s.status === 'CANCELLED') return false;
+                                         const end = s.cancellationEffectiveDate ? new Date(s.cancellationEffectiveDate) : new Date(s.endDate);
+                                         if (end.getTime() <= now.getTime()) return false;
+                                         if (s.cancellationEffectiveDate && new Date(s.startDate).getTime() >= new Date(s.cancellationEffectiveDate).getTime()) return false;
+                                         return true;
+                                       });
 
-                                          return (
-                                            <div key={sub.id} className="p-4 bg-emerald-500/5 border border-emerald-500/15 rounded-xl text-xs space-y-2">
-                                              <div className="flex justify-between items-center">
-                                                <div className="flex items-center space-x-2">
-                                                  <strong className="text-slate-900 dark:text-white text-sm uppercase">{sub.plan?.name}</strong>
-                                                  {isCustom && <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold uppercase border border-amber-500/20">CUSTOM</span>}
-                                                </div>
-                                                <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold uppercase">ACTIVE</span>
-                                              </div>
-                                              <div className="text-slate-600 dark:text-slate-400 leading-relaxed">
-                                                <div className="flex justify-between">
-                                                  <span>Purchase Price:</span>
-                                                  <span className="font-bold text-slate-800 dark:text-slate-200">
-                                                    ₹{(sub.amountTotal ?? (!gstEnabled ? sub.plan?.price : (gstCalculationType === 'EXCLUSIVE' ? Math.round(sub.plan?.price * 1.18) : sub.plan?.price))).toLocaleString()}
-                                                  </span>
-                                                </div>
-                                                <div className="flex justify-between"><span>Start Date:</span> <span className="font-mono text-slate-700 dark:text-slate-300">{new Date(sub.startDate).toLocaleDateString('en-IN')}</span></div>
-                                                <div className="flex justify-between"><span>Expiry Date:</span> <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{new Date(sub.endDate).toLocaleDateString('en-IN')}</span></div>
-                                              </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    ) : (
-                                      <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No active subscriptions currently.</div>
-                                    )}
-                                  </div>
+                                       const hadCancellations = (selectedClient.subscriptions || []).some((s: any) => s.status === 'CANCELLED' || Boolean(s.cancellationEffectiveDate));
+
+                                       if (activeSubs.length === 0) {
+                                         return hadCancellations ? (
+                                           <div className="text-rose-500 dark:text-rose-400 text-xs py-4 text-center border border-dashed border-rose-400/30 rounded-lg bg-rose-500/5 font-medium flex items-center justify-center gap-2">
+                                             <AlertCircle className="w-4 h-4 text-rose-500" />
+                                             <span>All subscriptions have been cancelled. No active services currently.</span>
+                                           </div>
+                                         ) : (
+                                           <div className="text-slate-500 dark:text-slate-500 text-xs py-4 text-center border border-dashed border-slate-400 dark:border-white/10 rounded-lg">No active subscriptions currently.</div>
+                                         );
+                                       }
+
+                                       return (
+                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                           {activeSubs.map((sub: any) => {
+                                             const planStdPrice = !gstEnabled ? (sub.plan?.price || 0) : (gstCalculationType === 'EXCLUSIVE' ? Math.round((sub.plan?.price || 0) * 1.18) : (sub.plan?.price || 0));
+                                             const isCustomAmount = sub.amountTotal != null && Math.abs(sub.amountTotal - planStdPrice) > 2;
+                                             const defaultDays = (sub.plan?.durationMonths || 1) * 30;
+                                             const actualDays = Math.round((new Date(sub.endDate).getTime() - new Date(sub.startDate).getTime()) / (1000 * 60 * 60 * 24));
+                                             const isCustomDays = Math.abs(actualDays - defaultDays) > 4;
+                                             const isCustom = isCustomAmount || isCustomDays;
+                                             const isCancellationScheduled = sub.cancellationEffectiveDate && new Date(sub.cancellationEffectiveDate).getTime() > now.getTime();
+                                             const origEndDate = sub.originalEndDate ? new Date(sub.originalEndDate) : (isCancellationScheduled && sub.plan?.durationMonths ? new Date(new Date(sub.startDate).getTime() + sub.plan.durationMonths * 30 * 86400000) : new Date(sub.endDate));
+
+                                             return (
+                                               <div key={sub.id || sub._id} className={`p-4 rounded-xl text-xs space-y-2 border ${isCancellationScheduled ? 'bg-amber-500/5 border-amber-500/20' : 'bg-emerald-500/5 border-emerald-500/15'}`}>
+                                                 <div className="flex justify-between items-center">
+                                                   <div className="flex items-center space-x-2">
+                                                     <strong className="text-slate-900 dark:text-white text-sm uppercase">{sub.plan?.name}</strong>
+                                                     {isCustom && <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold uppercase border border-amber-500/20">CUSTOM</span>}
+                                                   </div>
+                                                   {isCancellationScheduled ? (
+                                                     <span className="px-1.5 py-0.5 rounded text-[8px] bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold uppercase border border-amber-500/30">CANCELLATION SCHEDULED</span>
+                                                   ) : (
+                                                     <span className="px-1.5 py-0.5 rounded text-[8px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold uppercase">ACTIVE</span>
+                                                   )}
+                                                 </div>
+                                                 <div className="text-slate-600 dark:text-slate-400 leading-relaxed">
+                                                   <div className="flex justify-between">
+                                                     <span>Purchase Price:</span>
+                                                     <span className="font-bold text-slate-800 dark:text-slate-200">
+                                                       ₹{(sub.amountTotal ?? (!gstEnabled ? sub.plan?.price : (gstCalculationType === 'EXCLUSIVE' ? Math.round(sub.plan?.price * 1.18) : sub.plan?.price))).toLocaleString()}
+                                                     </span>
+                                                   </div>
+                                                   <div className="flex justify-between"><span>Start Date:</span> <span className="font-mono text-slate-700 dark:text-slate-300">{new Date(sub.startDate).toLocaleDateString('en-IN')}</span></div>
+                                                   <div className="flex justify-between items-center">
+                                                     <span>Expiry Date:</span>
+                                                     {isCancellationScheduled ? (
+                                                       <div className="text-right">
+                                                         <span className="line-through text-slate-400 text-xs font-mono mr-1.5">{origEndDate.toLocaleDateString('en-IN')}</span>
+                                                         <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">{new Date(sub.cancellationEffectiveDate).toLocaleDateString('en-IN')}</span>
+                                                         <span className="block text-[9px] text-amber-600 dark:text-amber-400 font-semibold">(Terminates Early)</span>
+                                                       </div>
+                                                     ) : (
+                                                       <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{new Date(sub.endDate).toLocaleDateString('en-IN')}</span>
+                                                     )}
+                                                   </div>
+                                                 </div>
+                                               </div>
+                                             );
+                                           })}
+                                         </div>
+                                       );
+                                     })()}
+                                   </div>
 
                                   {/* Full log table */}
                                   <div className="glassmorphism rounded-xl border border-slate-300 dark:border-white/5 overflow-hidden">
@@ -13862,20 +14600,116 @@ function AdminDashboardContent() {
                                           cell: (sub: any) => <span className="font-mono text-slate-600 dark:text-slate-400">{new Date(sub.startDate).toLocaleDateString('en-IN')}</span>
                                         },
                                         {
-                                          name: 'Expiry Date',
-                                          cell: (sub: any) => <span className="font-mono text-slate-600 dark:text-slate-400">{new Date(sub.endDate).toLocaleDateString('en-IN')}</span>
-                                        },
+                                           name: 'Expiry Date',
+                                           cell: (sub: any) => {
+                                             const isCancelled = sub.status === 'CANCELLED' || Boolean(sub.cancellationEffectiveDate);
+                                             const origEnd = sub.originalEndDate
+                                               ? new Date(sub.originalEndDate)
+                                               : (isCancelled && sub.plan?.durationMonths ? new Date(new Date(sub.startDate).getTime() + sub.plan.durationMonths * 30 * 86400000) : new Date(sub.endDate));
+                                             const currEnd = sub.cancellationEffectiveDate ? new Date(sub.cancellationEffectiveDate) : new Date(sub.endDate);
+                                             const hasDateChanged = isCancelled && origEnd.getTime() !== currEnd.getTime();
+
+                                             if (hasDateChanged) {
+                                               return (
+                                                 <div className="font-mono text-xs">
+                                                   <span className="line-through text-slate-400 block text-[10px]">{origEnd.toLocaleDateString('en-IN')}</span>
+                                                   <span className={sub.status === 'CANCELLED' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-amber-600 dark:text-amber-400 font-bold'}>
+                                                     {currEnd.toLocaleDateString('en-IN')}
+                                                   </span>
+                                                 </div>
+                                               );
+                                             }
+
+                                             return (
+                                               <span className={`font-mono ${sub.status === 'CANCELLED' ? 'line-through text-rose-500/70' : 'text-slate-600 dark:text-slate-400'}`}>
+                                                 {currEnd.toLocaleDateString('en-IN')}
+                                               </span>
+                                             );
+                                           }
+                                         },
                                         {
                                           name: 'Status',
-                                          right: true,
                                           cell: (sub: any) => {
                                             const displayStatus = getDisplayStatus(sub);
                                             const statusClass = displayStatus === 'ACTIVE'
                                               ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                                              : displayStatus === 'EXPIRED'
+                                              : displayStatus === 'CANCELLATION SCHEDULED'
                                                 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20';
+                                                : displayStatus === 'EXPIRED'
+                                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20';
                                             return <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase ${statusClass}`}>{displayStatus}</span>;
+                                          }
+                                        },
+                                        {
+                                          name: 'Action',
+                                          right: true,
+                                          cell: (sub: any) => {
+                                            const isCancelled = sub.status === 'CANCELLED';
+                                            if (isCancelled) {
+                                              return <span className="text-[10px] text-slate-400 italic">Cancelled</span>;
+                                            }
+
+                                            const isScheduled = Boolean(sub.cancellationEffectiveDate && new Date(sub.cancellationEffectiveDate) > new Date());
+                                            if (isScheduled) {
+                                              return (
+                                                <span
+                                                  className="px-2 py-0.5 rounded text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20"
+                                                  title={`Cancellation scheduled for ${new Date(sub.cancellationEffectiveDate).toLocaleDateString('en-IN')}`}
+                                                >
+                                                  Terminates {new Date(sub.cancellationEffectiveDate).toLocaleDateString('en-IN')}
+                                                </span>
+                                              );
+                                            }
+
+                                            const isExpired = sub.status === 'EXPIRED' || new Date(sub.endDate) <= new Date();
+                                            if (isExpired) {
+                                              return <span className="text-[10px] text-slate-400 font-medium">Expired</span>;
+                                            }
+
+                                            // Check if any newer active renewal exists for the same plan (LIFO Queue Rule)
+                                            const subPlanId = String(sub.planId?._id || sub.planId?.id || sub.planId || sub.plan?._id || sub.plan?.id || '');
+                                            const subEndDate = new Date(sub.endDate).getTime();
+                                            const allSubs: any[] = selectedClient?.subscriptions || [];
+                                            const hasNewerActiveRenewal = allSubs.some((other: any) => {
+                                              if (String(other._id || other.id) === String(sub._id || sub.id)) return false;
+                                              if (other.status === 'CANCELLED') return false;
+                                              if (new Date(other.endDate) <= new Date()) return false;
+                                              const otherPlanId = String(other.planId?._id || other.planId?.id || other.planId || other.plan?._id || other.plan?.id || '');
+                                              const isSamePlan = subPlanId && otherPlanId && subPlanId === otherPlanId;
+                                              return isSamePlan && new Date(other.endDate).getTime() > subEndDate;
+                                            });
+
+                                            if (hasNewerActiveRenewal) {
+                                              return (
+                                                <span
+                                                  className="px-2 py-0.5 rounded text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 cursor-help"
+                                                  title="Sequential Queue (LIFO): The latest renewal ending after this plan must be cancelled first."
+                                                >
+                                                  Queued (Locked)
+                                                </span>
+                                              );
+                                            }
+
+                                            return (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setCancelSubTarget(sub);
+                                                  const isZeroAmt = Number(sub.amountTotal ?? sub.plan?.price ?? 0) <= 0;
+                                                  setCancelSubType(isZeroAmt ? 'ONLY_CANCEL' : 'CANCEL_AND_REFUND');
+                                                  setCancelEffectiveDate(new Date().toISOString().split('T')[0]);
+                                                  setCancelRefundMode('WITH_GST');
+                                                  setCancelSendEmail(true);
+                                                  setCancelSendPdf(true);
+                                                  setCancelRemarks('');
+                                                  setIsCancelSubModalOpen(true);
+                                                }}
+                                                className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-500/10 text-rose-600 hover:bg-rose-500/20 border border-rose-500/20 transition cursor-pointer"
+                                              >
+                                                Cancel / Refund
+                                              </button>
+                                            );
                                           }
                                         }
                                       ]}
@@ -13985,6 +14819,212 @@ function AdminDashboardContent() {
                       )})()}
                     </div>
                   )}
+
+                  
+
+                      {/* ====================================================
+                          SEGMENT DETAILED TIMELINE & HISTORY MODAL
+                          ==================================================== */}
+                      {isSegmentHistoryModalOpen && selectedSegmentHistory && (
+                        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                          <div className="w-full max-w-3xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                            {/* Modal Header */}
+                            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/60">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                                  <Layers className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                                      {selectedSegmentHistory.name} Service History & Timeline
+                                    </h3>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                                      selectedSegmentHistory.displayStatus === 'ACTIVE'
+                                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                        : selectedSegmentHistory.displayStatus === 'CANCELLATION_SCHEDULED'
+                                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                          : selectedSegmentHistory.displayStatus === 'PLAN_CANCELLED'
+                                            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                            : selectedSegmentHistory.displayStatus === 'EXPIRED'
+                                              ? 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30'
+                                              : 'bg-slate-500/10 text-slate-500 border-slate-500/20'
+                                    }`}>
+                                      {selectedSegmentHistory.displayStatus.replace('_', ' ')}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                    Client: <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedClient?.name || selectedClient?.fullName || selectedClient?.id}</span> (ID: <span className="font-mono">{selectedClient?.id}</span>)
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setIsSegmentHistoryModalOpen(false);
+                                  setSelectedSegmentHistory(null);
+                                }}
+                                className="w-8 h-8 rounded-xl bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Summary KPI Strip */}
+                            <div className="grid grid-cols-3 gap-3 p-4 bg-slate-100/50 dark:bg-slate-950/30 border-b border-slate-200 dark:border-white/5 text-xs">
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Current Effective Expiry</span>
+                                <div className="font-mono font-bold text-sm text-slate-900 dark:text-white">
+                                  {selectedSegmentHistory.effectiveExpiry
+                                    ? new Date(selectedSegmentHistory.effectiveExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                                    : '—'}
+                                </div>
+                                {selectedSegmentHistory.displayStatus === 'PLAN_CANCELLED' && (
+                                  <span className="text-[10px] text-rose-500 font-semibold block">All plans cancelled</span>
+                                )}
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Original Scheduled Expiry</span>
+                                <div className="font-mono font-bold text-sm text-slate-900 dark:text-white">
+                                  {selectedSegmentHistory.originalExpiry ? (
+                                    <span className={selectedSegmentHistory.hasCancellations || selectedSegmentHistory.displayStatus === 'PLAN_CANCELLED' ? 'line-through text-slate-400' : ''}>
+                                      {new Date(selectedSegmentHistory.originalExpiry).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                    </span>
+                                  ) : '—'}
+                                </div>
+                                <span className="text-[10px] text-slate-400 block">
+                                  {selectedSegmentHistory.hasCancellations ? 'Shortened due to cancellation' : 'Normal scheduled tenure'}
+                                </span>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/5 space-y-1">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Purchases</span>
+                                <div className="font-bold text-sm text-slate-900 dark:text-white">
+                                  {selectedSegmentHistory.history.length} Plan(s)
+                                </div>
+                                <span className="text-[10px] text-slate-400 block">
+                                  {selectedSegmentHistory.history.filter((h: any) => h.isCancelled).length} Cancelled / Modified
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* History Table */}
+                            <div className="p-6 overflow-y-auto flex-grow space-y-4">
+                              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5 text-blue-500" />
+                                <span>Chronological Plan Allocation & Cancellation Events</span>
+                              </h4>
+
+                              {selectedSegmentHistory.history.length === 0 ? (
+                                <div className="text-center py-8 text-xs text-slate-500">No subscription history recorded for this segment.</div>
+                              ) : (
+                                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10">
+                                  <table className="w-full text-xs text-left">
+                                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-[10px] text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-white/10">
+                                      <tr>
+                                        <th className="p-3">#</th>
+                                        <th className="p-3">Plan Name</th>
+                                        <th className="p-3">Start Date</th>
+                                        <th className="p-3">Original Expiry</th>
+                                        <th className="p-3">Effective Expiry / End</th>
+                                        <th className="p-3">Status</th>
+                                        <th className="p-3">Refund & Credit Note</th>
+                                        <th className="p-3">Remarks</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200 dark:divide-white/5 font-sans">
+                                      {selectedSegmentHistory.history.map((item: any, idx: number) => {
+                                        const origStr = item.originalEndDate ? new Date(item.originalEndDate).toLocaleDateString('en-IN') : '—';
+                                        const effStr = item.cancellationEffectiveDate
+                                          ? new Date(item.cancellationEffectiveDate).toLocaleDateString('en-IN')
+                                          : new Date(item.endDate).toLocaleDateString('en-IN');
+                                        const hasDateChange = item.isCancelled && origStr !== effStr;
+
+                                        return (
+                                          <tr key={item.subId || idx} className="hover:bg-slate-50/50 dark:hover:bg-white/5 transition">
+                                            <td className="p-3 font-mono text-slate-400">{idx + 1}</td>
+                                            <td className="p-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">{item.planName}</td>
+                                            <td className="p-3 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                              {new Date(item.startDate).toLocaleDateString('en-IN')}
+                                            </td>
+                                            <td className="p-3 font-mono whitespace-nowrap">
+                                              <span className={hasDateChange ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-300'}>
+                                                {origStr}
+                                              </span>
+                                            </td>
+                                            <td className="p-3 font-mono whitespace-nowrap">
+                                              <span className={item.status === 'CANCELLED' ? 'text-rose-600 dark:text-rose-400 font-bold' : item.status === 'CANCELLATION SCHEDULED' ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'}>
+                                                {effStr}
+                                              </span>
+                                              {item.cancellationEffectiveDate && (
+                                                <span className="block text-[9px] text-amber-600 dark:text-amber-400 font-sans">
+                                                  {item.status === 'CANCELLATION SCHEDULED' ? 'Scheduled Termination' : 'Cancelled on date'}
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="p-3 whitespace-nowrap">
+                                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                                item.status === 'ACTIVE'
+                                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                                  : item.status === 'CANCELLATION SCHEDULED'
+                                                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                                    : item.status === 'EXPIRED'
+                                                      ? 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20'
+                                                      : 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20'
+                                              }`}>
+                                                {item.status}
+                                              </span>
+                                            </td>
+                                            <td className="p-3 text-[11px] whitespace-nowrap">
+                                              {item.refundAmount != null && item.refundAmount > 0 ? (
+                                                <div className="space-y-0.5">
+                                                  <span className="font-bold text-rose-600 dark:text-rose-400">
+                                                    ₹{Number(item.refundAmount).toLocaleString('en-IN')} Refunded
+                                                  </span>
+                                                  {item.creditNoteNumber && (
+                                                    <span className="text-[9px] font-mono text-slate-500 block">
+                                                      CN: {item.creditNoteNumber}
+                                                    </span>
+                                                  )}
+                                                  {item.refundMode && (
+                                                    <span className="text-[8px] px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 block w-fit">
+                                                      {item.refundMode}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              ) : item.isCancelled ? (
+                                                <span className="text-slate-500 text-[10px]">Cancelled (No Refund)</span>
+                                              ) : (
+                                                <span className="text-slate-400 text-[10px]">Fully Subscribed</span>
+                                              )}
+                                            </td>
+                                            <td className="p-3 text-[11px] text-slate-600 dark:text-slate-400 max-w-[180px] truncate" title={item.refundRemarks || '—'}>
+                                              {item.refundRemarks || '—'}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Modal Footer */}
+                            <div className="px-6 py-3 border-t border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-800/40 flex justify-end">
+                              <button
+                                onClick={() => {
+                                  setIsSegmentHistoryModalOpen(false);
+                                  setSelectedSegmentHistory(null);
+                                }}
+                                className="px-4 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+                              >
+                                Close History
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                   {/* ====================================================
                    PLAN MANAGEMENT TAB

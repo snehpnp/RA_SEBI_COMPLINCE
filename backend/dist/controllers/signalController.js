@@ -43,9 +43,35 @@ const createSignal = async (req, res) => {
         const tenantId = req.user.tenantId;
         const userId = req.user.id;
         const { segment, categoryIds, planCategoryIds, planIds, callType, tradeDuration, stockId, expiryDate, strikePrice, optionType, entryPrice, entryType, suggestedQuantity, target1, target2, target3, stoploss, description } = req.body;
+        const isQuickTrade = req.body.isQuickTrade === 'true' || req.body.isQuickTrade === true || (typeof description === 'string' && description.startsWith('Quick Dispatch:'));
+        const source = req.body.source || (isQuickTrade ? 'QUICK_TRADE' : 'MANUAL');
         let reportUrl = null;
         if (req.file) {
             reportUrl = `/uploads/research/${req.file.filename}`;
+        }
+        // Resolve stockId: if passed as symbol name (e.g. 'NIFTY', 'BANKNIFTY') or invalid ObjectId, resolve or create it
+        let resolvedStockId = stockId;
+        if (stockId && (!mongoose_1.default.Types.ObjectId.isValid(stockId) || typeof stockId === 'string')) {
+            if (!mongoose_1.default.Types.ObjectId.isValid(stockId)) {
+                const found = await db_1.default.Stock.findOne({
+                    $or: [
+                        { symbol: stockId.toUpperCase() },
+                        { symbol: { $regex: new RegExp(`^${stockId}$`, 'i') } },
+                        { name: { $regex: new RegExp(`^${stockId}$`, 'i') } }
+                    ]
+                }).lean();
+                if (found) {
+                    resolvedStockId = found._id;
+                }
+                else {
+                    const newStock = await db_1.default.Stock.create({
+                        symbol: stockId.toUpperCase(),
+                        name: stockId.toUpperCase(),
+                        exchange: 'NSE'
+                    });
+                    resolvedStockId = newStock._id;
+                }
+            }
         }
         const userRole = req.user.role;
         const isFullAdmin = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
@@ -135,7 +161,7 @@ const createSignal = async (req, res) => {
                 planId: pId,
                 callType,
                 tradeDuration,
-                stockId,
+                stockId: resolvedStockId,
                 expiryDate: expiryDate ? new Date(expiryDate) : null,
                 strikePrice: strikePrice ? parseFloat(strikePrice) : null,
                 optionType: optionType || null,
@@ -149,7 +175,9 @@ const createSignal = async (req, res) => {
                 description,
                 reportUrl,
                 createdById: userId,
-                status: 'OPEN'
+                status: 'OPEN',
+                source,
+                isQuickTrade
             });
             createdSignals.push({
                 ...newSignal.toObject(),
@@ -161,7 +189,7 @@ const createSignal = async (req, res) => {
         // Broadcast real-time alerts asynchronously in the background
         setImmediate(async () => {
             try {
-                const stockDoc = await db_1.default.Stock.findById(stockId).lean();
+                const stockDoc = await db_1.default.Stock.findById(resolvedStockId).lean();
                 const stockSymbol = stockDoc?.symbol || 'Trade Signal';
                 const user = req.user;
                 const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
@@ -547,6 +575,8 @@ const listSignals = async (req, res) => {
                 stockName: matchedStock?.name || '',
                 planName: (s.categoryId && map.get(s.categoryId.toString())) || (pIdStr && map.get(pIdStr)) || pIdStr || '',
                 createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
+                source: s.source || (s.isQuickTrade || (typeof s.description === 'string' && s.description.startsWith('Quick Dispatch:')) ? 'QUICK_TRADE' : 'MANUAL'),
+                isQuickTrade: Boolean(s.isQuickTrade || s.source === 'QUICK_TRADE' || (typeof s.description === 'string' && s.description.startsWith('Quick Dispatch:'))),
                 ...potential
             };
         });
@@ -567,6 +597,10 @@ const closeSignal = async (req, res) => {
             .lean();
         if (!signal) {
             return res.status(404).json({ success: false, message: 'Signal not found' });
+        }
+        // Validation: Partially closed trades require at least Target 1
+        if (closeStatus === 'Partially Closed' && (!closeTargets || closeTargets.trim() === '')) {
+            return res.status(400).json({ success: false, message: 'Please select at least Target 1 to partially close the trade.' });
         }
         const updatedSignal = await db_1.default.Signal.findByIdAndUpdate(id, {
             $set: {

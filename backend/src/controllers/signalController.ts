@@ -47,9 +47,36 @@ export const createSignal = async (req: Request, res: Response) => {
       target1, target2, target3, stoploss, description
     } = req.body;
 
+    const isQuickTrade = req.body.isQuickTrade === 'true' || req.body.isQuickTrade === true || (typeof description === 'string' && description.startsWith('Quick Dispatch:'));
+    const source = req.body.source || (isQuickTrade ? 'QUICK_TRADE' : 'MANUAL');
+
     let reportUrl = null;
     if (req.file) {
       reportUrl = `/uploads/research/${req.file.filename}`;
+    }
+
+    // Resolve stockId: if passed as symbol name (e.g. 'NIFTY', 'BANKNIFTY') or invalid ObjectId, resolve or create it
+    let resolvedStockId: any = stockId;
+    if (stockId && (!mongoose.Types.ObjectId.isValid(stockId) || typeof stockId === 'string')) {
+      if (!mongoose.Types.ObjectId.isValid(stockId)) {
+        const found = await dynamicDb.Stock.findOne({
+          $or: [
+            { symbol: (stockId as string).toUpperCase() },
+            { symbol: { $regex: new RegExp(`^${stockId}$`, 'i') } },
+            { name: { $regex: new RegExp(`^${stockId}$`, 'i') } }
+          ]
+        }).lean();
+        if (found) {
+          resolvedStockId = found._id;
+        } else {
+          const newStock = await dynamicDb.Stock.create({
+            symbol: (stockId as string).toUpperCase(),
+            name: (stockId as string).toUpperCase(),
+            exchange: 'NSE'
+          });
+          resolvedStockId = newStock._id;
+        }
+      }
     }
 
     const userRole = (req as any).user.role;
@@ -144,7 +171,7 @@ export const createSignal = async (req: Request, res: Response) => {
         planId: pId,
         callType,
         tradeDuration,
-        stockId,
+        stockId: resolvedStockId,
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         strikePrice: strikePrice ? parseFloat(strikePrice) : null,
         optionType: optionType || null,
@@ -158,7 +185,9 @@ export const createSignal = async (req: Request, res: Response) => {
         description,
         reportUrl,
         createdById: userId,
-        status: 'OPEN'
+        status: 'OPEN',
+        source,
+        isQuickTrade
       });
 
       createdSignals.push({
@@ -173,7 +202,7 @@ export const createSignal = async (req: Request, res: Response) => {
     // Broadcast real-time alerts asynchronously in the background
     setImmediate(async () => {
       try {
-        const stockDoc = await dynamicDb.Stock.findById(stockId).lean();
+        const stockDoc = await dynamicDb.Stock.findById(resolvedStockId).lean();
         const stockSymbol = stockDoc?.symbol || 'Trade Signal';
         const user = (req as any).user;
         const researcherName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.name || 'Researcher';
@@ -604,6 +633,8 @@ export const listSignals = async (req: Request, res: Response) => {
         stockName: matchedStock?.name || '',
         planName: (s.categoryId && map.get(s.categoryId.toString())) || (pIdStr && map.get(pIdStr)) || pIdStr || '',
         createdByName: (cIdStr && userMap.get(cIdStr)) || 'Unknown Researcher',
+        source: s.source || (s.isQuickTrade || (typeof s.description === 'string' && s.description.startsWith('Quick Dispatch:')) ? 'QUICK_TRADE' : 'MANUAL'),
+        isQuickTrade: Boolean(s.isQuickTrade || s.source === 'QUICK_TRADE' || (typeof s.description === 'string' && s.description.startsWith('Quick Dispatch:'))),
         ...potential
       };
     });
@@ -626,6 +657,11 @@ export const closeSignal = async (req: Request, res: Response) => {
 
     if (!signal) {
       return res.status(404).json({ success: false, message: 'Signal not found' });
+    }
+
+    // Validation: Partially closed trades require at least Target 1
+    if (closeStatus === 'Partially Closed' && (!closeTargets || closeTargets.trim() === '')) {
+      return res.status(400).json({ success: false, message: 'Please select at least Target 1 to partially close the trade.' });
     }
 
     const updatedSignal = await dynamicDb.Signal.findByIdAndUpdate(

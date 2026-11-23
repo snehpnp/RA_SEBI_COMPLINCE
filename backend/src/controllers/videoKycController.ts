@@ -19,9 +19,7 @@ export const getVideoKycUploadDir = () => {
     path.resolve(process.cwd(), '../uploads'),
     path.resolve(process.cwd(), 'uploads'),
     path.resolve(__dirname, '../../uploads'),
-    path.resolve(__dirname, '../../../uploads'),
-    'A:/RA_SEBI_COMPLINCE/uploads',
-    'A:/RA_SEBI_COMPLINCE/backend/uploads'
+    path.resolve(__dirname, '../../../uploads')
   ];
   let root = path.resolve(process.cwd(), 'uploads');
   for (const c of candidates) {

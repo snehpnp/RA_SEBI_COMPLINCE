@@ -1211,7 +1211,7 @@ export default function ComplianceCalendarModal({
                         {selectedEvent.proofDocumentUrl && (
                           <div className="pt-2">
                             <a
-                              href={selectedEvent.proofDocumentUrl}
+                              href={selectedEvent.proofDocumentUrl.startsWith('http') ? selectedEvent.proofDocumentUrl : `${api.getBaseUrl()}${selectedEvent.proofDocumentUrl.startsWith('/') ? '' : '/'}${selectedEvent.proofDocumentUrl}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm"

@@ -57,6 +57,7 @@ const querystring_1 = __importDefault(require("querystring"));
 const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
 const telegramService_1 = require("../services/telegramService");
+const TenantSubscription_1 = __importDefault(require("../models/TenantSubscription"));
 const registerClient = async (req, res) => {
     const { tenantId: passedTenantId, name, email, mobile, password, pan, aadhaar, category, occupation, addressLine1, city, state, zipCode, createdById } = req.body;
     const authHeader = req.headers.authorization;
@@ -91,6 +92,34 @@ const registerClient = async (req, res) => {
         }
         if (!tenant) {
             return res.status(404).json({ success: false, message: 'Company setup pending. Please contact admin.' });
+        }
+        // --- ENFORCE PLATFORM SAAS ACTIVE CLIENT CAPACITY LIMIT ---
+        try {
+            const activeTenantSub = await TenantSubscription_1.default.findOne({
+                $or: [
+                    { tenantId },
+                    { tenantId: (tenant._id || tenant.id) }
+                ],
+                status: 'ACTIVE'
+            }).sort({ createdAt: -1 }).lean();
+            if (activeTenantSub && activeTenantSub.maxActiveClients > 0) {
+                const currentActiveClients = await db_1.default.Client.countDocuments({
+                    tenantId: tenant._id || tenant.id,
+                    status: 'ACTIVE'
+                });
+                if (currentActiveClients >= activeTenantSub.maxActiveClients) {
+                    return res.status(403).json({
+                        success: false,
+                        message: `Active client capacity limit reached! Your SaaS plan allows up to ${activeTenantSub.maxActiveClients} active clients (${currentActiveClients} currently registered and active). Please upgrade your platform subscription to onboard new clients.`,
+                        limitReached: true,
+                        maxActiveClients: activeTenantSub.maxActiveClients,
+                        currentActiveClients
+                    });
+                }
+            }
+        }
+        catch (quotaCheckErr) {
+            console.error('Active client quota check error:', quotaCheckErr);
         }
         // Dynamic Password Policy Enforcement
         if (!password || password.length < 8 || password.length > 15) {

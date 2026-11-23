@@ -50,6 +50,7 @@ exports.sendTestEmail = sendTestEmail;
 exports.sendSignedAgreementEmail = sendSignedAgreementEmail;
 exports.sendTaxInvoiceEmail = sendTaxInvoiceEmail;
 exports.sendVideoKycInviteEmail = sendVideoKycInviteEmail;
+exports.sendSubscriptionCancellationEmail = sendSubscriptionCancellationEmail;
 const mongoose_1 = __importDefault(require("mongoose"));
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const db_1 = __importStar(require("../config/db"));
@@ -927,4 +928,136 @@ async function sendVideoKycInviteEmail(tenantId, toEmail, clientName, companyNam
         headerIcon: '📹'
     });
     return sendEmail(tenantId, toEmail, subject, html);
+}
+/**
+ * Send Subscription Cancellation & Refund Notification Email to Client
+ */
+async function sendSubscriptionCancellationEmail(opts) {
+    const { tenantId, toEmail, clientName, companyName, planName, effectiveDate, isRefunded, refundMode, refundAmount, refundBaseAmount, refundGstAmount, creditNoteNumber, pdfBuffer, remarks, totalDays, daysUsed, remainingDays, originalStartDate, originalEndDate, originalAmount } = opts;
+    const displayCompany = companyName || 'Research Analyst Services';
+    const displayPlan = planName || 'Research Service Plan';
+    const formattedEffectiveDate = new Date(effectiveDate).toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+    });
+    const subject = isRefunded
+        ? `Subscription Cancellation & Refund Notice (${displayPlan}) — ${displayCompany}`
+        : `Subscription Cancellation Notice (${displayPlan}) — ${displayCompany}`;
+    const attachments = [];
+    if (pdfBuffer && Buffer.isBuffer(pdfBuffer)) {
+        attachments.push({
+            filename: `Credit_Note_${(creditNoteNumber || 'Refund').replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+        });
+    }
+    const customContent = `
+    <div style="font-size: 15px; color: #1e293b; line-height: 1.6; margin-bottom: 20px;">
+      Dear <strong>${clientName}</strong>,
+      <br/><br/>
+      We are writing to formally notify you that your research service subscription for <strong>${displayPlan}</strong> has been cancelled effective from <strong>${formattedEffectiveDate}</strong>.
+      ${remarks ? `<br/><br/><em>Reason / Remarks: ${remarks}</em>` : ''}
+    </div>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin: 0 0 24px; padding: 16px 20px;">
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Subscribed Plan:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">${displayPlan}</td>
+      </tr>
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Subscription Status:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #dc2626; text-align: right;">TERMINATED / CANCELLED</td>
+      </tr>
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Effective Cancellation Date:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #dc2626; text-align: right;">${formattedEffectiveDate}</td>
+      </tr>
+
+      ${totalDays ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Total Plan Validity:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">${totalDays} Days</td>
+      </tr>` : ''}
+
+      ${daysUsed != null ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Service Availed / Utilized:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">${daysUsed} Days</td>
+      </tr>` : ''}
+
+      ${remainingDays != null ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #b91c1c; font-weight: 600;">Cancelled Service Days (Unutilized):</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 800; color: #b91c1c; text-align: right;">${remainingDays} Days Cancelled</td>
+      </tr>` : ''}
+
+      ${originalAmount ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Original Plan Fee Paid:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">₹${Number(originalAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+      </tr>` : ''}
+
+      ${isRefunded ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Refund Mode:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">
+          ${refundMode === 'WITH_GST' ? 'Refund with GST Reversal' : 'Refund without GST (Statutory Tax Retained)'}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">Base Fee Refunded:</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">₹${Number(refundBaseAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+      </tr>
+      ${refundMode === 'WITH_GST' ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 13px; color: #64748b;">GST Reversal (18%):</td>
+        <td style="padding: 6px 0; font-size: 13.5px; font-weight: 700; color: #1e293b; text-align: right;">₹${Number(refundGstAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+      </tr>` : ''}
+      <tr>
+        <td style="padding: 8px 0 0; font-size: 13.5px; font-weight: 700; color: #1e293b; border-top: 1px dashed #cbd5e1;">Approved Net Refund Payout:</td>
+        <td style="padding: 8px 0 0; font-size: 16px; font-weight: 800; color: #059669; text-align: right; border-top: 1px dashed #cbd5e1;">₹${Number(refundAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+      </tr>
+      ${creditNoteNumber ? `
+      <tr>
+        <td style="padding: 6px 0; font-size: 12px; color: #64748b;">Credit Note Reference:</td>
+        <td style="padding: 6px 0; font-size: 12px; font-family: monospace; color: #475569; text-align: right;">${creditNoteNumber}</td>
+      </tr>` : ''}
+      ` : ''}
+    </table>
+
+    ${isRefunded && Number(refundAmount || 0) > 0 ? `
+    <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 14px 18px; margin: 0 0 20px;">
+      <div style="font-weight: 700; color: #166534; font-size: 13px; margin-bottom: 3px;">
+        💳 Refund Disbursement Information
+      </div>
+      <div style="color: #15803d; font-size: 12px; line-height: 1.5;">
+        The approved refund amount of <strong>₹${Number(refundAmount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> has been initiated and will reflect in your registered bank account / original payment source within 3 to 5 business days.
+      </div>
+    </div>
+    ` : ''}
+
+    ${pdfBuffer && Buffer.isBuffer(pdfBuffer) ? `
+    <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 16px 18px; margin: 0 0 24px;">
+      <div style="font-weight: 800; color: #b91c1c; font-size: 13.5px; margin-bottom: 4px;">
+        📎 Official Credit Note / Cancellation Memo Attached
+      </div>
+      <div style="color: #991b1b; font-size: 12.5px; line-height: 1.5;">
+        A digitally generated Tax Credit Note / Cancellation Advice has been attached to this email. Please preserve this document for your accounting and taxation records.
+      </div>
+    </div>
+    ` : ''}
+
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; font-size: 12px; color: #475569; line-height: 1.5;">
+      If you have any questions regarding your account or this cancellation, please contact our compliance desk at <a href="mailto:${toEmail}" style="color: #2563eb;">our official support email</a>.
+    </div>
+  `;
+    const html = wrapInBrandedHtmlEmail({
+        title: isRefunded ? 'Subscription Cancellation & Refund Advice' : 'Subscription Cancellation Advice',
+        companyName: displayCompany,
+        content: customContent,
+        headerGradient: 'linear-gradient(135deg, #991b1b 0%, #b91c1c 100%)',
+        headerIcon: '📄'
+    });
+    return sendEmail(tenantId, toEmail, subject, html, attachments);
 }

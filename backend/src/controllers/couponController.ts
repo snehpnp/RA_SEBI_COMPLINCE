@@ -2,6 +2,39 @@ import { Request, Response } from 'express';
 import dynamicDb from '../config/db';
 import { AuthenticatedRequest } from '../middlewares/auth';
 
+export const parseExpiryEndOfDay = (dateInput: string | Date | null | undefined): Date | null => {
+  if (!dateInput) return null;
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (!trimmed) return null;
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const day = parseInt(match[3], 10);
+      return new Date(year, month, day, 23, 59, 59, 999);
+    }
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return null;
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
+export const isCouponExpired = (expiryDate: Date | string | null | undefined): boolean => {
+  if (!expiryDate) return false;
+  const d = new Date(expiryDate);
+  if (isNaN(d.getTime())) return false;
+  const effective = new Date(d);
+  if (
+    (effective.getUTCHours() === 0 && effective.getUTCMinutes() === 0 && effective.getUTCSeconds() === 0) ||
+    (effective.getHours() === 0 && effective.getMinutes() === 0 && effective.getSeconds() === 0)
+  ) {
+    effective.setHours(23, 59, 59, 999);
+  }
+  return effective.getTime() < Date.now();
+};
+
 export const getCoupons = async (req: AuthenticatedRequest, res: Response) => {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(400).json({ success: false, message: 'Invalid tenant context' });
@@ -31,6 +64,19 @@ export const createCoupon = async (req: AuthenticatedRequest, res: Response) => 
   if (discountType === 'PERCENTAGE' && parsedDiscount > 100) {
     return res.status(400).json({ success: false, message: 'Discount percentage cannot exceed 100%' });
   }
+
+  const parsedExpiry = expiryDate ? parseExpiryEndOfDay(expiryDate) : null;
+  if (parsedExpiry && isCouponExpired(parsedExpiry)) {
+    return res.status(400).json({ success: false, message: 'Expiry date cannot be in the past. Please select today or a future date.' });
+  }
+
+  let parsedLimit: number | null = null;
+  if (usageLimit !== null && usageLimit !== undefined && usageLimit !== '') {
+    parsedLimit = parseInt(usageLimit);
+    if (isNaN(parsedLimit) || parsedLimit < 1) {
+      return res.status(400).json({ success: false, message: 'Total usage limit must be at least 1' });
+    }
+  }
   
   try {
     const coupon = await dynamicDb.Coupon.create({
@@ -41,8 +87,8 @@ export const createCoupon = async (req: AuthenticatedRequest, res: Response) => 
       percentageType: percentageType || null,
       minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
       maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
-      expiryDate: expiryDate ? new Date(expiryDate) : null,
-      usageLimit: usageLimit ? parseInt(usageLimit) : null,
+      expiryDate: parsedExpiry,
+      usageLimit: clientId ? 1 : parsedLimit,
       clientId: clientId || null,
       planId: planId || null,
       categoryId: categoryId || null,
@@ -56,40 +102,50 @@ export const createCoupon = async (req: AuthenticatedRequest, res: Response) => 
 
 export const updateCoupon = async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { discountType, discountValue, percentageType, minPurchaseValue, maxDiscountValue, expiryDate, usageLimit, clientId, planId, categoryId, isPublic } = req.body;
+  const { expiryDate, usageLimit, isPublic } = req.body;
 
   if (!id || id === 'undefined' || id === 'null') {
     return res.status(400).json({ success: false, message: 'Invalid coupon ID' });
-  }
-
-  const parsedDiscount = parseFloat(discountValue);
-  if (isNaN(parsedDiscount) || parsedDiscount <= 0) {
-    return res.status(400).json({ success: false, message: 'Discount value must be greater than 0' });
-  }
-  if (discountType === 'PERCENTAGE' && parsedDiscount > 100) {
-    return res.status(400).json({ success: false, message: 'Discount percentage cannot exceed 100%' });
   }
   
   try {
     const existing = await dynamicDb.Coupon.findById(id);
     if (!existing) return res.status(404).json({ success: false, message: 'Coupon not found' });
-    
-    if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
-      return res.status(400).json({ success: false, message: 'Expired coupons cannot be edited' });
+
+    const updateFields: any = {};
+
+    // Only Expiry Date and Total Usage Limit (and optionally client visibility) are allowed to be updated
+    if (expiryDate !== undefined) {
+      if (expiryDate === null || expiryDate === '') {
+        updateFields.expiryDate = null;
+      } else {
+        const parsedExpiry = parseExpiryEndOfDay(expiryDate);
+        if (parsedExpiry && isCouponExpired(parsedExpiry)) {
+          return res.status(400).json({ success: false, message: 'Expiry date must be today or a future date' });
+        }
+        updateFields.expiryDate = parsedExpiry;
+      }
     }
 
-    const updateFields: any = {
-      discountType,
-      discountValue: parseFloat(discountValue),
-      percentageType: percentageType || null,
-      minPurchaseValue: minPurchaseValue ? parseFloat(minPurchaseValue) : null,
-      maxDiscountValue: maxDiscountValue ? parseFloat(maxDiscountValue) : null,
-      expiryDate: expiryDate ? new Date(expiryDate) : null,
-      usageLimit: usageLimit ? parseInt(usageLimit) : null,
-      clientId: clientId || null,
-      planId: planId || null,
-      categoryId: categoryId || null,
-    };
+    if (usageLimit !== undefined) {
+      if (usageLimit === null || usageLimit === '' || usageLimit === undefined) {
+        updateFields.usageLimit = null;
+      } else {
+        const parsedLimit = parseInt(usageLimit);
+        if (isNaN(parsedLimit) || parsedLimit < 1) {
+          return res.status(400).json({ success: false, message: 'Usage limit must be a positive integer or empty for unlimited' });
+        }
+        const currentUsed = existing.usedCount || 0;
+        if (parsedLimit < currentUsed) {
+          return res.status(400).json({
+            success: false,
+            message: `Total usage limit cannot be less than current usage (${currentUsed})`
+          });
+        }
+        updateFields.usageLimit = parsedLimit;
+      }
+    }
+
     if (isPublic !== undefined) {
       updateFields.isPublic = !!isPublic;
     }
@@ -133,8 +189,8 @@ export const toggleCouponStatus = async (req: AuthenticatedRequest, res: Respons
     const existing = await dynamicDb.Coupon.findById(id);
     if (!existing) return res.status(404).json({ success: false, message: 'Not found' });
     
-    if (existing.expiryDate && new Date(existing.expiryDate).getTime() < Date.now()) {
-      return res.status(400).json({ success: false, message: 'Expired coupons cannot be toggled' });
+    if (existing.expiryDate && isCouponExpired(existing.expiryDate)) {
+      return res.status(400).json({ success: false, message: 'Expired coupons cannot be activated' });
     }
 
     const coupon = await dynamicDb.Coupon.findByIdAndUpdate(
@@ -162,11 +218,11 @@ export const applyCoupon = async (req: AuthenticatedRequest, res: Response) => {
     }).lean();
     if (!coupon) return res.status(404).json({ success: false, message: 'Invalid or inactive coupon' });
 
-    if (coupon.expiryDate && new Date(coupon.expiryDate).getTime() < Date.now()) {
+    if (coupon.expiryDate && isCouponExpired(coupon.expiryDate)) {
       return res.status(400).json({ success: false, message: 'Coupon has expired' });
     }
     
-    if (coupon.usageLimit && (coupon.usedCount || 0) >= coupon.usageLimit) {
+    if (coupon.usageLimit !== null && coupon.usageLimit !== undefined && (coupon.usedCount || 0) >= coupon.usageLimit) {
       return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
     }
 
@@ -295,15 +351,19 @@ export const getClientCoupons = async (req: AuthenticatedRequest, res: Response)
     const coupons = await dynamicDb.Coupon.find({
       tenantId, 
       status: 'ACTIVE',
-      isPublic: true,
-      $or: [
-        { expiryDate: null }, 
-        { expiryDate: { $gt: new Date() } }
-      ]
+      isPublic: true
     }).lean();
 
-    // Filter by clientId matching
+    // Filter by expiry, usage limit, and clientId matching
     const validCoupons = coupons.filter((c: any) => {
+      // Exclude expired
+      if (c.expiryDate && isCouponExpired(c.expiryDate)) return false;
+
+      // Exclude if usage limit reached
+      if (c.usageLimit !== null && c.usageLimit !== undefined && (c.usedCount || 0) >= c.usageLimit) {
+        return false;
+      }
+
       if (!c.clientId) return true;
       const cClientId = String(c.clientId?._id || c.clientId?.id || c.clientId).trim();
       return (

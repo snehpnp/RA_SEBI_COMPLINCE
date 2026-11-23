@@ -41,6 +41,38 @@ const MultiSelectPills = ({ options, selectedString, onChange, disabled }: any) 
   );
 };
 
+const getTodayDateString = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatToDateInput = (dateVal: any): string => {
+  if (!dateVal) return '';
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isCouponExpired = (expiryDate: any): boolean => {
+  if (!expiryDate) return false;
+  const d = new Date(expiryDate);
+  if (isNaN(d.getTime())) return false;
+  const effective = new Date(d);
+  if (
+    (effective.getUTCHours() === 0 && effective.getUTCMinutes() === 0 && effective.getUTCSeconds() === 0) ||
+    (effective.getHours() === 0 && effective.getMinutes() === 0 && effective.getSeconds() === 0)
+  ) {
+    effective.setHours(23, 59, 59, 999);
+  }
+  return effective.getTime() < Date.now();
+};
+
 export default function CouponsManager() {
   const [coupons, setCoupons] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -98,18 +130,19 @@ export default function CouponsManager() {
   const handleOpenModal = (coupon: any = null) => {
     if (coupon) {
       setEditingCoupon(coupon);
+      const cClientId = coupon.clientId ? (coupon.clientId._id || coupon.clientId.id || coupon.clientId) : '';
       setFormData({
-        code: coupon.code,
-        discountType: coupon.discountType,
-        discountValue: coupon.discountValue.toString(),
+        code: coupon.code || '',
+        discountType: coupon.discountType || 'PERCENTAGE',
+        discountValue: (coupon.discountValue !== undefined && coupon.discountValue !== null) ? coupon.discountValue.toString() : '',
         percentageType: coupon.percentageType || 'FLAT',
-        minPurchaseValue: coupon.minPurchaseValue?.toString() || '',
-        maxDiscountValue: coupon.maxDiscountValue?.toString() || '',
-        expiryDate: coupon.expiryDate ? new Date(coupon.expiryDate).toISOString().split('T')[0] : '',
-        usageLimit: coupon.usageLimit?.toString() || '',
-        clientId: coupon.clientId || '',
-        planId: coupon.planId || '[]',
-        categoryId: coupon.categoryId || '[]',
+        minPurchaseValue: (coupon.minPurchaseValue !== undefined && coupon.minPurchaseValue !== null) ? coupon.minPurchaseValue.toString() : '',
+        maxDiscountValue: (coupon.maxDiscountValue !== undefined && coupon.maxDiscountValue !== null) ? coupon.maxDiscountValue.toString() : '',
+        expiryDate: formatToDateInput(coupon.expiryDate),
+        usageLimit: (coupon.usageLimit !== undefined && coupon.usageLimit !== null) ? coupon.usageLimit.toString() : '',
+        clientId: String(cClientId || ''),
+        planId: coupon.planId ? (typeof coupon.planId === 'string' ? coupon.planId : JSON.stringify(coupon.planId)) : '[]',
+        categoryId: coupon.categoryId ? (typeof coupon.categoryId === 'string' ? coupon.categoryId : JSON.stringify(coupon.categoryId)) : '[]',
         isPublic: !!coupon.isPublic
       });
     } else {
@@ -126,30 +159,13 @@ export default function CouponsManager() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const discVal = parseFloat(formData.discountValue);
-      if (isNaN(discVal) || discVal <= 0) {
-        toast.error('Please enter a valid discount value greater than 0');
-        return;
-      }
-      if (formData.discountType === 'PERCENTAGE' && discVal > 100) {
-        toast.error('Discount percentage cannot exceed 100%');
-        return;
-      }
+      const todayStr = getTodayDateString();
 
-      const payload = {
-        code: formData.code,
-        discountType: formData.discountType,
-        discountValue: parseFloat(formData.discountValue),
-        percentageType: formData.discountType === 'PERCENTAGE' ? formData.percentageType : null,
-        minPurchaseValue: formData.minPurchaseValue ? parseFloat(formData.minPurchaseValue) : null,
-        maxDiscountValue: (formData.discountType === 'PERCENTAGE' && formData.percentageType === 'CAPPED' && formData.maxDiscountValue) ? parseFloat(formData.maxDiscountValue) : null,
-        expiryDate: formData.expiryDate || null,
-        usageLimit: formData.clientId ? 1 : (formData.usageLimit ? parseInt(formData.usageLimit) : null),
-        clientId: formData.clientId || null,
-        planId: (formData.planId && formData.planId !== '[]') ? formData.planId : null,
-        categoryId: (formData.categoryId && formData.categoryId !== '[]') ? formData.categoryId : null,
-        isPublic: formData.isPublic
-      };
+      // Expiry date validation: cannot be in the past
+      if (formData.expiryDate && formData.expiryDate < todayStr) {
+        toast.error('Expiry date cannot be in the past. Please select today or a future date.');
+        return;
+      }
 
       if (editingCoupon) {
         const couponId = editingCoupon.id || editingCoupon._id;
@@ -157,11 +173,66 @@ export default function CouponsManager() {
           toast.error('Invalid coupon ID');
           return;
         }
+
+        // Usage limit validation in edit mode: cannot be below currently used count
+        if (formData.usageLimit) {
+          const newLimit = parseInt(formData.usageLimit);
+          if (isNaN(newLimit) || newLimit < 1) {
+            toast.error('Please enter a valid total usage limit');
+            return;
+          }
+          const currentUsed = editingCoupon.usedCount || 0;
+          if (newLimit < currentUsed) {
+            toast.error(`Total usage limit cannot be less than current usage (${currentUsed})`);
+            return;
+          }
+        }
+
+        // Only Expiry Date and Total Usage Limit (and client visibility) are updated when editing
+        const payload = {
+          expiryDate: formData.expiryDate || null,
+          usageLimit: formData.clientId ? 1 : (formData.usageLimit ? parseInt(formData.usageLimit) : null),
+          isPublic: formData.isPublic
+        };
+
         await api.updateCoupon(couponId, payload);
-        toast.success('Coupon updated');
+        toast.success('Coupon updated successfully');
       } else {
+        const discVal = parseFloat(formData.discountValue);
+        if (isNaN(discVal) || discVal <= 0) {
+          toast.error('Please enter a valid discount value greater than 0');
+          return;
+        }
+        if (formData.discountType === 'PERCENTAGE' && discVal > 100) {
+          toast.error('Discount percentage cannot exceed 100%');
+          return;
+        }
+
+        if (formData.usageLimit) {
+          const parsedLimit = parseInt(formData.usageLimit);
+          if (isNaN(parsedLimit) || parsedLimit < 1) {
+            toast.error('Total usage limit must be at least 1');
+            return;
+          }
+        }
+
+        const payload = {
+          code: formData.code,
+          discountType: formData.discountType,
+          discountValue: parseFloat(formData.discountValue),
+          percentageType: formData.discountType === 'PERCENTAGE' ? formData.percentageType : null,
+          minPurchaseValue: formData.minPurchaseValue ? parseFloat(formData.minPurchaseValue) : null,
+          maxDiscountValue: (formData.discountType === 'PERCENTAGE' && formData.percentageType === 'CAPPED' && formData.maxDiscountValue) ? parseFloat(formData.maxDiscountValue) : null,
+          expiryDate: formData.expiryDate || null,
+          usageLimit: formData.clientId ? 1 : (formData.usageLimit ? parseInt(formData.usageLimit) : null),
+          clientId: formData.clientId || null,
+          planId: (formData.planId && formData.planId !== '[]') ? formData.planId : null,
+          categoryId: (formData.categoryId && formData.categoryId !== '[]') ? formData.categoryId : null,
+          isPublic: formData.isPublic
+        };
+
         await api.createCoupon(payload);
-        toast.success('Coupon created');
+        toast.success('Coupon created successfully');
       }
       setIsModalOpen(false);
       fetchData();
@@ -229,7 +300,8 @@ export default function CouponsManager() {
               <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Details</th>
               <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Restrictions</th>
               <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Usage</th>
-              <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Expiry</th>
+              <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Created Date</th>
+              <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Expiry Date</th>
               <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Client Visibility</th>
               <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300">Status</th>
               <th className="py-4 px-6 text-sm font-semibold text-slate-700 dark:text-slate-300 text-right">Actions</th>
@@ -237,8 +309,9 @@ export default function CouponsManager() {
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
             {coupons.map((c) => {
-              const isExpired = c.expiryDate && new Date(c.expiryDate).getTime() < Date.now();
-              const displayStatus = isExpired ? 'EXPIRED' : c.status;
+              const isExpired = isCouponExpired(c.expiryDate);
+              const isLimitReached = c.usageLimit !== null && c.usageLimit !== undefined && (c.usedCount || 0) >= c.usageLimit;
+              const displayStatus = isExpired ? 'EXPIRED' : (isLimitReached ? 'LIMIT REACHED' : c.status);
               
               return (
               <tr key={c.id || c._id} className="hover:bg-slate-100 dark:hover:bg-slate-700/30 transition">
@@ -289,8 +362,18 @@ export default function CouponsManager() {
                 <td className="py-4 px-6 text-slate-700 dark:text-slate-300">
                   {c.usedCount} {c.usageLimit ? `/ ${c.usageLimit}` : ' (Unlimited)'}
                 </td>
-                <td className="py-4 px-6 text-slate-700 dark:text-slate-300">
-                  {c.expiryDate ? new Date(c.expiryDate).toLocaleDateString() : 'Never'}
+                <td className="py-4 px-6 text-slate-700 dark:text-slate-300 text-xs">
+                  {c.createdAt ? new Date(c.createdAt).toLocaleDateString() : '-'}
+                </td>
+                <td className="py-4 px-6 text-slate-700 dark:text-slate-300 text-xs">
+                  {c.expiryDate ? (
+                    <div>
+                      <span className="font-medium">{new Date(c.expiryDate).toLocaleDateString()}</span>
+                      <span className="block text-[10px] text-slate-500 dark:text-slate-400">Till 11:59 PM</span>
+                    </div>
+                  ) : (
+                    <span className="text-slate-500 dark:text-slate-400">Never</span>
+                  )}
                 </td>
                 
                 <td className="py-4 px-6 text-slate-700 dark:text-slate-300">
@@ -301,27 +384,33 @@ export default function CouponsManager() {
                 </td>
   
                 <td className="py-4 px-6">
-                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${displayStatus === 'ACTIVE' ? 'bg-emerald-500/10 text-emerald-400' : displayStatus === 'EXPIRED' ? 'bg-red-500/10 text-red-500' : 'bg-slate-500/10 text-slate-400'}`}>
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                    displayStatus === 'ACTIVE' 
+                      ? 'bg-emerald-500/10 text-emerald-400' 
+                      : displayStatus === 'EXPIRED' 
+                        ? 'bg-red-500/10 text-red-500' 
+                        : displayStatus === 'LIMIT REACHED'
+                          ? 'bg-amber-500/10 text-amber-500'
+                          : 'bg-slate-500/10 text-slate-400'
+                  }`}>
                     {displayStatus}
                   </span>
                 </td>
                 <td className="py-4 px-6 text-right space-x-2">
                   {!isExpired && (
-                    <>
-                      <button onClick={() => handleToggleStatus(c.id || c._id)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white" title="Toggle Status">
-                        {c.status === 'ACTIVE' ? <XCircle className="h-5 w-5 text-amber-500" /> : <CheckCircle className="h-5 w-5 text-emerald-500" />}
-                      </button>
-                      <button onClick={() => handleOpenModal(c)} className="text-slate-600 dark:text-slate-400 hover:text-indigo-400">
-                        <Edit2 className="h-5 w-5" />
-                      </button>
-                    </>
+                    <button onClick={() => handleToggleStatus(c.id || c._id)} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white" title="Toggle Status">
+                      {c.status === 'ACTIVE' ? <XCircle className="h-5 w-5 text-amber-500" /> : <CheckCircle className="h-5 w-5 text-emerald-500" />}
+                    </button>
                   )}
+                  <button onClick={() => handleOpenModal(c)} className="text-slate-600 dark:text-slate-400 hover:text-indigo-400" title="Edit Expiry & Limit">
+                    <Edit2 className="h-5 w-5 inline" />
+                  </button>
                 </td>
               </tr>
             )})}
             {coupons.length === 0 && !isLoading && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-600 dark:text-slate-400">No coupons found.</td>
+                <td colSpan={9} className="py-8 text-center text-slate-600 dark:text-slate-400">No coupons found.</td>
               </tr>
             )}
           </tbody>
@@ -333,10 +422,19 @@ export default function CouponsManager() {
           <div className="bg-white dark:bg-[#151c2c] rounded-2xl w-full max-w-2xl border border-slate-300 dark:border-white/10 shadow-xl my-auto">
             <div className="p-6 border-b border-slate-300 dark:border-white/10">
               <h3 className="text-xl font-semibold text-slate-900 dark:text-white">
-                {editingCoupon ? 'Edit Coupon' : 'Create Coupon'}
+                {editingCoupon ? `Edit Coupon: ${editingCoupon.code}` : 'Create Coupon'}
               </h3>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              {editingCoupon && (
+                <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
+                  <span className="font-bold text-sm">ℹ️</span>
+                  <div>
+                    <span className="font-semibold">Edit Mode:</span> Only <strong>Expiry Date</strong> and <strong>Total Usage Limit</strong> can be modified. Other discount terms and plan restrictions are locked.
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Coupon Code</label>
                 <input
@@ -345,7 +443,7 @@ export default function CouponsManager() {
                   value={formData.code}
                   onChange={e => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                   disabled={!!editingCoupon}
-                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50"
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="e.g. SUMMER50"
                 />
               </div>
@@ -355,6 +453,7 @@ export default function CouponsManager() {
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Discount Type</label>
                   <select
                     value={formData.discountType}
+                    disabled={!!editingCoupon}
                     onChange={e => {
                       const newType = e.target.value;
                       let newDiscount = formData.discountValue;
@@ -363,7 +462,7 @@ export default function CouponsManager() {
                       }
                       setFormData({ ...formData, discountType: newType, discountValue: newDiscount });
                     }}
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="PERCENTAGE">Percentage (%)</option>
                     <option value="FLAT">Flat Amount (₹)</option>
@@ -377,6 +476,7 @@ export default function CouponsManager() {
                     required
                     type="text"
                     inputMode="decimal"
+                    disabled={!!editingCoupon}
                     placeholder={formData.discountType === 'PERCENTAGE' ? 'e.g. 25.50' : 'e.g. 500.00'}
                     value={formData.discountValue}
                     onChange={e => {
@@ -404,7 +504,7 @@ export default function CouponsManager() {
                       }
                       setFormData(prev => ({ ...prev, discountValue: val }));
                     }}
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white font-semibold"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -415,8 +515,9 @@ export default function CouponsManager() {
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Percentage Type</label>
                     <select
                       value={formData.percentageType}
+                      disabled={!!editingCoupon}
                       onChange={e => setFormData({ ...formData, percentageType: e.target.value })}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="FLAT">Flat Percentage</option>
                       <option value="CAPPED">Capped (Min/Max limits)</option>
@@ -428,6 +529,7 @@ export default function CouponsManager() {
                       <input
                         type="text"
                         inputMode="decimal"
+                        disabled={!!editingCoupon}
                         value={formData.maxDiscountValue}
                         onChange={e => {
                           const val = e.target.value;
@@ -436,7 +538,7 @@ export default function CouponsManager() {
                           }
                         }}
                         placeholder="e.g. 500.00"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </div>
                   )}
@@ -449,6 +551,7 @@ export default function CouponsManager() {
                   <input
                     type="text"
                     inputMode="decimal"
+                    disabled={!!editingCoupon}
                     value={formData.minPurchaseValue}
                     onChange={e => {
                       const val = e.target.value;
@@ -457,14 +560,16 @@ export default function CouponsManager() {
                       }
                     }}
                     placeholder="e.g. 1000.00"
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Total Usage Limit {formData.clientId ? "(Fixed to 1 for specific user)" : "(Optional)"}</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Total Usage Limit {formData.clientId ? "(Fixed to 1 for specific user)" : "(Optional)"}
+                  </label>
                   <input
                     type="number"
-                    min="1"
+                    min={editingCoupon ? (editingCoupon.usedCount || 1) : 1}
                     step="1"
                     disabled={!!formData.clientId}
                     value={formData.clientId ? "1" : formData.usageLimit}
@@ -472,6 +577,15 @@ export default function CouponsManager() {
                     className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
                     placeholder="Leave empty for unlimited"
                   />
+                  {editingCoupon ? (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                      Already used: <strong className="text-indigo-500">{editingCoupon.usedCount || 0}</strong>. Limit cannot be set below {editingCoupon.usedCount || 0} (or empty for unlimited).
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                      Leave empty for unlimited redemptions.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -479,10 +593,14 @@ export default function CouponsManager() {
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Expiry Date (Optional)</label>
                 <input
                   type="date"
+                  min={getTodayDateString()}
                   value={formData.expiryDate}
                   onChange={e => setFormData({ ...formData, expiryDate: e.target.value })}
                   className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
                 />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  Coupon will expire at <strong>11:59 PM</strong> on the selected date. Past dates cannot be selected.
+                </p>
               </div>
 
               <div className="border-t border-slate-300 dark:border-white/10 pt-4 mt-4">
@@ -492,8 +610,9 @@ export default function CouponsManager() {
                     <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Restrict to Client</label>
                     <select
                       value={formData.clientId}
+                      disabled={!!editingCoupon}
                       onChange={e => setFormData({ ...formData, clientId: e.target.value })}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="">-- Any Client --</option>
                       {clients.map(c => (
@@ -507,6 +626,7 @@ export default function CouponsManager() {
                       <MultiSelectPills
                         options={categories.map(c => ({ value: c.id, label: c.name }))}
                         selectedString={formData.categoryId}
+                        disabled={!!editingCoupon}
                         onChange={(val: string) => {
                           setFormData({ ...formData, categoryId: val, planId: '[]' }); // Reset plans when categories change
                         }}
@@ -532,6 +652,7 @@ export default function CouponsManager() {
                             <MultiSelectPills
                               options={filteredPlans.map(p => ({ value: p.id || p._id, label: p.name }))}
                               selectedString={formData.planId}
+                              disabled={!!editingCoupon}
                               onChange={(val: string) => setFormData({ ...formData, planId: val })}
                             />
                             {selectedCats.length > 0 && selectedPlans.length === 0 && (

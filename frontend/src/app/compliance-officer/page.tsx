@@ -6,6 +6,7 @@ import StaffProfilePage from '../admin/staff-profile/page';
 import PAProfilePage from '../admin/pa-profile/page';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import DataTable from 'react-data-table-component';
+import SebiAuditorInspectionView from '@/components/compliance/SebiAuditorInspectionView';
 
 const tableCustomStyles = {
   table: {
@@ -519,6 +520,8 @@ function AdminDashboardContent() {
           // If current selection is older than start year, adjust it
           setReportYear(prev => prev < res.data.startYear ? res.data.startYear : prev);
         }
+      }).catch(err => {
+        console.warn('Failed to load periodic report metadata:', err?.message || err);
       });
     }
   }, [showReportModal]);
@@ -553,6 +556,7 @@ function AdminDashboardContent() {
   const [historyFilterText, setHistoryFilterText] = useState('');
   const [selectedFinancialYear, setSelectedFinancialYear] = useState<string>('All');
   const [penalties, setPenalties] = useState<any[]>([]);
+  const [isAuditorInspectionMode, setIsAuditorInspectionMode] = useState<boolean>(false);
   const [complianceTab, setComplianceTab] = useState<'overview' | 'alerts' | 'checklist' | 'penalties' | 'complaints' | 'audit_history'>('overview');
   const [alertViewMode, setAlertViewMode] = useState<'card' | 'table'>('card');
 
@@ -1131,9 +1135,11 @@ function AdminDashboardContent() {
   const isStaff = user && user.role && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN';
 
   const getFullUrl = (url?: string | null) => {
-    if (!url) return 'N/A';
-    if (url.startsWith('http')) return url;
-    return `${process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() + ''}${url}`;
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+    const base = (process.env.NEXT_PUBLIC_API_URL || api.getBaseUrl() || '').replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+    const cleanPath = url.startsWith('/') ? url : `/${url}`;
+    return `${base}${cleanPath}`;
   };
 
   const AGREEMENT_VARIABLES = [
@@ -4925,13 +4931,13 @@ function AdminDashboardContent() {
                             <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                               <button
                                 onClick={() => setChecklistSubTab('active')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'active' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                               >
                                 Active Checklist ({activeList.length})
                               </button>
                               <button
                                 onClick={() => setChecklistSubTab('history')}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold transition ${checklistSubTab === 'history' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                               >
                                 Checklist History ({checklistHistory.length})
                               </button>
@@ -5251,27 +5257,66 @@ function AdminDashboardContent() {
 
                   {/* COMPLIANCE TELEMETRY TAB */}
                   {activeTab === 'compliance' && (
+                    isAuditorInspectionMode ? (
+                      <SebiAuditorInspectionView
+                        onBack={() => setIsAuditorInspectionMode(false)}
+                        tenantData={null}
+                        clientsData={clients}
+                        alertsData={alerts}
+                        complaintsData={complaints}
+                        penaltiesData={penalties}
+                        isDarkMode={isDarkMode}
+                      />
+                    ) : (
                     <div className={`w-full ${showMobilePreview ? 'lg:flex items-start' : ''}`}>
                       <div className="flex-1 space-y-6 lg:pr-6">
                         {/* Header */}
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                           <div>
                             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Compliance Desk</h2>
                             <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">SEBI compliance monitoring, alerts, checklists & penalty management</p>
                           </div>
-                          <div className="flex space-x-2">
-                            <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-white/10 mr-2">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <label className="flex items-center space-x-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded-xl border border-slate-300 dark:border-white/10">
                               <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Preview</span>
                               <div className="relative">
                                 <input type="checkbox" className="sr-only peer" checked={showMobilePreview} onChange={toggleMobilePreview} />
                                 <div className="w-8 h-4 bg-slate-300 dark:bg-slate-600 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary-600"></div>
                               </div>
                             </label>
-                            <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-4 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
+
+                            {/* SEBI Auditor Analysis & Inspection Dossier Switcher */}
+                            <button
+                              type="button"
+                              onClick={() => setIsAuditorInspectionMode(true)}
+                              className="group relative flex items-center gap-2.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-700 hover:from-blue-600 hover:via-indigo-500 hover:to-violet-600 text-white rounded-xl shadow-md shadow-indigo-500/20 hover:shadow-indigo-500/35 transition-all duration-200 border border-indigo-400/30 active:scale-[0.98]"
+                              title="Switch to SEBI Auditor Analysis Report & Statutory Inspection Dossier"
+                            >
+                              <div className="relative p-1.5 bg-white/20 dark:bg-white/10 rounded-lg backdrop-blur-sm border border-white/20 group-hover:scale-105 transition-transform flex items-center justify-center">
+                                <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                                </span>
+                              </div>
+                              <div className="text-left leading-tight">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold tracking-wide">SEBI Auditor Analysis</span>
+                                  <span className="bg-emerald-500/25 text-emerald-200 text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase border border-emerald-400/30">
+                                    Dossier
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-blue-100/90 block mt-0.5 font-normal">
+                                  Statutory Inspection Mode
+                                </span>
+                              </div>
+                            </button>
+
+                            <button onClick={() => setShowReportModal(true)} disabled={downloadingReport} className="px-3.5 py-2 bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
                               {downloadingReport ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                               <span>Download Periodic Report</span>
                             </button>
-                            <button onClick={handleComplianceSweep} disabled={sweepLoading} className="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
+                            <button onClick={handleComplianceSweep} disabled={sweepLoading} className="px-3.5 py-2 bg-primary-600 hover:bg-primary-500 text-xs font-bold uppercase tracking-wider rounded-xl transition flex items-center space-x-2 disabled:opacity-50">
                               {sweepLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                               <span>Run Verification Sweep</span>
                             </button>
@@ -5280,7 +5325,7 @@ function AdminDashboardContent() {
 
                         {/* Sub-tabs and Global Filter */}
                         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-                          <div className="flex flex-wrap gap-1 bg-white dark:bg-slate-900/60 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
+                          <div className="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-900/60 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                             {[
                               { id: 'overview', label: 'Compliance Overview' },
                               { id: 'alerts', label: `Automated Alerts (${alerts.filter(a => a.status === 'OPEN').length})` },
@@ -5288,10 +5333,23 @@ function AdminDashboardContent() {
                               { id: 'complaints', label: `Complaints (${complaints.filter(c => c.status === 'OPEN').length} Open)` },
                               { id: 'audit_history', label: 'Audit Log' }
                             ].map(tab => (
-                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}>
+                              <button key={tab.id} onClick={() => setComplianceTab(tab.id as any)} className={`px-4 py-2 rounded-lg text-xs font-bold transition ${complianceTab === tab.id ? 'bg-primary-600 text-white' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                                 {tab.label}
                               </button>
                             ))}
+                            <div className="h-4 w-px bg-slate-200 dark:bg-white/10 mx-1 hidden sm:block"></div>
+                            <button
+                              type="button"
+                              onClick={() => setIsAuditorInspectionMode(true)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800/50 transition shadow-sm"
+                              title="Switch to SEBI Auditor Analysis & Statutory Inspection Dossier"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                              <span>Auditor Dossier View</span>
+                              <span className="text-[9px] font-extrabold uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">
+                                Inspect
+                              </span>
+                            </button>
                           </div>
                           <div className="flex items-center space-x-3 bg-white dark:bg-slate-900/40 p-1.5 rounded-xl border border-slate-300 dark:border-white/5 w-fit">
                             {(!isStaff || hasPermission('EXPORT_DATA')) && (
@@ -5499,13 +5557,13 @@ function AdminDashboardContent() {
                                 <div className="flex space-x-1 bg-white dark:bg-slate-900/40 p-1 rounded-xl w-fit border border-slate-300 dark:border-white/5">
                                   <button
                                     onClick={() => setAlertsSubTab('active')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'active' ? 'bg-amber-600 text-slate-900 dark:text-white shadow-lg shadow-amber-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:text-white'}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'active' ? 'bg-amber-600 text-slate-900 dark:text-white shadow-lg shadow-amber-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                   >
                                     Active Alerts ({alerts.filter((a: any) => a.status === 'OPEN').length})
                                   </button>
                                   <button
                                     onClick={() => setAlertsSubTab('history')}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold transition ${alertsSubTab === 'history' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                   >
                                     Resolved History ({alerts.filter((a: any) => a.status === 'CLOSED').length})
                                   </button>
@@ -5931,7 +5989,7 @@ function AdminDashboardContent() {
                                           <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-2 font-medium">{item.date.toLocaleString('en-IN')}</div>
                                         </div>
                                         {item.proofUrl && (
-                                          <a href={item.proofUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
+                                          <a href={getFullUrl(item.proofUrl)} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600/20 hover:bg-primary-600/40 text-primary-600 dark:text-primary-400 text-[10px] font-bold rounded-lg transition shrink-0">
                                             <ExternalLink className="h-3 w-3" />
                                             View Proof (SS)
                                           </a>
@@ -5970,6 +6028,7 @@ function AdminDashboardContent() {
                         </div>
                       )}
                     </div>
+                    )
                   )}
 
                   {/* ====================================================
@@ -7587,7 +7646,7 @@ function AdminDashboardContent() {
                                 <button
                                   key={tab.id}
                                   onClick={() => setClientDetailsTab(tab.id as any)}
-                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-white '}`}
+                                  className={`px-4 py-2.5 font-bold transition rounded-lg ${clientDetailsTab === tab.id ? 'bg-primary-600 text-white shadow' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                 >
                                   {tab.label}
                                 </button>
@@ -8102,7 +8161,7 @@ function AdminDashboardContent() {
                           <button
                             key={tab.id}
                             onClick={() => setSettingsTab(tab.id as any)}
-                            className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
+                            className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${settingsTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700/50'}`}
                           >
                             <tab.icon className="h-4 w-4" />
                             <span>{tab.label}</span>
@@ -8558,7 +8617,7 @@ function AdminDashboardContent() {
                               <button
                                 key={tab.id}
                                 onClick={() => setIntegrationTab(tab.id as any)}
-                                className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-white dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-700/50'}`}
+                                className={`flex flex-1 sm:flex-none justify-center items-center space-x-2 px-4 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap ${integrationTab === tab.id ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700/50'}`}
                               >
                                 <tab.icon className="h-4 w-4" />
                                 <span>{tab.label}</span>

@@ -52,6 +52,10 @@ import { SmsTemplate, SmsTemplateSchema, ISmsTemplate } from './SmsTemplate';
 import { ClientCallRecording, ClientCallRecordingSchema, IClientCallRecording } from './ClientCallRecording';
 import { Faq, FaqSchema, IFaq } from './Faq';
 import { VideoKycSession, VideoKycSessionSchema, IVideoKycSession } from './VideoKycSession';
+import { PlatformPlan, PlatformPlanSchema, IPlatformPlan } from './PlatformPlan';
+import { PlatformBillingConfig, PlatformBillingConfigSchema, IPlatformBillingConfig } from './PlatformBillingConfig';
+import { TenantSubscription, TenantSubscriptionSchema, ITenantSubscription } from './TenantSubscription';
+import { PlatformInvoice, PlatformInvoiceSchema, IPlatformInvoice } from './PlatformInvoice';
 
 // Re-export all models and interfaces
 export {
@@ -105,7 +109,11 @@ export {
   EmailVerification, EmailVerificationSchema, IEmailVerification,
   SystemSetting, SystemSettingSchema, ISystemSetting,
   AdminPermission, AdminPermissionSchema, IAdminPermission,
-  VideoKycSession, VideoKycSessionSchema, IVideoKycSession
+  VideoKycSession, VideoKycSessionSchema, IVideoKycSession,
+  PlatformPlan, PlatformPlanSchema, IPlatformPlan,
+  PlatformBillingConfig, PlatformBillingConfigSchema, IPlatformBillingConfig,
+  TenantSubscription, TenantSubscriptionSchema, ITenantSubscription,
+  PlatformInvoice, PlatformInvoiceSchema, IPlatformInvoice
 };
 
 /**
@@ -159,6 +167,10 @@ export interface ITenantModels {
   EmailVerification: Model<IEmailVerification>;
   SystemSetting: Model<ISystemSetting>;
   AdminPermission: Model<IAdminPermission>;
+  PlatformPlan: Model<IPlatformPlan>;
+  PlatformBillingConfig: Model<IPlatformBillingConfig>;
+  TenantSubscription: Model<ITenantSubscription>;
+  PlatformInvoice: Model<IPlatformInvoice>;
 
   // Lowercase / camelCase aliases
   tenant: Model<ITenant>;
@@ -272,6 +284,10 @@ export function registerTenantModels(connection: Connection): ITenantModels {
     EmailVerification: (connection.models.EmailVerification || connection.model<IEmailVerification>('EmailVerification', EmailVerificationSchema, 'EmailVerification')) as Model<IEmailVerification>,
     SystemSetting: (connection.models.SystemSetting || connection.model<ISystemSetting>('SystemSetting', SystemSettingSchema, 'SystemSetting')) as Model<ISystemSetting>,
     AdminPermission: (connection.models.AdminPermission || connection.model<IAdminPermission>('AdminPermission', AdminPermissionSchema, 'AdminPermission')) as Model<IAdminPermission>,
+    PlatformPlan: (connection.models.PlatformPlan || connection.model<IPlatformPlan>('PlatformPlan', PlatformPlanSchema, 'PlatformPlan')) as Model<IPlatformPlan>,
+    PlatformBillingConfig: (connection.models.PlatformBillingConfig || connection.model<IPlatformBillingConfig>('PlatformBillingConfig', PlatformBillingConfigSchema, 'PlatformBillingConfig')) as Model<IPlatformBillingConfig>,
+    TenantSubscription: (connection.models.TenantSubscription || connection.model<ITenantSubscription>('TenantSubscription', TenantSubscriptionSchema, 'TenantSubscription')) as Model<ITenantSubscription>,
+    PlatformInvoice: (connection.models.PlatformInvoice || connection.model<IPlatformInvoice>('PlatformInvoice', PlatformInvoiceSchema, 'PlatformInvoice')) as Model<IPlatformInvoice>,
     Occupation: (connection.models.Occupation || connection.model<IOccupation>('Occupation', OccupationSchema, 'Occupation')) as Model<IOccupation>,
     SmsTemplate: (connection.models.SmsTemplate || connection.model<ISmsTemplate>('SmsTemplate', SmsTemplateSchema, 'SmsTemplate')) as Model<ISmsTemplate>,
     ClientCallRecording: (connection.models.ClientCallRecording || connection.model<IClientCallRecording>('ClientCallRecording', ClientCallRecordingSchema, 'ClientCallRecording')) as Model<IClientCallRecording>,

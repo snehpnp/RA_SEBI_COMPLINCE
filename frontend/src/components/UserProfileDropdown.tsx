@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { User, LogOut, ChevronDown, ShieldCheck } from 'lucide-react';
+import { User, LogOut, ChevronDown, ShieldCheck, CreditCard } from 'lucide-react';
 
 interface UserProfileDropdownProps {
   user: {
@@ -13,6 +13,7 @@ interface UserProfileDropdownProps {
     avatarUrl?: string;
   };
   onProfileClick?: () => void;
+  onSubscriptionClick?: () => void;
   onLogoutClick: () => void;
   badgeLabel?: string;
   badgeColor?: 'rose' | 'amber' | 'emerald' | 'indigo' | 'blue';
@@ -21,6 +22,7 @@ interface UserProfileDropdownProps {
 export default function UserProfileDropdown({
   user,
   onProfileClick,
+  onSubscriptionClick,
   onLogoutClick,
   badgeLabel,
   badgeColor = 'rose'
@@ -137,6 +139,20 @@ export default function UserProfileDropdown({
               >
                 <User className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                 <span>My Profile Settings</span>
+              </button>
+            )}
+
+            {onSubscriptionClick && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onSubscriptionClick();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-500/10 transition-colors"
+              >
+                <CreditCard className="w-4 h-4 text-primary-500" />
+                <span>Platform Subscription</span>
               </button>
             )}
 
