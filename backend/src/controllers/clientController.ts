@@ -19,6 +19,7 @@ import { encryptCCAvenue, decryptCCAvenue } from '../utils/ccavenue';
 import querystring from 'querystring';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import axios from 'axios';
 import { sendTelegramMessage } from '../services/telegramService';
 import TenantSubscription from '../models/TenantSubscription';
 
@@ -2229,6 +2230,296 @@ export const verifyRazorpayPayment = async (req: AuthenticatedRequest, res: Resp
   } catch (error: any) {
     console.error('Razorpay Verify Error:', error);
     return res.status(500).json({ success: false, errors: [error.message] });
+  }
+};
+
+export const initiateCashfreePayment = async (req: AuthenticatedRequest, res: Response) => {
+  const { planId, couponCode } = req.body;
+  try {
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
+    const tenantId = tenantObj?._id || tenantObj?.id || req.user?.tenantId;
+
+    if (!tenantObj || !tenantObj.cashfreeAppId || !tenantObj.cashfreeSecretKey || !tenantObj.cashfreeAppId.trim() || !tenantObj.cashfreeSecretKey.trim()) {
+      return res.status(400).json({
+        success: false,
+        isConfigured: false,
+        message: 'Cashfree payment gateway is not configured by the administrator. To purchase this plan, please contact the administrator.'
+      });
+    }
+
+    const kycRequired = tenantObj?.kycFirst !== false;
+    const isClientKycDone = Boolean(client.kraVerified === true || client.status === 'VERIFIED' || client.status === 'APPROVED' || client.status === 'PAYMENT_PENDING' || client.status === 'ACTIVE');
+    if (kycRequired && !isClientKycDone) {
+      return res.status(403).json({
+        success: false,
+        requiresKyc: true,
+        message: 'KYC Verification is required before purchasing a plan. Please complete your KYC verification first.'
+      });
+    }
+
+    const plan: any = await dynamicDb.Plan.findById(planId).lean();
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+
+    let finalPrice = plan.amount || plan.price;
+    let appliedCouponId = null;
+
+    if (couponCode) {
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), tenantId }).lean();
+      if (coupon && coupon.status === 'ACTIVE') {
+        if (coupon.minPurchaseValue && finalPrice < coupon.minPurchaseValue) {
+          return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required for coupon ${coupon.code}` });
+        }
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          finalPrice = Math.max(0, finalPrice - coupon.discountValue);
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          let discount = (finalPrice * coupon.discountValue) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discount > coupon.maxDiscountValue) {
+            discount = coupon.maxDiscountValue;
+          }
+          finalPrice = Math.max(0, finalPrice - discount);
+        }
+        appliedCouponId = coupon._id || coupon.id;
+      }
+    }
+
+    // SEBI Annual Fee Cap Check
+    const feeSummary = await getClientFyFeeSummary(client._id || client.id, tenantId, dynamicDb);
+    if (finalPrice > 0 && (feeSummary.isQuotaFull || (feeSummary.totalBasePaid + finalPrice > feeSummary.maxBaseFeeCap))) {
+      return res.status(400).json({
+        success: false,
+        code: 'SEBI_FEE_CAP_EXCEEDED',
+        message: `SEBI Annual Limit Reached: You have already paid ₹${feeSummary.totalBasePaid.toLocaleString('en-IN')} base fee in ${feeSummary.fyLabel}. Maximum allowed limit is ₹1,51,000 (+ GST). Remaining quota: ₹${feeSummary.remainingBaseQuota.toLocaleString('en-IN')}. Further plan purchases are disabled under SEBI regulations.`,
+        feeSummary
+      });
+    }
+
+    const isGstActive = tenantObj?.gstEnabled !== false;
+    if (isGstActive && tenantObj.gstCalculationType === 'EXCLUSIVE') {
+      finalPrice = finalPrice * 1.18;
+    }
+
+    const formattedAmount = Number(finalPrice.toFixed(2));
+    const cashfreeOrderId = 'CF_' + Date.now() + '_' + Math.floor(1000 + Math.random() * 9000);
+
+    const isSandbox = tenantObj.cashfreeAppId.toLowerCase().includes('test') || tenantObj.cashfreeSecretKey.toLowerCase().includes('test');
+    const cashfreeBaseUrl = isSandbox ? 'https://sandbox.cashfree.com/pg' : 'https://api.cashfree.com/pg';
+
+    const origin = req.get('origin') || req.get('referer') || 'http://localhost:3000';
+    const cleanOrigin = origin.replace(/\/$/, '');
+
+    let returnUrl: string | null = null;
+    if (cleanOrigin.startsWith('https://')) {
+      returnUrl = `${cleanOrigin}/client?payment=cashfree&order_id={order_id}`;
+    }
+
+    let phone = (client.mobile || '').replace(/[^0-9]/g, '');
+    if (phone.length > 10) phone = phone.slice(-10);
+    if (phone.length < 10) phone = '9999999999';
+
+    const orderPayload: any = {
+      order_id: cashfreeOrderId,
+      order_amount: formattedAmount,
+      order_currency: 'INR',
+      customer_details: {
+        customer_id: String(client._id || client.id).replace(/[^a-zA-Z0-9_-]/g, ''),
+        customer_name: (client.name || 'Client User').slice(0, 100),
+        customer_email: client.email || 'client@example.com',
+        customer_phone: phone
+      },
+      order_note: `Plan purchase: ${plan.name || 'Subscription'}`,
+      order_tags: {
+        planId: String(plan._id || plan.id),
+        couponCode: couponCode ? String(couponCode).trim() : ''
+      }
+    };
+
+    if (returnUrl) {
+      orderPayload.order_meta = {
+        return_url: returnUrl
+      };
+    }
+
+    const cfRes = await axios.post(`${cashfreeBaseUrl}/orders`, orderPayload, {
+      headers: {
+        'x-client-id': tenantObj.cashfreeAppId.trim(),
+        'x-client-secret': tenantObj.cashfreeSecretKey.trim(),
+        'x-api-version': '2023-08-01',
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    });
+
+    return res.status(200).json({
+      success: true,
+      orderId: cfRes.data.order_id,
+      paymentSessionId: cfRes.data.payment_session_id,
+      amount: formattedAmount,
+      currency: 'INR',
+      isSandbox
+    });
+
+  } catch (error: any) {
+    console.error('Cashfree Initiate Error:', error.response?.data || error.message);
+    const msg = error.response?.data?.message || error.message || 'Failed to initiate Cashfree payment';
+    return res.status(500).json({ success: false, errors: [msg], message: msg });
+  }
+};
+
+export const verifyCashfreePayment = async (req: AuthenticatedRequest, res: Response) => {
+  const { order_id, planId, couponCode } = req.body;
+  try {
+    const client: any = await dynamicDb.Client.findOne({ userId: req.user!.id }).lean() || await dynamicDb.Client.findById(req.user!.id).lean();
+    if (!client) return res.status(404).json({ success: false, message: 'Client not found' });
+
+    const tenantObj: any = await getResolvedTenant(req.user?.tenantId, req.user?.id);
+    if (!tenantObj) return res.status(404).json({ success: false, message: 'Tenant not found' });
+    const tenantId = tenantObj._id || tenantObj.id || req.user?.tenantId;
+
+    if (!order_id) {
+      return res.status(400).json({ success: false, message: 'Cashfree order ID is required' });
+    }
+
+    const isSandbox = tenantObj.cashfreeAppId?.toLowerCase().includes('test') || tenantObj.cashfreeSecretKey?.toLowerCase().includes('test');
+    const cashfreeBaseUrl = isSandbox ? 'https://sandbox.cashfree.com/pg' : 'https://api.cashfree.com/pg';
+
+    const cfOrderRes = await axios.get(`${cashfreeBaseUrl}/orders/${order_id}`, {
+      headers: {
+        'x-client-id': tenantObj.cashfreeAppId.trim(),
+        'x-client-secret': tenantObj.cashfreeSecretKey.trim(),
+        'x-api-version': '2023-08-01'
+      },
+      timeout: 10000
+    });
+
+    const orderData = cfOrderRes.data;
+    if (orderData.order_status !== 'PAID') {
+      return res.status(400).json({
+        success: false,
+        message: `Cashfree order is not paid yet. Current status: ${orderData.order_status}`
+      });
+    }
+
+    // Check if this payment was already recorded
+    const existingPayment = await dynamicDb.Payment.findOne({ transactionRef: order_id }).lean();
+    if (existingPayment) {
+      return res.status(200).json({ success: true, message: 'Payment already verified', payment: existingPayment });
+    }
+
+    let effectivePlanId = planId || orderData.order_tags?.planId;
+    let effectiveCouponCode = couponCode || orderData.order_tags?.couponCode;
+
+    if (!effectivePlanId) {
+      // Fallback: match by price or first plan
+      const candidatePlan = await dynamicDb.Plan.findOne({ tenantId, amount: orderData.order_amount }).lean();
+      if (candidatePlan) effectivePlanId = candidatePlan._id || candidatePlan.id;
+    }
+
+    const plan: any = await dynamicDb.Plan.findById(effectivePlanId).lean();
+    if (!plan) return res.status(404).json({ success: false, message: 'Plan not found for this order' });
+
+    let discountAmount = 0;
+    let appliedCouponId: any = null;
+
+    if (effectiveCouponCode) {
+      const coupon: any = await dynamicDb.Coupon.findOne({ code: String(effectiveCouponCode).trim().toUpperCase(), tenantId }).lean();
+      if (coupon && coupon.status === 'ACTIVE') {
+        const rawPlanPrice = Number(plan.amount || plan.price || 0);
+        if (coupon.minPurchaseValue && rawPlanPrice < coupon.minPurchaseValue) {
+          return res.status(400).json({ success: false, message: `Minimum purchase of Rs. ${coupon.minPurchaseValue} required for coupon ${coupon.code}` });
+        }
+        if (coupon.discountType === 'FLAT' || coupon.discountType === 'FIXED') {
+          discountAmount = coupon.discountValue;
+        } else if (coupon.discountType === 'PERCENTAGE') {
+          discountAmount = (rawPlanPrice * coupon.discountValue) / 100;
+          if (coupon.percentageType === 'CAPPED' && coupon.maxDiscountValue && discountAmount > coupon.maxDiscountValue) {
+            discountAmount = coupon.maxDiscountValue;
+          }
+        }
+        if (discountAmount > rawPlanPrice) discountAmount = rawPlanPrice;
+        appliedCouponId = coupon._id || coupon.id;
+
+        await dynamicDb.Coupon.findByIdAndUpdate(coupon._id || coupon.id, {
+          $inc: { usedCount: 1 }
+        });
+      }
+    }
+
+    let finalPrice = (plan.amount || plan.price) - discountAmount;
+    let amountBase = finalPrice;
+    let amountGst = 0;
+    const isExclusive = tenantObj.gstCalculationType === 'EXCLUSIVE';
+    if (isExclusive) {
+      amountGst = finalPrice * 0.18;
+      finalPrice = finalPrice * 1.18;
+    } else {
+      amountBase = finalPrice / 1.18;
+      amountGst = finalPrice - amountBase;
+    }
+
+    const clientProfile = await dynamicDb.ClientProfile.findOne({ clientId: client._id || client.id }).lean();
+
+    const payment = await dynamicDb.Payment.create({
+      tenantId,
+      clientId: client._id || client.id,
+      planId: plan._id || plan.id,
+      amount: finalPrice,
+      couponId: appliedCouponId,
+      discountApplied: discountAmount,
+      paymentMode: 'ONLINE_CASHFREE',
+      transactionRef: order_id,
+      status: 'SUCCESS',
+      clientCity: clientProfile?.city || client.city || null,
+      clientState: clientProfile?.state || client.state || null,
+      tenantState: tenantObj?.state || null,
+      paymentDate: new Date()
+    });
+
+    let matchingPlanIds = [plan._id || plan.id];
+    if (plan.categoryId) {
+      const categoryPlans = await dynamicDb.Plan.find({ categoryId: plan.categoryId }).select('_id').lean();
+      if (categoryPlans.length > 0) matchingPlanIds = categoryPlans.map((p: any) => p._id);
+    }
+    const existingSub: any = await dynamicDb.Subscription.findOne({
+      clientId: client._id || client.id,
+      planId: { $in: matchingPlanIds },
+      status: 'ACTIVE',
+      endDate: { $gt: new Date() }
+    }).sort({ endDate: -1 }).lean();
+
+    let startDate = new Date();
+    if (existingSub) startDate = new Date(existingSub.endDate);
+    const duration = plan.durationMonths || plan.duration || 1;
+    const endDate = new Date(startDate.getTime() + duration * 30 * 24 * 60 * 60 * 1000);
+
+    const subscription = await dynamicDb.Subscription.create({
+      clientId: client._id || client.id,
+      planId: plan._id || plan.id,
+      startDate,
+      endDate,
+      status: 'ACTIVE',
+      amountBase,
+      amountGst,
+      amountTotal: finalPrice,
+      isGstInclusive: !isExclusive
+    });
+
+    await dynamicDb.Payment.findByIdAndUpdate(payment._id || payment.id, {
+      $set: { subscriptionId: subscription._id }
+    });
+
+    await dynamicDb.Client.findByIdAndUpdate(client._id || client.id, {
+      $set: { status: 'ACTIVE' }
+    });
+
+    return res.status(200).json({ success: true, message: 'Cashfree payment verified successfully', subscription });
+
+  } catch (error: any) {
+    console.error('Cashfree Verify Error:', error.response?.data || error.message);
+    const msg = error.response?.data?.message || error.message || 'Payment verification failed';
+    return res.status(500).json({ success: false, errors: [msg], message: msg });
   }
 };
 

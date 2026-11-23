@@ -195,6 +195,26 @@ function ClientPortalContent() {
     const notifInterval = setInterval(() => {
       fetchNotifications(true);
     }, 4000);
+
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paymentStatus = urlParams.get('payment');
+      const orderId = urlParams.get('order_id');
+      if (paymentStatus === 'cashfree' && orderId) {
+        api.verifyCashfreePayment({ order_id: orderId }).then((res: any) => {
+          if (res.success) {
+            toast.success('Cashfree payment verified successfully! Subscription activated.');
+            window.history.replaceState({}, document.title, '/client?payment=success');
+            fetchData();
+          } else {
+            toast.error(res.message || 'Payment verification failed');
+          }
+        }).catch((err: any) => {
+          toast.error(err.message || 'Payment verification failed');
+        });
+      }
+    }
+
     return () => clearInterval(notifInterval);
   }, []);
 

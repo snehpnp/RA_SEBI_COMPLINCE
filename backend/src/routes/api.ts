@@ -31,7 +31,7 @@ import {
 import { getMyCompanySubscription } from '../controllers/tenantCompanySubscriptionController';
 
 import { getDashboardStats, getProfileCompleteness, saveProfileStep, createStaff, getStaff, updateStaff, toggleStaffStatus, deleteStaff, restoreStaff, getStaffPassword, resendStaffCredentials, getResearcherDscPermissions, updateResearcherDscPermission, getAdminClients, toggleClientStatus, updateClient, deleteClient, restoreClient, getAdminPlans, createPlan, updatePlan, deletePlan, restorePlan, updateTenantSettings, uploadSignature, getAdminCategories, createCategory, updateCategory, toggleCategoryStatus, togglePlanStatus, getTenantAuditLogs, assignPlanByAdmin, previewSubscriptionCancellation, cancelSubscriptionByAdmin, getAdminPayments, getEmailTemplates, updateEmailTemplate, resetEmailTemplate, testSmtp, verifyPaymentGateway, getAdminDeletedClients, approveClient, exportInvoicesZip, exportAgreementsZip, getClientCommunications, exportKRAZip, exportClientsCSV, exportDeletedClientsCSV, exportPaymentsCSV, exportResearchReportsZip, exportGstReadySheetCSV, getClientFeeSummaryEndpoint, previewPolicyPdf, resetClientKyc, permanentDeleteClient, getSmsTemplates, createSmsTemplate, updateSmsTemplate, toggleSmsTemplateStatus, deleteSmsTemplate, testSmsGateway, testDigioConfig, testCamsKraConfig, sendPaymentInvoiceEmail, getAdminNotifications, markAdminNotificationsAsRead, goLiveTenant } from '../controllers/adminController';
-import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing, getClientFeeSummaryForSelf } from '../controllers/clientController';
+import { registerClient, verifyKRA, initiateDigioKyc, acceptConsent, signAgreement, handleRazorpayWebhook, initiateRazorpayPayment, verifyRazorpayPayment, initiateCashfreePayment, verifyCashfreePayment, submitManualPayment, verifyManualPayment, getPlans, getClientProfile, updateClientProfile, deleteClientAccount, uploadClientDocument, downloadInvoice, initiateCCAvenuePayment, handleCCAvenueResponse, getPaymentGatewayStatus, updateClientTelegramPreferences, testClientTelegramPing, getClientFeeSummaryForSelf } from '../controllers/clientController';
 import { handleTelegramWebhook, setTelegramWebhookEndpoint, getTelegramWebhookStatus } from '../controllers/telegramController';
 import { createResearch, updateResearch, publishResearch, listResearch, viewResearchDetail } from '../controllers/researchController';
 import { runComplianceCheck, getAlerts, closeAlert, getChecklist, updateAuditStatus, getChecklistHistory, getPenalties, resolvePenalty, getComplianceDashboardMetrics, getPeriodicReportData, getPeriodicReportMeta } from '../controllers/complianceController';
@@ -1448,6 +1448,22 @@ router.post(
   authenticateJWT,
   requireRoles(['CLIENT']),
   verifyRazorpayPayment
+);
+
+// ----------------------------------------------------
+// CASHFREE REAL PAYMENT INTEGRATION
+// ----------------------------------------------------
+router.post(
+  '/payment/cashfree/initiate',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  initiateCashfreePayment
+);
+router.post(
+  '/payment/cashfree/verify',
+  authenticateJWT,
+  requireRoles(['CLIENT']),
+  verifyCashfreePayment
 );
 
 // ----------------------------------------------------

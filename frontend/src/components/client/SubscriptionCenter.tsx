@@ -278,6 +278,18 @@ export default function SubscriptionCenter({
     }
   };
 
+  const loadCashfreeScript = () => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') return resolve(false);
+      if ((window as any).Cashfree) return resolve(true);
+      const script = document.createElement('script');
+      script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
   const loadRazorpayScript = () => {
     return new Promise((resolve) => {
       if (typeof window === 'undefined') return resolve(false);
@@ -416,7 +428,79 @@ export default function SubscriptionCenter({
           }
           throw new Error(res.message || 'Failed to initiate Razorpay payment');
         }
-      } else {
+      } else if (activeGateway === 'CASHFREE') {
+        const res = await api.initiateCashfreePayment({
+          planId: checkoutPlan.id || checkoutPlan._id,
+          couponCode: appliedCoupon ? appliedCoupon.code : undefined
+        });
+
+        if (res.success && res.paymentSessionId) {
+          const isLoaded = await loadCashfreeScript();
+          if (!isLoaded) throw new Error('Cashfree SDK failed to load');
+
+          const cashfree = (window as any).Cashfree({
+            mode: res.isSandbox ? 'sandbox' : 'production'
+          });
+
+          cashfree.checkout({
+            paymentSessionId: res.paymentSessionId,
+            redirectTarget: '_modal'
+          }).then(async (result: any) => {
+            if (result.error) {
+              toast.error(result.error.message || 'Payment cancelled');
+              setLoading(false);
+              return;
+            }
+            if (result.redirect) {
+              return;
+            }
+            if (result.paymentDetails) {
+              try {
+                const verifyRes = await api.verifyCashfreePayment({
+                  order_id: res.orderId,
+                  planId: checkoutPlan.id || checkoutPlan._id,
+                  couponCode: appliedCoupon ? appliedCoupon.code : undefined
+                });
+
+                if (verifyRes.success) {
+                  toast.success('Payment successful! Your subscription is now active.');
+                  setPaymentSuccess(true);
+                  const subRes = await api.getClientSubscriptions().catch(() => ({ success: false, data: [] }));
+                  if (subRes.success && Array.isArray(subRes.data)) {
+                    setActiveSubscriptions(subRes.data.filter((s: any) => s.status === 'ACTIVE' || s.status === 'active'));
+                  }
+                  setTimeout(() => {
+                    setCheckoutPlan(null);
+                    setPaymentSuccess(false);
+                    setActiveTab('active');
+                    window.location.href = '/client?payment=success';
+                  }, 1200);
+                } else {
+                  throw new Error(verifyRes.message || 'Payment verification failed');
+                }
+              } catch (err: any) {
+                toast.error(err.message || 'Verification failed');
+                window.location.href = '/client?payment=failed';
+              }
+            }
+          });
+          setLoading(false);
+        } else {
+          if (res.isConfigured === false || (res.message && res.message.toLowerCase().includes('contact the administrator'))) {
+            setContactAdminData({
+              adminContact: gatewayStatusRes?.adminContact || profile?.user?.tenant,
+              plan: checkoutPlan,
+              finalPrice: formattedPrice,
+              appliedCoupon: appliedCoupon,
+              customMessage: res.message
+            });
+            setCheckoutPlan(null);
+            setShowContactAdminModal(true);
+            return;
+          }
+          throw new Error(res.message || 'Failed to initiate Cashfree payment');
+        }
+      } else if (activeGateway === 'CCAVENUE') {
         const res = await api.initiateCCAvenuePayment({
           planId: checkoutPlan.id || checkoutPlan._id,
           couponCode: appliedCoupon ? appliedCoupon.code : undefined

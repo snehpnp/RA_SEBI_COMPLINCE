@@ -956,6 +956,20 @@ class ApiClient {
     });
   }
 
+  async initiateCashfreePayment(payload: { planId: string, couponCode?: string }) {
+    return this.request('/payment/cashfree/initiate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async verifyCashfreePayment(payload: { order_id: string, planId?: string, couponCode?: string }) {
+    return this.request('/payment/cashfree/verify', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  }
+
   // Research Analyst Methods
   async refreshToken(refreshTokenStr: string) {
     return this.request('/auth/refresh', {
